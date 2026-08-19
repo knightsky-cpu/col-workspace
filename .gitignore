@@ -1,0 +1,10 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Environment variables (Crucial - contains your API keys!)
+.env
+
+# OS-specific files
+.DS_Store
