@@ -59,6 +59,11 @@ async def snapshot_stream():
     )
 
 
+async def snapshot_stream_from(items: list[dict[str, object]]):
+    for item in items:
+        yield SimpleNamespace(to_dict=lambda item=item: item)
+
+
 @pytest.mark.asyncio
 async def test_get_chat_history_orders_by_timestamp() -> None:
     client = MagicMock()
@@ -84,6 +89,55 @@ async def test_get_chat_history_orders_by_timestamp() -> None:
         {"role": "user", "text": "first"},
         {"role": "model", "text": "second"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_chat_history_returns_newest_limit_chronologically() -> None:
+    client = MagicMock()
+    messages = MagicMock()
+    query = MagicMock()
+    limited_query = MagicMock()
+    limited_query.stream.return_value = snapshot_stream_from(
+        [
+            {"role": "model", "text": "newest"},
+            {"role": "user", "text": "older"},
+        ]
+    )
+    session = client.collection.return_value.document.return_value
+    session.collection.return_value = messages
+    messages.order_by.return_value = query
+    query.limit.return_value = limited_query
+
+    history = await MemoryEngine(client).get_chat_history(
+        "session-1",
+        limit=20,
+    )
+
+    messages.order_by.assert_called_once_with(
+        "timestamp",
+        direction=firestore.Query.DESCENDING,
+    )
+    query.limit.assert_called_once_with(20)
+    assert history == [
+        {"role": "user", "text": "older"},
+        {"role": "model", "text": "newest"},
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_limit", (True, 0, 101, 1.5, "20"))
+async def test_get_chat_history_rejects_invalid_limit_before_access(
+    invalid_limit: object,
+) -> None:
+    client = MagicMock()
+
+    with pytest.raises(ValueError):
+        await MemoryEngine(client).get_chat_history(
+            "session-1",
+            limit=invalid_limit,
+        )
+
+    client.collection.assert_not_called()
 
 
 @pytest.mark.asyncio

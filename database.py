@@ -51,10 +51,18 @@ class MemoryEngine:
             self._raise_firestore_error("save_message", exc)
 
     async def get_chat_history(
-        self, session_id: str
+        self,
+        session_id: str,
+        limit: int | None = None,
     ) -> list[dict[str, object]]:
-        """Return a session's messages in ascending timestamp order."""
+        """Return all or the newest session messages chronologically."""
         self._validate_string(session_id, "session_id")
+        if limit is not None and (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 100
+        ):
+            raise ValueError("limit must be an integer between 1 and 100.")
 
         try:
             messages_ref = (
@@ -62,15 +70,27 @@ class MemoryEngine:
                 .document(session_id)
                 .collection("messages")
             )
-            query = messages_ref.order_by(
-                "timestamp", direction=firestore.Query.ASCENDING
+            direction = (
+                firestore.Query.ASCENDING
+                if limit is None
+                else firestore.Query.DESCENDING
             )
+            query = messages_ref.order_by(
+                "timestamp",
+                direction=direction,
+            )
+            if limit is not None:
+                query = query.limit(limit)
+
             history: list[dict[str, object]] = []
 
             async for snapshot in query.stream():
                 data = snapshot.to_dict()
                 if data is not None:
                     history.append(data)
+
+            if limit is not None:
+                history.reverse()
 
             return history
         except GoogleAPIError as exc:
