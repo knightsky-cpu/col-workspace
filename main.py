@@ -4,7 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, status
@@ -13,6 +13,13 @@ from google.genai import types
 from pydantic import BaseModel, StringConstraints
 
 from database import MemoryEngine, MemoryEngineError
+from schemas import SynthesisRequest, SynthesisResponse
+from synthesis import (
+    SYNTHESIS_MODEL_NAME,
+    SynthesisEngineError,
+    SynthesisTimeoutError,
+    generate_blueprint,
+)
 
 
 MODEL_NAME = "gemini-3.6-flash"
@@ -103,6 +110,17 @@ def _build_current_message(
     return parts
 
 
+def _raise_database_http_error(exc: MemoryEngineError) -> NoReturn:
+    logger.error(
+        "Database operation failed (%s).",
+        type(exc).__name__,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Database operation failed.",
+    ) from exc
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if not os.getenv("GOOGLE_API_KEY"):
@@ -141,6 +159,54 @@ async def health_check() -> dict[str, str]:
     return {"status": "online"}
 
 
+@app.post("/api/synthesize", response_model=SynthesisResponse)
+async def synthesize(
+    payload: SynthesisRequest,
+    request: Request,
+) -> SynthesisResponse:
+    client = request.app.state.genai_client
+    database = request.app.state.db
+
+    try:
+        profile, history = await asyncio.gather(
+            database.get_user_profile(payload.user_id),
+            database.get_chat_history(payload.session_id, limit=20),
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    try:
+        blueprint = await generate_blueprint(
+            client,
+            profile,
+            history,
+            payload.source_text,
+        )
+    except SynthesisTimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Blueprint generation timed out.",
+        ) from exc
+    except SynthesisEngineError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Blueprint generation failed.",
+        ) from exc
+    try:
+        blueprint_id = await database.save_blueprint(
+            payload.project_id,
+            payload.session_id,
+            payload.user_id,
+            SYNTHESIS_MODEL_NAME,
+            blueprint.model_dump(mode="json"),
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    return SynthesisResponse(
+        blueprint_id=blueprint_id,
+        blueprint=blueprint,
+    )
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
     client = request.app.state.genai_client
@@ -157,14 +223,7 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             payload.message,
         )
     except MemoryEngineError as exc:
-        logger.error(
-            "Database operation failed (%s).",
-            type(exc).__name__,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database operation failed.",
-        ) from exc
+        _raise_database_http_error(exc)
 
     try:
         chat_history, pending_user_parts = _format_chat_history(history)
@@ -213,13 +272,6 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             response_text,
         )
     except MemoryEngineError as exc:
-        logger.error(
-            "Database operation failed (%s).",
-            type(exc).__name__,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database operation failed.",
-        ) from exc
+        _raise_database_http_error(exc)
 
     return ChatResponse(response=response_text)

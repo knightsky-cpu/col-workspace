@@ -165,7 +165,9 @@ async def generate_blueprint(
                 config=types.GenerateContentConfig(
                     system_instruction=SYNTHESIS_SYSTEM_INSTRUCTION,
                     response_mime_type="application/json",
-                    response_schema=SynthesisBlueprint,
+                    response_json_schema=(
+                        SynthesisBlueprint.model_json_schema()
+                    ),
                     temperature=0.2,
                     max_output_tokens=8192,
                 ),

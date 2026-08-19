@@ -250,7 +250,11 @@ async def test_generate_blueprint_uses_structured_untrusted_context(
     assert arguments["model"] == "gemini-3.6-flash"
     config = arguments["config"]
     assert config.response_mime_type == "application/json"
-    assert config.response_schema is SynthesisBlueprint
+    assert config.response_schema is None
+    assert (
+        config.response_json_schema
+        == SynthesisBlueprint.model_json_schema()
+    )
     assert config.temperature == 0.2
     assert config.max_output_tokens == 8192
     assert isinstance(config.system_instruction, str)
