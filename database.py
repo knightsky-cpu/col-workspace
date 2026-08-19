@@ -50,6 +50,48 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_message", exc)
 
+    async def save_blueprint(
+        self,
+        project_id: str,
+        session_id: str,
+        user_id: str,
+        model_name: str,
+        blueprint: dict[str, object],
+    ) -> str:
+        """Atomically persist a project update and generated blueprint."""
+        self._validate_string(project_id, "project_id")
+        self._validate_string(session_id, "session_id")
+        self._validate_string(user_id, "user_id")
+        self._validate_string(model_name, "model_name")
+        self._validate_blueprint(blueprint)
+
+        try:
+            project_ref = self._client.collection("projects").document(
+                project_id
+            )
+            blueprint_ref = project_ref.collection("blueprints").document()
+            batch = self._client.batch()
+            batch.set(
+                project_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            batch.set(
+                blueprint_ref,
+                {
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "originating_session_id": session_id,
+                    "user_id": user_id,
+                    "model_name": model_name,
+                    "schema_version": "1.0",
+                    "blueprint": blueprint,
+                },
+            )
+            await batch.commit()
+            return blueprint_ref.id
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("save_blueprint", exc)
+
     async def get_chat_history(
         self,
         session_id: str,
@@ -137,6 +179,11 @@ class MemoryEngine:
     def _validate_updates(updates: object) -> None:
         if not isinstance(updates, dict) or not updates:
             raise ValueError("updates must be a non-empty dictionary.")
+
+    @staticmethod
+    def _validate_blueprint(blueprint: object) -> None:
+        if not isinstance(blueprint, dict) or not blueprint:
+            raise ValueError("blueprint must be a non-empty dictionary.")
 
     @staticmethod
     def _raise_firestore_error(

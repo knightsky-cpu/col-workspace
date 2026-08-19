@@ -50,6 +50,149 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
     batch.commit.assert_awaited_once_with()
 
 
+@pytest.mark.asyncio
+async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
+    client = MagicMock()
+    projects = MagicMock()
+    project = MagicMock()
+    blueprints = MagicMock()
+    blueprint_ref = MagicMock(id="blueprint-1")
+    batch = MagicMock()
+    batch.commit = AsyncMock(return_value=[])
+
+    client.collection.return_value = projects
+    projects.document.return_value = project
+    project.collection.return_value = blueprints
+    blueprints.document.return_value = blueprint_ref
+    client.batch.return_value = batch
+    payload = {
+        "synthesized_conceptual_model": {
+            "project_name": "Agent Col",
+        }
+    }
+
+    blueprint_id = await MemoryEngine(client).save_blueprint(
+        "project-1",
+        "session-1",
+        "user-1",
+        "gemini-3.6-flash",
+        payload,
+    )
+
+    assert blueprint_id == "blueprint-1"
+    client.collection.assert_called_once_with("projects")
+    projects.document.assert_called_once_with("project-1")
+    project.collection.assert_called_once_with("blueprints")
+    blueprints.document.assert_called_once_with()
+    assert batch.set.call_args_list == [
+        call(
+            project,
+            {"updated_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        ),
+        call(
+            blueprint_ref,
+            {
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "originating_session_id": "session-1",
+                "user_id": "user-1",
+                "model_name": "gemini-3.6-flash",
+                "schema_version": "1.0",
+                "blueprint": payload,
+            },
+        ),
+    ]
+    batch.commit.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        (
+            "",
+            "session-1",
+            "user-1",
+            "gemini-3.6-flash",
+            {"key": "value"},
+        ),
+        (
+            "project-1",
+            "",
+            "user-1",
+            "gemini-3.6-flash",
+            {"key": "value"},
+        ),
+        (
+            "project-1",
+            "session-1",
+            " ",
+            "gemini-3.6-flash",
+            {"key": "value"},
+        ),
+        (
+            "project-1",
+            "session-1",
+            "user-1",
+            "",
+            {"key": "value"},
+        ),
+        (
+            "project-1",
+            "session-1",
+            "user-1",
+            "gemini-3.6-flash",
+            {},
+        ),
+        (
+            "project-1",
+            "session-1",
+            "user-1",
+            "gemini-3.6-flash",
+            "invalid",
+        ),
+    ),
+)
+async def test_save_blueprint_rejects_invalid_input_before_access(
+    arguments: tuple[object, ...],
+) -> None:
+    client = MagicMock()
+    client.batch.return_value.commit = AsyncMock(return_value=[])
+
+    with pytest.raises(ValueError):
+        await MemoryEngine(client).save_blueprint(*arguments)
+
+    client.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_save_blueprint_preserves_firestore_error_safely(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    private_value = "private-blueprint-value"
+    firestore_error = ServiceUnavailable("backend unavailable")
+    client = MagicMock()
+    batch = MagicMock()
+    batch.commit = AsyncMock(side_effect=firestore_error)
+    client.batch.return_value = batch
+    caplog.set_level(logging.ERROR, logger="database")
+
+    with pytest.raises(MemoryEngineError) as caught:
+        await MemoryEngine(client).save_blueprint(
+            "private-project",
+            "private-session",
+            "private-user",
+            "gemini-3.6-flash",
+            {"note": private_value},
+        )
+
+    assert caught.value.__cause__ is firestore_error
+    assert "private-project" not in caplog.text
+    assert "private-session" not in caplog.text
+    assert "private-user" not in caplog.text
+    assert private_value not in caplog.text
+
+
 async def snapshot_stream():
     yield SimpleNamespace(
         to_dict=lambda: {"role": "user", "text": "first"}
