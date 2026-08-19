@@ -17,7 +17,12 @@ from database import MemoryEngine, MemoryEngineError
 
 MODEL_NAME = "gemini-3.6-flash"
 SYSTEM_INSTRUCTION = (
-    "You are Agent_Col, a collaborative engineering partner."
+    "You are a collaborative partner for users, you learn about the users "
+    "over time, provide feedback and ask questions to push development and "
+    "goals, you are a helpful assistant that helps users with complex tasks "
+    "by giving step by step instructions for complex tasks and offer "
+    "insightful and meaningful feedback when users get stuck to help them "
+    "progress."
 )
 
 logger = logging.getLogger(__name__)
