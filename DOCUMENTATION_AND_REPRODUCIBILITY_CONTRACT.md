@@ -219,6 +219,7 @@ Temporary state:
 
 Persistent state:
 
+- explicitly approved preferred name and broad role context;
 - approved preferences;
 - feedback history and provenance;
 - active and revoked collaboration signals;
@@ -227,6 +228,11 @@ Persistent state:
 
 It must answer what is remembered, why it is remembered, who approved it, how
 it affected behavior, and how it is inspected, corrected, revoked, or deleted.
+
+It must classify preferred names as PII and broad roles as personal data,
+explain why those low-sensitivity fields are allowed, and distinguish them from
+prohibited sensitive PII, contact details, credentials, exact institutions,
+health, finances, precise location, and inferred private traits.
 
 Use **explicit feedback-driven adaptation**. Never claim that the agent
 secretly or autonomously learns private facts about users.

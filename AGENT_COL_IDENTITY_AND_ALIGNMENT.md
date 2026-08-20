@@ -99,23 +99,33 @@ Firestore remains the source of truth for:
 - project and non-project artifacts;
 - correction, revocation, and deletion state.
 
-Appropriate durable signals are non-sensitive collaboration preferences such
-as response length, example style, explanation pace, learning approach,
+Appropriate durable signals include non-sensitive collaboration preferences
+such as response length, example style, explanation pace, learning approach,
 planning cadence, formatting, accessibility support, check-in style, and
-approved tool-use preferences. Domain experience may be stored only when the
-user explicitly supplies and approves it for adaptation.
+approved tool-use preferences. Agent_Col may also retain a narrowly allowlisted
+preferred name or display name and broad role context such as student,
+professional, educator, researcher, or hobbyist when the user explicitly
+supplies and approves it. Domain experience may be stored only when the user
+explicitly supplies and approves it for adaptation.
 
-Identity claims, contact details, precise location, credentials, protected
-class information, health information, financial information, and inferred
-private traits are not collaboration preferences and must not enter the
-profile-memory workflow.
+Preferred names and broad role context are personal data, and a name is
+ordinarily PII. The system must describe that honestly rather than claim that
+all memory is PII-free. These low-sensitivity fields receive the same consent,
+provenance, inspection, correction, revocation, deletion, and safe-logging
+controls as collaboration preferences.
+
+Government and account identifiers, contact details, exact school or employer,
+precise location, credentials, protected class information, health
+information, financial information, and model-inferred identity or private
+traits must not enter the profile-memory workflow.
 
 Memory must be trustworthy and user-controlled:
 
-- store only an allowlisted, non-sensitive signal supported by explicit user
-  input;
-- do not intentionally store PII, sensitive PII, credentials, medical facts,
-  financial facts, or private traits as personalization signals;
+- store only an allowlisted collaboration preference or low-sensitivity
+  identity field supported by explicit user input;
+- do not store personal data outside the approved low-sensitivity fields, and
+  never store sensitive PII, credentials, medical facts, financial facts, or
+  private traits as personalization signals;
 - record where and when an approved signal came from;
 - distinguish a current preference from historical feedback;
 - permit inspection, correction, revocation, and deletion;
