@@ -1,4 +1,6 @@
-from typing import Annotated, Literal
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -6,6 +8,20 @@ from pydantic import (
     Field,
     HttpUrl,
     StringConstraints,
+    model_validator,
+)
+
+from memory_policy import (
+    ConfirmationChannel,
+    MEMORY_POLICY_VERSION,
+    MEMORY_SCHEMA_VERSION,
+    IdentityContextCategory,
+    MemoryCategory,
+    MemoryDecision,
+    MemoryEventType,
+    MemoryValue,
+    PreferenceCategory,
+    validate_memory_value,
 )
 
 
@@ -94,6 +110,152 @@ class ChatResponse(StrictModel):
     actions: list[AgentActionReceipt] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
     citations: list[CitationReference] = Field(default_factory=list)
+
+
+def _normalize_memory_model_value(
+    data: object,
+    value_field: str,
+) -> object:
+    if not isinstance(data, Mapping):
+        return data
+    if "category" not in data or value_field not in data:
+        return data
+    normalized = dict(data)
+    normalized[value_field] = validate_memory_value(
+        data["category"],
+        data[value_field],
+    )
+    return normalized
+
+
+class MemoryProposal(StrictModel):
+    proposal_id: IdentifierStr
+    category: MemoryCategory
+    proposed_value: MemoryValue
+    expected_signal_id: IdentifierStr | None
+    policy_version: Literal["1.0"] = MEMORY_POLICY_VERSION
+    status: Literal["pending", "approved", "rejected"]
+    source_session_id: IdentifierStr
+    source_message_id: IdentifierStr
+    created_at: datetime
+    expires_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_proposed_value(cls, data: object) -> object:
+        return _normalize_memory_model_value(data, "proposed_value")
+
+
+class ActiveMemorySignal(StrictModel):
+    signal_id: IdentifierStr
+    category: MemoryCategory
+    value: MemoryValue
+    policy_version: Literal["1.0"] = MEMORY_POLICY_VERSION
+    source_event_id: IdentifierStr
+    approved_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_value(cls, data: object) -> object:
+        return _normalize_memory_model_value(data, "value")
+
+
+class CollaborationProfile(StrictModel):
+    memory_schema_version: Literal["1.0"] = MEMORY_SCHEMA_VERSION
+    memory_revision: int = Field(default=0, ge=0)
+    identity_context: dict[
+        IdentityContextCategory,
+        ActiveMemorySignal,
+    ] = Field(default_factory=dict, max_length=2)
+    active_preferences: dict[
+        PreferenceCategory,
+        ActiveMemorySignal,
+    ] = Field(default_factory=dict, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_projection_keys(self) -> Self:
+        for key, signal in self.identity_context.items():
+            if key != signal.category:
+                raise ValueError(
+                    "Identity-context key must match signal category."
+                )
+        for key, signal in self.active_preferences.items():
+            if key != signal.category:
+                raise ValueError(
+                    "Preference key must match signal category."
+                )
+        return self
+
+
+class MemoryEvent(StrictModel):
+    event_id: IdentifierStr
+    event_type: MemoryEventType
+    signal_id: IdentifierStr
+    category: MemoryCategory
+    value: MemoryValue
+    policy_version: Literal["1.0"] = MEMORY_POLICY_VERSION
+    source_type: Literal["explicit_user_feedback"]
+    source_session_id: IdentifierStr
+    source_message_id: IdentifierStr
+    confirmation_channel: ConfirmationChannel
+    confirmation_session_id: IdentifierStr | None
+    confirmation_message_id: IdentifierStr | None
+    related_signal_id: IdentifierStr | None
+    memory_revision: int = Field(ge=1)
+    created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_value(cls, data: object) -> object:
+        return _normalize_memory_model_value(data, "value")
+
+    @model_validator(mode="after")
+    def validate_confirmation_channel(self) -> Self:
+        if self.confirmation_channel == "chat_decision":
+            valid = (
+                self.confirmation_session_id is not None
+                and self.confirmation_message_id is not None
+            )
+        else:
+            valid = (
+                self.confirmation_session_id is None
+                and self.confirmation_message_id is None
+            )
+        if not valid:
+            raise ValueError(
+                "Confirmation identifiers do not match the channel."
+            )
+        return self
+
+
+class MemoryDecisionRequest(StrictModel):
+    proposal_id: IdentifierStr
+    decision: MemoryDecision
+
+
+class MemoryProposalReceipt(StrictModel):
+    proposal_id: IdentifierStr
+    category: MemoryCategory
+    proposed_value: MemoryValue
+    expires_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_proposed_value(cls, data: object) -> object:
+        return _normalize_memory_model_value(data, "proposed_value")
+
+
+class AdaptationReceipt(StrictModel):
+    signal_id: IdentifierStr
+    category: MemoryCategory
+    value: MemoryValue
+    source_event_id: IdentifierStr
+    status: Literal["provided_to_model"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_value(cls, data: object) -> object:
+        return _normalize_memory_model_value(data, "value")
 
 
 class ConceptualModel(StrictModel):
