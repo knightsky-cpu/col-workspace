@@ -109,7 +109,7 @@ class MemoryEngine:
 
     async def save_message(
         self, session_id: str, role: str, text: str
-    ) -> None:
+    ) -> str:
         """Atomically persist a session update and a new chat message."""
         self._validate_string(session_id, "session_id")
         self._validate_string(role, "role")
@@ -135,6 +135,7 @@ class MemoryEngine:
                 },
             )
             await batch.commit()
+            return message_ref.id
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_message", exc)
 

@@ -102,20 +102,6 @@ class CitationReference(StrictModel):
     label: DisplayLabelStr
 
 
-class ChatRequest(StrictModel):
-    project_id: IdentifierStr
-    session_id: IdentifierStr
-    user_id: IdentifierStr
-    message: NonEmptyStr
-
-
-class ChatResponse(StrictModel):
-    response: NonEmptyStr
-    actions: list[AgentActionReceipt] = Field(default_factory=list)
-    artifacts: list[ArtifactReference] = Field(default_factory=list)
-    citations: list[CitationReference] = Field(default_factory=list)
-
-
 def _normalize_memory_model_value(
     data: object,
     value_field: str,
@@ -130,6 +116,43 @@ def _normalize_memory_model_value(
         data[value_field],
     )
     return normalized
+
+
+class MemoryDecisionRequest(StrictModel):
+    proposal_id: IdentifierStr
+    decision: MemoryDecision
+
+
+class AdaptationReceipt(StrictModel):
+    signal_id: IdentifierStr
+    category: MemoryCategory
+    value: MemoryValue
+    source_event_id: IdentifierStr
+    status: Literal["provided_to_model"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_value(cls, data: object) -> object:
+        return _normalize_memory_model_value(data, "value")
+
+
+class ChatRequest(StrictModel):
+    project_id: IdentifierStr
+    session_id: IdentifierStr
+    user_id: IdentifierStr
+    message: NonEmptyStr
+    memory_decision: MemoryDecisionRequest | None = None
+
+
+class ChatResponse(StrictModel):
+    response: NonEmptyStr
+    actions: list[AgentActionReceipt] = Field(default_factory=list)
+    artifacts: list[ArtifactReference] = Field(default_factory=list)
+    citations: list[CitationReference] = Field(default_factory=list)
+    adaptations: list[AdaptationReceipt] = Field(
+        default_factory=list,
+        max_length=10,
+    )
 
 
 class MemoryProposal(StrictModel):
@@ -232,11 +255,6 @@ class MemoryEvent(StrictModel):
         return self
 
 
-class MemoryDecisionRequest(StrictModel):
-    proposal_id: IdentifierStr
-    decision: MemoryDecision
-
-
 class MemoryProposalReceipt(StrictModel):
     proposal_id: IdentifierStr
     category: MemoryCategory
@@ -247,19 +265,6 @@ class MemoryProposalReceipt(StrictModel):
     @classmethod
     def normalize_proposed_value(cls, data: object) -> object:
         return _normalize_memory_model_value(data, "proposed_value")
-
-
-class AdaptationReceipt(StrictModel):
-    signal_id: IdentifierStr
-    category: MemoryCategory
-    value: MemoryValue
-    source_event_id: IdentifierStr
-    status: Literal["provided_to_model"]
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_value(cls, data: object) -> object:
-        return _normalize_memory_model_value(data, "value")
 
 
 class MemoryInspectionResponse(StrictModel):

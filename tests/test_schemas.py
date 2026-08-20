@@ -594,12 +594,14 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "session_id": "session-1",
         "user_id": "user-1",
         "message": "Help me plan this.",
+        "memory_decision": None,
     }
     assert response.model_dump(mode="json") == {
         "response": "Collaborative answer.",
         "actions": [],
         "artifacts": [],
         "citations": [],
+        "adaptations": [],
     }
 
 

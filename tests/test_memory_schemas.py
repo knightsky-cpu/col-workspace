@@ -166,6 +166,57 @@ def test_memory_decision_request_accepts_structured_user_authority(
     assert request.decision == decision
 
 
+def test_chat_contract_carries_decision_and_adaptation_receipts() -> None:
+    from schemas import ChatRequest, ChatResponse
+
+    request = ChatRequest(
+        project_id="project-1",
+        session_id="session-1",
+        user_id="user-1",
+        message="Yes, remember that preference.",
+        memory_decision={
+            "proposal_id": "response_length--proposal-1",
+            "decision": "approve",
+        },
+    )
+    response = ChatResponse(
+        response="I will use concise responses going forward.",
+        adaptations=[
+            {
+                "signal_id": "response_length--proposal-1",
+                "category": "response_length",
+                "value": "concise",
+                "source_event_id": (
+                    "response_length--proposal-1--approved"
+                ),
+                "status": "provided_to_model",
+            }
+        ],
+    )
+
+    assert request.memory_decision is not None
+    assert request.memory_decision.decision == "approve"
+    assert response.adaptations[0].category == "response_length"
+
+
+def test_chat_response_limits_adaptation_receipts() -> None:
+    from schemas import ChatResponse
+
+    receipt = {
+        "signal_id": "response_length--proposal-1",
+        "category": "response_length",
+        "value": "concise",
+        "source_event_id": "response_length--proposal-1--approved",
+        "status": "provided_to_model",
+    }
+
+    with pytest.raises(ValidationError):
+        ChatResponse(
+            response="Bounded response",
+            adaptations=[receipt] * 11,
+        )
+
+
 def test_memory_proposal_receipt_normalizes_server_derived_value() -> None:
     from schemas import MemoryProposalReceipt
 

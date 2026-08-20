@@ -11,6 +11,9 @@ import pytest_asyncio
 import main
 from database import (
     MemoryEventCursorNotFoundError,
+    MemoryProposalConflictError,
+    MemoryProposalExpiredError,
+    MemoryProposalNotFoundError,
     MemorySignalConflictError,
     MemorySignalNotFoundError,
 )
@@ -35,6 +38,7 @@ from synthesis_service import (
 from trusted_memory_service import (
     DeleteMemorySignalCommand,
     InspectMemoryCommand,
+    MemoryDecisionCommand,
     RevokeMemorySignalCommand,
     TrustedMemoryInspectionResult,
     TrustedMemoryMutationResult,
@@ -113,8 +117,8 @@ MEMORY_NOW = datetime(2026, 8, 20, 23, 0, tzinfo=UTC)
 @dataclass
 class FakeMemoryEngine:
     events: list[tuple[Any, ...]]
-    profile: dict[str, object] = field(
-        default_factory=lambda: {"experience_level": "early-career"}
+    collaboration_profile: CollaborationProfile = field(
+        default_factory=CollaborationProfile
     )
     history: list[dict[str, object]] = field(
         default_factory=lambda: [
@@ -125,11 +129,14 @@ class FakeMemoryEngine:
     fail_on: str | None = None
     closed: bool = False
 
-    async def get_user_profile(self, user_id: str) -> dict[str, object]:
+    async def get_collaboration_profile(
+        self,
+        user_id: str,
+    ) -> CollaborationProfile:
         if self.fail_on == "profile":
             raise main.MemoryEngineError("profile read failed")
-        self.events.append(("profile", user_id))
-        return self.profile
+        self.events.append(("collaboration_profile", user_id))
+        return self.collaboration_profile
 
     async def get_chat_history(
         self,
@@ -143,10 +150,11 @@ class FakeMemoryEngine:
 
     async def save_message(
         self, session_id: str, role: str, text: str
-    ) -> None:
+    ) -> str:
         if self.fail_on == f"save_{role}":
             raise main.MemoryEngineError(f"{role} save failed")
         self.events.append(("save", session_id, role, text))
+        return f"{role}-message-1"
 
     def close(self) -> None:
         self.closed = True
@@ -215,11 +223,15 @@ class FakeTrustedMemoryService:
     error: Exception | None = None
     revoke_result: TrustedMemoryMutationResult | None = None
     delete_result: TrustedMemoryMutationResult | None = None
+    decision_result: TrustedMemoryMutationResult | None = None
     calls: list[InspectMemoryCommand] = field(default_factory=list)
     revoke_calls: list[RevokeMemorySignalCommand] = field(
         default_factory=list
     )
     delete_calls: list[DeleteMemorySignalCommand] = field(
+        default_factory=list
+    )
+    decision_calls: list[MemoryDecisionCommand] = field(
         default_factory=list
     )
 
@@ -232,6 +244,18 @@ class FakeTrustedMemoryService:
         if self.error is not None:
             raise self.error
         return self.result
+
+    async def decide_memory_proposal(
+        self,
+        command: MemoryDecisionCommand,
+    ) -> TrustedMemoryMutationResult:
+        self.decision_calls.append(command)
+        self.events.append(("memory_decision",))
+        if self.error is not None:
+            raise self.error
+        if self.decision_result is None:
+            raise AssertionError("Missing fake decision result.")
+        return self.decision_result
 
     async def revoke_memory_signal(
         self,
@@ -303,6 +327,22 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         memory_revision=1,
         created_at=MEMORY_NOW,
     )
+    approved_profile = CollaborationProfile.model_validate(
+        {
+            "memory_revision": 2,
+            "active_preferences": {
+                "response_length": {
+                    "signal_id": "response_length--proposal-1",
+                    "category": "response_length",
+                    "value": "concise",
+                    "source_event_id": (
+                        "response_length--proposal-1--approved"
+                    ),
+                    "approved_at": MEMORY_NOW,
+                }
+            },
+        }
+    )
     memory_service = FakeTrustedMemoryService(
         events=events,
         result=TrustedMemoryInspectionResult(
@@ -324,6 +364,13 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 status="completed",
             ),
             profile=CollaborationProfile(memory_revision=3),
+        ),
+        decision_result=TrustedMemoryMutationResult(
+            action=AgentActionReceipt(
+                action_name="approve_memory_signal",
+                status="completed",
+            ),
+            profile=approved_profile,
         ),
     )
     state = ServiceState(
@@ -998,10 +1045,236 @@ async def test_synthesize_rejects_incomplete_or_malformed_json(
 
 
 @pytest.mark.asyncio
+async def test_chat_decision_uses_updated_profile_and_returns_receipts(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "confirmation-session",
+            "user_id": "user-1",
+            "message": "Yes, remember that preference.",
+            "memory_decision": {
+                "proposal_id": "response_length--proposal-1",
+                "decision": "approve",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "response": "Generated answer",
+        "actions": [
+            {
+                "action_name": "approve_memory_signal",
+                "status": "completed",
+            }
+        ],
+        "artifacts": [],
+        "citations": [],
+        "adaptations": [
+            {
+                "signal_id": "response_length--proposal-1",
+                "category": "response_length",
+                "value": "concise",
+                "source_event_id": (
+                    "response_length--proposal-1--approved"
+                ),
+                "status": "provided_to_model",
+            }
+        ],
+    }
+    assert service_state.events == [
+        ("history", "confirmation-session", 20),
+        (
+            "save",
+            "confirmation-session",
+            "user",
+            "Yes, remember that preference.",
+        ),
+        ("memory_decision",),
+        ("supervisor",),
+        (
+            "save",
+            "confirmation-session",
+            "model",
+            "Generated answer",
+        ),
+    ]
+    assert service_state.memory_service.decision_calls == [
+        MemoryDecisionCommand(
+            user_id="user-1",
+            proposal_id="response_length--proposal-1",
+            decision="approve",
+            confirmation_channel="chat_decision",
+            confirmation_session_id="confirmation-session",
+            confirmation_message_id="user-message-1",
+        )
+    ]
+    assert len(service_state.supervisor.calls) == 1
+    context = service_state.supervisor.calls[0]
+    assert context.message == "Yes, remember that preference."
+    context_text = "\n".join(
+        part.text
+        for content in context.model_input_context
+        for part in content.parts
+        if part.text
+    )
+    assert "[APPROVED_COLLABORATION_PREFERENCES]" in context_text
+    assert "response_length=concise" in context_text
+    assert "response_length--proposal-1" not in context_text
+    assert "Yes, remember that preference." not in context_text
+
+
+@pytest.mark.asyncio
+async def test_chat_rejection_returns_action_without_adaptation(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.memory_service.decision_result = (
+        TrustedMemoryMutationResult(
+            action=AgentActionReceipt(
+                action_name="reject_memory_signal",
+                status="completed",
+            ),
+            profile=CollaborationProfile(),
+        )
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "confirmation-session",
+            "user_id": "user-1",
+            "message": "No, do not remember that.",
+            "memory_decision": {
+                "proposal_id": "response_length--proposal-1",
+                "decision": "reject",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["actions"] == [
+        {
+            "action_name": "reject_memory_signal",
+            "status": "completed",
+        }
+    ]
+    assert response.json()["adaptations"] == []
+    assert service_state.memory_service.decision_calls[0].decision == (
+        "reject"
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    (
+        (
+            MemoryProposalNotFoundError("private missing proposal"),
+            404,
+            "Memory proposal was not found.",
+        ),
+        (
+            MemoryProposalConflictError("private conflicting proposal"),
+            409,
+            "Memory proposal state conflicts with this request.",
+        ),
+        (
+            MemoryProposalExpiredError("private expired proposal"),
+            410,
+            "Memory proposal has expired.",
+        ),
+        (
+            ValueError("private invalid proposal identifier"),
+            422,
+            "Memory decision is invalid.",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_chat_decision_maps_domain_errors_before_supervisor(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    service_state.memory_service.error = error
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "confirmation-session",
+            "user_id": "user-1",
+            "message": "Apply my explicit decision.",
+            "memory_decision": {
+                "proposal_id": "response_length--proposal-1",
+                "decision": "approve",
+            },
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+    assert service_state.events == [
+        ("history", "confirmation-session", 20),
+        (
+            "save",
+            "confirmation-session",
+            "user",
+            "Apply my explicit decision.",
+        ),
+        ("memory_decision",),
+    ]
+    assert service_state.supervisor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_decision_translates_database_failure_safely(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service_state.memory_service.error = main.MemoryEngineError(
+        "private-user private-proposal private-value"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "private-session",
+            "user_id": "private-user",
+            "message": "Approve my private preference.",
+            "memory_decision": {
+                "proposal_id": "response_length--private-proposal",
+                "decision": "approve",
+            },
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Database operation failed."}
+    assert service_state.supervisor.calls == []
+    assert "private-user" not in caplog.text
+    assert "private-proposal" not in caplog.text
+    assert "private-value" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_chat_uses_context_and_persists_both_messages(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
+    decision_result = service_state.memory_service.decision_result
+    assert decision_result is not None
+    service_state.database.collaboration_profile = decision_result.profile
+
     response = await client.post(
         "/api/chat",
         json={
@@ -1018,9 +1291,20 @@ async def test_chat_uses_context_and_persists_both_messages(
         "actions": [],
         "artifacts": [],
         "citations": [],
+        "adaptations": [
+            {
+                "signal_id": "response_length--proposal-1",
+                "category": "response_length",
+                "value": "concise",
+                "source_event_id": (
+                    "response_length--proposal-1--approved"
+                ),
+                "status": "provided_to_model",
+            }
+        ],
     }
     assert set(service_state.events[:2]) == {
-        ("profile", "user-1"),
+        ("collaboration_profile", "user-1"),
         ("history", "session-1", 20),
     }
     assert service_state.events[2:] == [
@@ -1039,8 +1323,9 @@ async def test_chat_uses_context_and_persists_both_messages(
     context_content = context.model_input_context[0]
     assert context_content.role == "user"
     context_text = context_content.parts[0].text
-    assert "[USER_PROFILE_DATA]" in context_text
-    assert '"experience_level": "early-career"' in context_text
+    assert "[APPROVED_COLLABORATION_PREFERENCES]" in context_text
+    assert "response_length=concise" in context_text
+    assert "response_length--proposal-1" not in context_text
     assert "[SESSION_HISTORY_DATA]" in context_text
     assert context_text.index("Earlier question") < context_text.index(
         "Earlier answer"
@@ -1089,6 +1374,18 @@ async def test_chat_rejects_whitespace_only_fields(
         {
             "content": "not-json",
             "headers": {"content-type": "text/plain"},
+        },
+        {
+            "json": {
+                "project_id": "project-1",
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "message": "Remember this.",
+                "memory_decision": {
+                    "proposal_id": "response_length--proposal-1",
+                    "decision": "yes",
+                },
+            }
         },
     ),
 )
@@ -1211,11 +1508,13 @@ async def test_chat_starts_context_reads_concurrently(
     history_started = asyncio.Event()
     release = asyncio.Event()
 
-    async def blocked_profile(user_id: str) -> dict[str, object]:
+    async def blocked_profile(
+        user_id: str,
+    ) -> CollaborationProfile:
         assert user_id == "user-1"
         profile_started.set()
         await release.wait()
-        return {}
+        return CollaborationProfile()
 
     async def blocked_history(
         session_id: str,
@@ -1227,7 +1526,7 @@ async def test_chat_starts_context_reads_concurrently(
         await release.wait()
         return []
 
-    service_state.database.get_user_profile = blocked_profile
+    service_state.database.get_collaboration_profile = blocked_profile
     service_state.database.get_chat_history = blocked_history
     request_task = asyncio.create_task(
         client.post(

@@ -15,7 +15,7 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
     sessions = MagicMock()
     session = MagicMock()
     messages = MagicMock()
-    message = MagicMock()
+    message = MagicMock(id="message-1")
     batch = MagicMock()
     batch.commit = AsyncMock(return_value=[])
 
@@ -26,8 +26,9 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
     client.batch.return_value = batch
 
     engine = MemoryEngine(client=client)
-    await engine.save_message("session-1", "user", "hello")
+    message_id = await engine.save_message("session-1", "user", "hello")
 
+    assert message_id == "message-1"
     client.collection.assert_called_once_with("sessions")
     sessions.document.assert_called_once_with("session-1")
     session.collection.assert_called_once_with("messages")
