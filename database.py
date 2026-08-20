@@ -1,9 +1,13 @@
 import logging
+import re
+from datetime import datetime, timedelta
 from typing import NoReturn
 
 from google.api_core.exceptions import GoogleAPIError
 from google.cloud import firestore
-from google.cloud.firestore import AsyncClient
+from google.cloud.firestore import AsyncClient, AsyncTransaction
+
+from schemas import MemoryProposal
 
 
 logger = logging.getLogger(__name__)
@@ -11,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 class MemoryEngineError(RuntimeError):
     """Raised when a Firestore memory operation fails."""
+
+
+class MemoryProposalConflictError(RuntimeError):
+    """Raised when an unexpired proposal owns a category slot."""
 
 
 class MemoryEngine:
@@ -168,9 +176,143 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("get_user_profile", exc)
 
+    async def create_memory_proposal(
+        self,
+        user_id: str,
+        proposal: MemoryProposal,
+        *,
+        observed_at: datetime,
+    ) -> MemoryProposal:
+        """Create one pending proposal in its deterministic category slot."""
+        self._validate_memory_proposal_creation(
+            user_id,
+            proposal,
+            observed_at,
+        )
+        user_ref = self._client.collection("users").document(user_id)
+        proposal_ref = user_ref.collection("memory_proposals").document(
+            proposal.category
+        )
+        transaction = self._client.transaction()
+
+        async def create_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryProposal:
+            snapshot = await proposal_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                transaction.set(
+                    proposal_ref,
+                    self._proposal_document(proposal),
+                )
+                return proposal
+            stored = self._proposal_from_document(snapshot.to_dict())
+            if stored.status == "pending" and stored.expires_at > observed_at:
+                if self._proposals_are_identical(stored, proposal):
+                    return stored
+                raise MemoryProposalConflictError(
+                    "An unexpired memory proposal already occupies this "
+                    "category."
+                )
+            transaction.set(
+                proposal_ref,
+                self._proposal_document(proposal),
+            )
+            return proposal
+
+        run_transaction = firestore.async_transactional(
+            create_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("create_memory_proposal", exc)
+
     def close(self) -> None:
         """Close the Firestore client's transport."""
         self._client.close()
+
+    @staticmethod
+    def _proposal_document(proposal: MemoryProposal) -> dict[str, object]:
+        document = proposal.model_dump(mode="python")
+        document["created_at"] = firestore.SERVER_TIMESTAMP
+        document["resolved_at"] = None
+        return document
+
+    @staticmethod
+    def _validate_memory_proposal_creation(
+        user_id: object,
+        proposal: object,
+        observed_at: object,
+    ) -> None:
+        if not isinstance(user_id, str) or re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}",
+            user_id,
+        ) is None:
+            raise ValueError("user_id must be a valid identifier.")
+        if not isinstance(proposal, MemoryProposal):
+            raise ValueError("proposal must be a MemoryProposal.")
+        if proposal.status != "pending":
+            raise ValueError("proposal status must be pending.")
+
+        proposal_prefix = f"{proposal.category}--"
+        proposal_suffix = proposal.proposal_id.removeprefix(proposal_prefix)
+        if (
+            not proposal.proposal_id.startswith(proposal_prefix)
+            or not proposal_suffix
+        ):
+            raise ValueError("proposal_id must match its category.")
+
+        timestamps = (
+            ("observed_at", observed_at),
+            ("created_at", proposal.created_at),
+            ("expires_at", proposal.expires_at),
+        )
+        for field_name, value in timestamps:
+            if (
+                not isinstance(value, datetime)
+                or value.tzinfo is None
+                or value.utcoffset() is None
+            ):
+                raise ValueError(
+                    f"{field_name} must be a timezone-aware datetime."
+                )
+
+        if not proposal.created_at <= observed_at < proposal.expires_at:
+            raise ValueError("proposal timestamps are not currently valid.")
+        if proposal.expires_at - proposal.created_at != timedelta(hours=24):
+            raise ValueError("proposal lifetime must be exactly 24 hours.")
+
+    @staticmethod
+    def _proposal_from_document(
+        document: object,
+    ) -> MemoryProposal:
+        if not isinstance(document, dict):
+            raise ValueError("Stored memory proposal is invalid.")
+        proposal_fields = {
+            field_name: document.get(field_name)
+            for field_name in MemoryProposal.model_fields
+        }
+        return MemoryProposal.model_validate(proposal_fields)
+
+    @staticmethod
+    def _proposals_are_identical(
+        stored: MemoryProposal,
+        candidate: MemoryProposal,
+    ) -> bool:
+        stable_fields = (
+            "proposal_id",
+            "category",
+            "proposed_value",
+            "expected_signal_id",
+            "policy_version",
+            "source_session_id",
+            "source_message_id",
+            "expires_at",
+        )
+        return all(
+            getattr(stored, field_name) == getattr(candidate, field_name)
+            for field_name in stable_fields
+        )
 
     @staticmethod
     def _validate_string(value: object, field_name: str) -> None:
@@ -189,7 +331,7 @@ class MemoryEngine:
 
     @staticmethod
     def _raise_firestore_error(
-        operation: str, error: GoogleAPIError
+        operation: str, error: Exception
     ) -> NoReturn:
         logger.error("Firestore %s operation failed.", operation)
         raise MemoryEngineError(
