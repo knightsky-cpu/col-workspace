@@ -16,6 +16,10 @@ from supervisor_runtime import (
     SupervisorTurnResult,
 )
 from synthesis import SynthesisEngineError, SynthesisTimeoutError
+from synthesis_service import (
+    SynthesisCommand,
+    SynthesisResult,
+)
 
 
 VALID_BLUEPRINT_PAYLOAD = {
@@ -123,28 +127,6 @@ class FakeMemoryEngine:
             raise main.MemoryEngineError(f"{role} save failed")
         self.events.append(("save", session_id, role, text))
 
-    async def save_blueprint(
-        self,
-        project_id: str,
-        session_id: str,
-        user_id: str,
-        model_name: str,
-        blueprint: dict[str, object],
-    ) -> str:
-        if self.fail_on == "save_blueprint":
-            raise main.MemoryEngineError("blueprint save failed")
-        self.events.append(
-            (
-                "save_blueprint",
-                project_id,
-                session_id,
-                user_id,
-                model_name,
-                blueprint,
-            )
-        )
-        return "blueprint-1"
-
     def close(self) -> None:
         self.closed = True
 
@@ -167,34 +149,24 @@ class FakeGenAIClient:
 
 
 @dataclass
-class FakeSynthesis:
+class FakeSynthesisApplicationService:
     events: list[tuple[Any, ...]]
     blueprint: SynthesisBlueprint
     error: Exception | None = None
-    call_arguments: tuple[
-        object,
-        dict[str, object],
-        list[dict[str, object]],
-        str,
-    ] | None = None
+    calls: list[SynthesisCommand] = field(default_factory=list)
 
-    async def __call__(
+    async def synthesize(
         self,
-        client: object,
-        profile: dict[str, object],
-        history: list[dict[str, object]],
-        source_text: str,
-    ) -> SynthesisBlueprint:
-        self.call_arguments = (
-            client,
-            profile,
-            history,
-            source_text,
-        )
-        self.events.append(("synthesize",))
+        command: SynthesisCommand,
+    ) -> SynthesisResult:
+        self.calls.append(command)
+        self.events.append(("synthesis_service",))
         if self.error is not None:
             raise self.error
-        return self.blueprint
+        return SynthesisResult(
+            blueprint_id="blueprint-1",
+            blueprint=self.blueprint,
+        )
 
 
 @dataclass
@@ -220,7 +192,7 @@ class ServiceState:
     events: list[tuple[Any, ...]]
     database: FakeMemoryEngine
     genai_client: FakeGenAIClient
-    synthesis: FakeSynthesis
+    synthesis_service: FakeSynthesisApplicationService
     supervisor: FakeSupervisorRuntime
 
 
@@ -230,23 +202,30 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     database = FakeMemoryEngine(events)
     genai_client = FakeGenAIClient(FakeAsyncGenAI())
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
-    synthesis = FakeSynthesis(events, blueprint)
+    synthesis_service = FakeSynthesisApplicationService(events, blueprint)
     supervisor = FakeSupervisorRuntime(events)
     state = ServiceState(
         events,
         database,
         genai_client,
-        synthesis,
+        synthesis_service,
         supervisor,
     )
+
+    def create_synthesis_service(**kwargs: object) -> object:
+        assert kwargs == {
+            "client": genai_client,
+            "database": database,
+        }
+        return synthesis_service
 
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     monkeypatch.setattr(main, "MemoryEngine", lambda: database)
     monkeypatch.setattr(main.genai, "Client", lambda: genai_client)
     monkeypatch.setattr(
         main,
-        "generate_blueprint",
-        synthesis,
+        "SynthesisApplicationService",
+        create_synthesis_service,
         raising=False,
     )
     monkeypatch.setattr(
@@ -295,6 +274,17 @@ async def test_lifespan_exposes_supervisor_runtime(
 
 
 @pytest.mark.asyncio
+async def test_lifespan_exposes_synthesis_application_service(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        assert (
+            main.app.state.synthesis_service
+            is service_state.synthesis_service
+        )
+
+
+@pytest.mark.asyncio
 async def test_lifespan_closes_resources_if_supervisor_construction_fails(
     service_state: ServiceState,
     monkeypatch: pytest.MonkeyPatch,
@@ -340,94 +330,25 @@ async def test_synthesize_returns_and_persists_blueprint(
         "blueprint_id": "blueprint-1",
         "blueprint": VALID_BLUEPRINT_PAYLOAD,
     }
-    assert set(service_state.events[:2]) == {
-        ("profile", "user-1"),
-        ("history", "session-1", 20),
-    }
-    assert service_state.events[2:] == [
-        ("synthesize",),
-        (
-            "save_blueprint",
-            "project-1",
-            "session-1",
-            "user-1",
-            "gemini-3.6-flash",
-            VALID_BLUEPRINT_PAYLOAD,
-        ),
-    ]
-    assert service_state.synthesis.call_arguments == (
-        service_state.genai_client,
-        {"experience_level": "early-career"},
-        [
-            {"role": "user", "text": "Earlier question"},
-            {"role": "model", "text": "Earlier answer"},
-        ],
-        "Build a study partner.",
-    )
-
-
-@pytest.mark.asyncio
-async def test_synthesize_starts_context_reads_concurrently(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    profile_started = asyncio.Event()
-    history_started = asyncio.Event()
-    release = asyncio.Event()
-
-    async def blocked_profile(user_id: str) -> dict[str, object]:
-        assert user_id == "user-1"
-        profile_started.set()
-        await release.wait()
-        return {}
-
-    async def blocked_history(
-        session_id: str,
-        limit: int | None = None,
-    ) -> list[dict[str, object]]:
-        assert session_id == "session-1"
-        assert limit == 20
-        history_started.set()
-        await release.wait()
-        return []
-
-    service_state.database.get_user_profile = blocked_profile
-    service_state.database.get_chat_history = blocked_history
-    request_task = asyncio.create_task(
-        client.post(
-            "/api/synthesize",
-            json={
-                "project_id": "project-1",
-                "session_id": "session-1",
-                "user_id": "user-1",
-                "source_text": "Build a study partner.",
-            },
+    assert service_state.events == [("synthesis_service",)]
+    assert service_state.synthesis_service.calls == [
+        SynthesisCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            source_text="Build a study partner.",
         )
-    )
-
-    await asyncio.wait_for(profile_started.wait(), timeout=1)
-    both_reads_started = True
-    try:
-        await asyncio.wait_for(history_started.wait(), timeout=1)
-    except TimeoutError:
-        both_reads_started = False
-    finally:
-        assert ("synthesize",) not in service_state.events
-        release.set()
-        response = await request_task
-
-    assert both_reads_started
-    assert response.status_code == 200
+    ]
 
 
-@pytest.mark.parametrize("failure_point", ("profile", "history"))
 @pytest.mark.asyncio
-async def test_synthesize_translates_context_database_failure(
+async def test_synthesize_translates_service_database_failure(
     client: httpx.AsyncClient,
     service_state: ServiceState,
-    failure_point: str,
 ) -> None:
-    service_state.database.fail_on = failure_point
+    service_state.synthesis_service.error = main.MemoryEngineError(
+        "database failed"
+    )
 
     response = await client.post(
         "/api/synthesize",
@@ -441,19 +362,15 @@ async def test_synthesize_translates_context_database_failure(
 
     assert response.status_code == 500
     assert response.text == '{"detail":"Database operation failed."}'
-    assert ("synthesize",) not in service_state.events
-    assert not any(
-        event[0] == "save_blueprint"
-        for event in service_state.events
-    )
+    assert service_state.events == [("synthesis_service",)]
 
 
 @pytest.mark.asyncio
-async def test_synthesize_translates_generation_failure_without_writing(
+async def test_synthesize_translates_generation_failure(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
-    service_state.synthesis.error = SynthesisEngineError(
+    service_state.synthesis_service.error = SynthesisEngineError(
         "generation failed"
     )
 
@@ -469,18 +386,15 @@ async def test_synthesize_translates_generation_failure_without_writing(
 
     assert response.status_code == 502
     assert response.text == '{"detail":"Blueprint generation failed."}'
-    assert not any(
-        event[0] == "save_blueprint"
-        for event in service_state.events
-    )
+    assert service_state.events == [("synthesis_service",)]
 
 
 @pytest.mark.asyncio
-async def test_synthesize_translates_generation_timeout_without_writing(
+async def test_synthesize_translates_generation_timeout(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
-    service_state.synthesis.error = SynthesisTimeoutError(
+    service_state.synthesis_service.error = SynthesisTimeoutError(
         "generation timed out"
     )
 
@@ -496,19 +410,18 @@ async def test_synthesize_translates_generation_timeout_without_writing(
 
     assert response.status_code == 504
     assert response.text == '{"detail":"Blueprint generation timed out."}'
-    assert not any(
-        event[0] == "save_blueprint"
-        for event in service_state.events
-    )
+    assert service_state.events == [("synthesis_service",)]
 
 
 @pytest.mark.asyncio
-async def test_synthesize_translates_blueprint_database_failure(
+async def test_synthesize_does_not_log_private_database_failure_data(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    service_state.database.fail_on = "save_blueprint"
+    service_state.synthesis_service.error = main.MemoryEngineError(
+        "private-project private-session private-user private brainstorm"
+    )
 
     response = await client.post(
         "/api/synthesize",
@@ -522,7 +435,7 @@ async def test_synthesize_translates_blueprint_database_failure(
 
     assert response.status_code == 500
     assert response.text == '{"detail":"Database operation failed."}'
-    assert service_state.events[-1] == ("synthesize",)
+    assert service_state.events == [("synthesis_service",)]
     assert "private-project" not in caplog.text
     assert "private-session" not in caplog.text
     assert "private-user" not in caplog.text

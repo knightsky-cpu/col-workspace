@@ -26,16 +26,19 @@ from supervisor_runtime import (
     SupervisorTurnContext,
 )
 from synthesis import (
-    SYNTHESIS_MODEL_NAME,
     SynthesisEngineError,
     SynthesisTimeoutError,
-    generate_blueprint,
+)
+from synthesis_service import (
+    SynthesisApplicationService,
+    SynthesisCommand,
 )
 
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
+
 
 def _build_model_input_context(
     profile: dict[str, object],
@@ -104,6 +107,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     database = None
     try:
         database = MemoryEngine()
+        synthesis_service = SynthesisApplicationService(
+            client=client,
+            database=database,
+        )
         supervisor = SupervisorRuntime.from_app(create_supervisor_app())
     except Exception:
         try:
@@ -118,6 +125,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     app.state.genai_client = client
     app.state.db = database
+    app.state.synthesis_service = synthesis_service
     app.state.supervisor = supervisor
 
     try:
@@ -145,23 +153,19 @@ async def synthesize(
     payload: SynthesisRequest,
     request: Request,
 ) -> SynthesisResponse:
-    client = request.app.state.genai_client
-    database = request.app.state.db
+    synthesis_service = request.app.state.synthesis_service
 
     try:
-        profile, history = await asyncio.gather(
-            database.get_user_profile(payload.user_id),
-            database.get_chat_history(payload.session_id, limit=20),
+        result = await synthesis_service.synthesize(
+            SynthesisCommand(
+                project_id=payload.project_id,
+                session_id=payload.session_id,
+                user_id=payload.user_id,
+                source_text=payload.source_text,
+            )
         )
     except MemoryEngineError as exc:
         _raise_database_http_error(exc)
-    try:
-        blueprint = await generate_blueprint(
-            client,
-            profile,
-            history,
-            payload.source_text,
-        )
     except SynthesisTimeoutError as exc:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -172,19 +176,9 @@ async def synthesize(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Blueprint generation failed.",
         ) from exc
-    try:
-        blueprint_id = await database.save_blueprint(
-            payload.project_id,
-            payload.session_id,
-            payload.user_id,
-            SYNTHESIS_MODEL_NAME,
-            blueprint.model_dump(mode="json"),
-        )
-    except MemoryEngineError as exc:
-        _raise_database_http_error(exc)
     return SynthesisResponse(
-        blueprint_id=blueprint_id,
-        blueprint=blueprint,
+        blueprint_id=result.blueprint_id,
+        blueprint=result.blueprint,
     )
 
 
