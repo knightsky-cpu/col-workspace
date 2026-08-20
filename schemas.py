@@ -1,6 +1,12 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    StringConstraints,
+)
 
 
 NonEmptyStr = Annotated[
@@ -24,10 +30,51 @@ SourceText = Annotated[
         max_length=10_000,
     ),
 ]
+DisplayLabelStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=160),
+]
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class AgentActionReceipt(StrictModel):
+    action_name: Literal[
+        "synthesize_project",
+        "google_search",
+        "url_context",
+        "record_blueprint_feedback",
+    ]
+    status: Literal["completed"]
+
+
+class ArtifactReference(StrictModel):
+    artifact_type: Literal["synthesis_blueprint"]
+    project_id: IdentifierStr
+    artifact_id: IdentifierStr
+    schema_version: Literal["1.0"]
+    display_label: DisplayLabelStr
+
+
+class CitationReference(StrictModel):
+    uri: HttpUrl
+    label: DisplayLabelStr
+
+
+class ChatRequest(StrictModel):
+    project_id: IdentifierStr
+    session_id: IdentifierStr
+    user_id: IdentifierStr
+    message: NonEmptyStr
+
+
+class ChatResponse(StrictModel):
+    response: NonEmptyStr
+    actions: list[AgentActionReceipt] = Field(default_factory=list)
+    artifacts: list[ArtifactReference] = Field(default_factory=list)
+    citations: list[CitationReference] = Field(default_factory=list)
 
 
 class ConceptualModel(StrictModel):

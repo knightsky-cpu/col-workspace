@@ -76,6 +76,9 @@ async def test_run_turn_uses_bounded_fresh_session_and_returns_final_text(
     result = await runtime.run_turn(context)
 
     assert result.response == "Collaborative answer."
+    assert result.actions == ()
+    assert result.artifacts == ()
+    assert result.citations == ()
     created = sessions.created[0]
     assert created["app_name"] == "agent_col"
     assert created["user_id"] == "user-1"

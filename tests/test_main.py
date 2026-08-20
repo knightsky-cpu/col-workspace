@@ -6,21 +6,17 @@ from typing import Any
 import httpx
 import pytest
 import pytest_asyncio
-from google.genai import types
 
 import main
 from schemas import SynthesisBlueprint
+from supervisor_runtime import (
+    SupervisorRuntimeError,
+    SupervisorTimeoutError,
+    SupervisorTurnContext,
+    SupervisorTurnResult,
+)
 from synthesis import SynthesisEngineError, SynthesisTimeoutError
 
-
-EXPECTED_SYSTEM_INSTRUCTION = (
-    "You are a collaborative partner for users, you learn about the users "
-    "over time, provide feedback and ask questions to push development and "
-    "goals, you are a helpful assistant that helps users with complex tasks "
-    "by giving step by step instructions for complex tasks and offer "
-    "insightful and meaningful feedback when users get stuck to help them "
-    "progress."
-)
 
 VALID_BLUEPRINT_PAYLOAD = {
     "synthesized_conceptual_model": {
@@ -89,10 +85,6 @@ VALID_BLUEPRINT_PAYLOAD = {
 }
 
 
-def test_system_instruction_uses_detailed_prompt() -> None:
-    assert main.SYSTEM_INSTRUCTION == EXPECTED_SYSTEM_INSTRUCTION
-
-
 @dataclass
 class FakeMemoryEngine:
     events: list[tuple[Any, ...]]
@@ -158,35 +150,7 @@ class FakeMemoryEngine:
 
 
 @dataclass
-class FakeChat:
-    events: list[tuple[Any, ...]]
-    response_text: str | None = "Generated answer"
-    error: Exception | None = None
-    message: list[types.Part] | None = None
-
-    async def send_message(
-        self, message: list[types.Part]
-    ) -> SimpleNamespace:
-        self.message = message
-        self.events.append(("gemini",))
-        if self.error is not None:
-            raise self.error
-        return SimpleNamespace(text=self.response_text)
-
-
-@dataclass
-class FakeChats:
-    chat: FakeChat
-    create_arguments: dict[str, object] = field(default_factory=dict)
-
-    def create(self, **kwargs: object) -> FakeChat:
-        self.create_arguments = kwargs
-        return self.chat
-
-
-@dataclass
 class FakeAsyncGenAI:
-    chats: FakeChats
     closed: bool = False
 
     async def aclose(self) -> None:
@@ -234,31 +198,46 @@ class FakeSynthesis:
 
 
 @dataclass
+class FakeSupervisorRuntime:
+    events: list[tuple[Any, ...]]
+    response_text: str = "Generated answer"
+    error: Exception | None = None
+    calls: list[SupervisorTurnContext] = field(default_factory=list)
+
+    async def run_turn(
+        self,
+        context: SupervisorTurnContext,
+    ) -> SupervisorTurnResult:
+        self.calls.append(context)
+        self.events.append(("supervisor",))
+        if self.error is not None:
+            raise self.error
+        return SupervisorTurnResult(response=self.response_text)
+
+
+@dataclass
 class ServiceState:
     events: list[tuple[Any, ...]]
     database: FakeMemoryEngine
-    chat: FakeChat
-    chats: FakeChats
     genai_client: FakeGenAIClient
     synthesis: FakeSynthesis
+    supervisor: FakeSupervisorRuntime
 
 
 @pytest.fixture
 def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     events: list[tuple[Any, ...]] = []
     database = FakeMemoryEngine(events)
-    chat = FakeChat(events)
-    chats = FakeChats(chat)
-    genai_client = FakeGenAIClient(FakeAsyncGenAI(chats))
+    genai_client = FakeGenAIClient(FakeAsyncGenAI())
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
     synthesis = FakeSynthesis(events, blueprint)
+    supervisor = FakeSupervisorRuntime(events)
     state = ServiceState(
         events,
         database,
-        chat,
-        chats,
         genai_client,
         synthesis,
+        supervisor,
     )
 
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
@@ -268,6 +247,18 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         main,
         "generate_blueprint",
         synthesis,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "create_supervisor_app",
+        lambda: object(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "SupervisorRuntime",
+        SimpleNamespace(from_app=lambda app: supervisor),
         raising=False,
     )
     return state
@@ -293,6 +284,40 @@ async def test_health_check(client: httpx.AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "online"}
+
+
+@pytest.mark.asyncio
+async def test_lifespan_exposes_supervisor_runtime(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        assert main.app.state.supervisor is service_state.supervisor
+
+
+@pytest.mark.asyncio
+async def test_lifespan_closes_resources_if_supervisor_construction_fails(
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    construction_error = RuntimeError("supervisor construction failed")
+
+    def fail_construction(app: object) -> object:
+        raise construction_error
+
+    monkeypatch.setattr(
+        main,
+        "SupervisorRuntime",
+        SimpleNamespace(from_app=fail_construction),
+    )
+
+    with pytest.raises(RuntimeError) as caught:
+        async with main.lifespan(main.app):
+            pass
+
+    assert caught.value is construction_error
+    assert service_state.database.closed
+    assert service_state.genai_client.aio.closed
+    assert service_state.genai_client.closed
 
 
 @pytest.mark.asyncio
@@ -610,6 +635,7 @@ async def test_chat_uses_context_and_persists_both_messages(
     response = await client.post(
         "/api/chat",
         json={
+            "project_id": "project-1",
             "session_id": "session-1",
             "user_id": "user-1",
             "message": "New question",
@@ -617,39 +643,45 @@ async def test_chat_uses_context_and_persists_both_messages(
     )
 
     assert response.status_code == 200
-    assert response.json() == {"response": "Generated answer"}
+    assert response.json() == {
+        "response": "Generated answer",
+        "actions": [],
+        "artifacts": [],
+        "citations": [],
+    }
     assert set(service_state.events[:2]) == {
         ("profile", "user-1"),
-        ("history", "session-1", None),
+        ("history", "session-1", 20),
     }
     assert service_state.events[2:] == [
         ("save", "session-1", "user", "New question"),
-        ("gemini",),
+        ("supervisor",),
         ("save", "session-1", "model", "Generated answer"),
     ]
 
-    arguments = service_state.chats.create_arguments
-    assert arguments["model"] == "gemini-3.6-flash"
-    assert arguments["config"].system_instruction == (
-        EXPECTED_SYSTEM_INSTRUCTION
+    assert len(service_state.supervisor.calls) == 1
+    context = service_state.supervisor.calls[0]
+    assert context.project_id == "project-1"
+    assert context.session_id == "session-1"
+    assert context.user_id == "user-1"
+    assert context.message == "New question"
+    assert len(context.model_input_context) == 1
+    context_content = context.model_input_context[0]
+    assert context_content.role == "user"
+    context_text = context_content.parts[0].text
+    assert "[USER_PROFILE_DATA]" in context_text
+    assert '"experience_level": "early-career"' in context_text
+    assert "[SESSION_HISTORY_DATA]" in context_text
+    assert context_text.index("Earlier question") < context_text.index(
+        "Earlier answer"
     )
-
-    history = arguments["history"]
-    assert all(isinstance(item, types.Content) for item in history)
-    assert [item.role for item in history] == ["user", "model"]
-    assert [item.parts[0].text for item in history] == [
-        "Earlier question",
-        "Earlier answer",
-    ]
-    assert service_state.chat.message is not None
-    assert (
-        '"experience_level": "early-career"'
-        in service_state.chat.message[0].text
-    )
-    assert service_state.chat.message[-1].text == "New question"
+    assert "New question" not in context_text
 
 
-@pytest.mark.parametrize("field", ("session_id", "user_id", "message"))
+@pytest.mark.parametrize(
+    "field",
+    ("project_id", "session_id", "user_id", "message"),
+)
 @pytest.mark.asyncio
 async def test_chat_rejects_whitespace_only_fields(
     client: httpx.AsyncClient,
@@ -657,6 +689,7 @@ async def test_chat_rejects_whitespace_only_fields(
     field: str,
 ) -> None:
     payload = {
+        "project_id": "project-1",
         "session_id": "session-1",
         "user_id": "user-1",
         "message": "hello",
@@ -672,7 +705,13 @@ async def test_chat_rejects_whitespace_only_fields(
 @pytest.mark.parametrize(
     "request_arguments",
     (
-        {"json": {"session_id": "session-1", "message": "hello"}},
+        {
+            "json": {
+                "project_id": "project-1",
+                "session_id": "session-1",
+                "message": "hello",
+            }
+        },
         {
             "content": "{",
             "headers": {"content-type": "application/json"},
@@ -710,6 +749,7 @@ async def test_chat_translates_database_failures(
     response = await client.post(
         "/api/chat",
         json={
+            "project_id": "project-1",
             "session_id": "session-1",
             "user_id": "user-1",
             "message": "private message",
@@ -721,34 +761,154 @@ async def test_chat_translates_database_failures(
 
 
 @pytest.mark.asyncio
-async def test_chat_translates_gemini_failures_without_logging_payload(
+async def test_chat_translates_supervisor_failure_without_model_write(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     private_message = "private prompt text"
-    service_state.chat.error = RuntimeError(
+    service_state.supervisor.error = SupervisorRuntimeError(
         f"provider echoed {private_message}"
     )
 
     response = await client.post(
         "/api/chat",
         json={
+            "project_id": "private-project",
             "session_id": "private-session",
             "user_id": "private-user",
             "message": private_message,
         },
     )
 
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Gemini API request failed."}
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Agent_Col response failed."}
     assert private_message not in caplog.text
+    assert "private-project" not in caplog.text
     assert "private-session" not in caplog.text
     assert "private-user" not in caplog.text
+    assert (
+        "save",
+        "private-session",
+        "user",
+        private_message,
+    ) in service_state.events
     assert not any(
         event[0] == "save" and event[2] == "model"
         for event in service_state.events
     )
+
+
+@pytest.mark.asyncio
+async def test_chat_translates_supervisor_timeout_without_model_write(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.supervisor.error = SupervisorTimeoutError(
+        "turn timed out"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Hello",
+        },
+    )
+
+    assert response.status_code == 504
+    assert response.json() == {"detail": "Agent_Col response timed out."}
+    assert (
+        "save",
+        "session-1",
+        "user",
+        "Hello",
+    ) in service_state.events
+    assert not any(
+        event[0] == "save" and event[2] == "model"
+        for event in service_state.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_starts_context_reads_concurrently(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    profile_started = asyncio.Event()
+    history_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_profile(user_id: str) -> dict[str, object]:
+        assert user_id == "user-1"
+        profile_started.set()
+        await release.wait()
+        return {}
+
+    async def blocked_history(
+        session_id: str,
+        limit: int | None = None,
+    ) -> list[dict[str, object]]:
+        assert session_id == "session-1"
+        assert limit == 20
+        history_started.set()
+        await release.wait()
+        return []
+
+    service_state.database.get_user_profile = blocked_profile
+    service_state.database.get_chat_history = blocked_history
+    request_task = asyncio.create_task(
+        client.post(
+            "/api/chat",
+            json={
+                "project_id": "project-1",
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "message": "Hello",
+            },
+        )
+    )
+
+    await asyncio.wait_for(profile_started.wait(), timeout=1)
+    both_reads_started = True
+    try:
+        await asyncio.wait_for(history_started.wait(), timeout=1)
+    except TimeoutError:
+        both_reads_started = False
+    finally:
+        assert ("supervisor",) not in service_state.events
+        release.set()
+        response = await request_task
+
+    assert both_reads_started
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_invalid_stored_history_before_writes(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.history = [
+        {"role": "tool", "text": "untrusted content"}
+    ]
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Hello",
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Chat history is invalid."}
+    assert not any(event[0] == "save" for event in service_state.events)
+    assert ("supervisor",) not in service_state.events
 
 
 @pytest.mark.asyncio

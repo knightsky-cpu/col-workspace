@@ -8,6 +8,11 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from schemas import (
+    AgentActionReceipt,
+    ArtifactReference,
+    CitationReference,
+)
 from supervisor import SUPERVISOR_APP_NAME
 
 
@@ -36,6 +41,9 @@ class SupervisorTurnContext:
 @dataclass(frozen=True)
 class SupervisorTurnResult:
     response: str
+    actions: tuple[AgentActionReceipt, ...] = ()
+    artifacts: tuple[ArtifactReference, ...] = ()
+    citations: tuple[CitationReference, ...] = ()
 
 
 class SupervisorRuntime:

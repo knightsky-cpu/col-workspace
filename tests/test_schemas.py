@@ -401,3 +401,118 @@ def test_synthesis_response_rejects_blank_blueprint_id(
                 "blueprint": valid_blueprint_payload,
             }
         )
+
+
+def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
+    from schemas import ChatRequest, ChatResponse
+
+    request = ChatRequest.model_validate(
+        {
+            "project_id": " project-1 ",
+            "session_id": " session-1 ",
+            "user_id": " user-1 ",
+            "message": " Help me plan this. ",
+        }
+    )
+    response = ChatResponse(response=" Collaborative answer. ")
+
+    assert request.model_dump() == {
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "message": "Help me plan this.",
+    }
+    assert response.model_dump(mode="json") == {
+        "response": "Collaborative answer.",
+        "actions": [],
+        "artifacts": [],
+        "citations": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Hello",
+        },
+        {
+            "project_id": "bad/project",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Hello",
+        },
+        {
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "   ",
+        },
+        {
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Hello",
+            "unexpected": True,
+        },
+    ),
+)
+def test_chat_request_rejects_invalid_project_owned_payloads(
+    payload: dict[str, object],
+) -> None:
+    from schemas import ChatRequest
+
+    with pytest.raises(ValidationError):
+        ChatRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "receipt_payload",
+    (
+        {
+            "action_name": "unapproved_action",
+            "status": "completed",
+        },
+        {
+            "action_name": "synthesize_project",
+            "status": "failed",
+        },
+    ),
+)
+def test_action_receipt_rejects_unverified_public_values(
+    receipt_payload: dict[str, object],
+) -> None:
+    from schemas import AgentActionReceipt
+
+    with pytest.raises(ValidationError):
+        AgentActionReceipt.model_validate(receipt_payload)
+
+
+def test_artifact_and_citation_references_validate_public_fields() -> None:
+    from schemas import ArtifactReference, CitationReference
+
+    artifact = ArtifactReference.model_validate(
+        {
+            "artifact_type": "synthesis_blueprint",
+            "project_id": "project-1",
+            "artifact_id": "blueprint-1",
+            "schema_version": "1.0",
+            "display_label": "Agent Col blueprint",
+        }
+    )
+    citation = CitationReference.model_validate(
+        {
+            "uri": "https://example.com/reference",
+            "label": "Reference",
+        }
+    )
+
+    assert artifact.artifact_id == "blueprint-1"
+    assert str(citation.uri) == "https://example.com/reference"
+
+    with pytest.raises(ValidationError):
+        CitationReference.model_validate(
+            {"uri": "ftp://example.com/file", "label": "Reference"}
+        )
