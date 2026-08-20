@@ -269,6 +269,11 @@ class MemoryInspectionResponse(StrictModel):
     next_event_id: IdentifierStr | None
 
 
+class MemoryMutationResponse(StrictModel):
+    action: AgentActionReceipt
+    profile: CollaborationProfile
+
+
 class ConceptualModel(StrictModel):
     project_name: ProjectDisplayNameStr = Field(
         description="A concise, human-readable project name."

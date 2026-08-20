@@ -246,6 +246,31 @@ def test_memory_inspection_response_enforces_public_bounds() -> None:
         )
 
 
+def test_memory_mutation_response_is_strict_and_typed() -> None:
+    from schemas import MemoryMutationResponse
+
+    response = MemoryMutationResponse(
+        action={
+            "action_name": "revoke_memory_signal",
+            "status": "completed",
+        },
+        profile={"memory_revision": 2},
+    )
+
+    assert response.action.action_name == "revoke_memory_signal"
+    assert response.profile.memory_revision == 2
+
+    with pytest.raises(ValidationError):
+        MemoryMutationResponse(
+            action={
+                "action_name": "revoke_memory_signal",
+                "status": "completed",
+            },
+            profile={},
+            unexpected=True,
+        )
+
+
 def test_memory_models_reject_extra_fields_and_category_value_mismatch() -> None:
     from schemas import ActiveMemorySignal, MemoryProposal
 

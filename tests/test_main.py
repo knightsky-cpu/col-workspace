@@ -9,8 +9,13 @@ import pytest
 import pytest_asyncio
 
 import main
-from database import MemoryEventCursorNotFoundError
+from database import (
+    MemoryEventCursorNotFoundError,
+    MemorySignalConflictError,
+    MemorySignalNotFoundError,
+)
 from schemas import (
+    AgentActionReceipt,
     CollaborationProfile,
     MemoryEvent,
     MemoryProposal,
@@ -28,8 +33,11 @@ from synthesis_service import (
     SynthesisResult,
 )
 from trusted_memory_service import (
+    DeleteMemorySignalCommand,
     InspectMemoryCommand,
+    RevokeMemorySignalCommand,
     TrustedMemoryInspectionResult,
+    TrustedMemoryMutationResult,
 )
 
 
@@ -205,7 +213,15 @@ class FakeTrustedMemoryService:
     events: list[tuple[Any, ...]]
     result: TrustedMemoryInspectionResult
     error: Exception | None = None
+    revoke_result: TrustedMemoryMutationResult | None = None
+    delete_result: TrustedMemoryMutationResult | None = None
     calls: list[InspectMemoryCommand] = field(default_factory=list)
+    revoke_calls: list[RevokeMemorySignalCommand] = field(
+        default_factory=list
+    )
+    delete_calls: list[DeleteMemorySignalCommand] = field(
+        default_factory=list
+    )
 
     async def inspect_memory(
         self,
@@ -216,6 +232,30 @@ class FakeTrustedMemoryService:
         if self.error is not None:
             raise self.error
         return self.result
+
+    async def revoke_memory_signal(
+        self,
+        command: RevokeMemorySignalCommand,
+    ) -> TrustedMemoryMutationResult:
+        self.revoke_calls.append(command)
+        self.events.append(("memory_revoke",))
+        if self.error is not None:
+            raise self.error
+        if self.revoke_result is None:
+            raise AssertionError("Missing fake revocation result.")
+        return self.revoke_result
+
+    async def delete_memory_signal(
+        self,
+        command: DeleteMemorySignalCommand,
+    ) -> TrustedMemoryMutationResult:
+        self.delete_calls.append(command)
+        self.events.append(("memory_delete",))
+        if self.error is not None:
+            raise self.error
+        if self.delete_result is None:
+            raise AssertionError("Missing fake deletion result.")
+        return self.delete_result
 
 
 @dataclass
@@ -270,6 +310,20 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             unresolved_proposals=(pending_proposal,),
             events=(approved_event,),
             next_event_id="response_length--signal-1--approved",
+        ),
+        revoke_result=TrustedMemoryMutationResult(
+            action=AgentActionReceipt(
+                action_name="revoke_memory_signal",
+                status="completed",
+            ),
+            profile=CollaborationProfile(memory_revision=2),
+        ),
+        delete_result=TrustedMemoryMutationResult(
+            action=AgentActionReceipt(
+                action_name="delete_memory_signal",
+                status="completed",
+            ),
+            profile=CollaborationProfile(memory_revision=3),
         ),
     )
     state = ServiceState(
@@ -471,6 +525,201 @@ async def test_memory_inspection_rejects_invalid_identifiers_before_service(
 
     assert response.status_code == 422
     assert service_state.memory_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_revoke_memory_signal_returns_mutation_receipt(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/memory/signals/"
+        "response_length--signal-1/revoke"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": {
+            "action_name": "revoke_memory_signal",
+            "status": "completed",
+        },
+        "profile": {
+            "memory_schema_version": "1.0",
+            "memory_revision": 2,
+            "identity_context": {},
+            "active_preferences": {},
+        },
+    }
+    assert service_state.memory_service.revoke_calls == [
+        RevokeMemorySignalCommand(
+            user_id="user-1",
+            signal_id="response_length--signal-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_memory_signal_returns_no_content(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.delete(
+        "/api/users/user-1/memory/signals/response_length--signal-1"
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert service_state.memory_service.delete_calls == [
+        DeleteMemorySignalCommand(
+            user_id="user-1",
+            signal_id="response_length--signal-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_revoke_memory_signal_maps_unknown_signal_to_not_found(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.memory_service.error = MemorySignalNotFoundError(
+        "private signal detail"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/memory/signals/"
+        "response_length--missing/revoke"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Memory signal was not found."}
+
+
+@pytest.mark.asyncio
+async def test_revoke_memory_signal_maps_state_conflict(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.memory_service.error = MemorySignalConflictError(
+        "private conflict detail"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/memory/signals/"
+        "response_length--signal-1/revoke"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Memory signal state conflicts with this request."
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        (
+            "POST",
+            f"/api/users/{'u' * 129}/memory/signals/"
+            "response_length--signal-1/revoke",
+        ),
+        (
+            "POST",
+            "/api/users/user-1/memory/signals/"
+            f"response_length--{'s' * 129}/revoke",
+        ),
+        (
+            "DELETE",
+            f"/api/users/{'u' * 129}/memory/signals/"
+            "response_length--signal-1",
+        ),
+        (
+            "DELETE",
+            "/api/users/user-1/memory/signals/"
+            f"response_length--{'s' * 129}",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_memory_mutations_reject_invalid_identifiers_before_service(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    method: str,
+    path: str,
+) -> None:
+    response = await client.request(method, path)
+
+    assert response.status_code == 422
+    assert service_state.memory_service.revoke_calls == []
+    assert service_state.memory_service.delete_calls == []
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        (
+            "POST",
+            "/api/users/user-1/memory/signals/unknown--signal/revoke",
+        ),
+        (
+            "DELETE",
+            "/api/users/user-1/memory/signals/unknown--signal",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_memory_mutations_map_invalid_governed_category(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    method: str,
+    path: str,
+) -> None:
+    service_state.memory_service.error = ValueError(
+        "private invalid category detail"
+    )
+
+    response = await client.request(method, path)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Memory signal identifier is invalid."
+    }
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        (
+            "POST",
+            "/api/users/private-user/memory/signals/"
+            "response_length--private-signal/revoke",
+        ),
+        (
+            "DELETE",
+            "/api/users/private-user/memory/signals/"
+            "response_length--private-signal",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_memory_mutations_translate_database_failure_safely(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+    method: str,
+    path: str,
+) -> None:
+    service_state.memory_service.error = main.MemoryEngineError(
+        "private-user private-signal private-memory-value"
+    )
+
+    response = await client.request(method, path)
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Database operation failed."}
+    assert "private-user" not in caplog.text
+    assert "private-signal" not in caplog.text
+    assert "private-memory-value" not in caplog.text
 
 
 @pytest.mark.asyncio

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import NoReturn
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from google import genai
 from google.genai import types
 
@@ -15,12 +15,15 @@ from database import (
     MemoryEngine,
     MemoryEngineError,
     MemoryEventCursorNotFoundError,
+    MemorySignalConflictError,
+    MemorySignalNotFoundError,
 )
 from schemas import (
     ChatRequest,
     ChatResponse,
     IdentifierStr,
     MemoryInspectionResponse,
+    MemoryMutationResponse,
     SynthesisRequest,
     SynthesisResponse,
 )
@@ -40,7 +43,9 @@ from synthesis_service import (
     SynthesisCommand,
 )
 from trusted_memory_service import (
+    DeleteMemorySignalCommand,
     InspectMemoryCommand,
+    RevokeMemorySignalCommand,
     TrustedMemoryService,
 )
 
@@ -189,6 +194,71 @@ async def inspect_memory(
         events=list(result.events),
         next_event_id=result.next_event_id,
     )
+
+
+@app.post(
+    "/api/users/{user_id}/memory/signals/{signal_id}/revoke",
+    response_model=MemoryMutationResponse,
+)
+async def revoke_memory_signal(
+    user_id: IdentifierStr,
+    signal_id: IdentifierStr,
+    request: Request,
+) -> MemoryMutationResponse:
+    try:
+        result = await request.app.state.memory_service.revoke_memory_signal(
+            RevokeMemorySignalCommand(
+                user_id=user_id,
+                signal_id=signal_id,
+            )
+        )
+    except MemorySignalNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory signal was not found.",
+        ) from exc
+    except MemorySignalConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Memory signal state conflicts with this request.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Memory signal identifier is invalid.",
+        ) from exc
+    return MemoryMutationResponse(
+        action=result.action,
+        profile=result.profile,
+    )
+
+
+@app.delete(
+    "/api/users/{user_id}/memory/signals/{signal_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_memory_signal(
+    user_id: IdentifierStr,
+    signal_id: IdentifierStr,
+    request: Request,
+) -> Response:
+    try:
+        await request.app.state.memory_service.delete_memory_signal(
+            DeleteMemorySignalCommand(
+                user_id=user_id,
+                signal_id=signal_id,
+            )
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Memory signal identifier is invalid.",
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.post("/api/synthesize", response_model=SynthesisResponse)
