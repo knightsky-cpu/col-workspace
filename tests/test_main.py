@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -8,7 +9,13 @@ import pytest
 import pytest_asyncio
 
 import main
-from schemas import SynthesisBlueprint
+from database import MemoryEventCursorNotFoundError
+from schemas import (
+    CollaborationProfile,
+    MemoryEvent,
+    MemoryProposal,
+    SynthesisBlueprint,
+)
 from supervisor_runtime import (
     SupervisorRuntimeError,
     SupervisorTimeoutError,
@@ -19,6 +26,10 @@ from synthesis import SynthesisEngineError, SynthesisTimeoutError
 from synthesis_service import (
     SynthesisCommand,
     SynthesisResult,
+)
+from trusted_memory_service import (
+    InspectMemoryCommand,
+    TrustedMemoryInspectionResult,
 )
 
 
@@ -87,6 +98,8 @@ VALID_BLUEPRINT_PAYLOAD = {
     ],
     "diagnostic_warnings": [],
 }
+
+MEMORY_NOW = datetime(2026, 8, 20, 23, 0, tzinfo=UTC)
 
 
 @dataclass
@@ -188,12 +201,31 @@ class FakeSupervisorRuntime:
 
 
 @dataclass
+class FakeTrustedMemoryService:
+    events: list[tuple[Any, ...]]
+    result: TrustedMemoryInspectionResult
+    error: Exception | None = None
+    calls: list[InspectMemoryCommand] = field(default_factory=list)
+
+    async def inspect_memory(
+        self,
+        command: InspectMemoryCommand,
+    ) -> TrustedMemoryInspectionResult:
+        self.calls.append(command)
+        self.events.append(("memory_inspection",))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+@dataclass
 class ServiceState:
     events: list[tuple[Any, ...]]
     database: FakeMemoryEngine
     genai_client: FakeGenAIClient
     synthesis_service: FakeSynthesisApplicationService
     supervisor: FakeSupervisorRuntime
+    memory_service: FakeTrustedMemoryService
 
 
 @pytest.fixture
@@ -204,12 +236,49 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
     synthesis_service = FakeSynthesisApplicationService(events, blueprint)
     supervisor = FakeSupervisorRuntime(events)
+    pending_proposal = MemoryProposal(
+        proposal_id="example_usage--proposal-1",
+        category="example_usage",
+        proposed_value="always_practical",
+        expected_signal_id=None,
+        status="pending",
+        source_session_id="source-session",
+        source_message_id="source-message",
+        created_at=MEMORY_NOW,
+        expires_at=MEMORY_NOW + timedelta(hours=24),
+    )
+    approved_event = MemoryEvent(
+        event_id="response_length--signal-1--approved",
+        event_type="approved",
+        signal_id="response_length--signal-1",
+        category="response_length",
+        value="concise",
+        source_type="explicit_user_feedback",
+        source_session_id="source-session",
+        source_message_id="source-message",
+        confirmation_channel="memory_api",
+        confirmation_session_id=None,
+        confirmation_message_id=None,
+        related_signal_id=None,
+        memory_revision=1,
+        created_at=MEMORY_NOW,
+    )
+    memory_service = FakeTrustedMemoryService(
+        events=events,
+        result=TrustedMemoryInspectionResult(
+            profile=CollaborationProfile(memory_revision=1),
+            unresolved_proposals=(pending_proposal,),
+            events=(approved_event,),
+            next_event_id="response_length--signal-1--approved",
+        ),
+    )
     state = ServiceState(
         events,
         database,
         genai_client,
         synthesis_service,
         supervisor,
+        memory_service,
     )
 
     def create_synthesis_service(**kwargs: object) -> object:
@@ -240,6 +309,16 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         SimpleNamespace(from_app=lambda app: supervisor),
         raising=False,
     )
+    monkeypatch.setattr(
+        main,
+        "TrustedMemoryService",
+        lambda *, database: (
+            memory_service
+            if database is state.database
+            else pytest.fail("Unexpected memory service database.")
+        ),
+        raising=False,
+    )
     return state
 
 
@@ -263,6 +342,135 @@ async def test_health_check(client: httpx.AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "online"}
+
+
+@pytest.mark.asyncio
+async def test_memory_inspection_returns_typed_service_result(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/users/user-1/memory",
+        params={
+            "after_event_id": "response_length--cursor--approved",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "profile": {
+            "memory_schema_version": "1.0",
+            "memory_revision": 1,
+            "identity_context": {},
+            "active_preferences": {},
+        },
+        "unresolved_proposals": [
+            {
+                "proposal_id": "example_usage--proposal-1",
+                "category": "example_usage",
+                "proposed_value": "always_practical",
+                "expected_signal_id": None,
+                "policy_version": "1.0",
+                "status": "pending",
+                "source_session_id": "source-session",
+                "source_message_id": "source-message",
+                "created_at": "2026-08-20T23:00:00Z",
+                "expires_at": "2026-08-21T23:00:00Z",
+            }
+        ],
+        "events": [
+            {
+                "event_id": "response_length--signal-1--approved",
+                "event_type": "approved",
+                "signal_id": "response_length--signal-1",
+                "category": "response_length",
+                "value": "concise",
+                "policy_version": "1.0",
+                "source_type": "explicit_user_feedback",
+                "source_session_id": "source-session",
+                "source_message_id": "source-message",
+                "confirmation_channel": "memory_api",
+                "confirmation_session_id": None,
+                "confirmation_message_id": None,
+                "related_signal_id": None,
+                "memory_revision": 1,
+                "created_at": "2026-08-20T23:00:00Z",
+            }
+        ],
+        "next_event_id": "response_length--signal-1--approved",
+    }
+    assert service_state.memory_service.calls == [
+        InspectMemoryCommand(
+            user_id="user-1",
+            after_event_id="response_length--cursor--approved",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_memory_inspection_maps_missing_user_cursor_to_not_found(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.memory_service.error = MemoryEventCursorNotFoundError(
+        "private cursor detail"
+    )
+
+    response = await client.get(
+        "/api/users/user-1/memory",
+        params={"after_event_id": "response_length--missing--approved"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Memory event cursor was not found."
+    }
+
+
+@pytest.mark.asyncio
+async def test_memory_inspection_translates_database_failure_safely(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    private_detail = "private-user private-memory-value"
+    service_state.memory_service.error = main.MemoryEngineError(
+        private_detail
+    )
+
+    response = await client.get("/api/users/private-user/memory")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Database operation failed."}
+    assert "private-user" not in caplog.text
+    assert "private-memory-value" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("path", "params"),
+    (
+        (f"/api/users/{'u' * 129}/memory", None),
+        (
+            "/api/users/user-1/memory",
+            {"after_event_id": "invalid/cursor"},
+        ),
+        (
+            "/api/users/user-1/memory",
+            {"after_event_id": "   "},
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_memory_inspection_rejects_invalid_identifiers_before_service(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    path: str,
+    params: dict[str, str] | None,
+) -> None:
+    response = await client.get(path, params=params)
+
+    assert response.status_code == 422
+    assert service_state.memory_service.calls == []
 
 
 @pytest.mark.asyncio

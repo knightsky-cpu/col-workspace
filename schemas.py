@@ -262,6 +262,13 @@ class AdaptationReceipt(StrictModel):
         return _normalize_memory_model_value(data, "value")
 
 
+class MemoryInspectionResponse(StrictModel):
+    profile: CollaborationProfile
+    unresolved_proposals: list[MemoryProposal] = Field(max_length=10)
+    events: list[MemoryEvent] = Field(max_length=50)
+    next_event_id: IdentifierStr | None
+
+
 class ConceptualModel(StrictModel):
     project_name: ProjectDisplayNameStr = Field(
         description="A concise, human-readable project name."

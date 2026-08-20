@@ -194,6 +194,58 @@ def test_adaptation_receipt_accepts_only_provided_to_model_status() -> None:
     assert receipt.status == "provided_to_model"
 
 
+def test_memory_inspection_response_enforces_public_bounds() -> None:
+    from schemas import MemoryInspectionResponse, MemoryProposal
+
+    proposal = MemoryProposal(
+        proposal_id="response_length--proposal-1",
+        category="response_length",
+        proposed_value="concise",
+        expected_signal_id=None,
+        status="pending",
+        source_session_id="source-session",
+        source_message_id="source-message",
+        created_at=NOW,
+        expires_at=NOW + timedelta(hours=24),
+    )
+    event = memory_event_payload()
+
+    response = MemoryInspectionResponse(
+        profile={},
+        unresolved_proposals=[proposal],
+        events=[event],
+        next_event_id="signal-1--approved",
+    )
+
+    assert response.profile.memory_revision == 0
+    assert response.unresolved_proposals == [proposal]
+    assert response.events[0].event_id == "signal-1--approved"
+    assert response.next_event_id == "signal-1--approved"
+
+    with pytest.raises(ValidationError):
+        MemoryInspectionResponse(
+            profile={},
+            unresolved_proposals=[proposal] * 11,
+            events=[],
+            next_event_id=None,
+        )
+    with pytest.raises(ValidationError):
+        MemoryInspectionResponse(
+            profile={},
+            unresolved_proposals=[],
+            events=[event] * 51,
+            next_event_id=None,
+        )
+    with pytest.raises(ValidationError):
+        MemoryInspectionResponse(
+            profile={},
+            unresolved_proposals=[],
+            events=[],
+            next_event_id=None,
+            unexpected=True,
+        )
+
+
 def test_memory_models_reject_extra_fields_and_category_value_mismatch() -> None:
     from schemas import ActiveMemorySignal, MemoryProposal
 

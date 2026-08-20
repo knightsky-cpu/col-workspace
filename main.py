@@ -11,10 +11,16 @@ from fastapi import FastAPI, HTTPException, Request, status
 from google import genai
 from google.genai import types
 
-from database import MemoryEngine, MemoryEngineError
+from database import (
+    MemoryEngine,
+    MemoryEngineError,
+    MemoryEventCursorNotFoundError,
+)
 from schemas import (
     ChatRequest,
     ChatResponse,
+    IdentifierStr,
+    MemoryInspectionResponse,
     SynthesisRequest,
     SynthesisResponse,
 )
@@ -32,6 +38,10 @@ from synthesis import (
 from synthesis_service import (
     SynthesisApplicationService,
     SynthesisCommand,
+)
+from trusted_memory_service import (
+    InspectMemoryCommand,
+    TrustedMemoryService,
 )
 
 
@@ -111,6 +121,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             client=client,
             database=database,
         )
+        memory_service = TrustedMemoryService(database=database)
         supervisor = SupervisorRuntime.from_app(create_supervisor_app())
     except Exception:
         try:
@@ -126,6 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.genai_client = client
     app.state.db = database
     app.state.synthesis_service = synthesis_service
+    app.state.memory_service = memory_service
     app.state.supervisor = supervisor
 
     try:
@@ -146,6 +158,37 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 async def health_check() -> dict[str, str]:
     return {"status": "online"}
+
+
+@app.get(
+    "/api/users/{user_id}/memory",
+    response_model=MemoryInspectionResponse,
+)
+async def inspect_memory(
+    user_id: IdentifierStr,
+    request: Request,
+    after_event_id: IdentifierStr | None = None,
+) -> MemoryInspectionResponse:
+    try:
+        result = await request.app.state.memory_service.inspect_memory(
+            InspectMemoryCommand(
+                user_id=user_id,
+                after_event_id=after_event_id,
+            )
+        )
+    except MemoryEventCursorNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory event cursor was not found.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    return MemoryInspectionResponse(
+        profile=result.profile,
+        unresolved_proposals=list(result.unresolved_proposals),
+        events=list(result.events),
+        next_event_id=result.next_event_id,
+    )
 
 
 @app.post("/api/synthesize", response_model=SynthesisResponse)
