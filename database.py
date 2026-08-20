@@ -78,6 +78,14 @@ class MemoryDeletionResult:
     artifacts_deleted: bool
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryRejectionResult:
+    """Return governed state after rejecting a pending proposal."""
+
+    profile: CollaborationProfile
+    proposal: MemoryProposal
+
+
 class MemoryEngine:
     """Provide asynchronous persistence for chat messages and user profiles."""
 
@@ -507,6 +515,99 @@ class MemoryEngine:
             return await run_transaction(transaction)
         except (GoogleAPIError, ValueError) as exc:
             self._raise_firestore_error("approve_memory_proposal", exc)
+
+    async def reject_memory_proposal(
+        self,
+        user_id: str,
+        category: MemoryCategory,
+        proposal_id: str,
+        *,
+        observed_at: datetime,
+    ) -> MemoryRejectionResult:
+        """Atomically reject one pending governed-memory proposal."""
+        self._validate_memory_signal_locator(
+            user_id,
+            category,
+            proposal_id,
+        )
+        if (
+            not isinstance(observed_at, datetime)
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+        ):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+
+        user_ref = self._client.collection("users").document(user_id)
+        proposal_ref = user_ref.collection("memory_proposals").document(
+            category
+        )
+        transaction = self._client.transaction()
+
+        async def reject_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryRejectionResult:
+            proposal_snapshot = await proposal_ref.get(
+                transaction=transaction
+            )
+            profile_snapshot = await user_ref.get(transaction=transaction)
+            if not proposal_snapshot.exists:
+                raise MemoryProposalNotFoundError(
+                    "Memory proposal does not exist."
+                )
+            proposal = self._proposal_from_document(
+                proposal_snapshot.to_dict()
+            )
+            if (
+                proposal.proposal_id != proposal_id
+                or proposal.category != category
+            ):
+                raise MemoryProposalConflictError(
+                    "Memory proposal no longer occupies this category."
+                )
+            profile = (
+                self._collaboration_profile_from_document(
+                    profile_snapshot.to_dict()
+                )
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+            if proposal.status == "rejected":
+                return MemoryRejectionResult(
+                    profile=profile,
+                    proposal=proposal,
+                )
+            if proposal.status != "pending":
+                raise MemoryProposalConflictError(
+                    "Memory proposal has already been resolved."
+                )
+            if proposal.expires_at <= observed_at:
+                raise MemoryProposalExpiredError(
+                    "Memory proposal has expired."
+                )
+
+            rejected_proposal = proposal.model_copy(
+                update={"status": "rejected"}
+            )
+            transaction.set(
+                proposal_ref,
+                {
+                    "status": "rejected",
+                    "resolved_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return MemoryRejectionResult(
+                profile=profile,
+                proposal=rejected_proposal,
+            )
+
+        run_transaction = firestore.async_transactional(
+            reject_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("reject_memory_proposal", exc)
 
     async def revoke_memory_signal(
         self,
