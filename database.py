@@ -1,13 +1,29 @@
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import NoReturn
 
 from google.api_core.exceptions import GoogleAPIError
 from google.cloud import firestore
-from google.cloud.firestore import AsyncClient, AsyncTransaction
+from google.cloud.firestore import (
+    AsyncClient,
+    AsyncCollectionReference,
+    AsyncDocumentReference,
+    AsyncTransaction,
+)
 
-from schemas import MemoryProposal
+from memory_policy import (
+    MEMORY_CATEGORY_ORDER,
+    ConfirmationChannel,
+    MemoryCategory,
+)
+from schemas import (
+    ActiveMemorySignal,
+    CollaborationProfile,
+    MemoryEvent,
+    MemoryProposal,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -19,6 +35,23 @@ class MemoryEngineError(RuntimeError):
 
 class MemoryProposalConflictError(RuntimeError):
     """Raised when an unexpired proposal owns a category slot."""
+
+
+class MemoryProposalNotFoundError(RuntimeError):
+    """Raised when a requested proposal slot does not exist."""
+
+
+class MemoryProposalExpiredError(RuntimeError):
+    """Raised when a requested pending proposal has expired."""
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryApprovalResult:
+    """Return the governed state created by a memory approval."""
+
+    profile: CollaborationProfile
+    event: MemoryEvent
+    superseded_event: MemoryEvent | None = None
 
 
 class MemoryEngine:
@@ -176,6 +209,24 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("get_user_profile", exc)
 
+    async def get_collaboration_profile(
+        self,
+        user_id: str,
+    ) -> CollaborationProfile:
+        """Load only the governed active-memory projection."""
+        self._validate_memory_user_id(user_id)
+
+        try:
+            user_ref = self._client.collection("users").document(user_id)
+            snapshot = await user_ref.get()
+            if not snapshot.exists:
+                return CollaborationProfile()
+            return self._collaboration_profile_from_document(
+                snapshot.to_dict()
+            )
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("get_collaboration_profile", exc)
+
     async def create_memory_proposal(
         self,
         user_id: str,
@@ -227,6 +278,212 @@ class MemoryEngine:
         except (GoogleAPIError, ValueError) as exc:
             self._raise_firestore_error("create_memory_proposal", exc)
 
+    async def approve_memory_proposal(
+        self,
+        user_id: str,
+        category: MemoryCategory,
+        proposal_id: str,
+        *,
+        confirmation_channel: ConfirmationChannel,
+        confirmation_session_id: str | None,
+        confirmation_message_id: str | None,
+        observed_at: datetime,
+    ) -> MemoryApprovalResult:
+        """Atomically approve one governed memory proposal."""
+        self._validate_memory_approval_inputs(
+            user_id,
+            category,
+            proposal_id,
+            confirmation_channel,
+            confirmation_session_id,
+            confirmation_message_id,
+            observed_at,
+        )
+        user_ref = self._client.collection("users").document(user_id)
+        proposal_ref = user_ref.collection("memory_proposals").document(
+            category
+        )
+        events_ref = user_ref.collection("memory_events")
+        approved_event_id = f"{proposal_id}--approved"
+        corrected_event_id = f"{proposal_id}--corrected"
+        approved_event_ref = events_ref.document(approved_event_id)
+        corrected_event_ref = events_ref.document(corrected_event_id)
+        transaction = self._client.transaction()
+
+        async def approve_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryApprovalResult:
+            proposal_snapshot = await proposal_ref.get(transaction=transaction)
+            profile_snapshot = await user_ref.get(transaction=transaction)
+            approved_snapshot = await approved_event_ref.get(
+                transaction=transaction
+            )
+            corrected_snapshot = await corrected_event_ref.get(
+                transaction=transaction
+            )
+
+            if not proposal_snapshot.exists:
+                raise MemoryProposalNotFoundError(
+                    "Memory proposal does not exist."
+                )
+            proposal = self._proposal_from_document(
+                proposal_snapshot.to_dict()
+            )
+            if (
+                proposal.proposal_id != proposal_id
+                or proposal.category != category
+            ):
+                raise MemoryProposalConflictError(
+                    "Memory proposal no longer occupies this category."
+                )
+            profile = (
+                self._collaboration_profile_from_document(
+                    profile_snapshot.to_dict()
+                )
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+            if approved_snapshot.exists and corrected_snapshot.exists:
+                raise ValueError(
+                    "Stored memory approval has conflicting events."
+                )
+            if approved_snapshot.exists:
+                return self._existing_initial_approval_result(
+                    proposal,
+                    profile,
+                    approved_event_id,
+                    approved_snapshot.to_dict(),
+                    confirmation_channel,
+                    confirmation_session_id,
+                    confirmation_message_id,
+                )
+            if corrected_snapshot.exists:
+                corrected_event = self._memory_event_from_document(
+                    corrected_event_id,
+                    corrected_snapshot.to_dict(),
+                )
+                prior_signal_id = corrected_event.related_signal_id
+                if prior_signal_id is None:
+                    raise MemoryProposalConflictError(
+                        "Stored correction has no prior signal."
+                    )
+                superseded_event_id = f"{prior_signal_id}--superseded"
+                if len(superseded_event_id) > 128:
+                    raise ValueError("Derived memory event ID is too long.")
+                superseded_event_ref = events_ref.document(
+                    superseded_event_id
+                )
+                superseded_snapshot = await superseded_event_ref.get(
+                    transaction=transaction
+                )
+                if not superseded_snapshot.exists:
+                    raise ValueError(
+                        "Stored correction has no superseded event."
+                    )
+                superseded_event = self._memory_event_from_document(
+                    superseded_event_id,
+                    superseded_snapshot.to_dict(),
+                )
+                return self._existing_correction_result(
+                    proposal,
+                    profile,
+                    corrected_event,
+                    superseded_event,
+                    confirmation_channel,
+                    confirmation_session_id,
+                    confirmation_message_id,
+                )
+            if proposal.status == "approved":
+                raise ValueError(
+                    "Approved memory proposal has no lifecycle event."
+                )
+            if proposal.status != "pending":
+                raise MemoryProposalConflictError(
+                    "Memory proposal has already been resolved."
+                )
+            if proposal.expires_at <= observed_at:
+                raise MemoryProposalExpiredError("Memory proposal has expired.")
+
+            active_signal = self._active_signal_for_category(profile, category)
+            if active_signal is not None:
+                if proposal.expected_signal_id != active_signal.signal_id:
+                    raise MemoryProposalConflictError(
+                        "Memory proposal does not match the active signal."
+                    )
+                return await self._approve_correction_in_transaction(
+                    transaction=transaction,
+                    events_ref=events_ref,
+                    corrected_event_ref=corrected_event_ref,
+                    user_ref=user_ref,
+                    proposal_ref=proposal_ref,
+                    proposal=proposal,
+                    profile=profile,
+                    active_signal=active_signal,
+                    corrected_event_id=corrected_event_id,
+                    confirmation_channel=confirmation_channel,
+                    confirmation_session_id=confirmation_session_id,
+                    confirmation_message_id=confirmation_message_id,
+                    observed_at=observed_at,
+                )
+
+            if proposal.expected_signal_id is not None:
+                raise MemoryProposalConflictError(
+                    "Memory proposal does not match the active signal."
+                )
+
+            revision = profile.memory_revision + 1
+            event = self._proposal_memory_event(
+                proposal,
+                event_id=approved_event_id,
+                event_type="approved",
+                confirmation_channel=confirmation_channel,
+                confirmation_session_id=confirmation_session_id,
+                confirmation_message_id=confirmation_message_id,
+                related_signal_id=None,
+                memory_revision=revision,
+                created_at=observed_at,
+            )
+            signal = self._active_signal_from_event(
+                proposal,
+                event,
+                observed_at,
+            )
+            updated_profile = self._profile_with_signal(
+                profile,
+                signal,
+                revision,
+            )
+
+            transaction.set(
+                approved_event_ref,
+                self._memory_event_document(event),
+            )
+            transaction.set(
+                user_ref,
+                self._collaboration_profile_document(updated_profile),
+                merge=True,
+            )
+            transaction.set(
+                proposal_ref,
+                {
+                    "status": "approved",
+                    "resolved_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return MemoryApprovalResult(
+                profile=updated_profile,
+                event=event,
+            )
+
+        run_transaction = firestore.async_transactional(
+            approve_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("approve_memory_proposal", exc)
+
     def close(self) -> None:
         """Close the Firestore client's transport."""
         self._client.close()
@@ -239,16 +496,372 @@ class MemoryEngine:
         return document
 
     @staticmethod
+    def _active_signal_for_category(
+        profile: CollaborationProfile,
+        category: MemoryCategory,
+    ) -> ActiveMemorySignal | None:
+        if category in profile.identity_context:
+            return profile.identity_context[category]
+        if category in profile.active_preferences:
+            return profile.active_preferences[category]
+        return None
+
+    @classmethod
+    def _existing_initial_approval_result(
+        cls,
+        proposal: MemoryProposal,
+        profile: CollaborationProfile,
+        event_id: str,
+        event_document: object,
+        confirmation_channel: ConfirmationChannel,
+        confirmation_session_id: str | None,
+        confirmation_message_id: str | None,
+    ) -> MemoryApprovalResult:
+        event = cls._memory_event_from_document(event_id, event_document)
+        active_signal = cls._active_signal_for_category(
+            profile,
+            proposal.category,
+        )
+        expected_event = MemoryEvent.model_validate(
+            {
+                "event_id": event_id,
+                "event_type": "approved",
+                "signal_id": proposal.proposal_id,
+                "category": proposal.category,
+                "value": proposal.proposed_value,
+                "policy_version": proposal.policy_version,
+                "source_type": "explicit_user_feedback",
+                "source_session_id": proposal.source_session_id,
+                "source_message_id": proposal.source_message_id,
+                "confirmation_channel": confirmation_channel,
+                "confirmation_session_id": confirmation_session_id,
+                "confirmation_message_id": confirmation_message_id,
+                "related_signal_id": None,
+                "memory_revision": profile.memory_revision,
+                "created_at": event.created_at,
+            }
+        )
+        valid_signal = (
+            active_signal is not None
+            and active_signal.signal_id == proposal.proposal_id
+            and active_signal.category == proposal.category
+            and active_signal.value == proposal.proposed_value
+            and active_signal.policy_version == proposal.policy_version
+            and active_signal.source_event_id == event_id
+        )
+        if (
+            proposal.status != "approved"
+            or event != expected_event
+            or not valid_signal
+        ):
+            raise MemoryProposalConflictError(
+                "Stored memory approval differs from this decision."
+            )
+        return MemoryApprovalResult(profile=profile, event=event)
+
+    async def _approve_correction_in_transaction(
+        self,
+        *,
+        transaction: AsyncTransaction,
+        events_ref: AsyncCollectionReference,
+        corrected_event_ref: AsyncDocumentReference,
+        user_ref: AsyncDocumentReference,
+        proposal_ref: AsyncDocumentReference,
+        proposal: MemoryProposal,
+        profile: CollaborationProfile,
+        active_signal: ActiveMemorySignal,
+        corrected_event_id: str,
+        confirmation_channel: ConfirmationChannel,
+        confirmation_session_id: str | None,
+        confirmation_message_id: str | None,
+        observed_at: datetime,
+    ) -> MemoryApprovalResult:
+        source_event_ref = events_ref.document(active_signal.source_event_id)
+        superseded_event_id = f"{active_signal.signal_id}--superseded"
+        if len(superseded_event_id) > 128:
+            raise ValueError("Derived memory event ID is too long.")
+        superseded_event_ref = events_ref.document(superseded_event_id)
+        source_snapshot = await source_event_ref.get(transaction=transaction)
+        superseded_snapshot = await superseded_event_ref.get(
+            transaction=transaction
+        )
+        if not source_snapshot.exists:
+            raise ValueError("Active memory source event does not exist.")
+        source_event = self._memory_event_from_document(
+            active_signal.source_event_id,
+            source_snapshot.to_dict(),
+        )
+        self._validate_active_signal_source(active_signal, source_event)
+        if superseded_snapshot.exists:
+            raise MemoryProposalConflictError(
+                "A differing superseded event already exists."
+            )
+
+        revision = profile.memory_revision + 1
+        corrected_event = self._proposal_memory_event(
+            proposal,
+            event_id=corrected_event_id,
+            event_type="corrected",
+            confirmation_channel=confirmation_channel,
+            confirmation_session_id=confirmation_session_id,
+            confirmation_message_id=confirmation_message_id,
+            related_signal_id=active_signal.signal_id,
+            memory_revision=revision,
+            created_at=observed_at,
+        )
+        superseded_event = MemoryEvent.model_validate(
+            {
+                "event_id": superseded_event_id,
+                "event_type": "superseded",
+                "signal_id": active_signal.signal_id,
+                "category": active_signal.category,
+                "value": active_signal.value,
+                "policy_version": active_signal.policy_version,
+                "source_type": source_event.source_type,
+                "source_session_id": source_event.source_session_id,
+                "source_message_id": source_event.source_message_id,
+                "confirmation_channel": confirmation_channel,
+                "confirmation_session_id": confirmation_session_id,
+                "confirmation_message_id": confirmation_message_id,
+                "related_signal_id": proposal.proposal_id,
+                "memory_revision": revision,
+                "created_at": observed_at,
+            }
+        )
+        signal = self._active_signal_from_event(
+            proposal,
+            corrected_event,
+            observed_at,
+        )
+        updated_profile = self._profile_with_signal(
+            profile,
+            signal,
+            revision,
+        )
+        transaction.set(
+            corrected_event_ref,
+            self._memory_event_document(corrected_event),
+        )
+        transaction.set(
+            superseded_event_ref,
+            self._memory_event_document(superseded_event),
+        )
+        transaction.set(
+            user_ref,
+            self._collaboration_profile_document(updated_profile),
+            merge=True,
+        )
+        transaction.set(
+            proposal_ref,
+            {
+                "status": "approved",
+                "resolved_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        return MemoryApprovalResult(
+            profile=updated_profile,
+            event=corrected_event,
+            superseded_event=superseded_event,
+        )
+
+    @classmethod
+    def _existing_correction_result(
+        cls,
+        proposal: MemoryProposal,
+        profile: CollaborationProfile,
+        corrected_event: MemoryEvent,
+        superseded_event: MemoryEvent,
+        confirmation_channel: ConfirmationChannel,
+        confirmation_session_id: str | None,
+        confirmation_message_id: str | None,
+    ) -> MemoryApprovalResult:
+        prior_signal_id = corrected_event.related_signal_id
+        active_signal = cls._active_signal_for_category(
+            profile,
+            proposal.category,
+        )
+        expected_corrected = cls._proposal_memory_event(
+            proposal,
+            event_id=corrected_event.event_id,
+            event_type="corrected",
+            confirmation_channel=confirmation_channel,
+            confirmation_session_id=confirmation_session_id,
+            confirmation_message_id=confirmation_message_id,
+            related_signal_id=prior_signal_id,
+            memory_revision=profile.memory_revision,
+            created_at=corrected_event.created_at,
+        )
+        valid_active_signal = (
+            active_signal is not None
+            and active_signal.signal_id == proposal.proposal_id
+            and active_signal.category == proposal.category
+            and active_signal.value == proposal.proposed_value
+            and active_signal.policy_version == proposal.policy_version
+            and active_signal.source_event_id == corrected_event.event_id
+        )
+        valid_superseded = (
+            prior_signal_id is not None
+            and superseded_event.event_id
+            == f"{prior_signal_id}--superseded"
+            and superseded_event.event_type == "superseded"
+            and superseded_event.signal_id == prior_signal_id
+            and superseded_event.category == proposal.category
+            and superseded_event.policy_version == proposal.policy_version
+            and superseded_event.confirmation_channel == confirmation_channel
+            and superseded_event.confirmation_session_id
+            == confirmation_session_id
+            and superseded_event.confirmation_message_id
+            == confirmation_message_id
+            and superseded_event.related_signal_id == proposal.proposal_id
+            and superseded_event.memory_revision == profile.memory_revision
+        )
+        if (
+            proposal.status != "approved"
+            or proposal.expected_signal_id != prior_signal_id
+            or corrected_event != expected_corrected
+            or not valid_active_signal
+            or not valid_superseded
+        ):
+            raise MemoryProposalConflictError(
+                "Stored memory correction differs from this decision."
+            )
+        return MemoryApprovalResult(
+            profile=profile,
+            event=corrected_event,
+            superseded_event=superseded_event,
+        )
+
+    @staticmethod
+    def _proposal_memory_event(
+        proposal: MemoryProposal,
+        *,
+        event_id: str,
+        event_type: str,
+        confirmation_channel: ConfirmationChannel,
+        confirmation_session_id: str | None,
+        confirmation_message_id: str | None,
+        related_signal_id: str | None,
+        memory_revision: int,
+        created_at: datetime,
+    ) -> MemoryEvent:
+        return MemoryEvent.model_validate(
+            {
+                "event_id": event_id,
+                "event_type": event_type,
+                "signal_id": proposal.proposal_id,
+                "category": proposal.category,
+                "value": proposal.proposed_value,
+                "policy_version": proposal.policy_version,
+                "source_type": "explicit_user_feedback",
+                "source_session_id": proposal.source_session_id,
+                "source_message_id": proposal.source_message_id,
+                "confirmation_channel": confirmation_channel,
+                "confirmation_session_id": confirmation_session_id,
+                "confirmation_message_id": confirmation_message_id,
+                "related_signal_id": related_signal_id,
+                "memory_revision": memory_revision,
+                "created_at": created_at,
+            }
+        )
+
+    @staticmethod
+    def _active_signal_from_event(
+        proposal: MemoryProposal,
+        event: MemoryEvent,
+        approved_at: datetime,
+    ) -> ActiveMemorySignal:
+        return ActiveMemorySignal.model_validate(
+            {
+                "signal_id": proposal.proposal_id,
+                "category": proposal.category,
+                "value": proposal.proposed_value,
+                "policy_version": proposal.policy_version,
+                "source_event_id": event.event_id,
+                "approved_at": approved_at,
+            }
+        )
+
+    @staticmethod
+    def _validate_active_signal_source(
+        signal: ActiveMemorySignal,
+        event: MemoryEvent,
+    ) -> None:
+        valid = (
+            event.event_id == signal.source_event_id
+            and event.signal_id == signal.signal_id
+            and event.category == signal.category
+            and event.value == signal.value
+            and event.policy_version == signal.policy_version
+            and event.event_type in ("approved", "corrected")
+        )
+        if not valid:
+            raise ValueError(
+                "Active memory signal does not match its source event."
+            )
+
+    @staticmethod
+    def _profile_with_signal(
+        profile: CollaborationProfile,
+        signal: ActiveMemorySignal,
+        revision: int,
+    ) -> CollaborationProfile:
+        identity_context = dict(profile.identity_context)
+        active_preferences = dict(profile.active_preferences)
+        if signal.category in ("preferred_name", "broad_roles"):
+            identity_context[signal.category] = signal
+        else:
+            active_preferences[signal.category] = signal
+        return CollaborationProfile(
+            memory_schema_version="1.0",
+            memory_revision=revision,
+            identity_context=identity_context,
+            active_preferences=active_preferences,
+        )
+
+    @staticmethod
+    def _memory_event_document(event: MemoryEvent) -> dict[str, object]:
+        document = event.model_dump(mode="python")
+        document.pop("event_id")
+        document["created_at"] = firestore.SERVER_TIMESTAMP
+        return document
+
+    @staticmethod
+    def _memory_event_from_document(
+        event_id: str,
+        document: object,
+    ) -> MemoryEvent:
+        if not isinstance(document, dict):
+            raise ValueError("Stored memory event is invalid.")
+        event_fields = {
+            field_name: document.get(field_name)
+            for field_name in MemoryEvent.model_fields
+            if field_name != "event_id"
+        }
+        event_fields["event_id"] = event_id
+        return MemoryEvent.model_validate(event_fields)
+
+    @staticmethod
+    def _collaboration_profile_document(
+        profile: CollaborationProfile,
+    ) -> dict[str, object]:
+        document = profile.model_dump(mode="python")
+        for signals in (
+            document["identity_context"],
+            document["active_preferences"],
+        ):
+            for signal in signals.values():
+                signal["approved_at"] = firestore.SERVER_TIMESTAMP
+        document["memory_updated_at"] = firestore.SERVER_TIMESTAMP
+        return document
+
+    @staticmethod
     def _validate_memory_proposal_creation(
         user_id: object,
         proposal: object,
         observed_at: object,
     ) -> None:
-        if not isinstance(user_id, str) or re.fullmatch(
-            r"[A-Za-z0-9_-]{1,128}",
-            user_id,
-        ) is None:
-            raise ValueError("user_id must be a valid identifier.")
+        MemoryEngine._validate_memory_user_id(user_id)
         if not isinstance(proposal, MemoryProposal):
             raise ValueError("proposal must be a MemoryProposal.")
         if proposal.status != "pending":
@@ -283,6 +896,54 @@ class MemoryEngine:
             raise ValueError("proposal lifetime must be exactly 24 hours.")
 
     @staticmethod
+    def _validate_memory_approval_inputs(
+        user_id: object,
+        category: object,
+        proposal_id: object,
+        confirmation_channel: object,
+        confirmation_session_id: object,
+        confirmation_message_id: object,
+        observed_at: object,
+    ) -> None:
+        MemoryEngine._validate_memory_user_id(user_id)
+        if category not in MEMORY_CATEGORY_ORDER:
+            raise ValueError("category must be a governed memory category.")
+        if not isinstance(proposal_id, str) or re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}", proposal_id
+        ) is None:
+            raise ValueError("proposal_id must be a valid identifier.")
+        if not proposal_id.startswith(f"{category}--"):
+            raise ValueError("proposal_id must match its category.")
+        for suffix in ("--approved", "--corrected", "--superseded"):
+            if len(f"{proposal_id}{suffix}") > 128:
+                raise ValueError("Derived memory event ID is too long.")
+        if confirmation_channel == "chat_decision":
+            MemoryEngine._validate_memory_identifier(
+                confirmation_session_id,
+                "confirmation_session_id",
+            )
+            MemoryEngine._validate_memory_identifier(
+                confirmation_message_id,
+                "confirmation_message_id",
+            )
+        elif confirmation_channel == "memory_api":
+            if (
+                confirmation_session_id is not None
+                or confirmation_message_id is not None
+            ):
+                raise ValueError(
+                    "Memory API confirmation IDs must be omitted."
+                )
+        else:
+            raise ValueError("confirmation_channel is invalid.")
+        if (
+            not isinstance(observed_at, datetime)
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+        ):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+
+    @staticmethod
     def _proposal_from_document(
         document: object,
     ) -> MemoryProposal:
@@ -293,6 +954,19 @@ class MemoryEngine:
             for field_name in MemoryProposal.model_fields
         }
         return MemoryProposal.model_validate(proposal_fields)
+
+    @staticmethod
+    def _collaboration_profile_from_document(
+        document: object,
+    ) -> CollaborationProfile:
+        if not isinstance(document, dict):
+            raise ValueError("Stored collaboration profile is invalid.")
+        profile_fields = {
+            field_name: document[field_name]
+            for field_name in CollaborationProfile.model_fields
+            if field_name in document
+        }
+        return CollaborationProfile.model_validate(profile_fields)
 
     @staticmethod
     def _proposals_are_identical(
@@ -313,6 +987,22 @@ class MemoryEngine:
             getattr(stored, field_name) == getattr(candidate, field_name)
             for field_name in stable_fields
         )
+
+    @staticmethod
+    def _validate_memory_user_id(user_id: object) -> None:
+        if not isinstance(user_id, str) or re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}",
+            user_id,
+        ) is None:
+            raise ValueError("user_id must be a valid identifier.")
+
+    @staticmethod
+    def _validate_memory_identifier(value: object, field_name: str) -> None:
+        if not isinstance(value, str) or re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}",
+            value,
+        ) is None:
+            raise ValueError(f"{field_name} must be a valid identifier.")
 
     @staticmethod
     def _validate_string(value: object, field_name: str) -> None:
