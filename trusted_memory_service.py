@@ -11,7 +11,12 @@ from memory_policy import (
     MemoryCategory,
     MemoryDecision,
 )
-from schemas import AgentActionReceipt, CollaborationProfile
+from schemas import (
+    AgentActionReceipt,
+    CollaborationProfile,
+    MemoryEvent,
+    MemoryProposal,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,11 +48,29 @@ class DeleteMemorySignalCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class InspectMemoryCommand:
+    """Describe one bounded governed-memory inspection request."""
+
+    user_id: str
+    after_event_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TrustedMemoryMutationResult:
     """Return a completed deterministic memory action and profile."""
 
     action: AgentActionReceipt
     profile: CollaborationProfile
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedMemoryInspectionResult:
+    """Return a bounded governed-memory inspection page."""
+
+    profile: CollaborationProfile
+    unresolved_proposals: tuple[MemoryProposal, ...]
+    events: tuple[MemoryEvent, ...]
+    next_event_id: str | None
 
 
 def _utc_now() -> datetime:
@@ -65,6 +88,23 @@ class TrustedMemoryService:
     ) -> None:
         self._database = database
         self._clock = clock
+
+    async def inspect_memory(
+        self,
+        command: InspectMemoryCommand,
+    ) -> TrustedMemoryInspectionResult:
+        """Load one bounded page of governed collaboration memory."""
+        result = await self._database.get_memory_inspection(
+            command.user_id,
+            observed_at=self._clock(),
+            after_event_id=command.after_event_id,
+        )
+        return TrustedMemoryInspectionResult(
+            profile=result.profile,
+            unresolved_proposals=result.unresolved_proposals,
+            events=result.events,
+            next_event_id=result.next_event_id,
+        )
 
     async def decide_memory_proposal(
         self,

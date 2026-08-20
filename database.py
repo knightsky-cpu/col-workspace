@@ -12,6 +12,7 @@ from google.cloud.firestore import (
     AsyncDocumentReference,
     AsyncTransaction,
 )
+from google.cloud.firestore_v1.field_path import FieldPath
 
 from memory_policy import (
     MEMORY_CATEGORY_ORDER,
@@ -53,6 +54,10 @@ class MemorySignalConflictError(RuntimeError):
     """Raised when stored signal state conflicts with a memory mutation."""
 
 
+class MemoryEventCursorNotFoundError(RuntimeError):
+    """Raised when a memory-event pagination cursor cannot be resolved."""
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryApprovalResult:
     """Return the governed state created by a memory approval."""
@@ -84,6 +89,16 @@ class MemoryRejectionResult:
 
     profile: CollaborationProfile
     proposal: MemoryProposal
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryInspectionPage:
+    """Return one bounded page of governed collaboration memory."""
+
+    profile: CollaborationProfile
+    unresolved_proposals: tuple[MemoryProposal, ...]
+    events: tuple[MemoryEvent, ...]
+    next_event_id: str | None
 
 
 class MemoryEngine:
@@ -258,6 +273,104 @@ class MemoryEngine:
             )
         except (GoogleAPIError, ValueError) as exc:
             self._raise_firestore_error("get_collaboration_profile", exc)
+
+    async def get_memory_inspection(
+        self,
+        user_id: str,
+        *,
+        observed_at: datetime,
+        after_event_id: str | None = None,
+    ) -> MemoryInspectionPage:
+        """Load bounded governed memory without exposing source messages."""
+        self._validate_memory_user_id(user_id)
+        if (
+            not isinstance(observed_at, datetime)
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+        ):
+            raise ValueError(
+                "observed_at must be a timezone-aware datetime."
+            )
+        if after_event_id is not None:
+            self._validate_memory_identifier(
+                after_event_id,
+                "after_event_id",
+            )
+
+        try:
+            user_ref = self._client.collection("users").document(user_id)
+            profile_snapshot = await user_ref.get()
+            profile = (
+                self._collaboration_profile_from_document(
+                    profile_snapshot.to_dict()
+                )
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+
+            proposal_collection = user_ref.collection("memory_proposals")
+            proposal_refs = [
+                proposal_collection.document(category)
+                for category in MEMORY_CATEGORY_ORDER
+            ]
+            unresolved_by_category: dict[str, MemoryProposal] = {}
+            async for snapshot in self._client.get_all(proposal_refs):
+                if not snapshot.exists:
+                    continue
+                proposal = self._proposal_from_document(snapshot.to_dict())
+                if (
+                    proposal.status == "pending"
+                    and observed_at < proposal.expires_at
+                ):
+                    unresolved_by_category[proposal.category] = proposal
+            unresolved_proposals = tuple(
+                unresolved_by_category[category]
+                for category in MEMORY_CATEGORY_ORDER
+                if category in unresolved_by_category
+            )
+
+            events_ref = user_ref.collection("memory_events")
+            query = events_ref.order_by(
+                "created_at",
+                direction=firestore.Query.DESCENDING,
+            )
+            query = query.order_by(
+                FieldPath.document_id(),
+                direction=firestore.Query.DESCENDING,
+            )
+            if after_event_id is not None:
+                cursor_ref = events_ref.document(after_event_id)
+                cursor_snapshot = await cursor_ref.get()
+                if not cursor_snapshot.exists:
+                    raise MemoryEventCursorNotFoundError(
+                        "Memory event cursor was not found."
+                    )
+                self._memory_event_from_document(
+                    after_event_id,
+                    cursor_snapshot.to_dict(),
+                )
+                query = query.start_after(cursor_snapshot)
+            query = query.limit(51)
+            event_snapshots = [snapshot async for snapshot in query.stream()]
+            events = tuple(
+                self._memory_event_from_document(
+                    snapshot.id,
+                    snapshot.to_dict(),
+                )
+                for snapshot in event_snapshots[:50]
+            )
+            next_event_id = (
+                events[-1].event_id if len(event_snapshots) > 50 else None
+            )
+
+            return MemoryInspectionPage(
+                profile=profile,
+                unresolved_proposals=unresolved_proposals,
+                events=events,
+                next_event_id=next_event_id,
+            )
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("get_memory_inspection", exc)
 
     async def create_memory_proposal(
         self,

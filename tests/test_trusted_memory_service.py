@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -287,3 +288,41 @@ async def test_memory_service_rejects_invalid_identifier_before_dispatch(
     database.revoke_memory_signal.assert_not_called()
     database.delete_memory_signal.assert_not_called()
     clock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inspect_memory_uses_one_observation_time_and_cursor() -> None:
+    from trusted_memory_service import InspectMemoryCommand
+
+    pending_proposal = rejected_proposal().model_copy(
+        update={"status": "pending"}
+    )
+    database = MagicMock()
+    database.get_memory_inspection = AsyncMock(
+        return_value=SimpleNamespace(
+            profile=CollaborationProfile(memory_revision=4),
+            unresolved_proposals=(pending_proposal,),
+            events=(approved_event(),),
+            next_event_id="response_length--earlier--approved",
+        )
+    )
+    clock = MagicMock(return_value=NOW)
+    service = TrustedMemoryService(database=database, clock=clock)
+
+    result = await service.inspect_memory(
+        InspectMemoryCommand(
+            user_id="user-1",
+            after_event_id="response_length--cursor--approved",
+        )
+    )
+
+    assert result.profile.memory_revision == 4
+    assert result.unresolved_proposals == (pending_proposal,)
+    assert result.events == (approved_event(),)
+    assert result.next_event_id == "response_length--earlier--approved"
+    database.get_memory_inspection.assert_awaited_once_with(
+        "user-1",
+        observed_at=NOW,
+        after_event_id="response_length--cursor--approved",
+    )
+    clock.assert_called_once_with()
