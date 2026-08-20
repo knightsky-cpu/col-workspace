@@ -41,9 +41,11 @@ flowchart TD
 
 - receives bounded, explicitly delimited, untrusted source and context;
 - returns one strict `SynthesisBlueprint` structured response;
+- uses a provider-compatible derivative of the canonical local schema;
 - has no direct Firestore access;
 - cannot update the user profile;
-- fails closed when provider output does not pass local validation.
+- fails closed when provider output does not pass local structural, semantic,
+  personalization, or 128 KiB size validation.
 
 ### MemoryEngine
 
@@ -81,7 +83,7 @@ projects/{project_id}/blueprints/{blueprint_id}
   originating_session_id
   created_at
   model_name
-  schema_version
+  schema_version (current: 2.0)
   blueprint
 
 projects/{project_id}/feedback/{feedback_id}

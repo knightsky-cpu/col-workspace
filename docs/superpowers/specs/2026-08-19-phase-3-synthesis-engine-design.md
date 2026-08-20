@@ -164,6 +164,9 @@ After Pydantic parsing, application validation enforces:
 
 - an empty allowlisted profile requires an empty adaptations list;
 - every adaptation `profile_key` exists in the allowlisted input profile;
+- normalized generated values are unique within their semantic scope;
+- `in_scope` and `out_of_scope` do not overlap;
+- the serialized blueprint is at most 131,072 UTF-8 bytes;
 - an invalid trace fails before any blueprint write.
 
 The trace identifies keys but never copies raw profile values. Logs contain
@@ -237,7 +240,7 @@ worse than returning none.
 
 - `synthesized_conceptual_model: ConceptualModel`;
 - `personalization_trace: PersonalizationTrace`;
-- `architectural_decisions_and_feedback: list[ArchitecturalDecision]` with at
+- `architectural_decisions: list[ArchitecturalDecision]` with at
   least one item;
 - `socratic_clarifying_questions: list[ClarifyingQuestion]` with at least one
   item;
@@ -247,6 +250,10 @@ worse than returning none.
 
 `schema_version` remains server-owned persistence metadata and is not generated
 by Gemini.
+
+The canonical string and collection limits, field descriptions, provider-safe
+schema adaptation, and complete semantic-invariant list are defined by the
+[Phase 3B synthesis schema v2 design](2026-08-20-phase-3b-synthesis-schema-v2-design.md).
 
 `SynthesisRequest` contains:
 
@@ -301,12 +308,13 @@ async def save_blueprint(
     session_id: str,
     user_id: str,
     model_name: str,
+    schema_version: str,
     blueprint: dict[str, object],
 ) -> str:
 ```
 
-Before Firestore access, it validates the first four arguments as non-empty
-strings and `blueprint` as a non-empty dictionary.
+Before Firestore access, it validates the first five string arguments as
+non-empty and `blueprint` as a non-empty dictionary.
 
 It creates an auto-ID document at
 `projects/{project_id}/blueprints/{blueprint_id}`. One asynchronous batch:
@@ -318,7 +326,7 @@ It creates an auto-ID document at
    - `originating_session_id=session_id`;
    - `user_id` as temporary local-development provenance;
    - `model_name`;
-   - `schema_version="1.0"`;
+   - the validated `schema_version` supplied by the application service;
    - `blueprint`.
 
 The method awaits the commit and returns `blueprint_ref.id`. A
@@ -327,6 +335,9 @@ cause. Logs contain only the operation name.
 
 The stored `blueprint` map receives a Firestore single-field index exemption
 because Phase 3 does not query its nested generated fields.
+
+The active application service supplies schema version `2.0`. Existing `1.0`
+development documents are not migrated by this phase.
 
 ## Structured Generation
 

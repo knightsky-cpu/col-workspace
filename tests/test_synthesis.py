@@ -57,7 +57,7 @@ def valid_blueprint_payload() -> dict[str, object]:
                 }
             ]
         },
-        "architectural_decisions_and_feedback": [
+        "architectural_decisions": [
             {
                 "component_name": "API",
                 "proposed_solution": "FastAPI",
@@ -322,6 +322,37 @@ async def test_generate_blueprint_rejects_unknown_profile_key(
             [],
             "Build a study tool.",
         )
+
+
+@pytest.mark.asyncio
+async def test_generate_blueprint_rejects_semantically_invalid_response(
+    valid_blueprint_payload: dict[str, object],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from blueprint_validation import BlueprintValidationError
+    from synthesis import SynthesisEngineError, generate_blueprint
+
+    conceptual_model = valid_blueprint_payload[
+        "synthesized_conceptual_model"
+    ]
+    assert isinstance(conceptual_model, dict)
+    conceptual_model["out_of_scope"] = [" private-overlap "]
+    conceptual_model["in_scope"] = ["PRIVATE-OVERLAP"]
+    client = fake_genai_client(json.dumps(valid_blueprint_payload))
+    caplog.set_level(logging.ERROR, logger="synthesis")
+
+    with pytest.raises(SynthesisEngineError) as caught:
+        await generate_blueprint(
+            client,
+            {"experience_level": "student"},
+            [],
+            "private-source",
+        )
+
+    assert isinstance(caught.value.__cause__, BlueprintValidationError)
+    assert "BlueprintValidationError" in caplog.text
+    assert "private-overlap" not in caplog.text
+    assert "private-source" not in caplog.text
 
 
 @pytest.mark.asyncio

@@ -70,12 +70,17 @@ forced to invent multiple decisions, phases, or warnings.
 receive its raw `model_json_schema()` result.
 
 A pure schema adapter deep-copies the canonical schema and recursively removes
-the local-only string keywords `minLength`, `maxLength`, and `pattern` from
-schema nodes before the request. It does not remove model properties or
+the local-only keywords `minLength`, `maxLength`, `pattern`, and `maxItems`
+from schema nodes before the request. It does not remove model properties or
 definitions that happen to use one of those words as a name. It preserves the
 proven object shape, required fields, `additionalProperties`, definitions and
-references, enums, descriptions, and array `minItems` and `maxItems`
-constraints.
+references, enums, descriptions, and array `minItems` constraints.
+
+Although Gemini documents `maxItems` support, the complete v2 schema was
+rejected by the live Gemini 3.6 Flash endpoint with HTTP 400 when the expanded
+collection maxima were present. The identical request was accepted when only
+`maxItems` was removed. Canonical Pydantic validation therefore remains
+authoritative for every collection maximum.
 
 Local parsing always uses `SynthesisBlueprint.model_validate_json()`. Provider
 schema compliance never replaces local validation.

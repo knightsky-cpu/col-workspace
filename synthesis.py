@@ -6,6 +6,7 @@ from google import genai
 from google.genai import types
 from pydantic import ValidationError
 
+from blueprint_validation import validate_blueprint
 from schemas import SynthesisBlueprint
 from synthesis_schema import build_gemini_response_schema
 
@@ -124,26 +125,6 @@ def build_synthesis_contents(
     ]
 
 
-def validate_personalization(
-    blueprint: SynthesisBlueprint,
-    profile_context: dict[str, object],
-) -> None:
-    """Reject personalization claims unsupported by prompt context."""
-    adaptations = blueprint.personalization_trace.adaptations
-    if not profile_context and adaptations:
-        raise ValueError("Empty profile cannot produce adaptations.")
-
-    unknown_keys = {
-        adaptation.profile_key
-        for adaptation in adaptations
-        if adaptation.profile_key not in profile_context
-    }
-    if unknown_keys:
-        raise ValueError(
-            "Personalization contains an unknown profile key."
-        )
-
-
 async def generate_blueprint(
     client: genai.Client,
     profile: dict[str, object],
@@ -193,7 +174,7 @@ async def generate_blueprint(
         if not isinstance(response.text, str) or not response.text.strip():
             raise ValueError("Gemini returned an empty response.")
         blueprint = SynthesisBlueprint.model_validate_json(response.text)
-        validate_personalization(blueprint, profile_context)
+        validate_blueprint(blueprint, profile_context)
         return blueprint
     except (TypeError, ValueError, ValidationError) as exc:
         logger.error(

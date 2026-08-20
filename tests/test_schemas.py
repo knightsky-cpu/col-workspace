@@ -27,6 +27,20 @@ def set_nested_value(
     target[final_key] = value
 
 
+def get_nested_value(
+    container: dict[str, object],
+    path: tuple[str | int, ...],
+) -> object:
+    target: object = container
+    for key in path:
+        if isinstance(key, int):
+            assert isinstance(target, list)
+        else:
+            assert isinstance(target, dict)
+        target = target[key]
+    return target
+
+
 @pytest.fixture
 def valid_blueprint_payload() -> dict[str, object]:
     return {
@@ -50,7 +64,7 @@ def valid_blueprint_payload() -> dict[str, object]:
                 }
             ]
         },
-        "architectural_decisions_and_feedback": [
+        "architectural_decisions": [
             {
                 "component_name": "API",
                 "proposed_solution": "FastAPI",
@@ -124,6 +138,165 @@ def test_synthesis_blueprint_accepts_complete_valid_payload(
     assert blueprint.model_dump(mode="json") == payload
 
 
+def test_blueprint_v2_uses_architectural_decisions(
+    valid_blueprint_payload: dict[str, object],
+) -> None:
+    payload = copy.deepcopy(valid_blueprint_payload)
+
+    blueprint = SynthesisBlueprint.model_validate(payload)
+
+    assert blueprint.architectural_decisions
+
+
+def test_blueprint_v2_rejects_legacy_decisions_field(
+    valid_blueprint_payload: dict[str, object],
+) -> None:
+    payload = copy.deepcopy(valid_blueprint_payload)
+    decisions = payload.pop("architectural_decisions")
+    payload["architectural_decisions_and_feedback"] = decisions
+
+    with pytest.raises(ValidationError):
+        SynthesisBlueprint.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("path", "maximum"),
+    (
+        (("synthesized_conceptual_model", "project_name"), 120),
+        (("architectural_decisions", 0, "component_name"), 160),
+        (
+            (
+                "synthesized_conceptual_model",
+                "core_value_proposition",
+            ),
+            1_500,
+        ),
+        (
+            (
+                "step_by_step_execution_roadmap",
+                0,
+                "micro_tasks",
+                0,
+                "verification_steps",
+                0,
+            ),
+            500,
+        ),
+    ),
+)
+def test_generated_string_types_enforce_upper_bounds(
+    valid_blueprint_payload: dict[str, object],
+    path: tuple[str | int, ...],
+    maximum: int,
+) -> None:
+    accepted = copy.deepcopy(valid_blueprint_payload)
+    rejected = copy.deepcopy(valid_blueprint_payload)
+    set_nested_value(accepted, path, "x" * maximum)
+    set_nested_value(rejected, path, "x" * (maximum + 1))
+
+    SynthesisBlueprint.model_validate(accepted)
+    with pytest.raises(ValidationError):
+        SynthesisBlueprint.model_validate(rejected)
+
+
+@pytest.mark.parametrize(
+    ("path", "maximum"),
+    (
+        (("synthesized_conceptual_model", "in_scope"), 10),
+        (("synthesized_conceptual_model", "out_of_scope"), 10),
+        (("synthesized_conceptual_model", "assumptions"), 10),
+        (("personalization_trace", "adaptations"), 8),
+        (("architectural_decisions",), 8),
+        (("architectural_decisions", 0, "alternatives"), 3),
+        (("socratic_clarifying_questions",), 5),
+        (
+            (
+                "socratic_clarifying_questions",
+                0,
+                "suggested_options",
+            ),
+            3,
+        ),
+        (("step_by_step_execution_roadmap",), 8),
+        (
+            (
+                "step_by_step_execution_roadmap",
+                0,
+                "micro_tasks",
+            ),
+            10,
+        ),
+        (
+            (
+                "step_by_step_execution_roadmap",
+                0,
+                "micro_tasks",
+                0,
+                "verification_steps",
+            ),
+            5,
+        ),
+    ),
+)
+def test_generated_collections_enforce_upper_bounds(
+    valid_blueprint_payload: dict[str, object],
+    path: tuple[str | int, ...],
+    maximum: int,
+) -> None:
+    accepted = copy.deepcopy(valid_blueprint_payload)
+    rejected = copy.deepcopy(valid_blueprint_payload)
+    item = get_nested_value(accepted, path)[0]
+    set_nested_value(
+        accepted,
+        path,
+        [copy.deepcopy(item) for _ in range(maximum)],
+    )
+    set_nested_value(
+        rejected,
+        path,
+        [copy.deepcopy(item) for _ in range(maximum + 1)],
+    )
+
+    SynthesisBlueprint.model_validate(accepted)
+    with pytest.raises(ValidationError):
+        SynthesisBlueprint.model_validate(rejected)
+
+
+def test_diagnostic_warnings_enforce_ten_item_maximum(
+    valid_blueprint_payload: dict[str, object],
+) -> None:
+    warning = {
+        "affected_component": "API",
+        "severity": "Medium",
+        "risk_identified": "Requests may fail.",
+        "preventative_guidance": "Use bounded retries.",
+    }
+    accepted = copy.deepcopy(valid_blueprint_payload)
+    rejected = copy.deepcopy(valid_blueprint_payload)
+    accepted["diagnostic_warnings"] = [
+        copy.deepcopy(warning) for _ in range(10)
+    ]
+    rejected["diagnostic_warnings"] = [
+        copy.deepcopy(warning) for _ in range(11)
+    ]
+
+    SynthesisBlueprint.model_validate(accepted)
+    with pytest.raises(ValidationError):
+        SynthesisBlueprint.model_validate(rejected)
+
+
+def test_generated_fields_have_provider_guidance_descriptions() -> None:
+    schema = SynthesisBlueprint.model_json_schema()
+    model_schemas = [schema, *schema["$defs"].values()]
+
+    for model_schema in model_schemas:
+        properties = model_schema.get("properties", {})
+        for property_schema in properties.values():
+            description = property_schema.get("description")
+            assert isinstance(description, str)
+            assert description.strip()
+
+
 def test_synthesis_blueprint_forbids_extra_fields(
     valid_blueprint_payload: dict[str, object],
 ) -> None:
@@ -145,7 +318,7 @@ def test_synthesis_blueprint_forbids_extra_fields(
             "architecture_change",
         ),
         (
-            "architectural_decisions_and_feedback",
+            "architectural_decisions",
             0,
             "alternatives",
             0,
@@ -183,10 +356,10 @@ def test_generated_strings_reject_whitespace(
     ("path", "invalid_value"),
     (
         (("synthesized_conceptual_model", "in_scope"), []),
-        (("architectural_decisions_and_feedback",), []),
+        (("architectural_decisions",), []),
         (
             (
-                "architectural_decisions_and_feedback",
+                "architectural_decisions",
                 0,
                 "alternatives",
             ),
@@ -498,7 +671,7 @@ def test_artifact_and_citation_references_validate_public_fields() -> None:
             "artifact_type": "synthesis_blueprint",
             "project_id": "project-1",
             "artifact_id": "blueprint-1",
-            "schema_version": "1.0",
+            "schema_version": "2.0",
             "display_label": "Agent Col blueprint",
         }
     )
@@ -511,6 +684,17 @@ def test_artifact_and_citation_references_validate_public_fields() -> None:
 
     assert artifact.artifact_id == "blueprint-1"
     assert str(citation.uri) == "https://example.com/reference"
+
+    with pytest.raises(ValidationError):
+        ArtifactReference.model_validate(
+            {
+                "artifact_type": "synthesis_blueprint",
+                "project_id": "project-1",
+                "artifact_id": "blueprint-1",
+                "schema_version": "1.0",
+                "display_label": "Legacy blueprint",
+            }
+        )
 
     with pytest.raises(ValidationError):
         CitationReference.model_validate(

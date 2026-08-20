@@ -56,6 +56,7 @@ class MemoryEngine:
         session_id: str,
         user_id: str,
         model_name: str,
+        schema_version: str,
         blueprint: dict[str, object],
     ) -> str:
         """Atomically persist a project update and generated blueprint."""
@@ -63,6 +64,7 @@ class MemoryEngine:
         self._validate_string(session_id, "session_id")
         self._validate_string(user_id, "user_id")
         self._validate_string(model_name, "model_name")
+        self._validate_string(schema_version, "schema_version")
         self._validate_blueprint(blueprint)
 
         try:
@@ -83,7 +85,7 @@ class MemoryEngine:
                     "originating_session_id": session_id,
                     "user_id": user_id,
                     "model_name": model_name,
-                    "schema_version": "1.0",
+                    "schema_version": schema_version,
                     "blueprint": blueprint,
                 },
             )

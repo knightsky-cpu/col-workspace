@@ -5,7 +5,10 @@ from dataclasses import dataclass
 from google import genai
 
 from database import MemoryEngine
-from schemas import SynthesisBlueprint
+from schemas import (
+    SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
+    SynthesisBlueprint,
+)
 from synthesis import SYNTHESIS_MODEL_NAME, generate_blueprint
 
 SYNTHESIS_HISTORY_LIMIT = 20
@@ -69,6 +72,7 @@ class SynthesisApplicationService:
             command.session_id,
             command.user_id,
             SYNTHESIS_MODEL_NAME,
+            SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
             blueprint.model_dump(mode="json"),
         )
         return SynthesisResult(

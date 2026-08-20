@@ -1,7 +1,7 @@
 import json
 
 
-def test_provider_schema_removes_local_only_string_constraints() -> None:
+def test_provider_schema_removes_local_only_constraints() -> None:
     from synthesis_schema import build_gemini_response_schema
 
     schema = build_gemini_response_schema()
@@ -10,6 +10,16 @@ def test_provider_schema_removes_local_only_string_constraints() -> None:
     assert '"minLength"' not in serialized
     assert '"maxLength"' not in serialized
     assert '"pattern"' not in serialized
+    assert '"maxItems"' not in serialized
+
+
+def test_canonical_schema_retains_local_collection_limits() -> None:
+    from schemas import SynthesisBlueprint
+
+    schema = SynthesisBlueprint.model_json_schema()
+    serialized = json.dumps(schema, sort_keys=True)
+
+    assert '"maxItems"' in serialized
 
 
 def test_provider_schema_preserves_structural_constraints() -> None:
@@ -21,7 +31,7 @@ def test_provider_schema_preserves_structural_constraints() -> None:
     assert schema["required"] == [
         "synthesized_conceptual_model",
         "personalization_trace",
-        "architectural_decisions_and_feedback",
+        "architectural_decisions",
         "socratic_clarifying_questions",
         "step_by_step_execution_roadmap",
     ]
@@ -29,9 +39,13 @@ def test_provider_schema_preserves_structural_constraints() -> None:
     assert isinstance(definitions, dict)
     conceptual_model = schema["properties"]
     assert isinstance(conceptual_model, dict)
-    assert conceptual_model["synthesized_conceptual_model"] == {
-        "$ref": "#/$defs/ConceptualModel"
-    }
+    conceptual_model_reference = conceptual_model[
+        "synthesized_conceptual_model"
+    ]
+    assert conceptual_model_reference["$ref"] == (
+        "#/$defs/ConceptualModel"
+    )
+    assert conceptual_model_reference["description"]
 
     diagnostic_warning = definitions["DiagnosticWarning"]
     assert isinstance(diagnostic_warning, dict)
@@ -60,7 +74,7 @@ def test_provider_schema_preserves_structural_constraints() -> None:
     assert isinstance(question_properties, dict)
     options = question_properties["suggested_options"]
     assert options["minItems"] == 2
-    assert options["maxItems"] == 3
+    assert "maxItems" not in options
 
 
 def test_adapter_preserves_named_fields_and_does_not_mutate_input() -> None:
@@ -72,7 +86,12 @@ def test_adapter_preserves_named_fields_and_does_not_mutate_input() -> None:
             "pattern": {
                 "type": "string",
                 "pattern": "^[a-z]+$",
-            }
+            },
+            "maxItems": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 2,
+            },
         },
         "$defs": {
             "maxLength": {
@@ -86,7 +105,13 @@ def test_adapter_preserves_named_fields_and_does_not_mutate_input() -> None:
 
     assert adapted == {
         "type": "object",
-        "properties": {"pattern": {"type": "string"}},
+        "properties": {
+            "pattern": {"type": "string"},
+            "maxItems": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
         "$defs": {"maxLength": {"type": "string"}},
     }
     assert canonical["properties"]["pattern"]["pattern"] == (

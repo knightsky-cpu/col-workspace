@@ -9,6 +9,9 @@ from pydantic import (
 )
 
 
+SYNTHESIS_BLUEPRINT_SCHEMA_VERSION = "2.0"
+
+
 NonEmptyStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
@@ -34,6 +37,22 @@ DisplayLabelStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=160),
 ]
+ProjectDisplayNameStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=120),
+]
+GeneratedLabelStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=160),
+]
+GeneratedTextStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=1_500),
+]
+VerificationStepStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+]
 
 
 class StrictModel(BaseModel):
@@ -54,7 +73,7 @@ class ArtifactReference(StrictModel):
     artifact_type: Literal["synthesis_blueprint"]
     project_id: IdentifierStr
     artifact_id: IdentifierStr
-    schema_version: Literal["1.0"]
+    schema_version: Literal["2.0"]
     display_label: DisplayLabelStr
 
 
@@ -78,86 +97,181 @@ class ChatResponse(StrictModel):
 
 
 class ConceptualModel(StrictModel):
-    project_name: NonEmptyStr
-    core_value_proposition: NonEmptyStr
-    in_scope: list[NonEmptyStr] = Field(min_length=1)
-    out_of_scope: list[NonEmptyStr] = Field(default_factory=list)
-    assumptions: list[NonEmptyStr] = Field(default_factory=list)
+    project_name: ProjectDisplayNameStr = Field(
+        description="A concise, human-readable project name."
+    )
+    core_value_proposition: GeneratedTextStr = Field(
+        description=(
+            "The primary user friction the project solves and the value it "
+            "delivers."
+        )
+    )
+    in_scope: list[GeneratedTextStr] = Field(
+        min_length=1,
+        max_length=10,
+        description="Concrete capabilities included in this blueprint.",
+    )
+    out_of_scope: list[GeneratedTextStr] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Explicitly excluded capabilities or responsibilities.",
+    )
+    assumptions: list[GeneratedTextStr] = Field(
+        default_factory=list,
+        max_length=10,
+        description="Material assumptions on which the blueprint depends.",
+    )
 
 
 class PersonalizationAdaptation(StrictModel):
-    profile_key: NonEmptyStr
-    architecture_change: NonEmptyStr
-    reason: NonEmptyStr
+    profile_key: GeneratedLabelStr = Field(
+        description="The exact non-sensitive user-profile key used."
+    )
+    architecture_change: GeneratedTextStr = Field(
+        description="The specific design change caused by the profile signal."
+    )
+    reason: GeneratedTextStr = Field(
+        description="Why the profile signal justifies that design change."
+    )
 
 
 class PersonalizationTrace(StrictModel):
     adaptations: list[PersonalizationAdaptation] = Field(
-        default_factory=list
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Profile-grounded adaptations; empty when no profile signal was "
+            "used."
+        ),
     )
 
 
 class ArchitecturalAlternative(StrictModel):
-    option_name: NonEmptyStr
-    tradeoff: NonEmptyStr
-    reason_not_selected: NonEmptyStr
+    option_name: GeneratedLabelStr = Field(
+        description="The name of an alternative technical option."
+    )
+    tradeoff: GeneratedTextStr = Field(
+        description="The material benefits and costs of the alternative."
+    )
+    reason_not_selected: GeneratedTextStr = Field(
+        description="Why the proposed solution is preferred over this option."
+    )
 
 
 class ArchitecturalDecision(StrictModel):
-    component_name: NonEmptyStr
-    proposed_solution: NonEmptyStr
-    rationale: NonEmptyStr
-    alternatives: list[ArchitecturalAlternative] = Field(min_length=1)
+    component_name: GeneratedLabelStr = Field(
+        description="The component or architectural layer being decided."
+    )
+    proposed_solution: GeneratedTextStr = Field(
+        description="The recommended implementation for this component."
+    )
+    rationale: GeneratedTextStr = Field(
+        description="Why this solution best fits the stated project goals."
+    )
+    alternatives: list[ArchitecturalAlternative] = Field(
+        min_length=1,
+        max_length=3,
+        description="Viable alternatives considered for this decision.",
+    )
 
 
 class ClarifyingOption(StrictModel):
-    label: NonEmptyStr
-    impact: NonEmptyStr
+    label: GeneratedLabelStr = Field(
+        description="A short user-facing choice label."
+    )
+    impact: GeneratedTextStr = Field(
+        description="How selecting this option changes the blueprint."
+    )
 
 
 class ClarifyingQuestion(StrictModel):
-    question_text: NonEmptyStr
-    why_this_matters: NonEmptyStr
+    question_text: GeneratedTextStr = Field(
+        description="A Socratic question requiring a meaningful design choice."
+    )
+    why_this_matters: GeneratedTextStr = Field(
+        description="How the answer affects the project or its implementation."
+    )
     suggested_options: list[ClarifyingOption] = Field(
         min_length=2,
         max_length=3,
+        description="Two or three concrete choices the user can evaluate.",
     )
 
 
 class MicroTask(StrictModel):
-    task_description: NonEmptyStr
-    complexity_level: Literal["Low", "Medium", "High"]
-    verification_steps: list[NonEmptyStr] = Field(min_length=1)
+    task_description: GeneratedTextStr = Field(
+        description="One specific, independently executable implementation task."
+    )
+    complexity_level: Literal["Low", "Medium", "High"] = Field(
+        description="The task's relative implementation complexity."
+    )
+    verification_steps: list[VerificationStepStr] = Field(
+        min_length=1,
+        max_length=5,
+        description="Observable checks proving the task works as intended.",
+    )
 
 
 class RoadmapMilestone(StrictModel):
-    phase_name: NonEmptyStr
-    objective: NonEmptyStr
-    expected_deliverable: NonEmptyStr
-    micro_tasks: list[MicroTask] = Field(min_length=1)
+    phase_name: GeneratedLabelStr = Field(
+        description="The ordered implementation phase name."
+    )
+    objective: GeneratedTextStr = Field(
+        description="The outcome this milestone is intended to achieve."
+    )
+    expected_deliverable: GeneratedTextStr = Field(
+        description="The concrete artifact or behavior produced by the phase."
+    )
+    micro_tasks: list[MicroTask] = Field(
+        min_length=1,
+        max_length=10,
+        description="Sequential tasks required to complete this milestone.",
+    )
 
 
 class DiagnosticWarning(StrictModel):
-    affected_component: NonEmptyStr
-    severity: Literal["Low", "Medium", "High", "Critical"]
-    risk_identified: NonEmptyStr
-    preventative_guidance: NonEmptyStr
+    affected_component: GeneratedLabelStr = Field(
+        description="The component or layer exposed to the risk."
+    )
+    severity: Literal["Low", "Medium", "High", "Critical"] = Field(
+        description="The expected impact if the risk is not mitigated."
+    )
+    risk_identified: GeneratedTextStr = Field(
+        description="A concrete technical, security, or delivery risk."
+    )
+    preventative_guidance: GeneratedTextStr = Field(
+        description="A specific action that reduces or prevents the risk."
+    )
 
 
 class SynthesisBlueprint(StrictModel):
-    synthesized_conceptual_model: ConceptualModel
-    personalization_trace: PersonalizationTrace
-    architectural_decisions_and_feedback: list[
+    synthesized_conceptual_model: ConceptualModel = Field(
+        description="The distilled project identity, value, and scope boundary."
+    )
+    personalization_trace: PersonalizationTrace = Field(
+        description="An auditable record of profile-grounded adaptations."
+    )
+    architectural_decisions: list[
         ArchitecturalDecision
-    ] = Field(min_length=1)
+    ] = Field(
+        min_length=1,
+        max_length=8,
+        description="The blueprint's major technical decisions and trade-offs.",
+    )
     socratic_clarifying_questions: list[ClarifyingQuestion] = Field(
-        min_length=1
+        min_length=1,
+        max_length=5,
+        description="Unresolved choices that require the user's judgment.",
     )
     step_by_step_execution_roadmap: list[RoadmapMilestone] = Field(
-        min_length=1
+        min_length=1,
+        max_length=8,
+        description="An ordered, verifiable implementation roadmap.",
     )
     diagnostic_warnings: list[DiagnosticWarning] = Field(
-        default_factory=list
+        default_factory=list,
+        max_length=10,
+        description="Material risks and concrete preventative guidance.",
     )
 
 

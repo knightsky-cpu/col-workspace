@@ -18,7 +18,7 @@ def blueprint() -> SynthesisBlueprint:
                 "in_scope": ["Planning"],
             },
             "personalization_trace": {},
-            "architectural_decisions_and_feedback": [
+            "architectural_decisions": [
                 {
                     "component_name": "API",
                     "proposed_solution": "FastAPI",
@@ -99,6 +99,7 @@ class FakeDatabase:
         session_id: str,
         user_id: str,
         model_name: str,
+        schema_version: str,
         blueprint: dict[str, object],
     ) -> str:
         if self.fail_on == "save":
@@ -111,6 +112,7 @@ class FakeDatabase:
                 session_id,
                 user_id,
                 model_name,
+                schema_version,
                 blueprint,
             )
         )
@@ -214,6 +216,7 @@ async def test_service_generates_and_persists_project_blueprint(
             "session-1",
             "user-1",
             "gemini-3.6-flash",
+            "2.0",
             blueprint.model_dump(mode="json"),
         ),
     ]

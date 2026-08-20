@@ -76,6 +76,7 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
         "session-1",
         "user-1",
         "gemini-3.6-flash",
+        "2.0",
         payload,
     )
 
@@ -97,7 +98,7 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
                 "originating_session_id": "session-1",
                 "user_id": "user-1",
                 "model_name": "gemini-3.6-flash",
-                "schema_version": "1.0",
+                "schema_version": "2.0",
                 "blueprint": payload,
             },
         ),
@@ -114,6 +115,7 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
             "session-1",
             "user-1",
             "gemini-3.6-flash",
+            "2.0",
             {"key": "value"},
         ),
         (
@@ -121,6 +123,7 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
             "",
             "user-1",
             "gemini-3.6-flash",
+            "2.0",
             {"key": "value"},
         ),
         (
@@ -128,12 +131,22 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
             "session-1",
             " ",
             "gemini-3.6-flash",
+            "2.0",
             {"key": "value"},
         ),
         (
             "project-1",
             "session-1",
             "user-1",
+            "",
+            "2.0",
+            {"key": "value"},
+        ),
+        (
+            "project-1",
+            "session-1",
+            "user-1",
+            "gemini-3.6-flash",
             "",
             {"key": "value"},
         ),
@@ -142,6 +155,7 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
             "session-1",
             "user-1",
             "gemini-3.6-flash",
+            "2.0",
             {},
         ),
         (
@@ -149,6 +163,7 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
             "session-1",
             "user-1",
             "gemini-3.6-flash",
+            "2.0",
             "invalid",
         ),
     ),
@@ -183,6 +198,7 @@ async def test_save_blueprint_preserves_firestore_error_safely(
             "private-session",
             "private-user",
             "gemini-3.6-flash",
+            "2.0",
             {"note": private_value},
         )
 

@@ -2,7 +2,7 @@ from schemas import SynthesisBlueprint
 
 
 LOCAL_ONLY_SCHEMA_KEYWORDS = frozenset(
-    {"minLength", "maxLength", "pattern"}
+    {"minLength", "maxLength", "pattern", "maxItems"}
 )
 NAMED_SCHEMA_MAPPINGS = frozenset({"$defs", "properties"})
 

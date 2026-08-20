@@ -15,11 +15,13 @@ Implemented today:
 - Gemini 3.6 Flash through the Google GenAI SDK;
 - asynchronous Firestore message and profile persistence;
 - atomic session/message writes;
-- offline API and database tests.
+- project-owned, atomically persisted structured synthesis blueprints;
+- a hybrid ADK supervisor runtime controlling project-aware chat;
+- strict local schema and semantic validation for blueprint version 2.0;
+- offline API, orchestration, schema, and database tests.
 
 Not implemented yet:
 
-- structured synthesis production code;
 - supervisor tool invocation;
 - feedback-driven profile learning;
 - durable background jobs;
@@ -93,14 +95,11 @@ The health endpoint is available at `http://127.0.0.1:8000/`.
 
 ## Tests
 
-Run the implemented baseline:
+Run the automated suite:
 
 ```bash
-pytest tests/test_main.py tests/test_database.py
+pytest
 ```
-
-`tests/test_schemas.py` is intentionally RED until the first approved Phase 3A
-implementation pass creates `schemas.py`.
 
 ## Security status
 

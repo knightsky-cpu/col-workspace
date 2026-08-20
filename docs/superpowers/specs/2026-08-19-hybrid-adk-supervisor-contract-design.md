@@ -263,7 +263,7 @@ are not exposed.
 - `artifact_type: Literal["synthesis_blueprint"]`;
 - `project_id`;
 - `artifact_id`;
-- `schema_version: Literal["1.0"]`;
+- `schema_version: Literal["2.0"]`;
 - a short validated display label.
 
 `CitationReference` contains a validated public HTTP or HTTPS URI and a

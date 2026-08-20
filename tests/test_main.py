@@ -39,7 +39,7 @@ VALID_BLUEPRINT_PAYLOAD = {
             }
         ]
     },
-    "architectural_decisions_and_feedback": [
+    "architectural_decisions": [
         {
             "component_name": "API",
             "proposed_solution": "FastAPI",

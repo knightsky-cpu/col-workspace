@@ -82,9 +82,11 @@ record the session that supplied their conversational context.
 - **Phase 2 — Durable memory:** Asynchronous Firestore message and profile
   operations work and have offline tests. Project ownership, feedback events,
   and the actual profile-learning loop remain.
-- **Phase 3A — Structured synthesis core:** Designed; production code has not
-  started. The first schema test is intentionally RED.
-- **Phase 3B — Supervisor and feedback loop:** Planned.
+- **Phase 3A — Structured synthesis core:** Implemented, tested, and manually
+  verified with live Gemini generation and Firestore persistence.
+- **Phase 3B — Supervisor and feedback loop:** Hybrid ADK runtime and
+  supervisor-controlled chat are implemented. Blueprint schema v2 validation
+  is in progress; synthesis delegation and the feedback loop remain.
 - **Phase 3C — Durable background synthesis:** Planned.
 - **Phase 4 — Judge-facing workspace:** Not started.
 - **Phase 5 — Security, Cloud Run deployment, and submission:** Not started.
