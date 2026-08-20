@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from schemas import SynthesisBlueprint
+from synthesis_schema import build_gemini_response_schema
 
 
 @dataclass
@@ -253,7 +254,11 @@ async def test_generate_blueprint_uses_structured_untrusted_context(
     assert config.response_schema is None
     assert (
         config.response_json_schema
-        == SynthesisBlueprint.model_json_schema()
+        == build_gemini_response_schema()
+    )
+    assert (
+        config.response_json_schema
+        != SynthesisBlueprint.model_json_schema()
     )
     assert config.temperature == 0.2
     assert config.max_output_tokens == 8192
