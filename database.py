@@ -45,6 +45,14 @@ class MemoryProposalExpiredError(RuntimeError):
     """Raised when a requested pending proposal has expired."""
 
 
+class MemorySignalNotFoundError(RuntimeError):
+    """Raised when a governed memory signal cannot be revoked."""
+
+
+class MemorySignalConflictError(RuntimeError):
+    """Raised when stored signal state conflicts with a memory mutation."""
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryApprovalResult:
     """Return the governed state created by a memory approval."""
@@ -52,6 +60,22 @@ class MemoryApprovalResult:
     profile: CollaborationProfile
     event: MemoryEvent
     superseded_event: MemoryEvent | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryRevocationResult:
+    """Return the governed state created by a memory revocation."""
+
+    profile: CollaborationProfile
+    event: MemoryEvent
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryDeletionResult:
+    """Return the governed state after bounded hard deletion."""
+
+    profile: CollaborationProfile
+    artifacts_deleted: bool
 
 
 class MemoryEngine:
@@ -484,6 +508,279 @@ class MemoryEngine:
         except (GoogleAPIError, ValueError) as exc:
             self._raise_firestore_error("approve_memory_proposal", exc)
 
+    async def revoke_memory_signal(
+        self,
+        user_id: str,
+        category: MemoryCategory,
+        signal_id: str,
+        *,
+        confirmation_channel: ConfirmationChannel,
+        confirmation_session_id: str | None,
+        confirmation_message_id: str | None,
+        observed_at: datetime,
+    ) -> MemoryRevocationResult:
+        """Atomically remove an active signal and retain its history."""
+        self._validate_memory_approval_inputs(
+            user_id,
+            category,
+            signal_id,
+            confirmation_channel,
+            confirmation_session_id,
+            confirmation_message_id,
+            observed_at,
+        )
+        user_ref = self._client.collection("users").document(user_id)
+        events_ref = user_ref.collection("memory_events")
+        revoked_event_id = f"{signal_id}--revoked"
+        revoked_event_ref = events_ref.document(revoked_event_id)
+        transaction = self._client.transaction()
+
+        async def revoke_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryRevocationResult:
+            profile_snapshot = await user_ref.get(transaction=transaction)
+            revoked_snapshot = await revoked_event_ref.get(
+                transaction=transaction
+            )
+            profile = (
+                self._collaboration_profile_from_document(
+                    profile_snapshot.to_dict()
+                )
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+            active_signal = self._active_signal_for_category(
+                profile,
+                category,
+            )
+            if active_signal is None or active_signal.signal_id != signal_id:
+                if revoked_snapshot.exists:
+                    revoked_event = self._memory_event_from_document(
+                        revoked_event_id,
+                        revoked_snapshot.to_dict(),
+                    )
+                    same_action = (
+                        revoked_event.event_type == "revoked"
+                        and revoked_event.signal_id == signal_id
+                        and revoked_event.category == category
+                        and revoked_event.confirmation_channel
+                        == confirmation_channel
+                        and revoked_event.confirmation_session_id
+                        == confirmation_session_id
+                        and revoked_event.confirmation_message_id
+                        == confirmation_message_id
+                        and revoked_event.related_signal_id is None
+                    )
+                    if not same_action:
+                        raise MemorySignalConflictError(
+                            "Stored memory revocation cannot prove this "
+                            "action."
+                        )
+                    if profile.memory_revision < revoked_event.memory_revision:
+                        raise ValueError(
+                            "Stored memory revision precedes revoked event."
+                        )
+                    return MemoryRevocationResult(
+                        profile=profile,
+                        event=revoked_event,
+                    )
+                raise MemorySignalNotFoundError(
+                    "Memory signal is not active."
+                )
+            if revoked_snapshot.exists:
+                raise ValueError(
+                    "Active memory signal already has a revoked event."
+                )
+
+            source_event_ref = events_ref.document(
+                active_signal.source_event_id
+            )
+            source_snapshot = await source_event_ref.get(
+                transaction=transaction
+            )
+            if not source_snapshot.exists:
+                raise ValueError("Active memory source event does not exist.")
+            source_event = self._memory_event_from_document(
+                active_signal.source_event_id,
+                source_snapshot.to_dict(),
+            )
+            self._validate_active_signal_source(active_signal, source_event)
+
+            revision = profile.memory_revision + 1
+            revoked_event = MemoryEvent.model_validate(
+                {
+                    "event_id": revoked_event_id,
+                    "event_type": "revoked",
+                    "signal_id": active_signal.signal_id,
+                    "category": active_signal.category,
+                    "value": active_signal.value,
+                    "policy_version": active_signal.policy_version,
+                    "source_type": source_event.source_type,
+                    "source_session_id": source_event.source_session_id,
+                    "source_message_id": source_event.source_message_id,
+                    "confirmation_channel": confirmation_channel,
+                    "confirmation_session_id": confirmation_session_id,
+                    "confirmation_message_id": confirmation_message_id,
+                    "related_signal_id": None,
+                    "memory_revision": revision,
+                    "created_at": observed_at,
+                }
+            )
+            identity_context = dict(profile.identity_context)
+            active_preferences = dict(profile.active_preferences)
+            identity_context.pop(category, None)
+            active_preferences.pop(category, None)
+            updated_profile = CollaborationProfile(
+                memory_schema_version="1.0",
+                memory_revision=revision,
+                identity_context=identity_context,
+                active_preferences=active_preferences,
+            )
+            transaction.set(
+                revoked_event_ref,
+                self._memory_event_document(revoked_event),
+            )
+            transaction.set(
+                user_ref,
+                self._collaboration_profile_document(
+                    updated_profile,
+                    refresh_approved_at=False,
+                ),
+                merge=True,
+            )
+            return MemoryRevocationResult(
+                profile=updated_profile,
+                event=revoked_event,
+            )
+
+        run_transaction = firestore.async_transactional(
+            revoke_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("revoke_memory_signal", exc)
+
+    async def delete_memory_signal(
+        self,
+        user_id: str,
+        category: MemoryCategory,
+        signal_id: str,
+    ) -> MemoryDeletionResult:
+        """Atomically remove every bounded artifact owned by a signal."""
+        self._validate_memory_signal_locator(user_id, category, signal_id)
+        user_ref = self._client.collection("users").document(user_id)
+        proposal_ref = user_ref.collection("memory_proposals").document(
+            category
+        )
+        events_ref = user_ref.collection("memory_events")
+        event_types = ("approved", "corrected", "superseded", "revoked")
+        event_refs = {
+            event_type: events_ref.document(f"{signal_id}--{event_type}")
+            for event_type in event_types
+        }
+        transaction = self._client.transaction()
+
+        async def delete_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryDeletionResult:
+            profile_snapshot = await user_ref.get(transaction=transaction)
+            proposal_snapshot = await proposal_ref.get(
+                transaction=transaction
+            )
+            event_snapshots = {
+                event_type: await event_refs[event_type].get(
+                    transaction=transaction
+                )
+                for event_type in event_types
+            }
+            profile = (
+                self._collaboration_profile_from_document(
+                    profile_snapshot.to_dict()
+                )
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+            identity_context = dict(profile.identity_context)
+            active_preferences = dict(profile.active_preferences)
+            active_signal = self._active_signal_for_category(
+                profile,
+                category,
+            )
+            projection_owned = (
+                active_signal is not None
+                and active_signal.signal_id == signal_id
+            )
+            if projection_owned:
+                identity_context.pop(category, None)
+                active_preferences.pop(category, None)
+
+            proposal_owned = False
+            if proposal_snapshot.exists:
+                proposal = self._proposal_from_document(
+                    proposal_snapshot.to_dict()
+                )
+                proposal_owned = proposal.proposal_id == signal_id
+
+            owned_event_types: list[str] = []
+            for event_type, snapshot in event_snapshots.items():
+                if not snapshot.exists:
+                    continue
+                event_id = f"{signal_id}--{event_type}"
+                event = self._memory_event_from_document(
+                    event_id,
+                    snapshot.to_dict(),
+                )
+                if (
+                    event.event_type != event_type
+                    or event.signal_id != signal_id
+                    or event.category != category
+                ):
+                    raise ValueError(
+                        "Stored memory event does not match its path."
+                    )
+                owned_event_types.append(event_type)
+
+            artifacts_deleted = bool(
+                projection_owned or proposal_owned or owned_event_types
+            )
+            if not artifacts_deleted:
+                return MemoryDeletionResult(
+                    profile=profile,
+                    artifacts_deleted=False,
+                )
+
+            updated_profile = CollaborationProfile(
+                memory_schema_version="1.0",
+                memory_revision=profile.memory_revision + 1,
+                identity_context=identity_context,
+                active_preferences=active_preferences,
+            )
+            transaction.set(
+                user_ref,
+                self._collaboration_profile_document(
+                    updated_profile,
+                    refresh_approved_at=False,
+                ),
+                merge=True,
+            )
+            if proposal_owned:
+                transaction.delete(proposal_ref)
+            for event_type in owned_event_types:
+                transaction.delete(event_refs[event_type])
+            return MemoryDeletionResult(
+                profile=updated_profile,
+                artifacts_deleted=True,
+            )
+
+        run_transaction = firestore.async_transactional(
+            delete_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("delete_memory_signal", exc)
+
     def close(self) -> None:
         """Close the Firestore client's transport."""
         self._client.close()
@@ -844,14 +1141,17 @@ class MemoryEngine:
     @staticmethod
     def _collaboration_profile_document(
         profile: CollaborationProfile,
+        *,
+        refresh_approved_at: bool = True,
     ) -> dict[str, object]:
         document = profile.model_dump(mode="python")
-        for signals in (
-            document["identity_context"],
-            document["active_preferences"],
-        ):
-            for signal in signals.values():
-                signal["approved_at"] = firestore.SERVER_TIMESTAMP
+        if refresh_approved_at:
+            for signals in (
+                document["identity_context"],
+                document["active_preferences"],
+            ):
+                for signal in signals.values():
+                    signal["approved_at"] = firestore.SERVER_TIMESTAMP
         document["memory_updated_at"] = firestore.SERVER_TIMESTAMP
         return document
 
@@ -942,6 +1242,31 @@ class MemoryEngine:
             or observed_at.utcoffset() is None
         ):
             raise ValueError("observed_at must be a timezone-aware datetime.")
+
+    @staticmethod
+    def _validate_memory_signal_locator(
+        user_id: object,
+        category: object,
+        signal_id: object,
+    ) -> None:
+        MemoryEngine._validate_memory_user_id(user_id)
+        if category not in MEMORY_CATEGORY_ORDER:
+            raise ValueError("category must be a governed memory category.")
+        if not isinstance(signal_id, str) or re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}",
+            signal_id,
+        ) is None:
+            raise ValueError("signal_id must be a valid identifier.")
+        if not signal_id.startswith(f"{category}--"):
+            raise ValueError("signal_id must match its category.")
+        for suffix in (
+            "--approved",
+            "--corrected",
+            "--superseded",
+            "--revoked",
+        ):
+            if len(f"{signal_id}{suffix}") > 128:
+                raise ValueError("Derived memory event ID is too long.")
 
     @staticmethod
     def _proposal_from_document(
