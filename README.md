@@ -130,7 +130,6 @@ a public Cloud Run service.
 - [Testing](docs/development/testing.md)
 - [Troubleshooting](docs/development/troubleshooting.md)
 - [Submission checklist](docs/submission-checklist.md)
-- [Project context](context.md)
 - [Phase 3 design](docs/superpowers/specs/2026-08-19-phase-3-synthesis-engine-design.md)
 
 ## License

@@ -1,5 +1,10 @@
 # Project Context: Agent_Col Workspace
 
+> **Archived August 21, 2026.** This snapshot predates the accepted governed
+> memory lifecycle and chat-turn idempotency work. Its phase status and data
+> model are no longer authoritative. Use the root `README.md`, current design
+> contracts, and current source instead.
+
 ## Product Goal
 
 Agent_Col is a Collaborative Partner web application for the Devpost All
@@ -101,5 +106,5 @@ and cost controls are in place.
 ## Working Method
 
 Every source-changing pass follows the repository's approval-gated TDD
-workflow in `AGENTS.md`. Accepted work is manually verified before any Git
-checkpoint or push.
+workflow in [`AGENTS.md`](../../AGENTS.md). Accepted work is manually verified
+before any Git checkpoint or push.

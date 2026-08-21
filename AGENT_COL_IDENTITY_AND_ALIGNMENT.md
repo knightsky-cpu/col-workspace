@@ -210,13 +210,21 @@ The judge should be able to conclude without narration alone:
 
 ## Current implementation gap
 
-As of August 20, 2026, Agent_Col loads a Firestore profile across sessions and
-can expose profile-grounded synthesis traces. It does **not** yet implement the
-complete feedback-event, consent, provenance, correction, revocation, and
-deletion workflow described above. The current supervisor language also remains
-engineering-focused, and the current README and project context emphasize the
-software-blueprint workflow more than the general collaborative identity.
-The chat path currently persists raw user messages without automatic PII
-detection or redaction, so retention and deletion controls for collaboration
-history are also unfinished. These are active product gaps and must not be
-presented as finished capabilities.
+As of August 21, 2026, Agent_Col implements the governed memory lifecycle for
+pending proposals, structured approval and rejection, provenance, correction,
+revocation, bounded inspection, hard deletion, cross-session adaptation
+context, adaptation receipts, and retry-safe chat turns. These behaviors have
+offline tests and accepted live Firestore evidence.
+
+The remaining governed-memory gap is the supervisor proposal boundary:
+Agent_Col cannot yet recognize explicit feedback during ordinary chat and call
+the bounded proposal service itself. The M7 design specifies that tool but is
+not implementation authorization. The supervisor instruction also remains
+engineering-focused, and governed memory is not yet the authoritative
+personalization input for structured synthesis.
+
+The chat path persists raw user messages without automatic sensitive-data
+detection or redaction. Collaboration-history retention and deletion controls,
+authenticated ownership, the judge-facing workspace, durable background work,
+and public deployment security remain unfinished. These are active product
+gaps and must not be presented as implemented capabilities.
