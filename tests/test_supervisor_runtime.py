@@ -131,6 +131,95 @@ async def test_run_turn_uses_bounded_fresh_session_and_returns_final_text(
 
 
 @pytest.mark.asyncio
+async def test_run_turn_places_server_owned_memory_context_in_session_state(
+) -> None:
+    from memory_proposals import ProposalTurnLease
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(events=[FakeEvent("Pending proposal.", True)]),
+        session_service=sessions,
+    )
+
+    await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember that I prefer concise responses.",
+            source_message_id="turn--source-message--user",
+            memory_decision_present=False,
+            turn_lease=ProposalTurnLease(
+                turn_id="a" * 64,
+                owner_token="owner-token-1",
+            ),
+        )
+    )
+
+    assert sessions.created[0]["state"] == {
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "memory_user_id": "user-1",
+        "memory_session_id": "session-1",
+        "memory_source_message_id": "turn--source-message--user",
+        "memory_source_message_text": (
+            "Remember that I prefer concise responses."
+        ),
+        "memory_decision_present": False,
+        "memory_turn_id": "a" * 64,
+        "memory_turn_owner_token": "owner-token-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_turn_recovers_precompleted_proposal_without_new_tool_call(
+) -> None:
+    from datetime import UTC, datetime
+
+    from schemas import AgentActionReceipt, MemoryProposalReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = MemoryProposalReceipt(
+        proposal_id="response_length--proposal-1",
+        category="response_length",
+        proposed_value="concise",
+        expires_at=datetime(2026, 8, 22, 16, 0, tzinfo=UTC),
+    )
+    runner = FakeRunner(events=[FakeEvent("Proposal remains pending.", True)])
+    runtime = SupervisorRuntime(
+        runner=runner,
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember my preference.",
+            source_message_id="message-1",
+            precompleted_actions=(action,),
+            precompleted_memory_proposals=(proposal,),
+        )
+    )
+
+    assert result.actions == (action,)
+    assert result.memory_proposals == (proposal,)
+    operational_context = runner.calls[0][
+        "run_config"
+    ].model_input_context[-1].parts[0].text
+    assert "already completed" in operational_context
+    assert "do not call propose_memory_signal" in operational_context
+    assert "response_length--proposal-1" in operational_context
+
+
+@pytest.mark.asyncio
 async def test_run_turn_collects_proposal_receipt_only_from_function_response(
 ) -> None:
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
@@ -435,6 +524,94 @@ async def test_run_turn_wraps_provider_error_and_cleans_session_safely(
         "provider echoed",
     ):
         assert private_value not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_after_proposal_carries_completed_receipts(
+) -> None:
+    from supervisor_runtime import (
+        SupervisorRuntime,
+        SupervisorRuntimeError,
+        SupervisorTurnContext,
+    )
+
+    class ProposalThenFailureRunner(FakeRunner):
+        async def run_async(
+            self,
+            **kwargs: object,
+        ) -> AsyncIterator[FakeEvent]:
+            self.calls.append(dict(kwargs))
+            yield FakeEvent(None, False, [pending_function_response()])
+            raise RuntimeError("private provider failure")
+
+    runtime = SupervisorRuntime(
+        runner=ProposalThenFailureRunner(events=[]),
+        session_service=FakeSessionService(),
+    )
+
+    with pytest.raises(SupervisorRuntimeError) as caught:
+        await runtime.run_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Remember my preference.",
+            )
+        )
+
+    assert [item.action_name for item in caught.value.actions] == [
+        "propose_memory_signal"
+    ]
+    assert [
+        item.proposal_id for item in caught.value.memory_proposals
+    ] == ["response_length--e82366f7699ee2e39bff6a68154e09b7"]
+
+
+@pytest.mark.asyncio
+async def test_timeout_after_proposal_carries_completed_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    import supervisor_runtime
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    class ProposalThenWaitRunner(FakeRunner):
+        async def run_async(
+            self,
+            **kwargs: object,
+        ) -> AsyncIterator[FakeEvent]:
+            self.calls.append(dict(kwargs))
+            yield FakeEvent(None, False, [pending_function_response()])
+            await asyncio.Event().wait()
+
+    runtime = SupervisorRuntime(
+        runner=ProposalThenWaitRunner(events=[]),
+        session_service=FakeSessionService(),
+    )
+    monkeypatch.setattr(
+        supervisor_runtime,
+        "SUPERVISOR_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    with pytest.raises(supervisor_runtime.SupervisorTimeoutError) as caught:
+        await asyncio.wait_for(
+            runtime.run_turn(
+                SupervisorTurnContext(
+                    project_id="project-1",
+                    session_id="session-1",
+                    user_id="user-1",
+                    message="Remember my preference.",
+                )
+            ),
+            timeout=0.2,
+        )
+
+    assert [item.action_name for item in caught.value.actions] == [
+        "propose_memory_signal"
+    ]
+    assert len(caught.value.memory_proposals) == 1
 
 
 @pytest.mark.asyncio

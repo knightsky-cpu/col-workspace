@@ -137,6 +137,18 @@ class AdaptationReceipt(StrictModel):
         return _normalize_memory_model_value(data, "value")
 
 
+class MemoryProposalReceipt(StrictModel):
+    proposal_id: IdentifierStr
+    category: MemoryCategory
+    proposed_value: MemoryValue
+    expires_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_proposed_value(cls, data: object) -> object:
+        return _normalize_memory_model_value(data, "proposed_value")
+
+
 class ChatRequest(StrictModel):
     project_id: IdentifierStr
     session_id: IdentifierStr
@@ -150,9 +162,25 @@ class ChatResponse(StrictModel):
     actions: list[AgentActionReceipt] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
     citations: list[CitationReference] = Field(default_factory=list)
+    memory_proposals: list[MemoryProposalReceipt] = Field(
+        default_factory=list,
+        max_length=1,
+    )
     adaptations: list[AdaptationReceipt] = Field(
         default_factory=list,
         max_length=10,
+    )
+
+
+class ChatPartialFailureResponse(StrictModel):
+    detail: Literal[
+        "Agent_Col response failed after a completed action.",
+        "Agent_Col response timed out after a completed action.",
+    ]
+    actions: list[AgentActionReceipt]
+    memory_proposals: list[MemoryProposalReceipt] = Field(
+        default_factory=list,
+        max_length=1,
     )
 
 
@@ -254,18 +282,6 @@ class MemoryEvent(StrictModel):
                 "Confirmation identifiers do not match the channel."
             )
         return self
-
-
-class MemoryProposalReceipt(StrictModel):
-    proposal_id: IdentifierStr
-    category: MemoryCategory
-    proposed_value: MemoryValue
-    expires_at: datetime
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_proposed_value(cls, data: object) -> object:
-        return _normalize_memory_model_value(data, "proposed_value")
 
 
 class MemoryInspectionResponse(StrictModel):

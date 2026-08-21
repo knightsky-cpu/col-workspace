@@ -4,6 +4,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 import warnings
 
+from google.adk.sessions import State
+
 from memory_proposal_tool import (
     PendingMemoryProposalToolResponse,
     create_propose_memory_signal_tool,
@@ -74,15 +76,18 @@ async def run_memory_proposal_tool_contract_smoke(
             "proposed_value": "concise",
         },
         tool_context=SimpleNamespace(
-            state={
-                "memory_user_id": "user-1",
-                "memory_session_id": "session-1",
-                "memory_source_message_id": "message-1",
-                "memory_source_message_text": (
-                    "I prefer concise responses."
-                ),
-                "memory_decision_present": False,
-            }
+            state=State(
+                value={
+                    "memory_user_id": "user-1",
+                    "memory_session_id": "session-1",
+                    "memory_source_message_id": "message-1",
+                    "memory_source_message_text": (
+                        "I prefer concise responses."
+                    ),
+                    "memory_decision_present": False,
+                },
+                delta={},
+            )
         ),
     )
     parsed = parse_memory_proposal_tool_response(response)

@@ -601,6 +601,7 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "actions": [],
         "artifacts": [],
         "citations": [],
+        "memory_proposals": [],
         "adaptations": [],
     }
 

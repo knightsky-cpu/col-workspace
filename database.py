@@ -287,12 +287,17 @@ class MemoryEngine:
                         ),
                     )
                     raise ChatTurnInProgressError(retry_seconds)
+                precompleted_actions, precompleted_proposals = (
+                    self._chat_turn_effects(turn_data)
+                )
                 resumed_claim = ChatTurnClaim(
                     request=request,
                     ids=ids,
                     owner_token=owner_token,
                     lease_expires_at=lease_expires_at,
                     resumed=True,
+                    precompleted_actions=precompleted_actions,
+                    precompleted_memory_proposals=precompleted_proposals,
                 )
                 transaction.set(
                     turn_ref,
@@ -402,13 +407,107 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("renew_chat_turn_lease", exc)
 
+    async def record_chat_turn_decision_action(
+        self,
+        claim: ChatTurnClaim,
+        action: AgentActionReceipt,
+        *,
+        observed_at: datetime,
+    ) -> ChatTurnClaim:
+        """Persist one owned structured memory-decision action receipt."""
+        self._validate_chat_turn_claim(claim)
+        if not isinstance(action, AgentActionReceipt):
+            raise ValueError("action must be an AgentActionReceipt.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        decision = claim.request.memory_decision
+        if decision is None:
+            raise ValueError("claim must contain a memory decision.")
+        expected_action_name = (
+            "approve_memory_signal"
+            if decision.decision == "approve"
+            else "reject_memory_signal"
+        )
+        if action.action_name != expected_action_name:
+            raise ValueError("action does not match the memory decision.")
+        turn_ref = (
+            self._client.collection("sessions")
+            .document(claim.request.session_id)
+            .collection("turns")
+            .document(claim.ids.turn_id)
+        )
+        transaction = self._client.transaction()
+
+        async def record_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ChatTurnClaim:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            turn_data = turn_snapshot.to_dict()
+            if not turn_snapshot.exists or not isinstance(
+                turn_data,
+                Mapping,
+            ):
+                raise ChatTurnStateError("Stored chat turn is invalid.")
+            self._assert_chat_turn_claim_matches_document(claim, turn_data)
+            stored_expiry = turn_data.get("lease_expires_at")
+            if (
+                turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(stored_expiry)
+                or stored_expiry <= observed_at
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn cannot record a decision action."
+                )
+            stored_actions, stored_proposals = self._chat_turn_effects(
+                turn_data
+            )
+            decision_actions = tuple(
+                item
+                for item in stored_actions
+                if item.action_name
+                in {"approve_memory_signal", "reject_memory_signal"}
+            )
+            if decision_actions and decision_actions != (action,):
+                raise ChatTurnStateError(
+                    "Stored chat turn has a conflicting decision action."
+                )
+            actions = stored_actions
+            if not decision_actions:
+                actions = (*stored_actions, action)
+                transaction.set(
+                    turn_ref,
+                    {
+                        "actions": [
+                            item.model_dump(mode="python")
+                            for item in actions
+                        ],
+                        "updated_at": firestore.SERVER_TIMESTAMP,
+                    },
+                    merge=True,
+                )
+            return replace(
+                claim,
+                precompleted_actions=actions,
+                precompleted_memory_proposals=stored_proposals,
+            )
+
+        run_transaction = firestore.async_transactional(record_in_transaction)
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "record_chat_turn_decision_action",
+                exc,
+            )
+
     async def release_chat_turn(
         self,
         claim: ChatTurnClaim,
         *,
         observed_at: datetime,
-    ) -> None:
-        """Expire the lease held by the current chat-turn owner."""
+    ) -> ChatTurnClaim:
+        """Expire an owned lease and return its completed turn effects."""
         self._validate_chat_turn_claim(claim)
         if not self._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
@@ -422,7 +521,7 @@ class MemoryEngine:
 
         async def release_in_transaction(
             transaction: AsyncTransaction,
-        ) -> None:
+        ) -> ChatTurnClaim:
             turn_snapshot = await turn_ref.get(transaction=transaction)
             turn_data = turn_snapshot.to_dict()
             if not turn_snapshot.exists or not isinstance(
@@ -440,8 +539,17 @@ class MemoryEngine:
                 raise ChatTurnOwnershipError(
                     "Stored chat turn lease cannot be released."
                 )
+            stored_actions, stored_proposals = self._chat_turn_effects(
+                turn_data
+            )
+            released_claim = replace(
+                claim,
+                lease_expires_at=min(stored_expiry, observed_at),
+                precompleted_actions=stored_actions,
+                precompleted_memory_proposals=stored_proposals,
+            )
             if stored_expiry <= observed_at:
-                return
+                return released_claim
             transaction.set(
                 turn_ref,
                 {
@@ -450,12 +558,13 @@ class MemoryEngine:
                 },
                 merge=True,
             )
+            return released_claim
 
         run_transaction = firestore.async_transactional(
             release_in_transaction
         )
         try:
-            await run_transaction(transaction)
+            return await run_transaction(transaction)
         except GoogleAPIError as exc:
             self._raise_firestore_error("release_chat_turn", exc)
 
@@ -510,6 +619,10 @@ class MemoryEngine:
                 raise ChatTurnStateError(
                     "Stored chat turn already has a model message."
                 )
+            self._assert_chat_turn_response_preserves_effects(
+                turn_data,
+                response,
+            )
             receipts = response.model_dump(
                 mode="json",
                 exclude={"response"},
@@ -628,6 +741,31 @@ class MemoryEngine:
             or not isinstance(claim.resumed, bool)
         ):
             raise ValueError("claim metadata is invalid.")
+        actions = claim.precompleted_actions
+        proposals = claim.precompleted_memory_proposals
+        if (
+            not isinstance(actions, tuple)
+            or not all(
+                isinstance(action, AgentActionReceipt) for action in actions
+            )
+            or not isinstance(proposals, tuple)
+            or not all(
+                isinstance(proposal, MemoryProposalReceipt)
+                for proposal in proposals
+            )
+        ):
+            raise ValueError("claim effects are invalid.")
+        proposal_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "propose_memory_signal"
+        )
+        if (
+            len(proposals) > 1
+            or bool(proposal_actions) != bool(proposals)
+            or (proposals and len(proposal_actions) != 1)
+        ):
+            raise ValueError("claim effects are invalid.")
 
     def _assert_chat_turn_claim_matches_document(
         self,
@@ -671,12 +809,14 @@ class MemoryEngine:
             raise ChatTurnStateError("Stored model message is invalid.")
         if not self._is_aware_datetime(turn_data.get("completed_at")):
             raise ChatTurnStateError("Completed chat turn is invalid.")
+        actions, memory_proposals = self._chat_turn_effects(turn_data)
         try:
             response = ChatResponse(
                 response=model_message_data["text"],
-                actions=turn_data.get("actions", []),
+                actions=list(actions),
                 artifacts=turn_data.get("artifacts", []),
                 citations=turn_data.get("citations", []),
+                memory_proposals=list(memory_proposals),
                 adaptations=turn_data.get("adaptations", []),
             )
         except (ValidationError, TypeError, ValueError) as exc:
@@ -684,6 +824,79 @@ class MemoryEngine:
                 "Stored chat turn response is invalid."
             ) from exc
         return ChatTurnReplay(response=response)
+
+    @staticmethod
+    def _chat_turn_effects(
+        turn_data: Mapping[str, object],
+    ) -> tuple[
+        tuple[AgentActionReceipt, ...],
+        tuple[MemoryProposalReceipt, ...],
+    ]:
+        stored_actions = turn_data.get("actions", [])
+        stored_proposals = turn_data.get("memory_proposals", [])
+        if not isinstance(stored_actions, list) or not isinstance(
+            stored_proposals,
+            list,
+        ):
+            raise ChatTurnStateError("Stored chat turn effects are invalid.")
+        try:
+            actions = tuple(
+                AgentActionReceipt.model_validate(item)
+                for item in stored_actions
+            )
+            proposals = tuple(
+                MemoryProposalReceipt.model_validate(item)
+                for item in stored_proposals
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn effects are invalid."
+            ) from exc
+        proposal_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "propose_memory_signal"
+        )
+        if len(proposals) > 1 or bool(proposal_actions) != bool(proposals):
+            raise ChatTurnStateError("Stored chat turn effects are invalid.")
+        if proposals and len(proposal_actions) != 1:
+            raise ChatTurnStateError("Stored chat turn effects are invalid.")
+        return actions, proposals
+
+    @classmethod
+    def _assert_chat_turn_response_preserves_effects(
+        cls,
+        turn_data: Mapping[str, object],
+        response: ChatResponse,
+    ) -> None:
+        stored_actions, stored_proposals = cls._chat_turn_effects(turn_data)
+        response_actions = tuple(response.actions)
+        response_proposals = tuple(response.memory_proposals)
+        stored_proposal_actions = tuple(
+            action
+            for action in stored_actions
+            if action.action_name == "propose_memory_signal"
+        )
+        response_proposal_actions = tuple(
+            action
+            for action in response_actions
+            if action.action_name == "propose_memory_signal"
+        )
+        if (
+            stored_proposal_actions != response_proposal_actions
+            or stored_proposals != response_proposals
+        ):
+            raise ChatTurnStateError(
+                "Completed response conflicts with stored turn effects."
+            )
+        for stored_action in stored_actions:
+            if (
+                stored_action.action_name != "propose_memory_signal"
+                and stored_action not in response_actions
+            ):
+                raise ChatTurnStateError(
+                    "Completed response omits a stored turn effect."
+                )
 
     @staticmethod
     def _is_aware_datetime(value: object) -> bool:

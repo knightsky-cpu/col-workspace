@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import pytest
 
 from chat_turns import derive_chat_turn_ids
-from schemas import ChatResponse
+from schemas import AgentActionReceipt, ChatResponse, MemoryProposalReceipt
 
 
 def test_derive_chat_turn_ids_hashes_key_and_bounds_message_ids() -> None:
@@ -67,6 +67,38 @@ def test_chat_turn_contract_values_drive_valid_claim() -> None:
     assert claim.lease_expires_at is expires_at
     with pytest.raises(FrozenInstanceError):
         claim.resumed = True  # type: ignore[misc]
+
+
+def test_resumed_chat_turn_claim_carries_typed_precompleted_effects() -> None:
+    request = chat_turns.ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Remember my preference.",
+    )
+    action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = MemoryProposalReceipt(
+        proposal_id="response_length--proposal-1",
+        category="response_length",
+        proposed_value="concise",
+        expires_at=datetime(2026, 8, 21, 12, 0, tzinfo=UTC),
+    )
+
+    claim = chat_turns.ChatTurnClaim(
+        request=request,
+        ids=derive_chat_turn_ids("request-1"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 21, 11, 0, tzinfo=UTC),
+        resumed=True,
+        precompleted_actions=(action,),
+        precompleted_memory_proposals=(proposal,),
+    )
+
+    assert claim.precompleted_actions == (action,)
+    assert claim.precompleted_memory_proposals == (proposal,)
 
 
 def test_chat_turn_replay_carries_validated_response() -> None:

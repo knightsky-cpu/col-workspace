@@ -241,6 +241,93 @@ def test_agent_action_receipt_accepts_governed_proposal_action() -> None:
     assert receipt.action_name == "propose_memory_signal"
 
 
+def test_chat_response_carries_one_governed_memory_proposal() -> None:
+    from schemas import ChatResponse
+
+    response = ChatResponse(
+        response="I created a pending proposal for your review.",
+        actions=[
+            {
+                "action_name": "propose_memory_signal",
+                "status": "completed",
+            }
+        ],
+        memory_proposals=[
+            {
+                "proposal_id": "response_length--proposal-1",
+                "category": "response_length",
+                "proposed_value": "concise",
+                "expires_at": NOW + timedelta(hours=24),
+            }
+        ],
+    )
+
+    assert response.memory_proposals[0].proposal_id == (
+        "response_length--proposal-1"
+    )
+    assert response.model_dump(mode="json")["memory_proposals"] == [
+        {
+            "proposal_id": "response_length--proposal-1",
+            "category": "response_length",
+            "proposed_value": "concise",
+            "expires_at": "2026-08-21T00:00:00Z",
+        }
+    ]
+
+
+def test_chat_response_rejects_more_than_one_memory_proposal() -> None:
+    from schemas import ChatResponse
+
+    receipt = {
+        "proposal_id": "response_length--proposal-1",
+        "category": "response_length",
+        "proposed_value": "concise",
+        "expires_at": NOW + timedelta(hours=24),
+    }
+
+    with pytest.raises(ValidationError):
+        ChatResponse(
+            response="Invalid unbounded proposals.",
+            memory_proposals=[receipt, receipt],
+        )
+
+
+@pytest.mark.parametrize(
+    ("detail", "expected_status"),
+    (
+        ("Agent_Col response failed after a completed action.", 502),
+        ("Agent_Col response timed out after a completed action.", 504),
+    ),
+)
+def test_chat_partial_failure_exposes_only_typed_completed_receipts(
+    detail: str,
+    expected_status: int,
+) -> None:
+    from schemas import ChatPartialFailureResponse
+
+    partial = ChatPartialFailureResponse(
+        detail=detail,
+        actions=[
+            {
+                "action_name": "propose_memory_signal",
+                "status": "completed",
+            }
+        ],
+        memory_proposals=[
+            {
+                "proposal_id": "response_length--proposal-1",
+                "category": "response_length",
+                "proposed_value": "concise",
+                "expires_at": NOW + timedelta(hours=24),
+            }
+        ],
+    )
+
+    assert expected_status in {502, 504}
+    assert partial.actions[0].status == "completed"
+    assert len(partial.memory_proposals) == 1
+
+
 def test_adaptation_receipt_accepts_only_provided_to_model_status() -> None:
     from schemas import AdaptationReceipt
 

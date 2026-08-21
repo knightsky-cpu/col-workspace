@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 
-from schemas import ChatResponse, MemoryDecisionRequest
+from schemas import (
+    AgentActionReceipt,
+    ChatResponse,
+    MemoryDecisionRequest,
+    MemoryProposalReceipt,
+)
 
 
 CHAT_TURN_SCHEMA_VERSION: Literal["1.0"] = "1.0"
@@ -63,6 +68,8 @@ class ChatTurnClaim:
     owner_token: str
     lease_expires_at: datetime
     resumed: bool
+    precompleted_actions: tuple[AgentActionReceipt, ...] = ()
+    precompleted_memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

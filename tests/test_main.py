@@ -1,5 +1,5 @@
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -24,9 +24,12 @@ from database import (
     MemoryProposalConflictError,
     MemoryProposalExpiredError,
     MemoryProposalNotFoundError,
+    MemoryProposalOriginConflictError,
+    MemoryProposalStateError,
     MemorySignalConflictError,
     MemorySignalNotFoundError,
 )
+from memory_proposals import ProposalTurnLease
 from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
@@ -37,6 +40,7 @@ from schemas import (
     MemoryDecisionRequest,
     MemoryEvent,
     MemoryProposal,
+    MemoryProposalReceipt,
     SynthesisBlueprint,
 )
 from supervisor_runtime import (
@@ -127,6 +131,7 @@ VALID_BLUEPRINT_PAYLOAD = {
 }
 
 MEMORY_NOW = datetime(2026, 8, 20, 23, 0, tzinfo=UTC)
+DEFAULT_TURN_ID = "b" * 64
 
 
 def make_chat_turn_claim(
@@ -144,13 +149,22 @@ def make_chat_turn_claim(
             memory_decision=memory_decision,
         ),
         ids=ChatTurnIds(
-            turn_id="turn-id-1",
-            user_message_id="turn--turn-id-1--user",
-            model_message_id="turn--turn-id-1--model",
+            turn_id=DEFAULT_TURN_ID,
+            user_message_id=f"turn--{DEFAULT_TURN_ID}--user",
+            model_message_id=f"turn--{DEFAULT_TURN_ID}--model",
         ),
         owner_token=owner_token,
         lease_expires_at=MEMORY_NOW + timedelta(seconds=120),
         resumed=resumed,
+    )
+
+
+def make_memory_proposal_receipt() -> MemoryProposalReceipt:
+    return MemoryProposalReceipt(
+        proposal_id="response_length--proposal-1",
+        category="response_length",
+        proposed_value="concise",
+        expires_at=MEMORY_NOW + timedelta(hours=24),
     )
 
 
@@ -171,6 +185,7 @@ class FakeMemoryEngine:
     chat_turn_error: Exception | None = None
     renewed_claim: ChatTurnClaim | None = None
     renew_error: Exception | None = None
+    released_claim: ChatTurnClaim | None = None
     release_error: Exception | None = None
     complete_error: Exception | None = None
     claim_calls: list[tuple[ChatTurnRequest, str, datetime]] = field(
@@ -184,6 +199,9 @@ class FakeMemoryEngine:
     )
     complete_calls: list[
         tuple[ChatTurnClaim, ChatResponse, datetime]
+    ] = field(default_factory=list)
+    decision_action_calls: list[
+        tuple[ChatTurnClaim, AgentActionReceipt, datetime]
     ] = field(default_factory=list)
     closed: bool = False
 
@@ -258,11 +276,12 @@ class FakeMemoryEngine:
         claim: ChatTurnClaim,
         *,
         observed_at: datetime,
-    ) -> None:
+    ) -> ChatTurnClaim:
         self.release_calls.append((claim, observed_at))
         self.events.append(("release_chat_turn",))
         if self.release_error is not None:
             raise self.release_error
+        return self.released_claim or claim
 
     async def complete_chat_turn(
         self,
@@ -275,6 +294,20 @@ class FakeMemoryEngine:
         self.events.append(("complete_chat_turn",))
         if self.complete_error is not None:
             raise self.complete_error
+
+    async def record_chat_turn_decision_action(
+        self,
+        claim: ChatTurnClaim,
+        action: AgentActionReceipt,
+        *,
+        observed_at: datetime,
+    ) -> ChatTurnClaim:
+        self.decision_action_calls.append((claim, action, observed_at))
+        self.events.append(("record_chat_turn_decision_action",))
+        return replace(
+            claim,
+            precompleted_actions=(*claim.precompleted_actions, action),
+        )
 
     def close(self) -> None:
         self.closed = True
@@ -324,6 +357,7 @@ class FakeSupervisorRuntime:
     response_text: str = "Generated answer"
     error: Exception | None = None
     calls: list[SupervisorTurnContext] = field(default_factory=list)
+    turn_result: SupervisorTurnResult | None = None
 
     async def run_turn(
         self,
@@ -333,6 +367,8 @@ class FakeSupervisorRuntime:
         self.events.append(("supervisor",))
         if self.error is not None:
             raise self.error
+        if self.turn_result is not None:
+            return self.turn_result
         return SupervisorTurnResult(response=self.response_text)
 
 
@@ -410,6 +446,7 @@ class ServiceState:
     synthesis_service: FakeSynthesisApplicationService
     supervisor: FakeSupervisorRuntime
     memory_service: FakeTrustedMemoryService
+    supervisor_memory_services: list[object]
 
 
 @pytest.fixture
@@ -493,6 +530,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             profile=approved_profile,
         ),
     )
+    supervisor_memory_services: list[object] = []
     state = ServiceState(
         events,
         database,
@@ -500,6 +538,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         synthesis_service,
         supervisor,
         memory_service,
+        supervisor_memory_services,
     )
 
     def create_synthesis_service(**kwargs: object) -> object:
@@ -518,10 +557,17 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         create_synthesis_service,
         raising=False,
     )
+    def create_supervisor_app(
+        *,
+        memory_service: object | None = None,
+    ) -> object:
+        supervisor_memory_services.append(memory_service)
+        return object()
+
     monkeypatch.setattr(
         main,
         "create_supervisor_app",
-        lambda: object(),
+        create_supervisor_app,
         raising=False,
     )
     monkeypatch.setattr(
@@ -898,6 +944,16 @@ async def test_lifespan_exposes_supervisor_runtime(
 
 
 @pytest.mark.asyncio
+async def test_lifespan_injects_shared_memory_service_into_supervisor(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        assert service_state.supervisor_memory_services == [
+            service_state.memory_service
+        ]
+
+
+@pytest.mark.asyncio
 async def test_lifespan_exposes_synthesis_application_service(
     service_state: ServiceState,
 ) -> None:
@@ -1191,10 +1247,11 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
                 "action_name": "approve_memory_signal",
                 "status": "completed",
             }
-        ],
-        "artifacts": [],
-        "citations": [],
-        "adaptations": [
+            ],
+            "artifacts": [],
+            "citations": [],
+            "memory_proposals": [],
+            "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
                 "category": "response_length",
@@ -1245,6 +1302,11 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
     assert "[APPROVED_COLLABORATION_PREFERENCES]" in context_text
     assert "response_length=concise" in context_text
     assert "response_length--proposal-1" not in context_text
+    assert "[SESSION_HISTORY_DATA]" in context_text
+    assert context_text.index("Earlier question") < context_text.index(
+        "Earlier answer"
+    )
+    assert "New question" not in context_text
     assert "Yes, remember that preference." not in context_text
 
 
@@ -1411,6 +1473,7 @@ async def test_chat_uses_context_and_persists_both_messages(
         "actions": [],
         "artifacts": [],
         "citations": [],
+        "memory_proposals": [],
         "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
@@ -1446,11 +1509,56 @@ async def test_chat_uses_context_and_persists_both_messages(
     assert "[APPROVED_COLLABORATION_PREFERENCES]" in context_text
     assert "response_length=concise" in context_text
     assert "response_length--proposal-1" not in context_text
-    assert "[SESSION_HISTORY_DATA]" in context_text
-    assert context_text.index("Earlier question") < context_text.index(
-        "Earlier answer"
+
+
+@pytest.mark.asyncio
+async def test_headerless_chat_returns_proposal_from_persisted_source_message(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    proposal = MemoryProposalReceipt(
+        proposal_id="response_length--proposal-1",
+        category="response_length",
+        proposed_value="concise",
+        expires_at=MEMORY_NOW + timedelta(hours=24),
     )
-    assert "New question" not in context_text
+    service_state.supervisor.turn_result = SupervisorTurnResult(
+        response="I created a pending proposal for your review.",
+        actions=(
+            AgentActionReceipt(
+                action_name="propose_memory_signal",
+                status="completed",
+            ),
+        ),
+        memory_proposals=(proposal,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Please remember that I prefer concise responses.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["actions"] == [
+        {
+            "action_name": "propose_memory_signal",
+            "status": "completed",
+        }
+    ]
+    assert response.json()["memory_proposals"] == [
+        proposal.model_dump(mode="json")
+    ]
+    context = service_state.supervisor.calls[0]
+    assert context.source_message_id == "user-message-1"
+    assert context.memory_decision_present is False
+    assert context.turn_lease is None
+    assert context.precompleted_actions == ()
+    assert context.precompleted_memory_proposals == ()
 
 
 @pytest.mark.parametrize(
@@ -1671,7 +1779,7 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
             "history",
             "session-1",
             20,
-            "turn--turn-id-1--user",
+            f"turn--{DEFAULT_TURN_ID}--user",
         ),
     }
     assert service_state.events[3:] == [
@@ -1709,6 +1817,72 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
 
 
 @pytest.mark.asyncio
+async def test_resumed_idempotent_chat_supplies_owned_precompleted_effects(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    turn_id = "a" * 64
+    action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = MemoryProposalReceipt(
+        proposal_id="response_length--proposal-1",
+        category="response_length",
+        proposed_value="concise",
+        expires_at=MEMORY_NOW + timedelta(hours=24),
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember my preference.",
+        ),
+        ids=ChatTurnIds(
+            turn_id=turn_id,
+            user_message_id=f"turn--{turn_id}--user",
+            model_message_id=f"turn--{turn_id}--model",
+        ),
+        owner_token="owner-token-1",
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=120),
+        resumed=True,
+        precompleted_actions=(action,),
+        precompleted_memory_proposals=(proposal,),
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.supervisor.turn_result = SupervisorTurnResult(
+        response="Your proposal remains pending.",
+        actions=(action,),
+        memory_proposals=(proposal,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "resumed-proposal-key"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Remember my preference.",
+        },
+    )
+
+    assert response.status_code == 200
+    context = service_state.supervisor.calls[0]
+    assert context.source_message_id == f"turn--{turn_id}--user"
+    assert context.turn_lease == ProposalTurnLease(
+        turn_id=turn_id,
+        owner_token="owner-token-1",
+    )
+    assert context.precompleted_actions == (action,)
+    assert context.precompleted_memory_proposals == (proposal,)
+    assert response.json()["memory_proposals"] == [
+        proposal.model_dump(mode="json")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_chat_claimed_turn_starts_context_reads_concurrently(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -1735,7 +1909,7 @@ async def test_chat_claimed_turn_starts_context_reads_concurrently(
     ) -> list[dict[str, object]]:
         assert session_id == "session-1"
         assert limit == 20
-        assert exclude_message_id == "turn--turn-id-1--user"
+        assert exclude_message_id == f"turn--{DEFAULT_TURN_ID}--user"
         history_started.set()
         await release.wait()
         return []
@@ -1788,15 +1962,23 @@ async def test_chat_idempotent_decision_uses_deterministic_confirmation_message_
             memory_decision=memory_decision,
         ),
         ids=ChatTurnIds(
-            turn_id="decision-turn-id",
-            user_message_id="turn--decision-turn-id--user",
-            model_message_id="turn--decision-turn-id--model",
+            turn_id="c" * 64,
+            user_message_id=f"turn--{'c' * 64}--user",
+            model_message_id=f"turn--{'c' * 64}--model",
         ),
         owner_token="decision-owner-token",
         lease_expires_at=MEMORY_NOW + timedelta(seconds=120),
         resumed=False,
     )
     service_state.database.chat_turn_result = claim
+    completed_action = AgentActionReceipt(
+        action_name="approve_memory_signal",
+        status="completed",
+    )
+    service_state.supervisor.turn_result = SupervisorTurnResult(
+        response="Generated answer",
+        actions=(completed_action,),
+    )
 
     response = await client.post(
         "/api/chat",
@@ -1834,9 +2016,10 @@ async def test_chat_idempotent_decision_uses_deterministic_confirmation_message_
             "history",
             "confirmation-session",
             20,
-            "turn--decision-turn-id--user",
+            f"turn--{'c' * 64}--user",
         ),
         ("memory_decision",),
+        ("record_chat_turn_decision_action",),
         ("renew_chat_turn_lease",),
         ("supervisor",),
         ("complete_chat_turn",),
@@ -1848,9 +2031,18 @@ async def test_chat_idempotent_decision_uses_deterministic_confirmation_message_
             decision="approve",
             confirmation_channel="chat_decision",
             confirmation_session_id="confirmation-session",
-            confirmation_message_id="turn--decision-turn-id--user",
+            confirmation_message_id=f"turn--{'c' * 64}--user",
         )
     ]
+    assert len(service_state.database.decision_action_calls) == 1
+    recorded_claim, recorded_action, recorded_at = (
+        service_state.database.decision_action_calls[0]
+    )
+    assert recorded_claim == claim
+    decision_result = service_state.memory_service.decision_result
+    assert decision_result is not None
+    assert recorded_action == decision_result.action
+    assert recorded_at.tzinfo is not None
     assert not any(event[0] == "save" for event in service_state.events)
     assert len(service_state.database.complete_calls) == 1
     completed_response = service_state.database.complete_calls[0][1]
@@ -2010,6 +2202,166 @@ async def test_chat_releases_claim_after_supervisor_failure(
     assert service_state.database.release_calls[0][1].tzinfo is not None
     assert service_state.database.complete_calls == []
     assert not any(event[0] == "save" for event in service_state.events)
+
+
+@pytest.mark.parametrize(
+    ("supervisor_error_type", "expected_status", "expected_detail"),
+    (
+        (
+            SupervisorRuntimeError,
+            502,
+            "Agent_Col response failed after a completed action.",
+        ),
+        (
+            SupervisorTimeoutError,
+            504,
+            "Agent_Col response timed out after a completed action.",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_headerless_chat_returns_completed_effects_on_provider_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    supervisor_error_type: type[SupervisorRuntimeError],
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = make_memory_proposal_receipt()
+    service_state.supervisor.error = supervisor_error_type(
+        "private provider failure",
+        actions=(action,),
+        memory_proposals=(proposal,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Remember this preference.",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {
+        "detail": expected_detail,
+        "actions": [action.model_dump(mode="json")],
+        "memory_proposals": [proposal.model_dump(mode="json")],
+    }
+    assert not any(
+        event[0] == "save" and event[2] == "model"
+        for event in service_state.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_idempotent_failure_recovers_completed_effects_from_turn_ledger(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = make_memory_proposal_receipt()
+    claim = make_chat_turn_claim(resumed=True)
+    service_state.database.chat_turn_result = claim
+    service_state.database.released_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_memory_proposals=(proposal,),
+    )
+    service_state.supervisor.error = SupervisorRuntimeError(
+        "private provider failure"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "recover-completed-effects"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Agent_Col response failed after a completed action.",
+        "actions": [action.model_dump(mode="json")],
+        "memory_proposals": [proposal.model_dump(mode="json")],
+    }
+    assert len(service_state.database.release_calls) == 1
+    assert service_state.database.complete_calls == []
+
+
+@pytest.mark.parametrize(
+    ("cause", "expected_status", "expected_detail"),
+    (
+        (
+            MemoryProposalOriginConflictError("private origin conflict"),
+            409,
+            "Memory proposal state conflicts with this request.",
+        ),
+        (
+            MemoryProposalConflictError("private category conflict"),
+            409,
+            "Memory proposal state conflicts with this request.",
+        ),
+        (
+            MemoryProposalStateError("private stored state"),
+            500,
+            "Memory proposal state is invalid.",
+        ),
+        (
+            main.MemoryEngineError("private database failure"),
+            500,
+            "Database operation failed.",
+        ),
+        (
+            ChatTurnOwnershipError("private turn ownership"),
+            409,
+            (
+                "Chat turn ownership changed; retry with the same "
+                "idempotency key."
+            ),
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_chat_maps_governed_proposal_tool_failures_by_typed_cause(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+    cause: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    runtime_error = SupervisorRuntimeError("private runtime wrapper")
+    runtime_error.__cause__ = cause
+    service_state.supervisor.error = runtime_error
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Remember this preference.",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+    assert str(cause) not in caplog.text
+    assert "private runtime wrapper" not in caplog.text
 
 
 @pytest.mark.parametrize(

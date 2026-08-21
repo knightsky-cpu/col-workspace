@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
@@ -20,7 +21,12 @@ from chat_turns import (
     derive_chat_turn_ids,
 )
 from database import MemoryEngine, MemoryEngineError
-from schemas import ChatResponse, MemoryDecisionRequest
+from schemas import (
+    AgentActionReceipt,
+    ChatResponse,
+    MemoryDecisionRequest,
+    MemoryProposalReceipt,
+)
 
 
 NOW = datetime(2026, 8, 20, 15, 0, tzinfo=UTC)
@@ -109,6 +115,7 @@ def turn_document(
                 "actions": [],
                 "artifacts": [],
                 "citations": [],
+                "memory_proposals": [],
                 "adaptations": [],
                 "completed_at": NOW - timedelta(seconds=1),
             }
@@ -120,6 +127,22 @@ def user_message_document(
     text: str = "Remember one logical turn.",
 ) -> dict[str, object]:
     return {"role": "user", "text": text, "timestamp": NOW}
+
+
+def proposal_action_document() -> dict[str, str]:
+    return {
+        "action_name": "propose_memory_signal",
+        "status": "completed",
+    }
+
+
+def proposal_receipt_document() -> dict[str, object]:
+    return {
+        "proposal_id": "response_length--proposal-1",
+        "category": "response_length",
+        "proposed_value": "concise",
+        "expires_at": NOW + timedelta(hours=24),
+    }
 
 
 def claimed_store(
@@ -338,6 +361,49 @@ async def test_claim_chat_turn_reclaims_expired_lease(
 
 
 @pytest.mark.asyncio
+async def test_reclaimed_chat_turn_recovers_precompleted_proposal_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(
+        ids,
+        lease_expires_at=NOW - timedelta(seconds=1),
+    )
+    stored_turn["actions"] = [proposal_action_document()]
+    stored_turn["memory_proposals"] = [proposal_receipt_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    monkeypatch.setattr(database.secrets, "token_hex", lambda _: "new-owner")
+
+    claim = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert claim.precompleted_actions == (
+        AgentActionReceipt(
+            action_name="propose_memory_signal",
+            status="completed",
+        ),
+    )
+    assert claim.precompleted_memory_proposals == (
+        MemoryProposalReceipt.model_validate(proposal_receipt_document()),
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_replays_completed_response_without_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -375,6 +441,53 @@ async def test_claim_chat_turn_replays_completed_response_without_writes(
     assert result == ChatTurnReplay(
         response=ChatResponse(response="Durable answer.")
     )
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_completed_chat_turn_replay_preserves_memory_proposal_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(ids, status="completed")
+    stored_turn["actions"] = [proposal_action_document()]
+    stored_turn["memory_proposals"] = [proposal_receipt_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"role": "model", "text": "Durable answer.", "timestamp": NOW},
+        )
+    )
+
+    result = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert isinstance(result, ChatTurnReplay)
+    assert result.response.actions == [
+        AgentActionReceipt(
+            action_name="propose_memory_signal",
+            status="completed",
+        )
+    ]
+    assert result.response.memory_proposals == [
+        MemoryProposalReceipt.model_validate(proposal_receipt_document())
+    ]
     store.transaction.set.assert_not_called()
 
 
@@ -501,6 +614,41 @@ async def test_claim_chat_turn_preserves_firestore_failure_as_cause(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid_effect",
+    ("invalid_action", "proposal_without_action"),
+)
+async def test_chat_turn_operations_reject_invalid_claim_effects_before_firestore(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_effect: str,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = claimed_store()
+    if invalid_effect == "invalid_action":
+        invalid_claim = replace(
+            claim,
+            precompleted_actions=(cast(AgentActionReceipt, object()),),
+        )
+    else:
+        invalid_claim = replace(
+            claim,
+            precompleted_memory_proposals=(
+                MemoryProposalReceipt.model_validate(
+                    proposal_receipt_document()
+                ),
+            ),
+        )
+
+    with pytest.raises(ValueError, match="claim effects"):
+        await MemoryEngine(store.client).renew_chat_turn_lease(
+            invalid_claim,
+            observed_at=NOW,
+        )
+
+    store.turn_ref.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_renew_chat_turn_lease_extends_matching_unexpired_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -561,6 +709,36 @@ async def test_release_chat_turn_expires_matching_lease(
             "updated_at": firestore.SERVER_TIMESTAMP,
         },
         merge=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_release_chat_turn_recovers_completed_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = claimed_store()
+    stored_turn = turn_document(
+        claim.ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["actions"] = [proposal_action_document()]
+    stored_turn["memory_proposals"] = [proposal_receipt_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+
+    released = await MemoryEngine(store.client).release_chat_turn(
+        claim,
+        observed_at=NOW,
+    )
+
+    assert released.precompleted_actions == (
+        AgentActionReceipt.model_validate(proposal_action_document()),
+    )
+    assert released.precompleted_memory_proposals == (
+        MemoryProposalReceipt.model_validate(proposal_receipt_document()),
     )
 
 
@@ -633,6 +811,7 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
                 "actions": [],
                 "artifacts": [],
                 "citations": [],
+                "memory_proposals": [],
                 "adaptations": [],
                 "completed_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,
@@ -642,6 +821,107 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
             merge=True,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_decision_action_persists_before_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    decision = MemoryDecisionRequest(
+        proposal_id="response_length--proposal-1",
+        decision="approve",
+    )
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Yes, remember it.",
+        memory_decision=decision,
+    )
+    claim = ChatTurnClaim(
+        request=request,
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    stored_turn = turn_document(
+        ids,
+        owner="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+    )
+    stored_turn["memory_decision"] = decision.model_dump(mode="json")
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    action = AgentActionReceipt(
+        action_name="approve_memory_signal",
+        status="completed",
+    )
+
+    refreshed = await MemoryEngine(
+        store.client
+    ).record_chat_turn_decision_action(
+        claim,
+        action,
+        observed_at=NOW,
+    )
+
+    assert refreshed.precompleted_actions == (action,)
+    assert refreshed.precompleted_memory_proposals == ()
+    store.transaction.set.assert_called_once_with(
+        store.turn_ref,
+        {
+            "actions": [action.model_dump(mode="python")],
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+
+
+@pytest.mark.parametrize("final_effect", ("omitted", "conflicting"))
+@pytest.mark.asyncio
+async def test_complete_chat_turn_rejects_changed_precompleted_proposal_effect(
+    monkeypatch: pytest.MonkeyPatch,
+    final_effect: str,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = claimed_store()
+    stored_turn = turn_document(
+        claim.ids,
+        owner=claim.owner_token,
+        lease_expires_at=NOW + timedelta(seconds=30),
+    )
+    stored_turn["actions"] = [proposal_action_document()]
+    stored_turn["memory_proposals"] = [proposal_receipt_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    if final_effect == "omitted":
+        response = ChatResponse(response="Unsafe omission.")
+    else:
+        conflicting_receipt = proposal_receipt_document()
+        conflicting_receipt["proposed_value"] = "detailed"
+        response = ChatResponse(
+            response="Unsafe substitution.",
+            actions=[proposal_action_document()],
+            memory_proposals=[conflicting_receipt],
+        )
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(store.client).complete_chat_turn(
+            claim,
+            response,
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
 
 
 @pytest.mark.asyncio

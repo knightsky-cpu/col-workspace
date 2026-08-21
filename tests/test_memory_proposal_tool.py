@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from google.adk.sessions import State
 from google.adk.tools import FunctionTool
 
 from schemas import AgentActionReceipt, MemoryProposalReceipt
@@ -84,7 +85,7 @@ def test_proposal_tool_exposes_only_candidate_fields_to_model() -> None:
 
 
 @pytest.mark.asyncio
-async def test_proposal_tool_builds_pending_result_from_server_context() -> None:
+async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
     from memory_proposal_tool import create_propose_memory_signal_tool
 
     service = RecordingMemoryService()
@@ -95,7 +96,9 @@ async def test_proposal_tool_builds_pending_result_from_server_context() -> None
             "category": "response_length",
             "proposed_value": "concise",
         },
-        tool_context=SimpleNamespace(state=tool_context_state()),
+        tool_context=SimpleNamespace(
+            state=State(value=tool_context_state(), delta={})
+        ),
     )
 
     assert result == {

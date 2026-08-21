@@ -5,10 +5,11 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Annotated, NoReturn
+from typing import Annotated, NoReturn, TypeVar
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
 
@@ -29,18 +30,24 @@ from database import (
     MemoryProposalConflictError,
     MemoryProposalExpiredError,
     MemoryProposalNotFoundError,
+    MemoryProposalOriginConflictError,
+    MemoryProposalStateError,
     MemorySignalConflictError,
     MemorySignalNotFoundError,
 )
 from memory_context import MemoryContextRenderer
+from memory_proposals import ProposalTurnLease
 from schemas import (
     AdaptationReceipt,
+    AgentActionReceipt,
+    ChatPartialFailureResponse,
     ChatRequest,
     ChatResponse,
     CollaborationProfile,
     IdentifierStr,
     MemoryInspectionResponse,
     MemoryMutationResponse,
+    MemoryProposalReceipt,
     SynthesisRequest,
     SynthesisResponse,
 )
@@ -69,6 +76,7 @@ from trusted_memory_service import (
 
 
 logger = logging.getLogger(__name__)
+ReceiptT = TypeVar("ReceiptT")
 
 load_dotenv()
 
@@ -165,9 +173,9 @@ def _raise_chat_turn_operation_http_error(
 async def _release_chat_turn_safely(
     database: MemoryEngine,
     claim: ChatTurnClaim,
-) -> None:
+) -> ChatTurnClaim | None:
     try:
-        await database.release_chat_turn(
+        return await database.release_chat_turn(
             claim,
             observed_at=datetime.now(UTC),
         )
@@ -181,6 +189,108 @@ async def _release_chat_turn_safely(
             "Chat turn lease release failed (%s).",
             type(exc).__name__,
         )
+        return None
+
+
+def _merge_receipts(
+    *groups: tuple[ReceiptT, ...],
+) -> tuple[ReceiptT, ...]:
+    merged: list[ReceiptT] = []
+    for group in groups:
+        for receipt in group:
+            if receipt not in merged:
+                merged.append(receipt)
+    return tuple(merged)
+
+
+def _partial_failure_response(
+    *,
+    status_code: int,
+    detail: str,
+    decision_actions: tuple[AgentActionReceipt, ...],
+    runtime_error: SupervisorRuntimeError,
+    released_claim: ChatTurnClaim | None,
+) -> JSONResponse | None:
+    released_actions = (
+        released_claim.precompleted_actions
+        if released_claim is not None
+        else ()
+    )
+    released_proposals = (
+        released_claim.precompleted_memory_proposals
+        if released_claim is not None
+        else ()
+    )
+    actions = _merge_receipts(
+        decision_actions,
+        runtime_error.actions,
+        released_actions,
+    )
+    proposals = _merge_receipts(
+        runtime_error.memory_proposals,
+        released_proposals,
+    )
+    if not actions:
+        return None
+    proposal_actions = tuple(
+        action
+        for action in actions
+        if action.action_name == "propose_memory_signal"
+    )
+    if (
+        len(proposals) > 1
+        or bool(proposal_actions) != bool(proposals)
+        or (proposals and len(proposal_actions) != 1)
+    ):
+        logger.error("Completed chat-turn effects are inconsistent.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Chat turn state is invalid.",
+        )
+    response = ChatPartialFailureResponse(
+        detail=detail,
+        actions=list(actions),
+        memory_proposals=list(proposals),
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content=response.model_dump(mode="json"),
+    )
+
+
+def _raise_governed_tool_cause_http_error(
+    runtime_error: SupervisorRuntimeError,
+) -> None:
+    cause = runtime_error.__cause__
+    visited: set[int] = set()
+    for _ in range(8):
+        if cause is None or id(cause) in visited:
+            return
+        visited.add(id(cause))
+        if isinstance(
+            cause,
+            (MemoryProposalOriginConflictError, MemoryProposalConflictError),
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Memory proposal state conflicts with this request."
+                ),
+            ) from runtime_error
+        if isinstance(cause, MemoryProposalStateError):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Memory proposal state is invalid.",
+            ) from runtime_error
+        if isinstance(
+            cause,
+            (ChatTurnOwnershipError, ChatTurnStateError, MemoryEngineError),
+        ):
+            _raise_chat_turn_operation_http_error(
+                cause,
+                "governed tool execution",
+            )
+        cause = cause.__cause__
 
 
 @asynccontextmanager
@@ -197,7 +307,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             database=database,
         )
         memory_service = TrustedMemoryService(database=database)
-        supervisor = SupervisorRuntime.from_app(create_supervisor_app())
+        supervisor = SupervisorRuntime.from_app(
+            create_supervisor_app(memory_service=memory_service)
+        )
     except Exception:
         try:
             if database is not None:
@@ -550,6 +662,24 @@ async def chat(
             ) from exc
         profile = decision_result.profile
         decision_actions = (decision_result.action,)
+        if chat_turn_claim is not None:
+            try:
+                chat_turn_claim = (
+                    await database.record_chat_turn_decision_action(
+                        chat_turn_claim,
+                        decision_result.action,
+                        observed_at=datetime.now(UTC),
+                    )
+                )
+            except (
+                ChatTurnOwnershipError,
+                ChatTurnStateError,
+                MemoryEngineError,
+            ) as exc:
+                _raise_chat_turn_operation_http_error(
+                    exc,
+                    "decision action recording",
+                )
 
     if payload.memory_decision is not None:
         try:
@@ -588,11 +718,49 @@ async def chat(
                 user_id=payload.user_id,
                 message=payload.message,
                 model_input_context=model_input_context,
+                source_message_id=user_message_id,
+                memory_decision_present=(
+                    payload.memory_decision is not None
+                ),
+                turn_lease=(
+                    ProposalTurnLease(
+                        turn_id=chat_turn_claim.ids.turn_id,
+                        owner_token=chat_turn_claim.owner_token,
+                    )
+                    if chat_turn_claim is not None
+                    else None
+                ),
+                precompleted_actions=(
+                    chat_turn_claim.precompleted_actions
+                    if chat_turn_claim is not None
+                    else ()
+                ),
+                precompleted_memory_proposals=(
+                    chat_turn_claim.precompleted_memory_proposals
+                    if chat_turn_claim is not None
+                    else ()
+                ),
             )
         )
     except SupervisorTimeoutError as exc:
+        released_claim = None
         if chat_turn_claim is not None:
-            await _release_chat_turn_safely(database, chat_turn_claim)
+            released_claim = await _release_chat_turn_safely(
+                database,
+                chat_turn_claim,
+            )
+        _raise_governed_tool_cause_http_error(exc)
+        partial_response = _partial_failure_response(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=(
+                "Agent_Col response timed out after a completed action."
+            ),
+            decision_actions=decision_actions,
+            runtime_error=exc,
+            released_claim=released_claim,
+        )
+        if partial_response is not None:
+            return partial_response
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="Agent_Col response timed out.",
@@ -602,8 +770,22 @@ async def chat(
             "Agent_Col response failed (%s).",
             type(exc).__name__,
         )
+        released_claim = None
         if chat_turn_claim is not None:
-            await _release_chat_turn_safely(database, chat_turn_claim)
+            released_claim = await _release_chat_turn_safely(
+                database,
+                chat_turn_claim,
+            )
+        _raise_governed_tool_cause_http_error(exc)
+        partial_response = _partial_failure_response(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Agent_Col response failed after a completed action.",
+            decision_actions=decision_actions,
+            runtime_error=exc,
+            released_claim=released_claim,
+        )
+        if partial_response is not None:
+            return partial_response
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Agent_Col response failed.",
@@ -611,9 +793,10 @@ async def chat(
 
     chat_response = ChatResponse(
         response=result.response,
-        actions=list((*decision_actions, *result.actions)),
+        actions=list(_merge_receipts(decision_actions, result.actions)),
         artifacts=list(result.artifacts),
         citations=list(result.citations),
+        memory_proposals=list(result.memory_proposals),
         adaptations=list(adaptations),
     )
     if chat_turn_claim is None:

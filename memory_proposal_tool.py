@@ -76,7 +76,7 @@ def _server_command(
     tool_context: ToolContext,
 ) -> ProposeMemorySignalCommand:
     state = getattr(tool_context, "state", None)
-    if not isinstance(state, Mapping):
+    if not callable(getattr(state, "get", None)):
         raise MemoryProposalToolConfigurationError(
             "Memory proposal tool context is invalid."
         )
