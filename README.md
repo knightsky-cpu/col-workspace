@@ -1,9 +1,10 @@
 # Agent_Col
 
 Agent_Col is a Collaborative Partner for the Devpost All Things Agentic
-Hackathon. It turns messy brainstorming, academic rubrics, notes, and project
-documents into structured software-project blueprints, then uses explicit
-feedback to adapt later recommendations.
+Hackathon. It is a persistent AI collaborator that uses user-approved working
+preferences and low-sensitivity identity context to adapt across sessions.
+Structured project synthesis is one demonstrated collaboration workflow, not
+the complete identity of the system.
 
 ## Current status
 
@@ -15,15 +16,21 @@ Implemented today:
 - Gemini 3.6 Flash through the Google GenAI SDK;
 - asynchronous Firestore message and profile persistence;
 - atomic session/message writes;
+- optional retry-safe chat turns with durable claim, replay, conflict, lease,
+  and atomic-completion behavior;
 - project-owned, atomically persisted structured synthesis blueprints;
 - a hybrid ADK supervisor runtime controlling project-aware chat;
 - strict local schema and semantic validation for blueprint version 2.0;
-- offline API, orchestration, schema, and database tests.
+- governed memory proposals, approval/rejection, provenance, correction,
+  revocation, bounded inspection, and hard deletion;
+- cross-session chat use of approved memory with explicit adaptation receipts;
+- offline API, orchestration, schema, database, and smoke-runner tests.
 
 Not implemented yet:
 
 - supervisor tool invocation;
-- feedback-driven profile learning;
+- supervisor extraction and creation of memory proposals from ordinary chat;
+- governed-memory personalization for structured synthesis;
 - durable background jobs;
 - the browser workspace;
 - authentication and public Cloud Run deployment.
@@ -46,22 +53,17 @@ The intended judge-facing workflow is:
 - Python and FastAPI
 - Google GenAI SDK and Gemini 3.6 Flash
 - Google Cloud Firestore
-- Google Cloud Tasks for durable asynchronous synthesis
-- Docker and Google Cloud Run
-- HTML, static CSS or TailwindCSS, and Vanilla JavaScript
+- Google Cloud Tasks for the target durable asynchronous synthesis phase
+- Docker and Google Cloud Run for the target deployment phase
+- HTML, static CSS or TailwindCSS, and Vanilla JavaScript for the target browser
+  workspace
 
-See [Architecture](docs/architecture.md) for component and data-flow details.
+See [Architecture](docs/architecture.md) for current and target data flows.
 
 ## Local setup
 
-Prerequisites:
-
-- Python 3.13 or newer
-- a Google Cloud project with Firestore in Native mode
-- Google Cloud Application Default Credentials
-- a Gemini API key
-
-Create the environment and install dependencies:
+The complete reproducible setup is in
+[Local development setup](docs/development/local-setup.md). The short path is:
 
 ```bash
 python3 -m venv venv
@@ -93,13 +95,26 @@ uvicorn main:app --reload
 
 The health endpoint is available at `http://127.0.0.1:8000/`.
 
+With Uvicorn running, verify the durable chat-turn boundary from another
+activated terminal:
+
+```bash
+python3 smoke_test_chat_idempotency.py
+```
+
+Success reports `first=200 replay=200 conflict=409 replay_equal=true` and safe
+Firestore locators. It does not print the key, prompts, or model response.
+
 ## Tests
 
-Run the automated suite:
+Run the offline automated suite:
 
 ```bash
 pytest
 ```
+
+See [Testing](docs/development/testing.md) for focused commands, test-layer
+boundaries, and live smoke checks.
 
 ## Security status
 
@@ -110,6 +125,10 @@ a public Cloud Run service.
 ## Submission material
 
 - [Architecture](docs/architecture.md)
+- [Chat turn idempotency](docs/design/turn-idempotency.md)
+- [Local development setup](docs/development/local-setup.md)
+- [Testing](docs/development/testing.md)
+- [Troubleshooting](docs/development/troubleshooting.md)
 - [Submission checklist](docs/submission-checklist.md)
 - [Project context](context.md)
 - [Phase 3 design](docs/superpowers/specs/2026-08-19-phase-3-synthesis-engine-design.md)
