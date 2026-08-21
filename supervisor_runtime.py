@@ -8,10 +8,15 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from memory_proposal_tool import (
+    PendingMemoryProposalToolResponse,
+    parse_memory_proposal_tool_response,
+)
 from schemas import (
     AgentActionReceipt,
     ArtifactReference,
     CitationReference,
+    MemoryProposalReceipt,
 )
 from supervisor import SUPERVISOR_APP_NAME
 
@@ -44,6 +49,7 @@ class SupervisorTurnResult:
     actions: tuple[AgentActionReceipt, ...] = ()
     artifacts: tuple[ArtifactReference, ...] = ()
     citations: tuple[CitationReference, ...] = ()
+    memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
 
 
 class SupervisorRuntime:
@@ -66,6 +72,8 @@ class SupervisorRuntime:
         invocation_session_id = uuid4().hex
         session_created = False
         final_responses: list[str] = []
+        proposal_actions: list[AgentActionReceipt] = []
+        memory_proposals: list[MemoryProposalReceipt] = []
         try:
             async with asyncio.timeout(SUPERVISOR_TIMEOUT_SECONDS):
                 await self._session_service.create_session(
@@ -93,6 +101,30 @@ class SupervisorRuntime:
                     new_message=message,
                     run_config=config,
                 ):
+                    for function_response in event.get_function_responses():
+                        if function_response.name != "propose_memory_signal":
+                            continue
+                        parsed = parse_memory_proposal_tool_response(
+                            function_response.response
+                        )
+                        if isinstance(
+                            parsed,
+                            PendingMemoryProposalToolResponse,
+                        ):
+                            if not memory_proposals:
+                                proposal_actions.append(parsed.action)
+                                memory_proposals.append(
+                                    parsed.memory_proposal
+                                )
+                            elif (
+                                proposal_actions != [parsed.action]
+                                or memory_proposals
+                                != [parsed.memory_proposal]
+                            ):
+                                raise SupervisorRuntimeError(
+                                    "Agent_Col produced conflicting memory "
+                                    "proposal receipts."
+                                )
                     if event.is_final_response():
                         text = self._extract_text(event)
                         if text:
@@ -101,7 +133,11 @@ class SupervisorRuntime:
                     raise SupervisorRuntimeError(
                         "Agent_Col did not produce exactly one final response."
                     )
-                return SupervisorTurnResult(response=final_responses[0])
+                return SupervisorTurnResult(
+                    response=final_responses[0],
+                    actions=tuple(proposal_actions),
+                    memory_proposals=tuple(memory_proposals),
+                )
         except TimeoutError as exc:
             logger.error(
                 "Agent_Col invocation failed (%s).",

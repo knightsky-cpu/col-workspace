@@ -21,13 +21,45 @@ class FakeSessionService:
 
 
 class FakeEvent:
-    def __init__(self, text: str | None, final: bool) -> None:
+    def __init__(
+        self,
+        text: str | None,
+        final: bool,
+        function_responses: list[types.FunctionResponse] | None = None,
+    ) -> None:
         parts = [] if text is None else [types.Part.from_text(text=text)]
         self.content = types.Content(role="model", parts=parts)
         self._final = final
+        self._function_responses = function_responses or []
 
     def is_final_response(self) -> bool:
         return self._final
+
+    def get_function_responses(self) -> list[types.FunctionResponse]:
+        return list(self._function_responses)
+
+
+def pending_function_response(
+    *,
+    origin_id: str = "e82366f7699ee2e39bff6a68154e09b7",
+    proposed_value: str = "concise",
+) -> types.FunctionResponse:
+    return types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "pending",
+            "action": {
+                "action_name": "propose_memory_signal",
+                "status": "completed",
+            },
+            "memory_proposal": {
+                "proposal_id": f"response_length--{origin_id}",
+                "category": "response_length",
+                "proposed_value": proposed_value,
+                "expires_at": "2026-08-22T16:00:00Z",
+            },
+        },
+    )
 
 
 @dataclass
@@ -79,6 +111,7 @@ async def test_run_turn_uses_bounded_fresh_session_and_returns_final_text(
     assert result.actions == ()
     assert result.artifacts == ()
     assert result.citations == ()
+    assert result.memory_proposals == ()
     created = sessions.created[0]
     assert created["app_name"] == "agent_col"
     assert created["user_id"] == "user-1"
@@ -95,6 +128,241 @@ async def test_run_turn_uses_bounded_fresh_session_and_returns_final_text(
     assert call["run_config"].max_llm_calls == SUPERVISOR_MAX_LLM_CALLS
     assert SUPERVISOR_MAX_LLM_CALLS == 4
     assert call["run_config"].model_input_context == [history]
+
+
+@pytest.mark.asyncio
+async def test_run_turn_collects_proposal_receipt_only_from_function_response(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    pending_response = types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "pending",
+            "action": {
+                "action_name": "propose_memory_signal",
+                "status": "completed",
+            },
+            "memory_proposal": {
+                "proposal_id": (
+                    "response_length--e82366f7699ee2e39bff6a68154e09b7"
+                ),
+                "category": "response_length",
+                "proposed_value": "concise",
+                "expires_at": "2026-08-22T16:00:00Z",
+            },
+        },
+    )
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    text="I will remember this.",
+                    final=False,
+                    function_responses=[pending_response],
+                ),
+                FakeEvent(text="Proposal is pending.", final=True),
+            ]
+        ),
+        session_service=sessions,
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember that I prefer concise responses.",
+        )
+    )
+
+    assert result.response == "Proposal is pending."
+    assert [action.model_dump(mode="json") for action in result.actions] == [
+        {
+            "action_name": "propose_memory_signal",
+            "status": "completed",
+        }
+    ]
+    assert len(result.memory_proposals) == 1
+    assert result.memory_proposals[0].proposal_id == (
+        "response_length--e82366f7699ee2e39bff6a68154e09b7"
+    )
+    assert len(sessions.deleted) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_turn_deduplicates_identical_proposal_responses() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    response = pending_function_response()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [response]),
+                FakeEvent(None, False, [response]),
+                FakeEvent("Proposal is pending.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember my preference.",
+        )
+    )
+
+    assert len(result.actions) == 1
+    assert len(result.memory_proposals) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_turn_rejects_distinct_proposal_responses() -> None:
+    from supervisor_runtime import (
+        SupervisorRuntime,
+        SupervisorRuntimeError,
+        SupervisorTurnContext,
+    )
+
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [pending_function_response()]),
+                FakeEvent(
+                    None,
+                    False,
+                    [
+                        pending_function_response(
+                            origin_id="b" * 32,
+                            proposed_value="detailed",
+                        )
+                    ],
+                ),
+                FakeEvent("Two proposals were created.", True),
+            ]
+        ),
+        session_service=sessions,
+    )
+
+    with pytest.raises(SupervisorRuntimeError):
+        await runtime.run_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Remember two preferences.",
+            )
+        )
+
+    assert len(sessions.deleted) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "function_response",
+    (
+        types.FunctionResponse(
+            name="propose_memory_signal",
+            response={
+                "status": "rejected",
+                "error_code": "invalid_memory_candidate",
+            },
+        ),
+        types.FunctionResponse(
+            name="unrelated_tool",
+            response={"private_payload": "must-be-ignored"},
+        ),
+    ),
+)
+async def test_run_turn_emits_no_receipt_for_rejected_or_unrelated_response(
+    function_response: types.FunctionResponse,
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [function_response]),
+                FakeEvent("No memory proposal was created.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Help with this task.",
+        )
+    )
+
+    assert result.actions == ()
+    assert result.memory_proposals == ()
+
+
+@pytest.mark.asyncio
+async def test_run_turn_translates_malformed_proposal_response_safely(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from memory_proposal_tool import MemoryProposalToolResponseError
+    from supervisor_runtime import (
+        SupervisorRuntime,
+        SupervisorRuntimeError,
+        SupervisorTurnContext,
+    )
+
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    None,
+                    False,
+                    [
+                        types.FunctionResponse(
+                            name="propose_memory_signal",
+                            response={
+                                "status": "rejected",
+                                "error_code": "invalid_memory_candidate",
+                                "private_payload": "must-not-leak",
+                            },
+                        )
+                    ],
+                )
+            ]
+        ),
+        session_service=sessions,
+    )
+    caplog.set_level(logging.ERROR, logger="supervisor_runtime")
+
+    with pytest.raises(SupervisorRuntimeError) as caught:
+        await runtime.run_turn(
+            SupervisorTurnContext(
+                project_id="private-project",
+                session_id="private-session",
+                user_id="private-user",
+                message="private-message",
+            )
+        )
+
+    assert isinstance(caught.value.__cause__, MemoryProposalToolResponseError)
+    assert len(sessions.deleted) == 1
+    assert "MemoryProposalToolResponseError" in caplog.text
+    for private_value in (
+        "private-project",
+        "private-session",
+        "private-user",
+        "private-message",
+        "must-not-leak",
+    ):
+        assert private_value not in caplog.text
 
 
 def test_runtime_constructs_from_real_adk_app_without_network() -> None:

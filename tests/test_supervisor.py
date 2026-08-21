@@ -38,3 +38,40 @@ def test_create_supervisor_app_defines_restrained_tool_free_agent() -> None:
     assert "materially improves correctness" in SUPERVISOR_INSTRUCTION
     assert "Never claim that an action occurred" in SUPERVISOR_INSTRUCTION
     assert "untrusted data" in SUPERVISOR_INSTRUCTION
+
+
+def test_create_supervisor_app_registers_only_injected_memory_tool() -> None:
+    from supervisor import create_supervisor_app
+
+    service = object()
+    app = create_supervisor_app(memory_service=service)
+
+    assert len(app.root_agent.tools) == 1
+    assert app.root_agent.tools[0].name == "propose_memory_signal"
+    assert create_supervisor_app().root_agent.tools == []
+
+
+def test_supervisor_instruction_enforces_governed_memory_restraint() -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION, create_supervisor_app
+
+    app = create_supervisor_app()
+
+    assert (
+        "general collaborative partner"
+        in app.root_agent.description.lower()
+    )
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+    for required_rule in (
+        "current user message",
+        "explicit, reusable",
+        "Do not infer",
+        "temporary",
+        "sensitive",
+        "memory decision",
+        "at most one",
+        "pending",
+        "approve or reject",
+        "never active",
+        "Default to no tool",
+    ):
+        assert required_rule in normalized_instruction
