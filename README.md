@@ -51,7 +51,7 @@ The intended judge-facing workflow is:
 ## Technology
 
 - Python and FastAPI
-- Google GenAI SDK and Gemini 3.6 Flash
+- Google GenAI SDK and Gemini 3.6 Flash on Vertex AI
 - Google Cloud Firestore
 - Google Cloud Tasks for the target durable asynchronous synthesis phase
 - Docker and Google Cloud Run for the target deployment phase
@@ -75,17 +75,25 @@ python -m pip install -r requirements-dev.txt
 Create an ignored `.env` file:
 
 ```dotenv
-GOOGLE_API_KEY=replace-with-your-key
 GOOGLE_CLOUD_PROJECT=replace-with-your-project-id
+GOOGLE_CLOUD_LOCATION=global
+GOOGLE_GENAI_USE_ENTERPRISE=True
 ```
 
-Configure local Firestore credentials and quota attribution:
+Enable Vertex AI and configure Application Default Credentials for local
+Firestore and model access:
 
 ```bash
-gcloud auth application-default login
 gcloud config set project YOUR_PROJECT_ID
+gcloud services enable aiplatform.googleapis.com --project=YOUR_PROJECT_ID
+gcloud auth application-default login
 gcloud auth application-default set-quota-project YOUR_PROJECT_ID
 ```
+
+The application does not use a Gemini API key. Vertex AI and Firestore use
+the authenticated ADC identity. The pinned GenAI SDK calls its current Vertex
+backend selector `enterprise`; the older `GOOGLE_GENAI_USE_VERTEXAI` alias is
+deprecated and must not be configured.
 
 Run the server:
 

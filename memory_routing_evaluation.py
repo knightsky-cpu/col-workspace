@@ -10,7 +10,12 @@ from pydantic import (
     model_validator,
 )
 
-from memory_policy import MemoryCategory, MemoryValue, validate_memory_value
+from memory_policy import (
+    MemoryCategory,
+    MemoryDecision,
+    MemoryValue,
+    validate_memory_value,
+)
 from schemas import ChatResponse
 
 
@@ -48,6 +53,8 @@ RoutingFindingCode = Literal[
     "proposal_mismatch",
     "proposal_contract_mismatch",
     "multiple_proposals",
+    "missing_decision_action",
+    "decision_action_mismatch",
 ]
 
 
@@ -68,6 +75,21 @@ class _ExpectedProposalDefinition(_StrictFixtureModel):
         return self
 
 
+class _StateSetupDefinition(_StrictFixtureModel):
+    category: MemoryCategory
+    proposed_value: MemoryValue
+    proposal_source_message: ScenarioMessage
+    target_decision: Literal["none"] | MemoryDecision
+
+    @model_validator(mode="after")
+    def validate_category_value_pair(self) -> Self:
+        self.proposed_value = validate_memory_value(
+            self.category,
+            self.proposed_value,
+        )
+        return self
+
+
 class _ScenarioDefinition(_StrictFixtureModel):
     scenario_id: ScenarioId
     message: ScenarioMessage
@@ -76,6 +98,7 @@ class _ScenarioDefinition(_StrictFixtureModel):
     manual_semantic_review: ManualSemanticReview
     execution_mode: ExecutionMode
     state_precondition: StatePrecondition
+    state_setup: _StateSetupDefinition | None = None
 
     @model_validator(mode="after")
     def validate_scenario_contract(self) -> Self:
@@ -95,10 +118,25 @@ class _ScenarioDefinition(_StrictFixtureModel):
             )
         is_stateful = self.execution_mode == "stateful"
         has_precondition = self.state_precondition != "none"
-        if is_stateful != has_precondition:
+        has_state_setup = self.state_setup is not None
+        if not (is_stateful == has_precondition == has_state_setup):
             raise ValueError(
-                "Stateful scenarios require exactly one state precondition."
+                "Stateful scenarios require a precondition and setup."
             )
+        if self.state_precondition == "active_identical_preference":
+            if self.state_setup is None or (
+                self.state_setup.target_decision != "none"
+            ):
+                raise ValueError(
+                    "Active-memory setup cannot defer its approval."
+                )
+        if self.state_precondition == "structured_memory_decision":
+            if self.state_setup is None or (
+                self.state_setup.target_decision == "none"
+            ):
+                raise ValueError(
+                    "Structured-decision setup requires a target decision."
+                )
         return self
 
 
@@ -121,6 +159,14 @@ class ExpectedProposal:
 
 
 @dataclass(frozen=True, slots=True)
+class StatefulRoutingSetup:
+    category: MemoryCategory
+    proposed_value: MemoryValue
+    proposal_source_message: str
+    target_decision: Literal["none"] | MemoryDecision
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryRoutingScenario:
     scenario_id: str
     fixture_version: str
@@ -130,6 +176,7 @@ class MemoryRoutingScenario:
     manual_semantic_review: ManualSemanticReview
     execution_mode: ExecutionMode
     state_precondition: StatePrecondition
+    state_setup: StatefulRoutingSetup | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +210,18 @@ def load_routing_scenarios(
             manual_semantic_review=scenario.manual_semantic_review,
             execution_mode=scenario.execution_mode,
             state_precondition=scenario.state_precondition,
+            state_setup=(
+                StatefulRoutingSetup(
+                    category=scenario.state_setup.category,
+                    proposed_value=scenario.state_setup.proposed_value,
+                    proposal_source_message=(
+                        scenario.state_setup.proposal_source_message
+                    ),
+                    target_decision=scenario.state_setup.target_decision,
+                )
+                if scenario.state_setup is not None
+                else None
+            ),
         )
         for scenario in document.scenarios
     )
@@ -199,4 +258,24 @@ def evaluate_routing(
 
     if proposal_count:
         return (RoutingFinding(code="unnecessary_proposal"),)
+
+    if scenario.state_precondition == "structured_memory_decision":
+        setup = scenario.state_setup
+        if setup is None or setup.target_decision == "none":
+            return (RoutingFinding(code="decision_action_mismatch"),)
+        expected_action_name = (
+            "approve_memory_signal"
+            if setup.target_decision == "approve"
+            else "reject_memory_signal"
+        )
+        decision_actions = tuple(
+            action.action_name
+            for action in response.actions
+            if action.action_name
+            in ("approve_memory_signal", "reject_memory_signal")
+        )
+        if not decision_actions:
+            return (RoutingFinding(code="missing_decision_action"),)
+        if decision_actions != (expected_action_name,):
+            return (RoutingFinding(code="decision_action_mismatch"),)
     return ()

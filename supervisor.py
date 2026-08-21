@@ -1,8 +1,10 @@
 from google.adk import Agent
 from google.adk.apps import App
+from google.adk.models import Gemini
 
 from memory_proposal_tool import create_propose_memory_signal_tool
 from trusted_memory_service import TrustedMemoryService
+from vertex_config import VertexAISettings
 
 
 SUPERVISOR_APP_NAME = "agent_col"
@@ -45,6 +47,7 @@ provides a completed approval receipt.
 
 def create_supervisor_app(
     *,
+    vertex_settings: VertexAISettings,
     memory_service: TrustedMemoryService | None = None,
 ) -> App:
     """Return the bounded Agent_Col ADK application definition."""
@@ -55,7 +58,10 @@ def create_supervisor_app(
     )
     root_agent = Agent(
         name="Agent_Col",
-        model=SUPERVISOR_MODEL_NAME,
+        model=Gemini(
+            model=SUPERVISOR_MODEL_NAME,
+            client_kwargs=vertex_settings.client_kwargs(),
+        ),
         description=(
             "General collaborative partner that retains final "
             "responsibility for each user response."

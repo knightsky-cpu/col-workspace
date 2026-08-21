@@ -162,17 +162,21 @@ def make_chat_response(
     *,
     proposal_actions: int = 0,
     proposals: list[dict[str, object]] | None = None,
+    additional_actions: list[dict[str, str]] | None = None,
 ) -> ChatResponse:
     return ChatResponse.model_validate(
         {
             "response": "private generated response",
-            "actions": [
-                {
-                    "action_name": "propose_memory_signal",
-                    "status": "completed",
-                }
-                for _ in range(proposal_actions)
-            ],
+            "actions": (
+                [
+                    {
+                        "action_name": "propose_memory_signal",
+                        "status": "completed",
+                    }
+                    for _ in range(proposal_actions)
+                ]
+                + (additional_actions or [])
+            ),
             "artifacts": [],
             "citations": [],
             "memory_proposals": proposals or [],
@@ -317,3 +321,157 @@ def test_default_fixture_covers_all_accepted_restraint_scenarios() -> None:
     assert sum(
         scenario.execution_mode == "stateful" for scenario in scenarios
     ) == 2
+
+
+def state_setup(
+    *,
+    target_decision: str = "none",
+) -> dict[str, object]:
+    return {
+        "category": "response_length",
+        "proposed_value": "concise",
+        "proposal_source_message": (
+            "Please remember that I prefer concise responses."
+        ),
+        "target_decision": target_decision,
+    }
+
+
+def test_fixture_loader_returns_stateful_setup_contract(
+    tmp_path: Path,
+) -> None:
+    from memory_routing_evaluation import load_routing_scenarios
+
+    scenario = valid_scenario()
+    scenario.update(
+        {
+            "expected_routing": "no_proposal",
+            "expected_proposal": None,
+            "execution_mode": "stateful",
+            "state_precondition": "active_identical_preference",
+            "state_setup": state_setup(),
+        }
+    )
+    payload = valid_fixture()
+    payload["scenarios"] = [scenario]
+
+    loaded = load_routing_scenarios(write_fixture(tmp_path, payload))[0]
+
+    assert loaded.state_setup is not None
+    assert loaded.state_setup.category == "response_length"
+    assert loaded.state_setup.proposed_value == "concise"
+    assert loaded.state_setup.target_decision == "none"
+
+
+@pytest.mark.parametrize(
+    "scenario_update",
+    (
+        {
+            "expected_routing": "no_proposal",
+            "expected_proposal": None,
+            "execution_mode": "stateful",
+            "state_precondition": "active_identical_preference",
+        },
+        {
+            "state_setup": state_setup(),
+        },
+        {
+            "expected_routing": "no_proposal",
+            "expected_proposal": None,
+            "execution_mode": "stateful",
+            "state_precondition": "active_identical_preference",
+            "state_setup": state_setup(target_decision="approve"),
+        },
+        {
+            "expected_routing": "no_proposal",
+            "expected_proposal": None,
+            "execution_mode": "stateful",
+            "state_precondition": "structured_memory_decision",
+            "state_setup": state_setup(),
+        },
+    ),
+)
+def test_fixture_loader_rejects_invalid_stateful_setup_contract(
+    tmp_path: Path,
+    scenario_update: dict[str, object],
+) -> None:
+    from memory_routing_evaluation import load_routing_scenarios
+
+    payload = valid_fixture()
+    payload["scenarios"][0].update(scenario_update)
+
+    with pytest.raises(ValidationError):
+        load_routing_scenarios(write_fixture(tmp_path, payload))
+
+
+def structured_decision_scenario():
+    from memory_routing_evaluation import (
+        MemoryRoutingScenario,
+        StatefulRoutingSetup,
+    )
+
+    return MemoryRoutingScenario(
+        scenario_id="structured-decision",
+        fixture_version="1.0",
+        message="Approve the pending preference.",
+        expected_routing="no_proposal",
+        expected_proposal=None,
+        manual_semantic_review="none",
+        execution_mode="stateful",
+        state_precondition="structured_memory_decision",
+        state_setup=StatefulRoutingSetup(
+            category="response_length",
+            proposed_value="concise",
+            proposal_source_message=(
+                "Please remember that I prefer concise responses."
+            ),
+            target_decision="approve",
+        ),
+    )
+
+
+def test_evaluator_accepts_expected_structured_decision_action() -> None:
+    from memory_routing_evaluation import evaluate_routing
+
+    findings = evaluate_routing(
+        structured_decision_scenario(),
+        make_chat_response(
+            additional_actions=[
+                {
+                    "action_name": "approve_memory_signal",
+                    "status": "completed",
+                }
+            ]
+        ),
+    )
+
+    assert findings == ()
+
+
+@pytest.mark.parametrize(
+    ("additional_actions", "expected_code"),
+    (
+        ([], "missing_decision_action"),
+        (
+            [
+                {
+                    "action_name": "reject_memory_signal",
+                    "status": "completed",
+                }
+            ],
+            "decision_action_mismatch",
+        ),
+    ),
+)
+def test_evaluator_rejects_missing_or_wrong_structured_decision_action(
+    additional_actions: list[dict[str, str]],
+    expected_code: str,
+) -> None:
+    from memory_routing_evaluation import evaluate_routing
+
+    findings = evaluate_routing(
+        structured_decision_scenario(),
+        make_chat_response(additional_actions=additional_actions),
+    )
+
+    assert finding_codes(findings) == (expected_code,)

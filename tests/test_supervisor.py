@@ -1,8 +1,16 @@
 from importlib.metadata import version
 from pathlib import Path
 
+from google.adk.models import Gemini
+
+from vertex_config import VertexAISettings
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+VERTEX_SETTINGS = VertexAISettings(
+    project="project-1",
+    location="global",
+)
 
 
 def test_google_adk_dependency_is_exactly_pinned_and_installed() -> None:
@@ -24,14 +32,20 @@ def test_create_supervisor_app_defines_restrained_tool_free_agent() -> None:
         create_supervisor_app,
     )
 
-    app = create_supervisor_app()
+    app = create_supervisor_app(vertex_settings=VERTEX_SETTINGS)
     root_agent = app.root_agent
 
     assert SUPERVISOR_APP_NAME == "agent_col"
     assert SUPERVISOR_MODEL_NAME == "gemini-3.6-flash"
     assert app.name == SUPERVISOR_APP_NAME
     assert root_agent.name == "Agent_Col"
-    assert root_agent.model == SUPERVISOR_MODEL_NAME
+    assert isinstance(root_agent.model, Gemini)
+    assert root_agent.model.model == SUPERVISOR_MODEL_NAME
+    assert root_agent.model.client_kwargs == {
+        "enterprise": True,
+        "project": "project-1",
+        "location": "global",
+    }
     assert root_agent.tools == []
     assert root_agent.instruction == SUPERVISOR_INSTRUCTION
     assert "Default to no tool" in SUPERVISOR_INSTRUCTION
@@ -44,17 +58,22 @@ def test_create_supervisor_app_registers_only_injected_memory_tool() -> None:
     from supervisor import create_supervisor_app
 
     service = object()
-    app = create_supervisor_app(memory_service=service)
+    app = create_supervisor_app(
+        vertex_settings=VERTEX_SETTINGS,
+        memory_service=service,
+    )
 
     assert len(app.root_agent.tools) == 1
     assert app.root_agent.tools[0].name == "propose_memory_signal"
-    assert create_supervisor_app().root_agent.tools == []
+    assert create_supervisor_app(
+        vertex_settings=VERTEX_SETTINGS
+    ).root_agent.tools == []
 
 
 def test_supervisor_instruction_enforces_governed_memory_restraint() -> None:
     from supervisor import SUPERVISOR_INSTRUCTION, create_supervisor_app
 
-    app = create_supervisor_app()
+    app = create_supervisor_app(vertex_settings=VERTEX_SETTINGS)
 
     assert (
         "general collaborative partner"

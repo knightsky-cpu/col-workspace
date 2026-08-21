@@ -14,7 +14,7 @@ flowchart TD
     supervisor[Agent_Col ADK supervisor]
     synthesis[Synthesis application service]
     memory_service[Trusted memory service]
-    genai[Gemini 3.6 Flash]
+    genai[Vertex AI / Gemini 3.6 Flash]
     engine[MemoryEngine]
     firestore[(Cloud Firestore)]
 
@@ -100,6 +100,7 @@ extract or create proposals from ordinary conversation.
 
 - validates HTTP contracts and maps bounded public errors;
 - owns application startup and shutdown;
+- constructs explicit global Vertex AI clients that authenticate through ADC;
 - coordinates service calls without treating request identifiers as verified
   identity;
 - does not expose provider error bodies or stored content in logs.

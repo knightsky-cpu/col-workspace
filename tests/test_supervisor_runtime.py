@@ -457,8 +457,16 @@ async def test_run_turn_translates_malformed_proposal_response_safely(
 def test_runtime_constructs_from_real_adk_app_without_network() -> None:
     from supervisor import create_supervisor_app
     from supervisor_runtime import SupervisorRuntime
+    from vertex_config import VertexAISettings
 
-    assert SupervisorRuntime.from_app(create_supervisor_app()) is not None
+    app = create_supervisor_app(
+        vertex_settings=VertexAISettings(
+            project="project-1",
+            location="global",
+        )
+    )
+
+    assert SupervisorRuntime.from_app(app) is not None
 
 
 @pytest.mark.asyncio

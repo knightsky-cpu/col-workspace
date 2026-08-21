@@ -73,6 +73,7 @@ from trusted_memory_service import (
     RevokeMemorySignalCommand,
     TrustedMemoryService,
 )
+from vertex_config import load_vertex_ai_settings
 
 
 logger = logging.getLogger(__name__)
@@ -295,10 +296,8 @@ def _raise_governed_tool_cause_http_error(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    if not os.getenv("GOOGLE_API_KEY"):
-        raise RuntimeError("GOOGLE_API_KEY is not configured.")
-
-    client = genai.Client()
+    vertex_settings = load_vertex_ai_settings(os.environ)
+    client = genai.Client(**vertex_settings.client_kwargs())
     database = None
     try:
         database = MemoryEngine()
@@ -308,7 +307,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         memory_service = TrustedMemoryService(database=database)
         supervisor = SupervisorRuntime.from_app(
-            create_supervisor_app(memory_service=memory_service)
+            create_supervisor_app(
+                vertex_settings=vertex_settings,
+                memory_service=memory_service,
+            )
         )
     except Exception:
         try:

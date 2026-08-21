@@ -62,6 +62,7 @@ from trusted_memory_service import (
     TrustedMemoryInspectionResult,
     TrustedMemoryMutationResult,
 )
+from vertex_config import VertexAISettings
 
 
 VALID_BLUEPRINT_PAYLOAD = {
@@ -447,6 +448,8 @@ class ServiceState:
     supervisor: FakeSupervisorRuntime
     memory_service: FakeTrustedMemoryService
     supervisor_memory_services: list[object]
+    genai_client_kwargs: list[dict[str, object]]
+    supervisor_vertex_settings: list[VertexAISettings]
 
 
 @pytest.fixture
@@ -531,14 +534,18 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         ),
     )
     supervisor_memory_services: list[object] = []
+    genai_client_kwargs: list[dict[str, object]] = []
+    supervisor_vertex_settings: list[VertexAISettings] = []
     state = ServiceState(
-        events,
-        database,
-        genai_client,
-        synthesis_service,
-        supervisor,
-        memory_service,
-        supervisor_memory_services,
+        events=events,
+        database=database,
+        genai_client=genai_client,
+        synthesis_service=synthesis_service,
+        supervisor=supervisor,
+        memory_service=memory_service,
+        supervisor_memory_services=supervisor_memory_services,
+        genai_client_kwargs=genai_client_kwargs,
+        supervisor_vertex_settings=supervisor_vertex_settings,
     )
 
     def create_synthesis_service(**kwargs: object) -> object:
@@ -548,9 +555,18 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         }
         return synthesis_service
 
-    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "project-1")
+    monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "global")
+    monkeypatch.delenv("GOOGLE_GENAI_USE_VERTEXAI", raising=False)
+    monkeypatch.setenv("GOOGLE_GENAI_USE_ENTERPRISE", "True")
     monkeypatch.setattr(main, "MemoryEngine", lambda: database)
-    monkeypatch.setattr(main.genai, "Client", lambda: genai_client)
+
+    def create_genai_client(**kwargs: object) -> FakeGenAIClient:
+        genai_client_kwargs.append(kwargs)
+        return genai_client
+
+    monkeypatch.setattr(main.genai, "Client", create_genai_client)
     monkeypatch.setattr(
         main,
         "SynthesisApplicationService",
@@ -559,8 +575,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     )
     def create_supervisor_app(
         *,
+        vertex_settings: VertexAISettings,
         memory_service: object | None = None,
     ) -> object:
+        supervisor_vertex_settings.append(vertex_settings)
         supervisor_memory_services.append(memory_service)
         return object()
 
@@ -941,6 +959,25 @@ async def test_lifespan_exposes_supervisor_runtime(
 ) -> None:
     async with main.lifespan(main.app):
         assert main.app.state.supervisor is service_state.supervisor
+
+
+@pytest.mark.asyncio
+async def test_lifespan_uses_explicit_vertex_clients_without_api_key(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        pass
+
+    assert service_state.genai_client_kwargs == [
+        {
+            "enterprise": True,
+            "project": "project-1",
+            "location": "global",
+        }
+    ]
+    assert service_state.supervisor_vertex_settings == [
+        VertexAISettings(project="project-1", location="global")
+    ]
 
 
 @pytest.mark.asyncio

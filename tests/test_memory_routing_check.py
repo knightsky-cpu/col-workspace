@@ -1,15 +1,17 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
 import httpx
 import pytest
+from google.auth.exceptions import DefaultCredentialsError
 
 from memory_routing_evaluation import (
     ExpectedProposal,
     MemoryRoutingScenario,
 )
-from schemas import ChatResponse
+from schemas import ChatResponse, MemoryDecisionRequest
 
 
 def make_scenario(
@@ -42,7 +44,11 @@ def make_scenario(
     )
 
 
-def make_response(*, with_proposal: bool = False) -> ChatResponse:
+def make_response(
+    *,
+    with_proposal: bool = False,
+    decision_action: str | None = None,
+) -> ChatResponse:
     return ChatResponse.model_validate(
         {
             "response": "private model response",
@@ -54,6 +60,16 @@ def make_response(*, with_proposal: bool = False) -> ChatResponse:
                     }
                 ]
                 if with_proposal
+                else []
+            )
+            + (
+                [
+                    {
+                        "action_name": decision_action,
+                        "status": "completed",
+                    }
+                ]
+                if decision_action is not None
                 else []
             ),
             "artifacts": [],
@@ -85,6 +101,7 @@ async def test_runner_selects_scenario_and_reports_manual_review() -> None:
         scenario: MemoryRoutingScenario,
         repetition: int,
         run_id: str,
+        _memory_decision: MemoryDecisionRequest | None,
     ) -> ChatResponse:
         calls.append((scenario.scenario_id, repetition, run_id))
         return make_response()
@@ -118,6 +135,7 @@ async def test_runner_returns_one_for_routing_failure_without_content() -> None:
         _scenario: MemoryRoutingScenario,
         _repetition: int,
         _run_id: str,
+        _memory_decision: MemoryDecisionRequest | None,
     ) -> ChatResponse:
         return make_response()
 
@@ -158,6 +176,7 @@ async def test_runner_returns_two_for_execution_failure_and_continues(
         _scenario: MemoryRoutingScenario,
         _repetition: int,
         _run_id: str,
+        _memory_decision: MemoryDecisionRequest | None,
     ) -> ChatResponse:
         nonlocal calls
         calls += 1
@@ -213,6 +232,7 @@ async def test_runner_rejects_unknown_or_stateful_selection_before_request(
         _scenario: MemoryRoutingScenario,
         _repetition: int,
         _run_id: str,
+        _memory_decision: MemoryDecisionRequest | None,
     ) -> ChatResponse:
         nonlocal requests
         requests += 1
@@ -243,6 +263,7 @@ async def test_runner_uses_each_requested_repetition_once() -> None:
         _scenario: MemoryRoutingScenario,
         repetition: int,
         _run_id: str,
+        _memory_decision: MemoryDecisionRequest | None,
     ) -> ChatResponse:
         repetitions.append(repetition)
         return make_response()
@@ -375,6 +396,7 @@ async def test_fixture_runner_rejects_malformed_fixture_safely(
         _scenario: MemoryRoutingScenario,
         _repetition: int,
         _run_id: str,
+        _memory_decision: MemoryDecisionRequest | None,
     ) -> ChatResponse:
         nonlocal requests
         requests += 1
@@ -447,3 +469,332 @@ def test_main_generates_content_free_run_id_when_omitted() -> None:
 
     assert exit_code == 0
     assert received_run_ids == ["12345678123456781234567812345678"]
+
+
+@pytest.mark.asyncio
+async def test_runner_executes_explicit_stateful_scenario_with_precondition(
+) -> None:
+    from memory_routing_check import run_routing_check
+    from memory_routing_evaluation import StatefulRoutingSetup
+
+    scenario = make_scenario(
+        "structured-stateful",
+        execution_mode="stateful",
+        state_precondition="structured_memory_decision",
+    )
+    scenario = replace(
+        scenario,
+        state_setup=StatefulRoutingSetup(
+            category="response_length",
+            proposed_value="concise",
+            proposal_source_message=(
+                "Please remember that I prefer concise responses."
+            ),
+            target_decision="approve",
+        ),
+    )
+    prepared_ids: list[tuple[str, str]] = []
+    received_decisions: list[MemoryDecisionRequest | None] = []
+
+    async def prepare_state(
+        _scenario: MemoryRoutingScenario,
+        user_id: str,
+        session_id: str,
+    ) -> MemoryDecisionRequest:
+        prepared_ids.append((user_id, session_id))
+        return MemoryDecisionRequest(
+            proposal_id=(
+                "response_length--1234567890abcdef1234567890abcdef"
+            ),
+            decision="approve",
+        )
+
+    async def request_chat(
+        _scenario: MemoryRoutingScenario,
+        _repetition: int,
+        _run_id: str,
+        memory_decision: MemoryDecisionRequest | None,
+    ) -> ChatResponse:
+        received_decisions.append(memory_decision)
+        return make_response(decision_action="approve_memory_signal")
+
+    output: list[str] = []
+    exit_code = await run_routing_check(
+        scenarios=(scenario,),
+        selected_scenario_id="structured-stateful",
+        repetitions=1,
+        run_id="stateful-run",
+        request_chat=request_chat,
+        state_preparer=prepare_state,
+        output=output.append,
+    )
+
+    assert exit_code == 0
+    assert prepared_ids == [
+        (
+            "m7-5a-stateful-run-structured-stateful-1",
+            "m7-5a-stateful-run-structured-stateful-1",
+        )
+    ]
+    assert received_decisions[0] is not None
+    assert received_decisions[0].decision == "approve"
+    assert output == ["structured-stateful run=1 pass"]
+
+
+@pytest.mark.asyncio
+async def test_runner_reports_state_setup_failure_without_request() -> None:
+    import memory_routing_check as module
+    from memory_routing_evaluation import StatefulRoutingSetup
+
+    scenario = make_scenario(
+        "stateful-failure",
+        execution_mode="stateful",
+        state_precondition="active_identical_preference",
+    )
+    scenario = replace(
+        scenario,
+        state_setup=StatefulRoutingSetup(
+            category="response_length",
+            proposed_value="concise",
+            proposal_source_message=(
+                "Please remember that I prefer concise responses."
+            ),
+            target_decision="none",
+        ),
+    )
+    requests = 0
+
+    async def fail_state_setup(
+        _scenario: MemoryRoutingScenario,
+        _user_id: str,
+        _session_id: str,
+    ) -> None:
+        raise module.MemoryRoutingStateError("private-state-detail")
+
+    async def request_chat(
+        _scenario: MemoryRoutingScenario,
+        _repetition: int,
+        _run_id: str,
+        _memory_decision: MemoryDecisionRequest | None,
+    ) -> ChatResponse:
+        nonlocal requests
+        requests += 1
+        return make_response()
+
+    output: list[str] = []
+    exit_code = await module.run_routing_check(
+        scenarios=(scenario,),
+        selected_scenario_id="stateful-failure",
+        repetitions=1,
+        run_id="private-run-id",
+        request_chat=request_chat,
+        state_preparer=fail_state_setup,
+        output=output.append,
+    )
+
+    assert exit_code == 2
+    assert output == ["stateful-failure run=1 state_setup_error"]
+    assert requests == 0
+    assert "private" not in " ".join(output)
+
+
+@pytest.mark.asyncio
+async def test_live_request_includes_structured_memory_decision() -> None:
+    from memory_routing_check import request_live_chat
+
+    requests: list[httpx.Request] = []
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=make_response().model_dump(mode="json"))
+
+    transport = httpx.MockTransport(handle_request)
+    decision = MemoryDecisionRequest(
+        proposal_id="response_length--1234567890abcdef1234567890abcdef",
+        decision="approve",
+    )
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        await request_live_chat(
+            client=client,
+            scenario=make_scenario("structured"),
+            repetition=1,
+            run_id="safe-run",
+            memory_decision=decision,
+        )
+
+    payload = json.loads(requests[0].content)
+    assert payload["memory_decision"] == {
+        "proposal_id": (
+            "response_length--1234567890abcdef1234567890abcdef"
+        ),
+        "decision": "approve",
+    }
+
+
+@pytest.mark.asyncio
+async def test_live_fixture_prepares_state_and_closes_owned_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import database as database_module
+    import memory_routing_check as module
+    import trusted_memory_service as service_module
+
+    prepared: list[tuple[str, str, str]] = []
+    requests: list[dict[str, object]] = []
+    close_calls = 0
+
+    class FakeStateManager:
+        async def prepare(
+            self,
+            scenario: MemoryRoutingScenario,
+            *,
+            user_id: str,
+            session_id: str,
+        ) -> MemoryDecisionRequest:
+            prepared.append((scenario.scenario_id, user_id, session_id))
+            return MemoryDecisionRequest(
+                proposal_id=(
+                    "response_length--1234567890abcdef1234567890abcdef"
+                ),
+                decision="approve",
+            )
+
+        def close(self) -> None:
+            nonlocal close_calls
+            close_calls += 1
+
+    class FakeAsyncClient:
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(
+            self,
+            _exc_type: object,
+            _exc: object,
+            _traceback: object,
+        ) -> None:
+            return None
+
+        async def post(self, _path: str, **kwargs: object) -> httpx.Response:
+            requests.append(dict(kwargs["json"]))
+            return httpx.Response(
+                200,
+                json=make_response(
+                    decision_action="approve_memory_signal"
+                ).model_dump(mode="json"),
+            )
+
+    state_manager = FakeStateManager()
+    monkeypatch.setattr(
+        module.httpx,
+        "AsyncClient",
+        lambda **_kwargs: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        database_module,
+        "MemoryEngine",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        service_module,
+        "TrustedMemoryService",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        module,
+        "MemoryRoutingStateManager",
+        lambda **_kwargs: state_manager,
+        raising=False,
+    )
+
+    output: list[str] = []
+    exit_code = await module.run_live_routing_fixture(
+        fixture_path=module.DEFAULT_MEMORY_ROUTING_FIXTURE_PATH,
+        selected_scenario_id="structured-memory-decision",
+        repetitions=1,
+        run_id="stateful-live",
+        base_url="http://testserver",
+        output=output.append,
+    )
+
+    expected_id = "m7-5a-stateful-live-structured-memory-decision-1"
+    assert exit_code == 0
+    assert prepared == [
+        ("structured-memory-decision", expected_id, expected_id)
+    ]
+    assert requests[0]["memory_decision"] == {
+        "proposal_id": (
+            "response_length--1234567890abcdef1234567890abcdef"
+        ),
+        "decision": "approve",
+    }
+    assert close_calls == 1
+    assert output == ["structured-memory-decision run=1 pass"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "initialization_error",
+    (
+        OSError("private-firestore-initialization-detail"),
+        pytest.param(
+            DefaultCredentialsError(
+                "private-firestore-initialization-detail"
+            ),
+            id="default-credentials",
+        ),
+    ),
+)
+async def test_live_fixture_reports_state_initialization_failure_safely(
+    monkeypatch: pytest.MonkeyPatch,
+    initialization_error: Exception,
+) -> None:
+    import database as database_module
+    import memory_routing_check as module
+
+    private_detail = "private-firestore-initialization-detail"
+
+    class FakeAsyncClient:
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(
+            self,
+            _exc_type: object,
+            _exc: object,
+            _traceback: object,
+        ) -> None:
+            return None
+
+    def fail_database_initialization() -> object:
+        raise initialization_error
+
+    monkeypatch.setattr(
+        module.httpx,
+        "AsyncClient",
+        lambda **_kwargs: FakeAsyncClient(),
+    )
+    monkeypatch.setattr(
+        database_module,
+        "MemoryEngine",
+        fail_database_initialization,
+    )
+
+    output: list[str] = []
+    exit_code = await module.run_live_routing_fixture(
+        fixture_path=module.DEFAULT_MEMORY_ROUTING_FIXTURE_PATH,
+        selected_scenario_id="already-active-identical-preference",
+        repetitions=1,
+        run_id="state-init-failure",
+        base_url="http://testserver",
+        output=output.append,
+    )
+
+    assert exit_code == 2
+    assert output == [
+        "already-active-identical-preference run=1 state_setup_error"
+    ]
+    assert private_detail not in " ".join(output)
