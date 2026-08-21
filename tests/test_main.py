@@ -9,6 +9,16 @@ import pytest
 import pytest_asyncio
 
 import main
+from chat_turns import (
+    ChatTurnClaim,
+    ChatTurnConflictError,
+    ChatTurnIds,
+    ChatTurnInProgressError,
+    ChatTurnOwnershipError,
+    ChatTurnReplay,
+    ChatTurnRequest,
+    ChatTurnStateError,
+)
 from database import (
     MemoryEventCursorNotFoundError,
     MemoryProposalConflictError,
@@ -18,8 +28,13 @@ from database import (
     MemorySignalNotFoundError,
 )
 from schemas import (
+    AdaptationReceipt,
     AgentActionReceipt,
+    ArtifactReference,
+    ChatResponse,
+    CitationReference,
     CollaborationProfile,
+    MemoryDecisionRequest,
     MemoryEvent,
     MemoryProposal,
     SynthesisBlueprint,
@@ -114,6 +129,31 @@ VALID_BLUEPRINT_PAYLOAD = {
 MEMORY_NOW = datetime(2026, 8, 20, 23, 0, tzinfo=UTC)
 
 
+def make_chat_turn_claim(
+    *,
+    memory_decision: MemoryDecisionRequest | None = None,
+    owner_token: str = "owner-token-1",
+    resumed: bool = False,
+) -> ChatTurnClaim:
+    return ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="New question",
+            memory_decision=memory_decision,
+        ),
+        ids=ChatTurnIds(
+            turn_id="turn-id-1",
+            user_message_id="turn--turn-id-1--user",
+            model_message_id="turn--turn-id-1--model",
+        ),
+        owner_token=owner_token,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=120),
+        resumed=resumed,
+    )
+
+
 @dataclass
 class FakeMemoryEngine:
     events: list[tuple[Any, ...]]
@@ -127,6 +167,24 @@ class FakeMemoryEngine:
         ]
     )
     fail_on: str | None = None
+    chat_turn_result: ChatTurnClaim | ChatTurnReplay | None = None
+    chat_turn_error: Exception | None = None
+    renewed_claim: ChatTurnClaim | None = None
+    renew_error: Exception | None = None
+    release_error: Exception | None = None
+    complete_error: Exception | None = None
+    claim_calls: list[tuple[ChatTurnRequest, str, datetime]] = field(
+        default_factory=list
+    )
+    renew_calls: list[tuple[ChatTurnClaim, datetime]] = field(
+        default_factory=list
+    )
+    release_calls: list[tuple[ChatTurnClaim, datetime]] = field(
+        default_factory=list
+    )
+    complete_calls: list[
+        tuple[ChatTurnClaim, ChatResponse, datetime]
+    ] = field(default_factory=list)
     closed: bool = False
 
     async def get_collaboration_profile(
@@ -142,10 +200,22 @@ class FakeMemoryEngine:
         self,
         session_id: str,
         limit: int | None = None,
+        *,
+        exclude_message_id: str | None = None,
     ) -> list[dict[str, object]]:
         if self.fail_on == "history":
             raise main.MemoryEngineError("history read failed")
-        self.events.append(("history", session_id, limit))
+        if exclude_message_id is None:
+            self.events.append(("history", session_id, limit))
+        else:
+            self.events.append(
+                (
+                    "history",
+                    session_id,
+                    limit,
+                    exclude_message_id,
+                )
+            )
         return self.history
 
     async def save_message(
@@ -155,6 +225,56 @@ class FakeMemoryEngine:
             raise main.MemoryEngineError(f"{role} save failed")
         self.events.append(("save", session_id, role, text))
         return f"{role}-message-1"
+
+    async def claim_chat_turn(
+        self,
+        request: ChatTurnRequest,
+        *,
+        idempotency_key: str,
+        observed_at: datetime,
+    ) -> ChatTurnClaim | ChatTurnReplay:
+        self.claim_calls.append((request, idempotency_key, observed_at))
+        self.events.append(("claim_chat_turn",))
+        if self.chat_turn_error is not None:
+            raise self.chat_turn_error
+        if self.chat_turn_result is None:
+            raise AssertionError("Missing fake chat-turn result.")
+        return self.chat_turn_result
+
+    async def renew_chat_turn_lease(
+        self,
+        claim: ChatTurnClaim,
+        *,
+        observed_at: datetime,
+    ) -> ChatTurnClaim:
+        self.renew_calls.append((claim, observed_at))
+        self.events.append(("renew_chat_turn_lease",))
+        if self.renew_error is not None:
+            raise self.renew_error
+        return self.renewed_claim or claim
+
+    async def release_chat_turn(
+        self,
+        claim: ChatTurnClaim,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        self.release_calls.append((claim, observed_at))
+        self.events.append(("release_chat_turn",))
+        if self.release_error is not None:
+            raise self.release_error
+
+    async def complete_chat_turn(
+        self,
+        claim: ChatTurnClaim,
+        response: ChatResponse,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        self.complete_calls.append((claim, response, observed_at))
+        self.events.append(("complete_chat_turn",))
+        if self.complete_error is not None:
+            raise self.complete_error
 
     def close(self) -> None:
         self.closed = True
@@ -1331,6 +1451,616 @@ async def test_chat_uses_context_and_persists_both_messages(
         "Earlier answer"
     )
     assert "New question" not in context_text
+
+
+@pytest.mark.parametrize(
+    "idempotency_key",
+    (
+        "",
+        "bad/key",
+        "bad.key",
+        "contains space",
+        "bad$key",
+        "a" * 129,
+    ),
+)
+@pytest.mark.asyncio
+async def test_chat_rejects_invalid_idempotency_key_before_service_access(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    idempotency_key: str,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": idempotency_key},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Hello",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Idempotency key is invalid."}
+    assert service_state.events == []
+    assert service_state.memory_service.decision_calls == []
+    assert service_state.supervisor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_replays_completed_idempotent_turn_without_downstream_access(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    stored_response = ChatResponse(
+        response="Stored answer",
+        actions=[
+            AgentActionReceipt(
+                action_name="synthesize_project",
+                status="completed",
+            )
+        ],
+        artifacts=[
+            ArtifactReference(
+                artifact_type="synthesis_blueprint",
+                project_id="project-1",
+                artifact_id="blueprint-1",
+                schema_version="2.0",
+                display_label="Stored blueprint",
+            )
+        ],
+        citations=[
+            CitationReference(
+                uri="https://example.com/evidence",
+                label="Stored evidence",
+            )
+        ],
+        adaptations=[
+            AdaptationReceipt(
+                signal_id="response_length--signal-1",
+                category="response_length",
+                value="concise",
+                source_event_id="response_length--signal-1--approved",
+                status="provided_to_model",
+            )
+        ],
+    )
+    service_state.database.chat_turn_result = ChatTurnReplay(
+        response=stored_response
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "replay-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Hello",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == stored_response.model_dump(mode="json")
+    assert service_state.events == [("claim_chat_turn",)]
+    assert service_state.memory_service.decision_calls == []
+    assert service_state.supervisor.calls == []
+    assert service_state.database.renew_calls == []
+    assert service_state.database.release_calls == []
+    assert service_state.database.complete_calls == []
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail", "retry_after"),
+    (
+        (
+            ChatTurnConflictError("private-conflict-marker"),
+            409,
+            "Idempotency key conflicts with a different chat request.",
+            None,
+        ),
+        (
+            ChatTurnInProgressError(17),
+            409,
+            "Chat turn is already in progress.",
+            "17",
+        ),
+        (
+            ChatTurnStateError("private-state-marker"),
+            500,
+            "Chat turn state is invalid.",
+            None,
+        ),
+        (
+            main.MemoryEngineError("private-database-marker"),
+            500,
+            "Database operation failed.",
+            None,
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_chat_translates_idempotent_claim_errors_without_downstream_access(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+    retry_after: str | None,
+) -> None:
+    service_state.database.chat_turn_error = error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "private-key-1"},
+        json={
+            "project_id": "private-project",
+            "session_id": "private-session",
+            "user_id": "private-user",
+            "message": "private-message-marker",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+    if retry_after is None:
+        assert "Retry-After" not in response.headers
+    else:
+        assert response.headers["Retry-After"] == retry_after
+    assert service_state.events == [("claim_chat_turn",)]
+    assert service_state.memory_service.decision_calls == []
+    assert service_state.supervisor.calls == []
+    assert service_state.database.renew_calls == []
+    assert service_state.database.release_calls == []
+    assert service_state.database.complete_calls == []
+    for private_marker in (
+        "private-key-1",
+        "private-project",
+        "private-session",
+        "private-user",
+        "private-message-marker",
+        "private-conflict-marker",
+        "private-state-marker",
+        "private-database-marker",
+    ):
+        assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    renewed_claim = ChatTurnClaim(
+        request=claim.request,
+        ids=claim.ids,
+        owner_token=claim.owner_token,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+        resumed=claim.resumed,
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 200
+    expected_response = ChatResponse(
+        response="Generated answer",
+        actions=[],
+        artifacts=[],
+        citations=[],
+        adaptations=[],
+    )
+    assert response.json() == expected_response.model_dump(mode="json")
+    assert service_state.events[0] == ("claim_chat_turn",)
+    assert set(service_state.events[1:3]) == {
+        ("collaboration_profile", "user-1"),
+        (
+            "history",
+            "session-1",
+            20,
+            "turn--turn-id-1--user",
+        ),
+    }
+    assert service_state.events[3:] == [
+        ("renew_chat_turn_lease",),
+        ("supervisor",),
+        ("complete_chat_turn",),
+    ]
+    assert not any(event[0] == "save" for event in service_state.events)
+    assert len(service_state.database.claim_calls) == 1
+    turn_request, key, observed_at = service_state.database.claim_calls[0]
+    assert turn_request == claim.request
+    assert key == "owned-key-1"
+    assert observed_at.tzinfo is not None
+    assert service_state.database.renew_calls[0][0] == claim
+    assert service_state.database.complete_calls == [
+        (
+            renewed_claim,
+            expected_response,
+            service_state.database.complete_calls[0][2],
+        )
+    ]
+    assert service_state.database.complete_calls[0][2].tzinfo is not None
+    assert len(service_state.supervisor.calls) == 1
+    context = service_state.supervisor.calls[0]
+    assert context.message == "New question"
+    context_text = "\n".join(
+        part.text
+        for content in context.model_input_context
+        for part in content.parts
+        if part.text
+    )
+    assert "Earlier question" in context_text
+    assert "Earlier answer" in context_text
+    assert "New question" not in context_text
+
+
+@pytest.mark.asyncio
+async def test_chat_claimed_turn_starts_context_reads_concurrently(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = claim
+    profile_started = asyncio.Event()
+    history_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_profile(
+        user_id: str,
+    ) -> CollaborationProfile:
+        assert user_id == "user-1"
+        profile_started.set()
+        await release.wait()
+        return CollaborationProfile()
+
+    async def blocked_history(
+        session_id: str,
+        limit: int | None = None,
+        *,
+        exclude_message_id: str | None = None,
+    ) -> list[dict[str, object]]:
+        assert session_id == "session-1"
+        assert limit == 20
+        assert exclude_message_id == "turn--turn-id-1--user"
+        history_started.set()
+        await release.wait()
+        return []
+
+    service_state.database.get_collaboration_profile = blocked_profile
+    service_state.database.get_chat_history = blocked_history
+    request_task = asyncio.create_task(
+        client.post(
+            "/api/chat",
+            headers={"Idempotency-Key": "concurrent-key-1"},
+            json={
+                "project_id": "project-1",
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "message": "New question",
+            },
+        )
+    )
+
+    await asyncio.wait_for(profile_started.wait(), timeout=1)
+    both_reads_started = True
+    try:
+        await asyncio.wait_for(history_started.wait(), timeout=1)
+    except TimeoutError:
+        both_reads_started = False
+    finally:
+        assert service_state.supervisor.calls == []
+        release.set()
+        response = await request_task
+
+    assert both_reads_started
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_chat_idempotent_decision_uses_deterministic_confirmation_message_id(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    memory_decision = MemoryDecisionRequest(
+        proposal_id="response_length--proposal-1",
+        decision="approve",
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="confirmation-session",
+            user_id="user-1",
+            message="Yes, remember that preference.",
+            memory_decision=memory_decision,
+        ),
+        ids=ChatTurnIds(
+            turn_id="decision-turn-id",
+            user_message_id="turn--decision-turn-id--user",
+            model_message_id="turn--decision-turn-id--model",
+        ),
+        owner_token="decision-owner-token",
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=120),
+        resumed=False,
+    )
+    service_state.database.chat_turn_result = claim
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "decision-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "confirmation-session",
+            "user_id": "user-1",
+            "message": "Yes, remember that preference.",
+            "memory_decision": memory_decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["actions"] == [
+        {
+            "action_name": "approve_memory_signal",
+            "status": "completed",
+        }
+    ]
+    assert response.json()["adaptations"] == [
+        {
+            "signal_id": "response_length--proposal-1",
+            "category": "response_length",
+            "value": "concise",
+            "source_event_id": (
+                "response_length--proposal-1--approved"
+            ),
+            "status": "provided_to_model",
+        }
+    ]
+    assert service_state.events == [
+        ("claim_chat_turn",),
+        (
+            "history",
+            "confirmation-session",
+            20,
+            "turn--decision-turn-id--user",
+        ),
+        ("memory_decision",),
+        ("renew_chat_turn_lease",),
+        ("supervisor",),
+        ("complete_chat_turn",),
+    ]
+    assert service_state.memory_service.decision_calls == [
+        MemoryDecisionCommand(
+            user_id="user-1",
+            proposal_id="response_length--proposal-1",
+            decision="approve",
+            confirmation_channel="chat_decision",
+            confirmation_session_id="confirmation-session",
+            confirmation_message_id="turn--decision-turn-id--user",
+        )
+    ]
+    assert not any(event[0] == "save" for event in service_state.events)
+    assert len(service_state.database.complete_calls) == 1
+    completed_response = service_state.database.complete_calls[0][1]
+    assert completed_response.model_dump(mode="json") == response.json()
+
+
+@pytest.mark.parametrize(
+    ("failure_operation", "error", "expected_status", "expected_detail"),
+    (
+        (
+            "renew",
+            ChatTurnOwnershipError("private-renew-owner-marker"),
+            409,
+            (
+                "Chat turn ownership changed; retry with the same "
+                "idempotency key."
+            ),
+        ),
+        (
+            "complete",
+            ChatTurnOwnershipError("private-complete-owner-marker"),
+            409,
+            (
+                "Chat turn ownership changed; retry with the same "
+                "idempotency key."
+            ),
+        ),
+        (
+            "renew",
+            ChatTurnStateError("private-renew-state-marker"),
+            500,
+            "Chat turn state is invalid.",
+        ),
+        (
+            "complete",
+            ChatTurnStateError("private-complete-state-marker"),
+            500,
+            "Chat turn state is invalid.",
+        ),
+        (
+            "renew",
+            main.MemoryEngineError("private-renew-database-marker"),
+            500,
+            "Database operation failed.",
+        ),
+        (
+            "complete",
+            main.MemoryEngineError("private-complete-database-marker"),
+            500,
+            "Database operation failed.",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_chat_translates_owned_turn_persistence_errors_safely(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+    failure_operation: str,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = claim
+    if failure_operation == "renew":
+        service_state.database.renew_error = error
+    else:
+        service_state.database.complete_error = error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "private-owned-key"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+    assert not any(event[0] == "save" for event in service_state.events)
+    if failure_operation == "renew":
+        assert service_state.supervisor.calls == []
+        assert service_state.database.complete_calls == []
+    else:
+        assert len(service_state.supervisor.calls) == 1
+        assert len(service_state.database.complete_calls) == 1
+    assert service_state.database.release_calls == []
+    for private_marker in (
+        "private-owned-key",
+        "owner-token-1",
+        "project-1",
+        "session-1",
+        "user-1",
+        "New question",
+        "Generated answer",
+        str(error),
+    ):
+        assert private_marker not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("supervisor_error", "expected_status", "expected_detail"),
+    (
+        (
+            SupervisorRuntimeError("provider failed"),
+            502,
+            "Agent_Col response failed.",
+        ),
+        (
+            SupervisorTimeoutError("provider timed out"),
+            504,
+            "Agent_Col response timed out.",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_chat_releases_claim_after_supervisor_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    supervisor_error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    claim = make_chat_turn_claim()
+    renewed_claim = ChatTurnClaim(
+        request=claim.request,
+        ids=claim.ids,
+        owner_token=claim.owner_token,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+        resumed=claim.resumed,
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+    service_state.supervisor.error = supervisor_error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "provider-failure-key"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+    assert len(service_state.database.renew_calls) == 1
+    assert len(service_state.supervisor.calls) == 1
+    assert len(service_state.database.release_calls) == 1
+    assert service_state.database.release_calls[0][0] == renewed_claim
+    assert service_state.database.release_calls[0][1].tzinfo is not None
+    assert service_state.database.complete_calls == []
+    assert not any(event[0] == "save" for event in service_state.events)
+
+
+@pytest.mark.parametrize(
+    "release_error",
+    (
+        main.MemoryEngineError("private-release-database-marker"),
+        ChatTurnOwnershipError("private-release-owner-error-marker"),
+        ChatTurnStateError("private-release-state-marker"),
+        ValueError("private-release-value-marker"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_chat_release_failure_does_not_replace_supervisor_error(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+    release_error: Exception,
+) -> None:
+    claim = make_chat_turn_claim(owner_token="private-owner-marker")
+    service_state.database.chat_turn_result = claim
+    service_state.supervisor.error = SupervisorRuntimeError(
+        "private-provider-marker"
+    )
+    service_state.database.release_error = release_error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "private-release-key"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Agent_Col response failed."}
+    assert len(service_state.database.release_calls) == 1
+    assert service_state.database.complete_calls == []
+    for private_marker in (
+        "private-owner-marker",
+        "private-provider-marker",
+        str(release_error),
+        "private-release-key",
+        "project-1",
+        "session-1",
+        "user-1",
+        "New question",
+    ):
+        assert private_marker not in caplog.text
 
 
 @pytest.mark.parametrize(

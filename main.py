@@ -4,13 +4,24 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import NoReturn
+from datetime import UTC, datetime
+from typing import Annotated, NoReturn
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from google import genai
 from google.genai import types
 
+from chat_turns import (
+    ChatTurnClaim,
+    ChatTurnConflictError,
+    ChatTurnInProgressError,
+    ChatTurnOwnershipError,
+    ChatTurnReplay,
+    ChatTurnRequest,
+    ChatTurnStateError,
+    validate_idempotency_key,
+)
 from database import (
     MemoryEngine,
     MemoryEngineError,
@@ -124,6 +135,52 @@ def _raise_database_http_error(exc: MemoryEngineError) -> NoReturn:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Database operation failed.",
     ) from exc
+
+
+def _raise_chat_turn_operation_http_error(
+    exc: ChatTurnOwnershipError | ChatTurnStateError | MemoryEngineError,
+    operation: str,
+) -> NoReturn:
+    if isinstance(exc, MemoryEngineError):
+        _raise_database_http_error(exc)
+    logger.error(
+        "Chat turn %s failed (%s).",
+        operation,
+        type(exc).__name__,
+    )
+    if isinstance(exc, ChatTurnOwnershipError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Chat turn ownership changed; retry with the same "
+                "idempotency key."
+            ),
+        ) from exc
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Chat turn state is invalid.",
+    ) from exc
+
+
+async def _release_chat_turn_safely(
+    database: MemoryEngine,
+    claim: ChatTurnClaim,
+) -> None:
+    try:
+        await database.release_chat_turn(
+            claim,
+            observed_at=datetime.now(UTC),
+        )
+    except (
+        ChatTurnOwnershipError,
+        ChatTurnStateError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        logger.error(
+            "Chat turn lease release failed (%s).",
+            type(exc).__name__,
+        )
 
 
 @asynccontextmanager
@@ -309,26 +366,109 @@ async def synthesize(
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
+async def chat(
+    payload: ChatRequest,
+    request: Request,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+) -> ChatResponse:
     database = request.app.state.db
     memory_service = request.app.state.memory_service
     supervisor = request.app.state.supervisor
     decision_actions = ()
+    chat_turn_claim: ChatTurnClaim | None = None
+
+    if idempotency_key is not None:
+        try:
+            validated_idempotency_key = validate_idempotency_key(
+                idempotency_key
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Idempotency key is invalid.",
+            ) from exc
+        try:
+            turn_result = await database.claim_chat_turn(
+                ChatTurnRequest(
+                    project_id=payload.project_id,
+                    session_id=payload.session_id,
+                    user_id=payload.user_id,
+                    message=payload.message,
+                    memory_decision=payload.memory_decision,
+                ),
+                idempotency_key=validated_idempotency_key,
+                observed_at=datetime.now(UTC),
+            )
+        except ChatTurnConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Idempotency key conflicts with a different chat "
+                    "request."
+                ),
+            ) from exc
+        except ChatTurnInProgressError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Chat turn is already in progress.",
+                headers={
+                    "Retry-After": str(exc.retry_after_seconds),
+                },
+            ) from exc
+        except ChatTurnStateError as exc:
+            logger.error(
+                "Chat turn claim failed (%s).",
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Chat turn state is invalid.",
+            ) from exc
+        except MemoryEngineError as exc:
+            _raise_database_http_error(exc)
+        if isinstance(turn_result, ChatTurnReplay):
+            return turn_result.response
+        chat_turn_claim = turn_result
 
     if payload.memory_decision is None:
         try:
+            if chat_turn_claim is None:
+                history_operation = database.get_chat_history(
+                    payload.session_id,
+                    limit=20,
+                )
+            else:
+                history_operation = database.get_chat_history(
+                    payload.session_id,
+                    limit=20,
+                    exclude_message_id=(
+                        chat_turn_claim.ids.user_message_id
+                    ),
+                )
             profile, history = await asyncio.gather(
                 database.get_collaboration_profile(payload.user_id),
-                database.get_chat_history(payload.session_id, limit=20),
+                history_operation,
             )
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
     else:
         try:
-            history = await database.get_chat_history(
-                payload.session_id,
-                limit=20,
-            )
+            if chat_turn_claim is None:
+                history = await database.get_chat_history(
+                    payload.session_id,
+                    limit=20,
+                )
+            else:
+                history = await database.get_chat_history(
+                    payload.session_id,
+                    limit=20,
+                    exclude_message_id=(
+                        chat_turn_claim.ids.user_message_id
+                    ),
+                )
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
 
@@ -360,14 +500,17 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 detail="Collaboration context is invalid.",
             ) from exc
 
-    try:
-        user_message_id = await database.save_message(
-            payload.session_id,
-            "user",
-            payload.message,
-        )
-    except MemoryEngineError as exc:
-        _raise_database_http_error(exc)
+    if chat_turn_claim is None:
+        try:
+            user_message_id = await database.save_message(
+                payload.session_id,
+                "user",
+                payload.message,
+            )
+        except MemoryEngineError as exc:
+            _raise_database_http_error(exc)
+    else:
+        user_message_id = chat_turn_claim.ids.user_message_id
 
     if payload.memory_decision is not None:
         try:
@@ -424,6 +567,19 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
                 detail="Collaboration context is invalid.",
             ) from exc
 
+    if chat_turn_claim is not None:
+        try:
+            chat_turn_claim = await database.renew_chat_turn_lease(
+                chat_turn_claim,
+                observed_at=datetime.now(UTC),
+            )
+        except (
+            ChatTurnOwnershipError,
+            ChatTurnStateError,
+            MemoryEngineError,
+        ) as exc:
+            _raise_chat_turn_operation_http_error(exc, "renewal")
+
     try:
         result = await supervisor.run_turn(
             SupervisorTurnContext(
@@ -435,6 +591,8 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             )
         )
     except SupervisorTimeoutError as exc:
+        if chat_turn_claim is not None:
+            await _release_chat_turn_safely(database, chat_turn_claim)
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="Agent_Col response timed out.",
@@ -444,24 +602,41 @@ async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
             "Agent_Col response failed (%s).",
             type(exc).__name__,
         )
+        if chat_turn_claim is not None:
+            await _release_chat_turn_safely(database, chat_turn_claim)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Agent_Col response failed.",
         ) from exc
 
-    try:
-        await database.save_message(
-            payload.session_id,
-            "model",
-            result.response,
-        )
-    except MemoryEngineError as exc:
-        _raise_database_http_error(exc)
-
-    return ChatResponse(
+    chat_response = ChatResponse(
         response=result.response,
         actions=list((*decision_actions, *result.actions)),
         artifacts=list(result.artifacts),
         citations=list(result.citations),
         adaptations=list(adaptations),
     )
+    if chat_turn_claim is None:
+        try:
+            await database.save_message(
+                payload.session_id,
+                "model",
+                result.response,
+            )
+        except MemoryEngineError as exc:
+            _raise_database_http_error(exc)
+    else:
+        try:
+            await database.complete_chat_turn(
+                chat_turn_claim,
+                chat_response,
+                observed_at=datetime.now(UTC),
+            )
+        except (
+            ChatTurnOwnershipError,
+            ChatTurnStateError,
+            MemoryEngineError,
+        ) as exc:
+            _raise_chat_turn_operation_http_error(exc, "completion")
+
+    return chat_response
