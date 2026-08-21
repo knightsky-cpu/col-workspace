@@ -75,3 +75,15 @@ def test_supervisor_instruction_enforces_governed_memory_restraint() -> None:
         "Default to no tool",
     ):
         assert required_rule in normalized_instruction
+
+
+def test_supervisor_requires_clarification_for_multiple_memory_candidates(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+
+    assert "more than one eligible memory candidate" in normalized_instruction
+    assert "do not choose between them" in normalized_instruction
+    assert "do not call propose_memory_signal" in normalized_instruction
+    assert "which single candidate" in normalized_instruction
