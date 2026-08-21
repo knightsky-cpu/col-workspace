@@ -395,13 +395,35 @@ web discovery is needed. Use the Research Expert for discovery.
 
 ### ADK boundary
 
-The selected abstraction is an ADK `LlmAgent` configured as an inline
-`mode="single_turn"` sub-agent with exactly one built-in capability:
-`url_context`.
+M7-EXP.4A corrected the original ADK `LlmAgent` selection after live provider
+and local adapter verification. The selected abstraction is now an
+application-owned async Source Expert service exposed to Agent_Col through one
+narrow ADK `FunctionTool`.
 
-The specialist has no sub-agents, transfer tools, Search, Code Execution,
-function tools, or persistence access. Retrieved page content is untrusted
-data and cannot alter instructions or authorize another action.
+The service uses a bounded two-stage Google Gen AI pipeline with the existing
+Vertex AI client and Gemini 3.6 Flash. The first fresh, one-turn Chat has
+exactly one built-in capability, URL Context, and returns natural-language
+output plus raw per-URL retrieval status and grounding evidence. The second
+fresh, tool-free Chat classifies only the locally extracted grounded segments
+into the strict Source schema. Local validation requires every classified
+fact, requirement, or constraint to exactly match a provider-grounded segment
+and its server-assigned source IDs.
+
+This split is necessary because live verification showed that the pinned
+Vertex GenerateContent structured-output path did not reliably preserve claim
+grounding when URL Context and JSON output were requested in the same call.
+The currently pinned ADK `LlmResponse` also preserves grounding metadata but
+drops `url_context_metadata`, so an inline `LlmAgent` cannot prove partial or
+failed retrieval without unsupported inference.
+
+The Source Expert remains a cognitive delegation and consumes one specialist
+budget slot even though its ADK exposure is a `FunctionTool`. It has no
+sub-agents, transfer tools, Search, Code Execution, other function tools, or
+persistence access. Retrieved page content is untrusted data and cannot alter
+instructions or authorize another action.
+
+The supporting compatibility evidence is recorded in
+`2026-08-21-phase-3b-m7-exp-4a-source-provider-compatibility-report.md`.
 
 ### Minimal input
 
@@ -432,21 +454,22 @@ SourceExpertPayload
 
 SourceDocumentResult
   source_id: server-assigned source reference
-  retrieval_status: retrieved | unsupported | inaccessible
+  retrieval_status: retrieved | error | paywall | unsafe
   evidence_summary: bounded text or null
 ```
 
 Every fact, requirement, or constraint includes at least one `source_id`.
 Assumptions and open questions are labeled as interpretation rather than
-source facts. Source URLs and retrieval status come from provider events, not
-specialist prose.
+source facts. Source URLs and retrieval status come from raw provider
+candidate metadata, not specialist prose. Claim-to-source relationships come
+from validated grounding chunks and grounding supports.
 
 ### Failure and timeout
 
 - A malformed, disallowed, or non-public URL returns `rejected_input` before
   provider access.
-- Unsupported, inaccessible, or empty retrieval returns `invalid_output` when
-  no usable source remains.
+- Error, paywall, unsafe, or empty retrieval returns `invalid_output` when no
+  usable source remains.
 - Partial retrieval may complete only if the result identifies every failed
   URL and the remaining evidence can answer the objective without hiding the
   gap.
@@ -813,7 +836,9 @@ independently reviewable passes. At minimum, the persistent suite must prove:
 
 - Search citations come only from grounding metadata;
 - prose-only URLs are discarded;
-- Source retrieval status and URLs come from provider events;
+- Source retrieval status and URLs come from raw provider candidate metadata;
+- Source citations come from validated grounding chunks and supports, not
+  `citation_metadata` or specialist prose;
 - computation completion requires a successful execution event;
 - prose-only computation claims are rejected;
 - requirement IDs are complete, unique, and exact;

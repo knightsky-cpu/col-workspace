@@ -1,0 +1,54 @@
+{
+  "fixture_version": "1.0",
+  "scenarios": [
+    {
+      "scenario_id": "current-public-fact",
+      "message": "What is the current stable release of Python as of today? Verify it with current public evidence and cite the sources.",
+      "expected_routing": "research",
+      "manual_semantic_review": "none",
+      "execution_mode": "single"
+    },
+    {
+      "scenario_id": "stable-explanation",
+      "message": "Explain why idempotency matters for retry-safe API requests using one practical example.",
+      "expected_routing": "direct",
+      "manual_semantic_review": "none",
+      "execution_mode": "single"
+    },
+    {
+      "scenario_id": "supplied-url",
+      "message": "Analyze only this supplied public URL and summarize its requirements: https://example.com/specification",
+      "expected_routing": "direct",
+      "manual_semantic_review": "source_boundary_quality",
+      "execution_mode": "single"
+    },
+    {
+      "scenario_id": "explicit-no-external-tools",
+      "message": "Do not use external tools or web search. Explain the difference between synchronous and asynchronous Python functions.",
+      "expected_routing": "direct",
+      "manual_semantic_review": "none",
+      "execution_mode": "single"
+    },
+    {
+      "scenario_id": "ambiguous-research",
+      "message": "Research the latest changes for me.",
+      "expected_routing": "clarify",
+      "manual_semantic_review": "clarification_quality",
+      "execution_mode": "single"
+    },
+    {
+      "scenario_id": "grounded-research-evidence",
+      "message": "Verify from current official public sources whether Python 3.14 is in active bugfix maintenance, and cite the evidence.",
+      "expected_routing": "research",
+      "manual_semantic_review": "none",
+      "execution_mode": "single"
+    },
+    {
+      "scenario_id": "idempotent-research-replay",
+      "message": "Find the current stable FastAPI release from public evidence and cite the source.",
+      "expected_routing": "research",
+      "manual_semantic_review": "none",
+      "execution_mode": "idempotency_replay"
+    }
+  ]
+}

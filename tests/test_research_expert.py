@@ -1,10 +1,173 @@
 import pytest
+from google.adk.agents import InvocationContext
 from google.adk.events import Event
 from google.adk.models import Gemini
 from google.genai import types
 from pydantic import ValidationError
 
 from vertex_config import VertexAISettings
+
+
+def live_research_event(*, grounded: bool) -> Event:
+    claim = "Python 3.14.7 is the current stable release."
+    metadata = None
+    if grounded:
+        metadata = types.GroundingMetadata(
+            grounding_chunks=[
+                types.GroundingChunk(
+                    web=types.GroundingChunkWeb(
+                        uri="https://www.python.org/downloads/",
+                        title="Python downloads",
+                    )
+                )
+            ],
+            grounding_supports=[
+                types.GroundingSupport(
+                    segment=types.Segment(text=claim),
+                    grounding_chunk_indices=[0],
+                )
+            ],
+        )
+    return Event(
+        author="research_expert",
+        content=types.Content(
+            role="model",
+            parts=[types.Part.from_text(text=claim)],
+        ),
+        grounding_metadata=metadata,
+    )
+
+
+async def run_scripted_research_attempts(
+    attempts: tuple[tuple[Event, ...], ...],
+) -> tuple[list[Event], int]:
+    from research_expert import BoundedResearchAgent
+
+    class ScriptedResearchAgent(BoundedResearchAgent):
+        scripted_attempts: tuple[tuple[Event, ...], ...]
+        attempt_count: int = 0
+
+        async def _run_provider_attempt(
+            self,
+            ctx: InvocationContext,
+        ):
+            events = self.scripted_attempts[self.attempt_count]
+            self.attempt_count += 1
+            for event in events:
+                yield event
+
+    agent = ScriptedResearchAgent(
+        name="research_expert",
+        model="gemini-3.6-flash",
+        scripted_attempts=attempts,
+    )
+    observed = [
+        event
+        async for event in agent._run_async_impl(None)  # type: ignore[arg-type]
+    ]
+    return observed, agent.attempt_count
+
+
+@pytest.mark.asyncio
+async def test_research_agent_retries_one_ungrounded_provider_response(
+) -> None:
+    ungrounded = live_research_event(grounded=False)
+    grounded = live_research_event(grounded=True)
+    observed, attempt_count = await run_scripted_research_attempts(
+        ((ungrounded,), (grounded,))
+    )
+
+    assert observed == [grounded]
+    assert attempt_count == 2
+
+
+@pytest.mark.asyncio
+async def test_research_agent_does_not_retry_grounded_provider_response(
+) -> None:
+    grounded = live_research_event(grounded=True)
+    unused = live_research_event(grounded=False)
+
+    observed, attempt_count = await run_scripted_research_attempts(
+        ((grounded,), (unused,))
+    )
+
+    assert observed == [grounded]
+    assert attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_research_agent_stops_after_two_ungrounded_responses() -> None:
+    first = live_research_event(grounded=False)
+    second = first.model_copy(
+        update={
+            "content": types.Content(
+                role="model",
+                parts=[types.Part.from_text(text="Still ungrounded.")],
+            )
+        }
+    )
+
+    observed, attempt_count = await run_scripted_research_attempts(
+        ((first,), (second,))
+    )
+
+    assert observed == [second]
+    assert attempt_count == 2
+
+
+@pytest.mark.asyncio
+async def test_research_agent_does_not_retry_malformed_grounding() -> None:
+    malformed = live_research_event(grounded=False).model_copy(
+        update={
+            "grounding_metadata": types.GroundingMetadata(
+                grounding_chunks=[
+                    types.GroundingChunk(
+                        web=types.GroundingChunkWeb(
+                            uri="https://www.python.org/downloads/",
+                            title="Python downloads",
+                        )
+                    )
+                ]
+            )
+        }
+    )
+    unused = live_research_event(grounded=True)
+
+    observed, attempt_count = await run_scripted_research_attempts(
+        ((malformed,), (unused,))
+    )
+
+    assert observed == [malformed]
+    assert attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_research_agent_does_not_retry_provider_exception() -> None:
+    from research_expert import BoundedResearchAgent
+
+    class FailingResearchAgent(BoundedResearchAgent):
+        attempt_count: int = 0
+
+        async def _run_provider_attempt(
+            self,
+            ctx: InvocationContext,
+        ):
+            self.attempt_count += 1
+            raise RuntimeError("provider failure")
+            yield  # pragma: no cover
+
+    agent = FailingResearchAgent(
+        name="research_expert",
+        model="gemini-3.6-flash",
+    )
+
+    with pytest.raises(RuntimeError, match="provider failure"):
+        async for _ in agent._run_async_impl(
+            None  # type: ignore[arg-type]
+        ):
+            pass
+
+    assert agent.attempt_count == 1
 
 
 def test_research_input_normalizes_only_task_specific_fields() -> None:
@@ -535,6 +698,65 @@ def test_research_output_maps_findings_to_provider_supports() -> None:
     assert result.evidence.grounding_support_count == 2
 
 
+def test_live_research_event_normalizes_grounded_text_without_node_output(
+) -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert import normalize_research_event
+
+    claim = "Python 3.14.7 is the current stable release."
+    event = Event(
+        author="research_expert",
+        content=types.Content(
+            role="model",
+            parts=[types.Part.from_text(text=claim)],
+        ),
+        output=None,
+        grounding_metadata=types.GroundingMetadata(
+            grounding_chunks=[
+                types.GroundingChunk(
+                    web=types.GroundingChunkWeb(
+                        uri="https://www.python.org/downloads/",
+                        title="Python downloads",
+                    )
+                )
+            ],
+            grounding_supports=[
+                types.GroundingSupport(
+                    segment=types.Segment(text=claim),
+                    grounding_chunk_indices=[0],
+                )
+            ],
+        ),
+    )
+
+    result = normalize_research_event(event)
+
+    assert result.status is ExpertStatus.COMPLETED
+    assert result.payload is not None
+    assert [
+        finding.model_dump(mode="json")
+        for finding in result.payload.findings
+    ] == [
+        {
+            "claim": claim,
+            "evidence_summary": claim,
+            "source_ids": ["source-1"],
+            "confidence": "medium",
+            "uncertainty": None,
+        }
+    ]
+    assert [
+        source.model_dump(mode="json")
+        for source in result.payload.sources
+    ] == [
+        {
+            "source_id": "source-1",
+            "uri": "https://www.python.org/downloads/",
+            "label": "Python downloads",
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("raw_output", "metadata"),
     (
@@ -703,10 +925,10 @@ def test_create_research_expert_is_an_isolated_single_turn_search_agent(
     from google.adk.tools.google_search_tool import google_search
 
     from research_expert import (
+        BoundedResearchAgent,
         RESEARCH_EXPERT_INSTRUCTION,
         RESEARCH_EXPERT_MODEL_NAME,
         RESEARCH_EXPERT_TIMEOUT_SECONDS,
-        ResearchExpertDraft,
         ResearchExpertInput,
         create_research_expert,
     )
@@ -718,12 +940,13 @@ def test_create_research_expert_is_an_isolated_single_turn_search_agent(
         )
     )
 
+    assert isinstance(agent, BoundedResearchAgent)
     assert agent.name == "research_expert"
     assert agent.mode == "single_turn"
     assert RESEARCH_EXPERT_TIMEOUT_SECONDS == 45
     assert agent.timeout == RESEARCH_EXPERT_TIMEOUT_SECONDS
     assert agent.input_schema is ResearchExpertInput
-    assert agent.output_schema is ResearchExpertDraft
+    assert agent.output_schema is None
     assert isinstance(agent.model, Gemini)
     assert agent.model.model == RESEARCH_EXPERT_MODEL_NAME
     assert agent.model.client_kwargs == {

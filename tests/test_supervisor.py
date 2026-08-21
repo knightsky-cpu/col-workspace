@@ -118,7 +118,6 @@ def test_create_supervisor_app_registers_only_bounded_research_expert(
     from research_expert import (
         RESEARCH_EXPERT_MODEL_NAME,
         RESEARCH_EXPERT_TIMEOUT_SECONDS,
-        ResearchExpertDraft,
         ResearchExpertInput,
     )
     from supervisor import SUPERVISOR_INSTRUCTION, create_supervisor_app
@@ -132,7 +131,7 @@ def test_create_supervisor_app_registers_only_bounded_research_expert(
     assert research_expert.timeout == RESEARCH_EXPERT_TIMEOUT_SECONDS
     assert research_expert.model.model == RESEARCH_EXPERT_MODEL_NAME
     assert research_expert.input_schema is ResearchExpertInput
-    assert research_expert.output_schema is ResearchExpertDraft
+    assert research_expert.output_schema is None
     assert research_expert.sub_agents == []
     assert research_expert.disallow_transfer_to_parent is True
     assert research_expert.disallow_transfer_to_peers is True

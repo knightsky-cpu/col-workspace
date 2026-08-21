@@ -63,7 +63,8 @@ class ResearchExpertTurnTracker:
             )
             self._results += 1
             raise ResearchExpertRuntimeError(result.status)
-        if getattr(event, "output", None) is None:
+        is_final_response = getattr(event, "is_final_response", None)
+        if not callable(is_final_response) or not is_final_response():
             return
         self._require_pending_claim()
         result = normalize_research_event(cast(Event, event))

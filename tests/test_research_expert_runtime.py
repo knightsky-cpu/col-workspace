@@ -74,6 +74,28 @@ async def test_research_turn_tracker_claims_and_maps_grounded_receipts(
     assert [action.model_dump(mode="json") for action in receipts.actions] == [
         {"action_name": "google_search", "status": "completed"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_research_tracker_accepts_live_event_without_node_output(
+) -> None:
+    from research_expert_runtime import ResearchExpertTurnTracker
+
+    tracker = ResearchExpertTurnTracker()
+    await tracker.observe(research_call_event())
+    live_event = grounded_research_event().model_copy(
+        update={"output": None}
+    )
+
+    await tracker.observe(live_event)
+    receipts = tracker.finalize()
+
+    assert [action.action_name for action in receipts.actions] == [
+        "google_search"
+    ]
+    assert [str(citation.uri) for citation in receipts.citations] == [
+        "https://www.python.org/downloads/"
+    ]
     assert [
         citation.model_dump(mode="json") for citation in receipts.citations
     ] == [
