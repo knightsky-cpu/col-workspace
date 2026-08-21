@@ -1,6 +1,9 @@
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+import secrets
+import time
 
 from expert_contracts import ExpertCapability
 
@@ -12,6 +15,8 @@ class ExpertDelegationDenialReason(StrEnum):
     CAPABILITY_ALREADY_CLAIMED = "capability_already_claimed"
     INVALID_CAPABILITY = "invalid_capability"
     INVALID_DEPTH = "invalid_depth"
+    INSUFFICIENT_TIME_REMAINING = "insufficient_time_remaining"
+    TURN_NOT_REGISTERED = "turn_not_registered"
 
 
 class ExpertDelegationDeniedError(RuntimeError):
@@ -72,3 +77,58 @@ class ExpertDelegationBudget:
             )
             self._claims.append(claim)
             return claim
+
+
+@dataclass(frozen=True, slots=True)
+class _RegisteredTurn:
+    budget: ExpertDelegationBudget
+    deadline: float
+
+
+class ExpertDelegationRegistry:
+    """Resolve server-owned turn tokens to invocation-scoped budgets."""
+
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._clock = clock
+        self._lock = asyncio.Lock()
+        self._turns: dict[str, _RegisteredTurn] = {}
+
+    def register_turn(
+        self,
+        *,
+        budget: ExpertDelegationBudget,
+        deadline: float,
+    ) -> str:
+        token = secrets.token_urlsafe(32)
+        self._turns[token] = _RegisteredTurn(
+            budget=budget,
+            deadline=deadline,
+        )
+        return token
+
+    async def claim(
+        self,
+        token: str,
+        capability: ExpertCapability,
+        *,
+        depth: int,
+        minimum_remaining_seconds: float,
+    ) -> ExpertDelegationClaim:
+        async with self._lock:
+            turn = self._turns.get(token)
+            if turn is None:
+                raise ExpertDelegationDeniedError(
+                    ExpertDelegationDenialReason.TURN_NOT_REGISTERED
+                )
+            if turn.deadline - self._clock() < minimum_remaining_seconds:
+                raise ExpertDelegationDeniedError(
+                    ExpertDelegationDenialReason.INSUFFICIENT_TIME_REMAINING
+                )
+            return await turn.budget.claim(capability, depth=depth)
+
+    def release_turn(self, token: str) -> None:
+        self._turns.pop(token, None)

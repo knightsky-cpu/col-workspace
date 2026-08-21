@@ -141,3 +141,39 @@ def test_create_supervisor_app_registers_only_bounded_research_expert(
     assert "current or externally verifiable" in normalized_instruction
     assert "supplied URL" in normalized_instruction
     assert "at most two specialist delegations" in normalized_instruction
+
+
+def test_create_supervisor_app_registers_injected_source_tool_only() -> None:
+    from expert_delegation import ExpertDelegationRegistry
+    from supervisor import SUPERVISOR_INSTRUCTION, create_supervisor_app
+
+    source_service = object()
+    registry = ExpertDelegationRegistry()
+    app = create_supervisor_app(
+        vertex_settings=VERTEX_SETTINGS,
+        source_service=source_service,
+        delegation_registry=registry,
+    )
+
+    assert [tool.name for tool in app.root_agent.tools] == [
+        "analyze_source",
+        "research_expert",
+    ]
+    assert len(app.root_agent.sub_agents) == 1
+    assert app.root_agent.sub_agents[0].name == "research_expert"
+    without_source = create_supervisor_app(
+        vertex_settings=VERTEX_SETTINGS
+    )
+    assert [tool.name for tool in without_source.root_agent.tools] == [
+        "research_expert"
+    ]
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+    for required_rule in (
+        "Source Expert",
+        "explicitly supplied",
+        "incidental URL",
+        "broad discovery",
+        "Never invoke the Source Expert again",
+        "final response",
+    ):
+        assert required_rule in normalized_instruction

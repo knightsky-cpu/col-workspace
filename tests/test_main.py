@@ -332,6 +332,11 @@ class FakeGenAIClient:
 
 
 @dataclass
+class FakeSourceExpertService:
+    client: object
+
+
+@dataclass
 class FakeSynthesisApplicationService:
     events: list[tuple[Any, ...]]
     blueprint: SynthesisBlueprint
@@ -445,9 +450,13 @@ class ServiceState:
     database: FakeMemoryEngine
     genai_client: FakeGenAIClient
     synthesis_service: FakeSynthesisApplicationService
+    source_service: FakeSourceExpertService
     supervisor: FakeSupervisorRuntime
     memory_service: FakeTrustedMemoryService
     supervisor_memory_services: list[object]
+    supervisor_source_services: list[object]
+    supervisor_delegation_registries: list[object]
+    runtime_delegation_registries: list[object]
     genai_client_kwargs: list[dict[str, object]]
     supervisor_vertex_settings: list[VertexAISettings]
 
@@ -459,6 +468,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     genai_client = FakeGenAIClient(FakeAsyncGenAI())
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
     synthesis_service = FakeSynthesisApplicationService(events, blueprint)
+    source_service = FakeSourceExpertService(client=genai_client)
     supervisor = FakeSupervisorRuntime(events)
     pending_proposal = MemoryProposal(
         proposal_id="example_usage--proposal-1",
@@ -534,6 +544,9 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         ),
     )
     supervisor_memory_services: list[object] = []
+    supervisor_source_services: list[object] = []
+    supervisor_delegation_registries: list[object] = []
+    runtime_delegation_registries: list[object] = []
     genai_client_kwargs: list[dict[str, object]] = []
     supervisor_vertex_settings: list[VertexAISettings] = []
     state = ServiceState(
@@ -541,9 +554,15 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         database=database,
         genai_client=genai_client,
         synthesis_service=synthesis_service,
+        source_service=source_service,
         supervisor=supervisor,
         memory_service=memory_service,
         supervisor_memory_services=supervisor_memory_services,
+        supervisor_source_services=supervisor_source_services,
+        supervisor_delegation_registries=(
+            supervisor_delegation_registries
+        ),
+        runtime_delegation_registries=runtime_delegation_registries,
         genai_client_kwargs=genai_client_kwargs,
         supervisor_vertex_settings=supervisor_vertex_settings,
     )
@@ -573,13 +592,29 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         create_synthesis_service,
         raising=False,
     )
+
+    def create_source_service(*, client: object) -> object:
+        assert client is genai_client
+        return source_service
+
+    monkeypatch.setattr(
+        main,
+        "SourceExpertService",
+        create_source_service,
+        raising=False,
+    )
+
     def create_supervisor_app(
         *,
         vertex_settings: VertexAISettings,
         memory_service: object | None = None,
+        source_service: object | None = None,
+        delegation_registry: object | None = None,
     ) -> object:
         supervisor_vertex_settings.append(vertex_settings)
         supervisor_memory_services.append(memory_service)
+        supervisor_source_services.append(source_service)
+        supervisor_delegation_registries.append(delegation_registry)
         return object()
 
     monkeypatch.setattr(
@@ -591,7 +626,14 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     monkeypatch.setattr(
         main,
         "SupervisorRuntime",
-        SimpleNamespace(from_app=lambda app: supervisor),
+        SimpleNamespace(
+            from_app=lambda app, *, delegation_registry=None: (
+                runtime_delegation_registries.append(
+                    delegation_registry
+                )
+                or supervisor
+            )
+        ),
         raising=False,
     )
     monkeypatch.setattr(
@@ -991,6 +1033,23 @@ async def test_lifespan_injects_shared_memory_service_into_supervisor(
 
 
 @pytest.mark.asyncio
+async def test_lifespan_shares_source_service_client_and_registry(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        assert service_state.source_service.client is (
+            service_state.genai_client
+        )
+        assert service_state.supervisor_source_services == [
+            service_state.source_service
+        ]
+        assert len(service_state.supervisor_delegation_registries) == 1
+        assert service_state.supervisor_delegation_registries[0] is (
+            service_state.runtime_delegation_registries[0]
+        )
+
+
+@pytest.mark.asyncio
 async def test_lifespan_exposes_synthesis_application_service(
     service_state: ServiceState,
 ) -> None:
@@ -1008,7 +1067,11 @@ async def test_lifespan_closes_resources_if_supervisor_construction_fails(
 ) -> None:
     construction_error = RuntimeError("supervisor construction failed")
 
-    def fail_construction(app: object) -> object:
+    def fail_construction(
+        app: object,
+        *,
+        delegation_registry: object | None = None,
+    ) -> object:
         raise construction_error
 
     monkeypatch.setattr(

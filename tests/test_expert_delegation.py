@@ -1,8 +1,151 @@
 import asyncio
+import time
 
 import pytest
 
 from expert_contracts import ExpertCapability
+
+
+@pytest.mark.asyncio
+async def test_registry_token_claims_the_registered_turn_budget() -> None:
+    from expert_delegation import (
+        ExpertDelegationBudget,
+        ExpertDelegationRegistry,
+    )
+
+    budget = ExpertDelegationBudget()
+    registry = ExpertDelegationRegistry()
+    token = registry.register_turn(
+        budget=budget,
+        deadline=time.monotonic() + 90,
+    )
+
+    research_claim = await budget.claim(
+        ExpertCapability.RESEARCH,
+        depth=1,
+    )
+    source_claim = await registry.claim(
+        token,
+        ExpertCapability.SOURCE,
+        depth=1,
+        minimum_remaining_seconds=45,
+    )
+
+    assert research_claim.attempt_number == 1
+    assert source_claim.attempt_number == 2
+
+
+@pytest.mark.asyncio
+async def test_registry_preserves_duplicate_and_third_attempt_denials() -> None:
+    from expert_delegation import (
+        ExpertDelegationBudget,
+        ExpertDelegationDeniedError,
+        ExpertDelegationDenialReason,
+        ExpertDelegationRegistry,
+    )
+
+    registry = ExpertDelegationRegistry()
+    token = registry.register_turn(
+        budget=ExpertDelegationBudget(),
+        deadline=time.monotonic() + 90,
+    )
+
+    await registry.claim(
+        token,
+        ExpertCapability.SOURCE,
+        depth=1,
+        minimum_remaining_seconds=45,
+    )
+    with pytest.raises(ExpertDelegationDeniedError) as duplicate:
+        await registry.claim(
+            token,
+            ExpertCapability.SOURCE,
+            depth=1,
+            minimum_remaining_seconds=45,
+        )
+    await registry.claim(
+        token,
+        ExpertCapability.RESEARCH,
+        depth=1,
+        minimum_remaining_seconds=45,
+    )
+    with pytest.raises(ExpertDelegationDeniedError) as third:
+        await registry.claim(
+            token,
+            ExpertCapability.COMPUTATION,
+            depth=1,
+            minimum_remaining_seconds=45,
+        )
+
+    assert duplicate.value.reason is (
+        ExpertDelegationDenialReason.CAPABILITY_ALREADY_CLAIMED
+    )
+    assert third.value.reason is (
+        ExpertDelegationDenialReason.ATTEMPT_BUDGET_EXHAUSTED
+    )
+
+
+@pytest.mark.asyncio
+async def test_registry_denies_claim_when_turn_time_is_insufficient() -> None:
+    from expert_delegation import (
+        ExpertDelegationBudget,
+        ExpertDelegationDeniedError,
+        ExpertDelegationDenialReason,
+        ExpertDelegationRegistry,
+    )
+
+    now = 100.0
+    registry = ExpertDelegationRegistry(clock=lambda: now)
+    token = registry.register_turn(
+        budget=ExpertDelegationBudget(),
+        deadline=144.0,
+    )
+
+    with pytest.raises(ExpertDelegationDeniedError) as exc_info:
+        await registry.claim(
+            token,
+            ExpertCapability.SOURCE,
+            depth=1,
+            minimum_remaining_seconds=45,
+        )
+
+    assert exc_info.value.reason is (
+        ExpertDelegationDenialReason.INSUFFICIENT_TIME_REMAINING
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("released", [False, True])
+async def test_registry_denies_unknown_or_released_turn_tokens(
+    released: bool,
+) -> None:
+    from expert_delegation import (
+        ExpertDelegationBudget,
+        ExpertDelegationDeniedError,
+        ExpertDelegationDenialReason,
+        ExpertDelegationRegistry,
+    )
+
+    registry = ExpertDelegationRegistry()
+    token = "unknown-server-token"
+    if released:
+        token = registry.register_turn(
+            budget=ExpertDelegationBudget(),
+            deadline=time.monotonic() + 90,
+        )
+        registry.release_turn(token)
+
+    with pytest.raises(ExpertDelegationDeniedError) as exc_info:
+        await registry.claim(
+            token,
+            ExpertCapability.SOURCE,
+            depth=1,
+            minimum_remaining_seconds=45,
+        )
+
+    assert exc_info.value.reason is (
+        ExpertDelegationDenialReason.TURN_NOT_REGISTERED
+    )
 
 
 @pytest.mark.asyncio

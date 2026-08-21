@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass
 import json
 import logging
+import time
 from uuid import uuid4
 
 from google.adk.agents.run_config import RunConfig
@@ -9,7 +10,10 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
-from expert_delegation import ExpertDelegationBudget
+from expert_delegation import (
+    ExpertDelegationBudget,
+    ExpertDelegationRegistry,
+)
 from memory_proposals import ProposalTurnLease
 from memory_proposal_tool import (
     PendingMemoryProposalToolResponse,
@@ -23,6 +27,7 @@ from schemas import (
     MemoryProposalReceipt,
 )
 from supervisor import SUPERVISOR_APP_NAME
+from source_expert_runtime import SourceExpertTurnTracker
 
 
 logger = logging.getLogger(__name__)
@@ -73,16 +78,31 @@ class SupervisorTurnResult:
 
 
 class SupervisorRuntime:
-    def __init__(self, *, runner: object, session_service: object) -> None:
+    def __init__(
+        self,
+        *,
+        runner: object,
+        session_service: object,
+        delegation_registry: ExpertDelegationRegistry | None = None,
+    ) -> None:
         self._runner = runner
         self._session_service = session_service
+        self._delegation_registry = (
+            delegation_registry or ExpertDelegationRegistry()
+        )
 
     @classmethod
-    def from_app(cls, app: object) -> "SupervisorRuntime":
+    def from_app(
+        cls,
+        app: object,
+        *,
+        delegation_registry: ExpertDelegationRegistry | None = None,
+    ) -> "SupervisorRuntime":
         sessions = InMemorySessionService()
         return cls(
             runner=Runner(app=app, session_service=sessions),
             session_service=sessions,
+            delegation_registry=delegation_registry,
         )
 
     async def run_turn(
@@ -96,9 +116,14 @@ class SupervisorRuntime:
         citations: list[CitationReference] = []
         memory_proposals = list(context.precompleted_memory_proposals)
         delegation_budget = ExpertDelegationBudget()
+        delegation_token = self._delegation_registry.register_turn(
+            budget=delegation_budget,
+            deadline=time.monotonic() + SUPERVISOR_TIMEOUT_SECONDS,
+        )
         research_tracker = ResearchExpertTurnTracker(
             budget=delegation_budget
         )
+        source_tracker = SourceExpertTurnTracker()
         self._validate_proposal_effects(actions, memory_proposals)
         try:
             async with asyncio.timeout(SUPERVISOR_TIMEOUT_SECONDS):
@@ -106,6 +131,7 @@ class SupervisorRuntime:
                     "project_id": context.project_id,
                     "session_id": context.session_id,
                     "user_id": context.user_id,
+                    "expert_delegation_token": delegation_token,
                 }
                 if context.source_message_id is not None:
                     session_state.update(
@@ -159,6 +185,7 @@ class SupervisorRuntime:
                     run_config=config,
                 ):
                     await research_tracker.observe(event)
+                    source_tracker.observe(event)
                     for function_response in event.get_function_responses():
                         if function_response.name != "propose_memory_signal":
                             continue
@@ -201,6 +228,9 @@ class SupervisorRuntime:
                 research_receipts = research_tracker.finalize()
                 actions.extend(research_receipts.actions)
                 citations.extend(research_receipts.citations)
+                source_receipts = source_tracker.finalize()
+                actions.extend(source_receipts.actions)
+                citations.extend(source_receipts.citations)
                 if len(final_responses) != 1:
                     raise SupervisorRuntimeError(
                         "Agent_Col did not produce exactly one final response.",
@@ -236,11 +266,16 @@ class SupervisorRuntime:
                 memory_proposals=tuple(memory_proposals),
             ) from exc
         finally:
-            if session_created:
-                await self._session_service.delete_session(
-                    app_name=SUPERVISOR_APP_NAME,
-                    user_id=context.user_id,
-                    session_id=invocation_session_id,
+            try:
+                if session_created:
+                    await self._session_service.delete_session(
+                        app_name=SUPERVISOR_APP_NAME,
+                        user_id=context.user_id,
+                        session_id=invocation_session_id,
+                    )
+            finally:
+                self._delegation_registry.release_turn(
+                    delegation_token
                 )
 
     @staticmethod

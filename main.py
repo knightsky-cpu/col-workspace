@@ -35,6 +35,7 @@ from database import (
     MemorySignalConflictError,
     MemorySignalNotFoundError,
 )
+from expert_delegation import ExpertDelegationRegistry
 from memory_context import MemoryContextRenderer
 from memory_proposals import ProposalTurnLease
 from schemas import (
@@ -58,6 +59,7 @@ from supervisor_runtime import (
     SupervisorTimeoutError,
     SupervisorTurnContext,
 )
+from source_expert_service import SourceExpertService
 from synthesis import (
     SynthesisEngineError,
     SynthesisTimeoutError,
@@ -306,11 +308,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             database=database,
         )
         memory_service = TrustedMemoryService(database=database)
+        source_service = SourceExpertService(client=client)
+        delegation_registry = ExpertDelegationRegistry()
         supervisor = SupervisorRuntime.from_app(
             create_supervisor_app(
                 vertex_settings=vertex_settings,
                 memory_service=memory_service,
-            )
+                source_service=source_service,
+                delegation_registry=delegation_registry,
+            ),
+            delegation_registry=delegation_registry,
         )
     except Exception:
         try:

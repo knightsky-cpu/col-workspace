@@ -27,11 +27,13 @@ class FakeEvent:
         text: str | None,
         final: bool,
         function_responses: list[types.FunctionResponse] | None = None,
+        author: str = "Agent_Col",
     ) -> None:
         parts = [] if text is None else [types.Part.from_text(text=text)]
         self.content = types.Content(role="model", parts=parts)
         self._final = final
         self._function_responses = function_responses or []
+        self.author = author
 
     def is_final_response(self) -> bool:
         return self._final
@@ -117,7 +119,10 @@ async def test_run_turn_uses_bounded_fresh_session_and_returns_final_text(
     assert created["app_name"] == "agent_col"
     assert created["user_id"] == "user-1"
     assert created["session_id"] != "session-1"
-    assert created["state"] == {
+    state = dict(created["state"])
+    delegation_token = state.pop("expert_delegation_token")
+    assert isinstance(delegation_token, str)
+    assert state == {
         "project_id": "project-1",
         "session_id": "session-1",
         "user_id": "user-1",
@@ -158,7 +163,10 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
         )
     )
 
-    assert sessions.created[0]["state"] == {
+    state = dict(sessions.created[0]["state"])
+    delegation_token = state.pop("expert_delegation_token")
+    assert isinstance(delegation_token, str)
+    assert state == {
         "project_id": "project-1",
         "session_id": "session-1",
         "user_id": "user-1",
@@ -794,3 +802,266 @@ async def test_run_turn_maps_grounded_research_without_child_final_ownership(
             "label": "Python downloads",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_run_turn_maps_source_receipts_and_releases_turn_token() -> None:
+    from expert_contracts import ExpertCapability
+    from expert_delegation import (
+        ExpertDelegationDeniedError,
+        ExpertDelegationDenialReason,
+        ExpertDelegationRegistry,
+    )
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+    from tests.test_source_expert_tool import completed_source_result
+
+    source_response = types.FunctionResponse(
+        name="analyze_source",
+        response={
+            "status": "completed",
+            "result": completed_source_result().model_dump(mode="json"),
+        },
+    )
+    sessions = FakeSessionService()
+    registry = ExpertDelegationRegistry()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [source_response]),
+                FakeEvent(
+                    "Agent_Col integrated source answer.",
+                    True,
+                ),
+            ]
+        ),
+        session_service=sessions,
+        delegation_registry=registry,
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Analyze https://example.com/.",
+        )
+    )
+
+    assert result.response == "Agent_Col integrated source answer."
+    assert [action.model_dump(mode="json") for action in result.actions] == [
+        {"action_name": "url_context", "status": "completed"}
+    ]
+    assert [
+        citation.model_dump(mode="json") for citation in result.citations
+    ] == [
+        {
+            "uri": "https://example.com/",
+            "label": "Example Domain",
+        }
+    ]
+    token = sessions.created[0]["state"]["expert_delegation_token"]
+    assert isinstance(token, str)
+    with pytest.raises(ExpertDelegationDeniedError) as exc_info:
+        await registry.claim(
+            token,
+            ExpertCapability.SOURCE,
+            depth=1,
+            minimum_remaining_seconds=1,
+        )
+    assert exc_info.value.reason is (
+        ExpertDelegationDenialReason.TURN_NOT_REGISTERED
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_turn_contains_source_failure_without_receipts() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    failure_response = types.FunctionResponse(
+        name="analyze_source",
+        response={
+            "status": "unavailable",
+            "message": "Source analysis could not be completed.",
+        },
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [failure_response]),
+                FakeEvent("I could not verify that source.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Analyze https://example.com/.",
+        )
+    )
+
+    assert result.response == "I could not verify that source."
+    assert result.actions == ()
+    assert result.citations == ()
+
+
+@pytest.mark.asyncio
+async def test_run_turn_never_uses_source_tool_output_as_final_response(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+    from tests.test_source_expert_tool import completed_source_result
+
+    source_response = types.FunctionResponse(
+        name="analyze_source",
+        response={
+            "status": "completed",
+            "result": completed_source_result().model_dump(mode="json"),
+        },
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    "Source tool internal output.",
+                    True,
+                    [source_response],
+                    author="analyze_source",
+                ),
+                FakeEvent("Agent_Col final answer.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Analyze https://example.com/.",
+        )
+    )
+
+    assert result.response == "Agent_Col final answer."
+
+
+@pytest.mark.asyncio
+async def test_run_turn_fails_closed_for_malformed_source_response(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from source_expert_runtime import SourceExpertRuntimeError
+    from supervisor_runtime import (
+        SupervisorRuntime,
+        SupervisorRuntimeError,
+        SupervisorTurnContext,
+    )
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    None,
+                    False,
+                    [
+                        types.FunctionResponse(
+                            name="analyze_source",
+                            response={
+                                "status": "unavailable",
+                                "message": (
+                                    "Source analysis could not be completed."
+                                ),
+                                "private_detail": "must-not-leak",
+                            },
+                        )
+                    ],
+                )
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+    caplog.set_level(logging.ERROR, logger="supervisor_runtime")
+
+    with pytest.raises(SupervisorRuntimeError) as exc_info:
+        await runtime.run_turn(
+            SupervisorTurnContext(
+                project_id="private-project",
+                session_id="private-session",
+                user_id="private-user",
+                message="private-message",
+            )
+        )
+
+    assert isinstance(exc_info.value.__cause__, SourceExpertRuntimeError)
+    assert "SourceExpertRuntimeError" in caplog.text
+    for private_value in (
+        "private-project",
+        "private-session",
+        "private-user",
+        "private-message",
+        "must-not-leak",
+    ):
+        assert private_value not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_run_turn_releases_delegation_token_after_cancellation() -> None:
+    import asyncio
+
+    from expert_contracts import ExpertCapability
+    from expert_delegation import (
+        ExpertDelegationDeniedError,
+        ExpertDelegationDenialReason,
+        ExpertDelegationRegistry,
+    )
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    started = asyncio.Event()
+
+    class BlockingRunner(FakeRunner):
+        async def run_async(
+            self,
+            **kwargs: object,
+        ) -> AsyncIterator[FakeEvent]:
+            self.calls.append(dict(kwargs))
+            started.set()
+            await asyncio.Event().wait()
+            if False:
+                yield FakeEvent(None, False)
+
+    sessions = FakeSessionService()
+    registry = ExpertDelegationRegistry()
+    runtime = SupervisorRuntime(
+        runner=BlockingRunner(events=[]),
+        session_service=sessions,
+        delegation_registry=registry,
+    )
+    task = asyncio.create_task(
+        runtime.run_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Analyze https://example.com/.",
+            )
+        )
+    )
+    await asyncio.wait_for(started.wait(), timeout=0.2)
+    token = sessions.created[0]["state"]["expert_delegation_token"]
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    with pytest.raises(ExpertDelegationDeniedError) as exc_info:
+        await registry.claim(
+            token,
+            ExpertCapability.SOURCE,
+            depth=1,
+            minimum_remaining_seconds=1,
+        )
+    assert exc_info.value.reason is (
+        ExpertDelegationDenialReason.TURN_NOT_REGISTERED
+    )
