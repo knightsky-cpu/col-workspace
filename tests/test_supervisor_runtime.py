@@ -4,6 +4,7 @@ import logging
 from types import SimpleNamespace
 
 import pytest
+from google.adk.events import Event
 from google.genai import types
 
 
@@ -64,11 +65,11 @@ def pending_function_response(
 
 @dataclass
 class FakeRunner:
-    events: list[FakeEvent]
+    events: list[object]
     calls: list[dict[str, object]] = field(default_factory=list)
     error: Exception | None = None
 
-    async def run_async(self, **kwargs: object) -> AsyncIterator[FakeEvent]:
+    async def run_async(self, **kwargs: object) -> AsyncIterator[object]:
         self.calls.append(dict(kwargs))
         if self.error is not None:
             raise self.error
@@ -703,3 +704,93 @@ async def test_run_turn_requires_exactly_one_nonempty_final_response(
         )
 
     assert len(sessions.deleted) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_turn_maps_grounded_research_without_child_final_ownership(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    claim = "Python 3.14.7 is the current stable release."
+    research_call = Event(
+        author="Agent_Col",
+        content=types.Content(
+            role="model",
+            parts=[
+                types.Part(
+                    function_call=types.FunctionCall(
+                        id="research-call-1",
+                        name="research_expert",
+                        args={
+                            "question": "What is the current Python release?",
+                            "objective": "Establish the current release.",
+                        },
+                    )
+                )
+            ],
+        ),
+    )
+    research_output = Event(
+        author="research_expert",
+        content=types.Content(
+            role="model",
+            parts=[types.Part.from_text(text=claim)],
+        ),
+        output={
+            "findings": [
+                {
+                    "claim": claim,
+                    "evidence_summary": "Python.org supports the claim.",
+                    "confidence": "high",
+                }
+            ]
+        },
+        grounding_metadata=types.GroundingMetadata(
+            grounding_chunks=[
+                types.GroundingChunk(
+                    web=types.GroundingChunkWeb(
+                        uri="https://www.python.org/downloads/",
+                        title="Python downloads",
+                    )
+                )
+            ],
+            grounding_supports=[
+                types.GroundingSupport(
+                    segment=types.Segment(text=claim),
+                    grounding_chunk_indices=[0],
+                )
+            ],
+        ),
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                research_call,
+                research_output,
+                FakeEvent("Agent_Col grounded answer.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="What is the current Python release?",
+        )
+    )
+
+    assert result.response == "Agent_Col grounded answer."
+    assert [action.model_dump(mode="json") for action in result.actions] == [
+        {"action_name": "google_search", "status": "completed"}
+    ]
+    assert [
+        citation.model_dump(mode="json") for citation in result.citations
+    ] == [
+        {
+            "uri": "https://www.python.org/downloads/",
+            "label": "Python downloads",
+        }
+    ]

@@ -3,6 +3,7 @@ from google.adk.apps import App
 from google.adk.models import Gemini
 
 from memory_proposal_tool import create_propose_memory_signal_tool
+from research_expert import create_research_expert
 from trusted_memory_service import TrustedMemoryService
 from vertex_config import VertexAISettings
 
@@ -18,6 +19,14 @@ Default to no tool. Use a tool only when it materially improves correctness,
 evidence, or completion of the user's requested task. Ordinary conversation,
 explanations already supported by supplied context, and ambiguous requests
 that need clarification do not justify a tool call.
+
+Use the Research Expert only when the task materially depends on current or
+externally verifiable public information that is not already present in
+validated context. Do not use it to analyze a supplied URL, perform a
+calculation, or restate stable general knowledge. Make at most two specialist
+delegations per turn, never invoke the same specialist twice, and use a second
+specialist only for a distinct evidence gap. Experts never own the final
+response.
 
 Ask one concise clarifying question when consequential input is missing.
 Never claim that an action occurred, an artifact was created, or a source was
@@ -68,5 +77,6 @@ def create_supervisor_app(
         ),
         instruction=SUPERVISOR_INSTRUCTION,
         tools=tools,
+        sub_agents=[create_research_expert(vertex_settings=vertex_settings)],
     )
     return App(name=SUPERVISOR_APP_NAME, root_agent=root_agent)

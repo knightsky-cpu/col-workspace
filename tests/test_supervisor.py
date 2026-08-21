@@ -24,7 +24,7 @@ def test_google_adk_dependency_is_exactly_pinned_and_installed() -> None:
     assert version("google-adk") == "2.7.0"
 
 
-def test_create_supervisor_app_defines_restrained_tool_free_agent() -> None:
+def test_create_supervisor_app_defines_restrained_research_agent() -> None:
     from supervisor import (
         SUPERVISOR_APP_NAME,
         SUPERVISOR_INSTRUCTION,
@@ -46,7 +46,7 @@ def test_create_supervisor_app_defines_restrained_tool_free_agent() -> None:
         "project": "project-1",
         "location": "global",
     }
-    assert root_agent.tools == []
+    assert [tool.name for tool in root_agent.tools] == ["research_expert"]
     assert root_agent.instruction == SUPERVISOR_INSTRUCTION
     assert "Default to no tool" in SUPERVISOR_INSTRUCTION
     assert "materially improves correctness" in SUPERVISOR_INSTRUCTION
@@ -63,11 +63,16 @@ def test_create_supervisor_app_registers_only_injected_memory_tool() -> None:
         memory_service=service,
     )
 
-    assert len(app.root_agent.tools) == 1
-    assert app.root_agent.tools[0].name == "propose_memory_signal"
-    assert create_supervisor_app(
-        vertex_settings=VERTEX_SETTINGS
-    ).root_agent.tools == []
+    assert [tool.name for tool in app.root_agent.tools] == [
+        "propose_memory_signal",
+        "research_expert",
+    ]
+    assert [
+        tool.name
+        for tool in create_supervisor_app(
+            vertex_settings=VERTEX_SETTINGS
+        ).root_agent.tools
+    ] == ["research_expert"]
 
 
 def test_supervisor_instruction_enforces_governed_memory_restraint() -> None:
@@ -106,3 +111,34 @@ def test_supervisor_requires_clarification_for_multiple_memory_candidates(
     assert "do not choose between them" in normalized_instruction
     assert "do not call propose_memory_signal" in normalized_instruction
     assert "which single candidate" in normalized_instruction
+
+
+def test_create_supervisor_app_registers_only_bounded_research_expert(
+) -> None:
+    from research_expert import (
+        RESEARCH_EXPERT_MODEL_NAME,
+        RESEARCH_EXPERT_TIMEOUT_SECONDS,
+        ResearchExpertDraft,
+        ResearchExpertInput,
+    )
+    from supervisor import SUPERVISOR_INSTRUCTION, create_supervisor_app
+
+    app = create_supervisor_app(vertex_settings=VERTEX_SETTINGS)
+
+    assert len(app.root_agent.sub_agents) == 1
+    research_expert = app.root_agent.sub_agents[0]
+    assert research_expert.name == "research_expert"
+    assert research_expert.mode == "single_turn"
+    assert research_expert.timeout == RESEARCH_EXPERT_TIMEOUT_SECONDS
+    assert research_expert.model.model == RESEARCH_EXPERT_MODEL_NAME
+    assert research_expert.input_schema is ResearchExpertInput
+    assert research_expert.output_schema is ResearchExpertDraft
+    assert research_expert.sub_agents == []
+    assert research_expert.disallow_transfer_to_parent is True
+    assert research_expert.disallow_transfer_to_peers is True
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+    assert "Research Expert" in normalized_instruction
+    assert "current or externally verifiable" in normalized_instruction
+    assert "supplied URL" in normalized_instruction
+    assert "at most two specialist delegations" in normalized_instruction

@@ -9,11 +9,13 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
+from expert_delegation import ExpertDelegationBudget
 from memory_proposals import ProposalTurnLease
 from memory_proposal_tool import (
     PendingMemoryProposalToolResponse,
     parse_memory_proposal_tool_response,
 )
+from research_expert_runtime import ResearchExpertTurnTracker
 from schemas import (
     AgentActionReceipt,
     ArtifactReference,
@@ -91,7 +93,12 @@ class SupervisorRuntime:
         session_created = False
         final_responses: list[str] = []
         actions = list(context.precompleted_actions)
+        citations: list[CitationReference] = []
         memory_proposals = list(context.precompleted_memory_proposals)
+        delegation_budget = ExpertDelegationBudget()
+        research_tracker = ResearchExpertTurnTracker(
+            budget=delegation_budget
+        )
         self._validate_proposal_effects(actions, memory_proposals)
         try:
             async with asyncio.timeout(SUPERVISOR_TIMEOUT_SECONDS):
@@ -151,6 +158,7 @@ class SupervisorRuntime:
                     new_message=message,
                     run_config=config,
                 ):
+                    await research_tracker.observe(event)
                     for function_response in event.get_function_responses():
                         if function_response.name != "propose_memory_signal":
                             continue
@@ -183,10 +191,16 @@ class SupervisorRuntime:
                                     actions=tuple(actions),
                                     memory_proposals=tuple(memory_proposals),
                                 )
-                    if event.is_final_response():
+                    if (
+                        getattr(event, "author", "Agent_Col") == "Agent_Col"
+                        and event.is_final_response()
+                    ):
                         text = self._extract_text(event)
                         if text:
                             final_responses.append(text)
+                research_receipts = research_tracker.finalize()
+                actions.extend(research_receipts.actions)
+                citations.extend(research_receipts.citations)
                 if len(final_responses) != 1:
                     raise SupervisorRuntimeError(
                         "Agent_Col did not produce exactly one final response.",
@@ -196,6 +210,7 @@ class SupervisorRuntime:
                 return SupervisorTurnResult(
                     response=final_responses[0],
                     actions=tuple(actions),
+                    citations=tuple(citations),
                     memory_proposals=tuple(memory_proposals),
                 )
         except TimeoutError as exc:
