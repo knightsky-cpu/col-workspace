@@ -230,6 +230,17 @@ def test_memory_proposal_receipt_normalizes_server_derived_value() -> None:
     assert receipt.proposed_value == "Avery"
 
 
+def test_agent_action_receipt_accepts_governed_proposal_action() -> None:
+    from schemas import AgentActionReceipt
+
+    receipt = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+
+    assert receipt.action_name == "propose_memory_signal"
+
+
 def test_adaptation_receipt_accepts_only_provided_to_model_status() -> None:
     from schemas import AdaptationReceipt
 

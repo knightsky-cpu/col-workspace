@@ -5,17 +5,24 @@ from datetime import UTC, datetime
 from typing import cast
 
 from database import MemoryEngine
+from memory_proposals import (
+    ProposalTurnLease,
+    derive_proposal_origin_ids,
+)
 from memory_policy import (
     MEMORY_CATEGORY_ORDER,
     ConfirmationChannel,
+    IdentityContextPolicy,
     MemoryCategory,
     MemoryDecision,
+    validate_memory_value,
 )
 from schemas import (
     AgentActionReceipt,
     CollaborationProfile,
     MemoryEvent,
     MemoryProposal,
+    MemoryProposalReceipt,
 )
 
 
@@ -56,11 +63,33 @@ class InspectMemoryCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class ProposeMemorySignalCommand:
+    """Describe one untrusted candidate with server-owned provenance."""
+
+    user_id: str
+    session_id: str
+    source_message_id: str
+    source_message_text: str
+    memory_decision_present: bool
+    category: MemoryCategory
+    proposed_value: object
+    turn_lease: ProposalTurnLease | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TrustedMemoryMutationResult:
     """Return a completed deterministic memory action and profile."""
 
     action: AgentActionReceipt
     profile: CollaborationProfile
+
+
+@dataclass(frozen=True, slots=True)
+class TrustedMemoryProposalResult:
+    """Return one completed pending-proposal action and receipt."""
+
+    action: AgentActionReceipt
+    proposal: MemoryProposalReceipt
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +133,79 @@ class TrustedMemoryService:
             unresolved_proposals=result.unresolved_proposals,
             events=result.events,
             next_event_id=result.next_event_id,
+        )
+
+    async def propose_memory_signal(
+        self,
+        command: ProposeMemorySignalCommand,
+    ) -> TrustedMemoryProposalResult:
+        """Validate and persist one pending governed-memory proposal."""
+        self._validate_identifier(command.user_id, "user_id")
+        self._validate_identifier(command.session_id, "session_id")
+        self._validate_identifier(
+            command.source_message_id,
+            "source_message_id",
+        )
+        if (
+            not isinstance(command.source_message_text, str)
+            or not command.source_message_text.strip()
+        ):
+            raise ValueError("source_message_text must be non-empty.")
+        if type(command.memory_decision_present) is not bool:
+            raise ValueError("memory_decision_present must be a boolean.")
+        if command.memory_decision_present:
+            raise ValueError(
+                "A memory-decision turn cannot create a new proposal."
+            )
+        if command.category not in MEMORY_CATEGORY_ORDER:
+            raise ValueError("category must be a governed memory category.")
+        category = cast(MemoryCategory, command.category)
+        if category == "preferred_name":
+            proposed_value = IdentityContextPolicy.validate(
+                category,
+                command.proposed_value,
+                current_message=command.source_message_text,
+                require_grounding=True,
+            )
+        else:
+            proposed_value = validate_memory_value(
+                category,
+                command.proposed_value,
+            )
+        origin_ids = derive_proposal_origin_ids(
+            command.user_id,
+            command.session_id,
+            command.source_message_id,
+            category,
+        )
+        observed_at = self._clock()
+        if (
+            not isinstance(observed_at, datetime)
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+        ):
+            raise ValueError("clock must return a timezone-aware datetime.")
+        stored = await self._database.create_guarded_memory_proposal(
+            user_id=command.user_id,
+            session_id=command.session_id,
+            source_message_id=command.source_message_id,
+            origin_ids=origin_ids,
+            category=category,
+            proposed_value=proposed_value,
+            observed_at=observed_at,
+            turn_lease=command.turn_lease,
+        )
+        return TrustedMemoryProposalResult(
+            action=AgentActionReceipt(
+                action_name="propose_memory_signal",
+                status="completed",
+            ),
+            proposal=MemoryProposalReceipt(
+                proposal_id=stored.proposal_id,
+                category=stored.category,
+                proposed_value=stored.proposed_value,
+                expires_at=stored.expires_at,
+            ),
         )
 
     async def decide_memory_proposal(
@@ -196,6 +298,14 @@ class TrustedMemoryService:
             if identifier.startswith(f"{category}--"):
                 return cast(MemoryCategory, category)
         raise ValueError("Memory identifier has no governed category.")
+
+    @staticmethod
+    def _validate_identifier(value: object, field_name: str) -> None:
+        if not isinstance(value, str) or re.fullmatch(
+            r"[A-Za-z0-9_-]{1,128}",
+            value,
+        ) is None:
+            raise ValueError(f"{field_name} must be a valid identifier.")
 
     @staticmethod
     def _validate_confirmation(command: MemoryDecisionCommand) -> None:

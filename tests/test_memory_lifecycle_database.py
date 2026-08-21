@@ -609,6 +609,123 @@ async def test_delete_memory_signal_removes_owned_artifacts(
 
 
 @pytest.mark.asyncio
+async def test_delete_memory_signal_removes_owned_proposal_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    origin_id = "e82366f7699ee2e39bff6a68154e09b7"
+    signal_id = f"response_length--{origin_id}"
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    proposals = MagicMock()
+    proposal_ref = MagicMock(name="proposal")
+    origins = MagicMock()
+    origin_ref = MagicMock(name="origin")
+    events = MagicMock()
+    transaction = MagicMock()
+    operations: list[str] = []
+
+    client.collection.return_value = users
+    client.transaction.return_value = transaction
+    users.document.return_value = user
+    proposals.document.return_value = proposal_ref
+    origins.document.return_value = origin_ref
+    user.collection.side_effect = lambda name: {
+        "memory_proposals": proposals,
+        "memory_proposal_origins": origins,
+        "memory_events": events,
+    }[name]
+
+    async def read_profile(*, transaction) -> SimpleNamespace:
+        operations.append("read-profile")
+        return SimpleNamespace(exists=False, to_dict=lambda: None)
+
+    async def read_proposal(*, transaction) -> SimpleNamespace:
+        operations.append("read-proposal")
+        return SimpleNamespace(
+            exists=True,
+            to_dict=lambda: {
+                "proposal_id": signal_id,
+                "category": "response_length",
+                "proposed_value": "concise",
+                "expected_signal_id": None,
+                "policy_version": "1.0",
+                "status": "approved",
+                "source_session_id": "source-session",
+                "source_message_id": "source-message",
+                "created_at": NOW,
+                "expires_at": NOW,
+                "resolved_at": NOW,
+            },
+        )
+
+    async def read_origin(*, transaction) -> SimpleNamespace:
+        operations.append("read-origin")
+        return SimpleNamespace(
+            exists=True,
+            to_dict=lambda: {
+                "schema_version": "1.0",
+                "proposal_id": signal_id,
+                "category": "response_length",
+                "source_session_id": "source-session",
+                "source_message_id": "source-message",
+                "created_at": NOW,
+            },
+        )
+
+    user.get = AsyncMock(side_effect=read_profile)
+    proposal_ref.get = AsyncMock(side_effect=read_proposal)
+    origin_ref.get = AsyncMock(side_effect=read_origin)
+    event_refs: dict[str, MagicMock] = {}
+
+    def event_document(event_id: str) -> MagicMock:
+        if event_id not in event_refs:
+            suffix = event_id.rsplit("--", maxsplit=1)[-1]
+            event_ref = MagicMock(name=f"event-{suffix}")
+
+            async def read_event(*, transaction, suffix=suffix):
+                operations.append(f"read-{suffix}")
+                return SimpleNamespace(exists=False, to_dict=lambda: None)
+
+            event_ref.get = AsyncMock(side_effect=read_event)
+            event_refs[event_id] = event_ref
+        return event_refs[event_id]
+
+    events.document.side_effect = event_document
+    transaction.set.side_effect = lambda *args, **kwargs: operations.append(
+        "write"
+    )
+    transaction.delete.side_effect = lambda *args: operations.append(
+        "delete"
+    )
+
+    result = await MemoryEngine(client).delete_memory_signal(
+        "user-1",
+        "response_length",
+        signal_id,
+    )
+
+    assert result.artifacts_deleted is True
+    assert operations == [
+        "read-profile",
+        "read-proposal",
+        "read-origin",
+        "read-approved",
+        "read-corrected",
+        "read-superseded",
+        "read-revoked",
+        "write",
+        "delete",
+        "delete",
+    ]
+    assert transaction.delete.call_args_list == [
+        call(proposal_ref),
+        call(origin_ref),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_delete_memory_signal_removes_inactive_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

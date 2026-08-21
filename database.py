@@ -35,14 +35,25 @@ from memory_policy import (
     MEMORY_CATEGORY_ORDER,
     ConfirmationChannel,
     MemoryCategory,
+    MemoryValue,
+    validate_memory_value,
+)
+from memory_proposals import (
+    PROPOSAL_ORIGIN_SCHEMA_VERSION,
+    ProposalOriginIds,
+    ProposalTurnLease,
+    derive_proposal_origin_ids,
+    proposal_origin_id_from_signal_id,
 )
 from schemas import (
     ActiveMemorySignal,
+    AgentActionReceipt,
     ChatResponse,
     CollaborationProfile,
     MemoryEvent,
     MemoryDecisionRequest,
     MemoryProposal,
+    MemoryProposalReceipt,
 )
 
 
@@ -63,6 +74,18 @@ class MemoryProposalNotFoundError(RuntimeError):
 
 class MemoryProposalExpiredError(RuntimeError):
     """Raised when a requested pending proposal has expired."""
+
+
+class MemoryProposalOriginConflictError(RuntimeError):
+    """Raised when one source message selects a different proposal."""
+
+
+class MemoryProposalStateError(RuntimeError):
+    """Raised when guarded proposal state is internally inconsistent."""
+
+
+class MemorySignalAlreadyActiveError(RuntimeError):
+    """Raised when a proposal would duplicate the active memory value."""
 
 
 class MemorySignalNotFoundError(RuntimeError):
@@ -974,6 +997,225 @@ class MemoryEngine:
         except (GoogleAPIError, ValueError) as exc:
             self._raise_firestore_error("create_memory_proposal", exc)
 
+    async def create_guarded_memory_proposal(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        source_message_id: str,
+        origin_ids: ProposalOriginIds,
+        category: MemoryCategory,
+        proposed_value: MemoryValue,
+        observed_at: datetime,
+        turn_lease: ProposalTurnLease | None,
+    ) -> MemoryProposal:
+        """Atomically create one source-message-guarded proposal."""
+        self._validate_guarded_memory_proposal_inputs(
+            user_id=user_id,
+            session_id=session_id,
+            source_message_id=source_message_id,
+            origin_ids=origin_ids,
+            category=category,
+            proposed_value=proposed_value,
+            observed_at=observed_at,
+            turn_lease=turn_lease,
+        )
+        user_ref = self._client.collection("users").document(user_id)
+        origin_ref = user_ref.collection(
+            "memory_proposal_origins"
+        ).document(origin_ids.origin_id)
+        proposal_ref = user_ref.collection("memory_proposals").document(
+            category
+        )
+        turn_ref = None
+        if turn_lease is not None:
+            turn_ref = (
+                self._client.collection("sessions")
+                .document(session_id)
+                .collection("turns")
+                .document(turn_lease.turn_id)
+            )
+        transaction = self._client.transaction()
+
+        async def create_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryProposal:
+            origin_snapshot = await origin_ref.get(transaction=transaction)
+            proposal_snapshot = await proposal_ref.get(
+                transaction=transaction
+            )
+            profile_snapshot = await user_ref.get(transaction=transaction)
+            turn_snapshot = (
+                await turn_ref.get(transaction=transaction)
+                if turn_ref is not None
+                else None
+            )
+            if origin_snapshot.exists:
+                origin_document = self._validated_proposal_origin_document(
+                    origin_snapshot.to_dict()
+                )
+                expected_origin = {
+                    "proposal_id": origin_ids.proposal_id,
+                    "category": category,
+                    "source_session_id": session_id,
+                    "source_message_id": source_message_id,
+                }
+                if any(
+                    origin_document[field_name] != expected_value
+                    for field_name, expected_value in expected_origin.items()
+                ):
+                    raise MemoryProposalOriginConflictError(
+                        "Stored proposal origin conflicts with this source."
+                    )
+                if not proposal_snapshot.exists:
+                    raise MemoryProposalStateError(
+                        "Stored proposal origin has no category proposal."
+                    )
+                try:
+                    stored_proposal = self._proposal_from_document(
+                        proposal_snapshot.to_dict()
+                    )
+                except ValueError as exc:
+                    raise MemoryProposalStateError(
+                        "Stored guarded proposal is invalid."
+                    ) from exc
+                retry_profile = (
+                    self._collaboration_profile_from_document(
+                        profile_snapshot.to_dict()
+                    )
+                    if profile_snapshot.exists
+                    else CollaborationProfile()
+                )
+                retry_active_signal = self._active_signal_for_category(
+                    retry_profile,
+                    category,
+                )
+                expected_proposal = {
+                    "proposal_id": origin_ids.proposal_id,
+                    "category": category,
+                    "proposed_value": proposed_value,
+                    "expected_signal_id": (
+                        retry_active_signal.signal_id
+                        if retry_active_signal is not None
+                        else None
+                    ),
+                    "policy_version": "1.0",
+                    "status": "pending",
+                    "source_session_id": session_id,
+                    "source_message_id": source_message_id,
+                }
+                if any(
+                    getattr(stored_proposal, field_name) != expected_value
+                    for field_name, expected_value in expected_proposal.items()
+                ):
+                    raise MemoryProposalOriginConflictError(
+                        "Stored proposal conflicts with this source."
+                    )
+                if turn_ref is not None:
+                    turn_effect = self._proposal_turn_effect_update(
+                        turn_snapshot=turn_snapshot,
+                        user_id=user_id,
+                        source_message_id=source_message_id,
+                        turn_lease=turn_lease,
+                        observed_at=observed_at,
+                        proposal=stored_proposal,
+                    )
+                    if turn_effect is not None:
+                        transaction.set(
+                            turn_ref,
+                            turn_effect,
+                            merge=True,
+                        )
+                return stored_proposal
+            profile = (
+                self._collaboration_profile_from_document(
+                    profile_snapshot.to_dict()
+                )
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+            active_signal = self._active_signal_for_category(
+                profile,
+                category,
+            )
+            if (
+                active_signal is not None
+                and active_signal.value == proposed_value
+            ):
+                raise MemorySignalAlreadyActiveError(
+                    "The proposed memory value is already active."
+                )
+            if proposal_snapshot.exists:
+                stored_slot = self._proposal_from_document(
+                    proposal_snapshot.to_dict()
+                )
+                if (
+                    stored_slot.status == "pending"
+                    and stored_slot.expires_at > observed_at
+                ):
+                    raise MemoryProposalConflictError(
+                        "An unexpired memory proposal already occupies this "
+                        "category."
+                    )
+            proposal = MemoryProposal(
+                proposal_id=origin_ids.proposal_id,
+                category=category,
+                proposed_value=proposed_value,
+                expected_signal_id=(
+                    active_signal.signal_id
+                    if active_signal is not None
+                    else None
+                ),
+                status="pending",
+                source_session_id=session_id,
+                source_message_id=source_message_id,
+                created_at=observed_at,
+                expires_at=observed_at + timedelta(hours=24),
+            )
+            turn_effect = None
+            if turn_ref is not None:
+                turn_effect = self._proposal_turn_effect_update(
+                    turn_snapshot=turn_snapshot,
+                    user_id=user_id,
+                    source_message_id=source_message_id,
+                    turn_lease=turn_lease,
+                    observed_at=observed_at,
+                    proposal=proposal,
+                )
+            transaction.set(
+                proposal_ref,
+                self._proposal_document(proposal),
+            )
+            transaction.set(
+                origin_ref,
+                {
+                    "schema_version": PROPOSAL_ORIGIN_SCHEMA_VERSION,
+                    "proposal_id": proposal.proposal_id,
+                    "category": proposal.category,
+                    "source_session_id": proposal.source_session_id,
+                    "source_message_id": proposal.source_message_id,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            if turn_ref is not None and turn_effect is not None:
+                transaction.set(
+                    turn_ref,
+                    turn_effect,
+                    merge=True,
+                )
+            return proposal
+
+        run_transaction = firestore.async_transactional(
+            create_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error(
+                "create_guarded_memory_proposal",
+                exc,
+            )
+
     async def approve_memory_proposal(
         self,
         user_id: str,
@@ -1438,6 +1680,12 @@ class MemoryEngine:
         proposal_ref = user_ref.collection("memory_proposals").document(
             category
         )
+        origin_id = proposal_origin_id_from_signal_id(category, signal_id)
+        origin_ref = (
+            user_ref.collection("memory_proposal_origins").document(origin_id)
+            if origin_id is not None
+            else None
+        )
         events_ref = user_ref.collection("memory_events")
         event_types = ("approved", "corrected", "superseded", "revoked")
         event_refs = {
@@ -1452,6 +1700,11 @@ class MemoryEngine:
             profile_snapshot = await user_ref.get(transaction=transaction)
             proposal_snapshot = await proposal_ref.get(
                 transaction=transaction
+            )
+            origin_snapshot = (
+                await origin_ref.get(transaction=transaction)
+                if origin_ref is not None
+                else None
             )
             event_snapshots = {
                 event_type: await event_refs[event_type].get(
@@ -1487,6 +1740,27 @@ class MemoryEngine:
                 )
                 proposal_owned = proposal.proposal_id == signal_id
 
+            origin_owned = False
+            if origin_snapshot is not None and origin_snapshot.exists:
+                try:
+                    origin_document = (
+                        self._validated_proposal_origin_document(
+                            origin_snapshot.to_dict()
+                        )
+                    )
+                except MemoryProposalStateError as exc:
+                    raise ValueError(
+                        "Stored proposal origin does not match its path."
+                    ) from exc
+                if (
+                    origin_document["proposal_id"] != signal_id
+                    or origin_document["category"] != category
+                ):
+                    raise ValueError(
+                        "Stored proposal origin does not match its path."
+                    )
+                origin_owned = True
+
             owned_event_types: list[str] = []
             for event_type, snapshot in event_snapshots.items():
                 if not snapshot.exists:
@@ -1507,7 +1781,10 @@ class MemoryEngine:
                 owned_event_types.append(event_type)
 
             artifacts_deleted = bool(
-                projection_owned or proposal_owned or owned_event_types
+                projection_owned
+                or proposal_owned
+                or origin_owned
+                or owned_event_types
             )
             if not artifacts_deleted:
                 return MemoryDeletionResult(
@@ -1531,6 +1808,8 @@ class MemoryEngine:
             )
             if proposal_owned:
                 transaction.delete(proposal_ref)
+            if origin_owned:
+                transaction.delete(origin_ref)
             for event_type in owned_event_types:
                 transaction.delete(event_refs[event_type])
             return MemoryDeletionResult(
@@ -1959,6 +2238,175 @@ class MemoryEngine:
             raise ValueError("proposal timestamps are not currently valid.")
         if proposal.expires_at - proposal.created_at != timedelta(hours=24):
             raise ValueError("proposal lifetime must be exactly 24 hours.")
+
+    @staticmethod
+    def _validate_guarded_memory_proposal_inputs(
+        *,
+        user_id: object,
+        session_id: object,
+        source_message_id: object,
+        origin_ids: object,
+        category: object,
+        proposed_value: object,
+        observed_at: object,
+        turn_lease: object,
+    ) -> None:
+        MemoryEngine._validate_memory_user_id(user_id)
+        MemoryEngine._validate_memory_identifier(session_id, "session_id")
+        MemoryEngine._validate_memory_identifier(
+            source_message_id,
+            "source_message_id",
+        )
+        if category not in MEMORY_CATEGORY_ORDER:
+            raise ValueError("category must be a governed memory category.")
+        normalized_value = validate_memory_value(category, proposed_value)
+        if normalized_value != proposed_value:
+            raise ValueError("proposed_value must already be normalized.")
+        if not isinstance(origin_ids, ProposalOriginIds):
+            raise ValueError("origin_ids must be valid proposal IDs.")
+        expected_ids = derive_proposal_origin_ids(
+            user_id,
+            session_id,
+            source_message_id,
+            category,
+        )
+        if origin_ids != expected_ids:
+            raise ValueError("origin_ids do not match proposal provenance.")
+        if not MemoryEngine._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        if turn_lease is not None and not isinstance(
+            turn_lease,
+            ProposalTurnLease,
+        ):
+            raise ValueError("turn_lease must be valid when provided.")
+
+    @staticmethod
+    def _validated_proposal_origin_document(
+        document: object,
+    ) -> dict[str, object]:
+        if not isinstance(document, dict):
+            raise MemoryProposalStateError(
+                "Stored proposal origin is invalid."
+            )
+        required_fields = {
+            "schema_version",
+            "proposal_id",
+            "category",
+            "source_session_id",
+            "source_message_id",
+            "created_at",
+        }
+        if set(document) != required_fields:
+            raise MemoryProposalStateError(
+                "Stored proposal origin is invalid."
+            )
+        if (
+            document["schema_version"] != PROPOSAL_ORIGIN_SCHEMA_VERSION
+            or document["category"] not in MEMORY_CATEGORY_ORDER
+            or not MemoryEngine._is_aware_datetime(document["created_at"])
+        ):
+            raise MemoryProposalStateError(
+                "Stored proposal origin is invalid."
+            )
+        for field_name in (
+            "proposal_id",
+            "source_session_id",
+            "source_message_id",
+        ):
+            MemoryEngine._validate_memory_identifier(
+                document[field_name],
+                field_name,
+            )
+        return document
+
+    @staticmethod
+    def _proposal_turn_effect_update(
+        *,
+        turn_snapshot: object,
+        user_id: str,
+        source_message_id: str,
+        turn_lease: ProposalTurnLease | None,
+        observed_at: datetime,
+        proposal: MemoryProposal,
+    ) -> dict[str, object] | None:
+        if turn_lease is None:
+            raise ValueError("turn_lease is required for a turn effect.")
+        if (
+            turn_snapshot is None
+            or not getattr(turn_snapshot, "exists", False)
+        ):
+            raise ChatTurnOwnershipError(
+                "Stored chat turn cannot own a proposal effect."
+            )
+        turn_data = turn_snapshot.to_dict()
+        if not isinstance(turn_data, Mapping):
+            raise ChatTurnStateError("Stored chat turn is invalid.")
+        lease_expires_at = turn_data.get("lease_expires_at")
+        if (
+            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
+            or turn_data.get("status") != "in_progress"
+            or turn_data.get("user_id") != user_id
+            or turn_data.get("user_message_id") != source_message_id
+            or turn_data.get("lease_owner") != turn_lease.owner_token
+            or not MemoryEngine._is_aware_datetime(lease_expires_at)
+            or lease_expires_at <= observed_at
+        ):
+            raise ChatTurnOwnershipError(
+                "Stored chat turn cannot own a proposal effect."
+            )
+        action = AgentActionReceipt(
+            action_name="propose_memory_signal",
+            status="completed",
+        ).model_dump(mode="python")
+        receipt = MemoryProposalReceipt(
+            proposal_id=proposal.proposal_id,
+            category=proposal.category,
+            proposed_value=proposal.proposed_value,
+            expires_at=proposal.expires_at,
+        ).model_dump(mode="python")
+        existing_actions = turn_data.get("actions", [])
+        existing_proposals = turn_data.get("memory_proposals", [])
+        if not isinstance(existing_actions, list) or not isinstance(
+            existing_proposals,
+            list,
+        ):
+            raise ChatTurnStateError("Stored chat turn effects are invalid.")
+        try:
+            validated_actions = [
+                AgentActionReceipt.model_validate(item).model_dump(
+                    mode="python"
+                )
+                for item in existing_actions
+            ]
+            validated_proposals = [
+                MemoryProposalReceipt.model_validate(item).model_dump(
+                    mode="python"
+                )
+                for item in existing_proposals
+            ]
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn effects are invalid."
+            ) from exc
+        proposal_actions = [
+            item
+            for item in validated_actions
+            if item["action_name"] == "propose_memory_signal"
+        ]
+        if proposal_actions or validated_proposals:
+            if (
+                proposal_actions == [action]
+                and validated_proposals == [receipt]
+            ):
+                return None
+            raise ChatTurnStateError(
+                "Stored chat turn has conflicting proposal effects."
+            )
+        return {
+            "actions": [*validated_actions, action],
+            "memory_proposals": [receipt],
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
 
     @staticmethod
     def _validate_memory_approval_inputs(
