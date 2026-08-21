@@ -285,6 +285,54 @@ async def test_get_chat_history_returns_newest_limit_chronologically() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bounded_history_excludes_current_message_and_keeps_limit() -> None:
+    client = MagicMock()
+    messages = MagicMock()
+    query = MagicMock()
+    limited_query = MagicMock()
+    current_id = "turn--digest--user"
+    snapshots = [
+        SimpleNamespace(
+            id=current_id,
+            to_dict=lambda: {"role": "user", "text": "current"},
+        )
+    ]
+    snapshots.extend(
+        SimpleNamespace(
+            id=f"prior-{index}",
+            to_dict=lambda index=index: {
+                "role": "model",
+                "text": f"prior-{index}",
+            },
+        )
+        for index in range(20, 0, -1)
+    )
+
+    async def stream_snapshots():
+        for item in snapshots:
+            yield item
+
+    limited_query.stream.return_value = stream_snapshots()
+    session = client.collection.return_value.document.return_value
+    session.collection.return_value = messages
+    messages.order_by.return_value = query
+    query.limit.return_value = limited_query
+
+    history = await MemoryEngine(client).get_chat_history(
+        "session-1",
+        limit=20,
+        exclude_message_id=current_id,
+    )
+
+    query.limit.assert_called_once_with(21)
+    assert len(history) == 20
+    assert [item["text"] for item in history] == [
+        f"prior-{index}" for index in range(1, 21)
+    ]
+    assert all("id" not in item and "message_id" not in item for item in history)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("invalid_limit", (True, 0, 101, 1.5, "20"))
 async def test_get_chat_history_rejects_invalid_limit_before_access(
     invalid_limit: object,

@@ -1,6 +1,9 @@
 import logging
+import math
 import re
-from dataclasses import dataclass
+import secrets
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import NoReturn
 
@@ -13,7 +16,21 @@ from google.cloud.firestore import (
     AsyncTransaction,
 )
 from google.cloud.firestore_v1.field_path import FieldPath
+from pydantic import ValidationError
 
+from chat_turns import (
+    CHAT_TURN_LEASE_DURATION,
+    CHAT_TURN_SCHEMA_VERSION,
+    ChatTurnClaim,
+    ChatTurnConflictError,
+    ChatTurnInProgressError,
+    ChatTurnIds,
+    ChatTurnOwnershipError,
+    ChatTurnReplay,
+    ChatTurnRequest,
+    ChatTurnStateError,
+    derive_chat_turn_ids,
+)
 from memory_policy import (
     MEMORY_CATEGORY_ORDER,
     ConfirmationChannel,
@@ -21,8 +38,10 @@ from memory_policy import (
 )
 from schemas import (
     ActiveMemorySignal,
+    ChatResponse,
     CollaborationProfile,
     MemoryEvent,
+    MemoryDecisionRequest,
     MemoryProposal,
 )
 
@@ -139,6 +158,518 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_message", exc)
 
+    async def claim_chat_turn(
+        self,
+        request: ChatTurnRequest,
+        *,
+        idempotency_key: str,
+        observed_at: datetime,
+    ) -> ChatTurnClaim | ChatTurnReplay:
+        """Atomically claim one durable logical chat turn."""
+        if not isinstance(request, ChatTurnRequest):
+            raise ValueError("request must be a ChatTurnRequest.")
+        self._validate_memory_identifier(request.project_id, "project_id")
+        self._validate_memory_identifier(request.session_id, "session_id")
+        self._validate_memory_identifier(request.user_id, "user_id")
+        self._validate_string(request.message, "message")
+        if request.memory_decision is not None and not isinstance(
+            request.memory_decision,
+            MemoryDecisionRequest,
+        ):
+            raise ValueError(
+                "memory_decision must be a MemoryDecisionRequest."
+            )
+        if (
+            not isinstance(observed_at, datetime)
+            or observed_at.tzinfo is None
+            or observed_at.utcoffset() is None
+        ):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        ids = derive_chat_turn_ids(idempotency_key)
+        owner_token = secrets.token_hex(16)
+        lease_expires_at = observed_at + CHAT_TURN_LEASE_DURATION
+        claim = ChatTurnClaim(
+            request=request,
+            ids=ids,
+            owner_token=owner_token,
+            lease_expires_at=lease_expires_at,
+            resumed=False,
+        )
+        session_ref = self._client.collection("sessions").document(
+            request.session_id
+        )
+        turn_ref = session_ref.collection("turns").document(ids.turn_id)
+        messages_ref = session_ref.collection("messages")
+        user_message_ref = messages_ref.document(ids.user_message_id)
+        transaction = self._client.transaction()
+
+        model_message_ref = messages_ref.document(ids.model_message_id)
+
+        async def claim_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ChatTurnClaim | ChatTurnReplay:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            user_snapshot = await user_message_ref.get(
+                transaction=transaction
+            )
+            if turn_snapshot.exists != user_snapshot.exists:
+                raise ChatTurnStateError(
+                    "Stored chat turn has incomplete message state."
+                )
+            if turn_snapshot.exists:
+                turn_data = turn_snapshot.to_dict()
+                user_data = user_snapshot.to_dict()
+                self._assert_chat_turn_request_matches(
+                    request,
+                    ids,
+                    turn_data,
+                    user_data,
+                )
+                if not isinstance(turn_data, Mapping):
+                    raise ChatTurnStateError(
+                        "Stored chat turn is invalid."
+                    )
+                status = turn_data.get("status")
+                if status == "completed":
+                    model_snapshot = await model_message_ref.get(
+                        transaction=transaction
+                    )
+                    if not model_snapshot.exists:
+                        raise ChatTurnStateError(
+                            "Completed chat turn has no model message."
+                        )
+                    return self._chat_turn_replay(
+                        turn_data,
+                        model_snapshot.to_dict(),
+                    )
+                if status != "in_progress":
+                    raise ChatTurnStateError(
+                        "Stored chat turn status is invalid."
+                    )
+                stored_owner = turn_data.get("lease_owner")
+                stored_expiry = turn_data.get("lease_expires_at")
+                if (
+                    not isinstance(stored_owner, str)
+                    or not stored_owner
+                    or not self._is_aware_datetime(stored_expiry)
+                ):
+                    raise ChatTurnStateError(
+                        "Stored chat turn lease is invalid."
+                    )
+                if stored_expiry > observed_at:
+                    retry_seconds = max(
+                        1,
+                        math.ceil(
+                            (stored_expiry - observed_at).total_seconds()
+                        ),
+                    )
+                    raise ChatTurnInProgressError(retry_seconds)
+                resumed_claim = ChatTurnClaim(
+                    request=request,
+                    ids=ids,
+                    owner_token=owner_token,
+                    lease_expires_at=lease_expires_at,
+                    resumed=True,
+                )
+                transaction.set(
+                    turn_ref,
+                    {
+                        "lease_owner": owner_token,
+                        "lease_expires_at": lease_expires_at,
+                        "updated_at": firestore.SERVER_TIMESTAMP,
+                    },
+                    merge=True,
+                )
+                return resumed_claim
+            transaction.set(
+                session_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            transaction.set(
+                turn_ref,
+                {
+                    "schema_version": CHAT_TURN_SCHEMA_VERSION,
+                    "status": "in_progress",
+                    "project_id": request.project_id,
+                    "user_id": request.user_id,
+                    "memory_decision": (
+                        request.memory_decision.model_dump(mode="json")
+                        if request.memory_decision is not None
+                        else None
+                    ),
+                    "user_message_id": ids.user_message_id,
+                    "model_message_id": ids.model_message_id,
+                    "lease_owner": owner_token,
+                    "lease_expires_at": lease_expires_at,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            transaction.set(
+                user_message_ref,
+                {
+                    "role": "user",
+                    "text": request.message,
+                    "timestamp": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            return claim
+
+        run_transaction = firestore.async_transactional(
+            claim_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("claim_chat_turn", exc)
+
+    async def renew_chat_turn_lease(
+        self,
+        claim: ChatTurnClaim,
+        *,
+        observed_at: datetime,
+    ) -> ChatTurnClaim:
+        """Extend the lease held by the current chat-turn owner."""
+        self._validate_chat_turn_claim(claim)
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        turn_ref = (
+            self._client.collection("sessions")
+            .document(claim.request.session_id)
+            .collection("turns")
+            .document(claim.ids.turn_id)
+        )
+        transaction = self._client.transaction()
+        lease_expires_at = observed_at + CHAT_TURN_LEASE_DURATION
+
+        async def renew_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ChatTurnClaim:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            turn_data = turn_snapshot.to_dict()
+            if (
+                not turn_snapshot.exists
+                or not isinstance(turn_data, Mapping)
+                or turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(
+                    turn_data.get("lease_expires_at")
+                )
+                or turn_data["lease_expires_at"] <= observed_at
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn lease cannot be renewed."
+                )
+            transaction.set(
+                turn_ref,
+                {
+                    "lease_expires_at": lease_expires_at,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return replace(claim, lease_expires_at=lease_expires_at)
+
+        run_transaction = firestore.async_transactional(
+            renew_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("renew_chat_turn_lease", exc)
+
+    async def release_chat_turn(
+        self,
+        claim: ChatTurnClaim,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        """Expire the lease held by the current chat-turn owner."""
+        self._validate_chat_turn_claim(claim)
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        turn_ref = (
+            self._client.collection("sessions")
+            .document(claim.request.session_id)
+            .collection("turns")
+            .document(claim.ids.turn_id)
+        )
+        transaction = self._client.transaction()
+
+        async def release_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> None:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            turn_data = turn_snapshot.to_dict()
+            if not turn_snapshot.exists or not isinstance(
+                turn_data, Mapping
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn lease cannot be released."
+                )
+            stored_expiry = turn_data.get("lease_expires_at")
+            if (
+                turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(stored_expiry)
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn lease cannot be released."
+                )
+            if stored_expiry <= observed_at:
+                return
+            transaction.set(
+                turn_ref,
+                {
+                    "lease_expires_at": observed_at,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+
+        run_transaction = firestore.async_transactional(
+            release_in_transaction
+        )
+        try:
+            await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("release_chat_turn", exc)
+
+    async def complete_chat_turn(
+        self,
+        claim: ChatTurnClaim,
+        response: ChatResponse,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        """Atomically persist a model response and complete its chat turn."""
+        self._validate_chat_turn_claim(claim)
+        if not isinstance(response, ChatResponse):
+            raise ValueError("response must be a ChatResponse.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        session_ref = self._client.collection("sessions").document(
+            claim.request.session_id
+        )
+        turn_ref = session_ref.collection("turns").document(
+            claim.ids.turn_id
+        )
+        model_message_ref = session_ref.collection("messages").document(
+            claim.ids.model_message_id
+        )
+        transaction = self._client.transaction()
+
+        async def complete_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> None:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            model_snapshot = await model_message_ref.get(
+                transaction=transaction
+            )
+            turn_data = turn_snapshot.to_dict()
+            if not turn_snapshot.exists or not isinstance(
+                turn_data, Mapping
+            ):
+                raise ChatTurnStateError("Stored chat turn is invalid.")
+            self._assert_chat_turn_claim_matches_document(claim, turn_data)
+            stored_expiry = turn_data.get("lease_expires_at")
+            if (
+                turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(stored_expiry)
+                or stored_expiry <= observed_at
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn lease cannot be completed."
+                )
+            if model_snapshot.exists:
+                raise ChatTurnStateError(
+                    "Stored chat turn already has a model message."
+                )
+            receipts = response.model_dump(
+                mode="json",
+                exclude={"response"},
+            )
+            transaction.set(
+                session_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            transaction.set(
+                model_message_ref,
+                {
+                    "role": "model",
+                    "text": response.response,
+                    "timestamp": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            transaction.set(
+                turn_ref,
+                {
+                    "status": "completed",
+                    **receipts,
+                    "completed_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "lease_owner": firestore.DELETE_FIELD,
+                    "lease_expires_at": firestore.DELETE_FIELD,
+                },
+                merge=True,
+            )
+
+        run_transaction = firestore.async_transactional(
+            complete_in_transaction
+        )
+        try:
+            await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("complete_chat_turn", exc)
+
+    def _assert_chat_turn_request_matches(
+        self,
+        request: ChatTurnRequest,
+        ids: ChatTurnIds,
+        turn_data: object,
+        user_message_data: object,
+    ) -> None:
+        if not isinstance(turn_data, Mapping) or not isinstance(
+            user_message_data, Mapping
+        ):
+            raise ChatTurnStateError("Stored chat turn is invalid.")
+        if any(
+            field in turn_data
+            for field in ("message", "text", "response")
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn contains prohibited content."
+            )
+        if (
+            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
+            or turn_data.get("user_message_id") != ids.user_message_id
+            or turn_data.get("model_message_id") != ids.model_message_id
+            or not self._is_aware_datetime(turn_data.get("created_at"))
+            or not self._is_aware_datetime(turn_data.get("updated_at"))
+        ):
+            raise ChatTurnStateError("Stored chat turn metadata is invalid.")
+        expected_decision = (
+            request.memory_decision.model_dump(mode="json")
+            if request.memory_decision is not None
+            else None
+        )
+        if (
+            turn_data.get("project_id") != request.project_id
+            or turn_data.get("user_id") != request.user_id
+            or turn_data.get("memory_decision") != expected_decision
+        ):
+            raise ChatTurnConflictError(
+                "Idempotency key conflicts with a different chat request."
+            )
+        if (
+            set(user_message_data)
+            != {"role", "text", "timestamp"}
+            or user_message_data.get("role") != "user"
+            or not self._is_aware_datetime(user_message_data.get("timestamp"))
+        ):
+            raise ChatTurnStateError("Stored user message is invalid.")
+        if user_message_data.get("text") != request.message:
+            raise ChatTurnConflictError(
+                "Idempotency key conflicts with a different chat request."
+            )
+
+    def _validate_chat_turn_claim(self, claim: object) -> None:
+        if not isinstance(claim, ChatTurnClaim):
+            raise ValueError("claim must be a valid ChatTurnClaim.")
+        request = claim.request
+        if not isinstance(request, ChatTurnRequest):
+            raise ValueError("claim request is invalid.")
+        self._validate_memory_identifier(request.project_id, "project_id")
+        self._validate_memory_identifier(request.session_id, "session_id")
+        self._validate_memory_identifier(request.user_id, "user_id")
+        self._validate_string(request.message, "message")
+        if request.memory_decision is not None and not isinstance(
+            request.memory_decision,
+            MemoryDecisionRequest,
+        ):
+            raise ValueError("claim memory_decision is invalid.")
+        turn_id = claim.ids.turn_id
+        if not isinstance(turn_id, str) or re.fullmatch(
+            r"[a-f0-9]{64}", turn_id
+        ) is None:
+            raise ValueError("claim turn ID is invalid.")
+        if (
+            claim.ids.user_message_id != f"turn--{turn_id}--user"
+            or claim.ids.model_message_id != f"turn--{turn_id}--model"
+            or not isinstance(claim.owner_token, str)
+            or not claim.owner_token
+            or not self._is_aware_datetime(claim.lease_expires_at)
+            or not isinstance(claim.resumed, bool)
+        ):
+            raise ValueError("claim metadata is invalid.")
+
+    def _assert_chat_turn_claim_matches_document(
+        self,
+        claim: ChatTurnClaim,
+        turn_data: Mapping[str, object],
+    ) -> None:
+        expected_decision = (
+            claim.request.memory_decision.model_dump(mode="json")
+            if claim.request.memory_decision is not None
+            else None
+        )
+        if (
+            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
+            or turn_data.get("project_id") != claim.request.project_id
+            or turn_data.get("user_id") != claim.request.user_id
+            or turn_data.get("memory_decision") != expected_decision
+            or turn_data.get("user_message_id")
+            != claim.ids.user_message_id
+            or turn_data.get("model_message_id")
+            != claim.ids.model_message_id
+            or not self._is_aware_datetime(turn_data.get("created_at"))
+            or not self._is_aware_datetime(turn_data.get("updated_at"))
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn does not match its claim."
+            )
+
+    def _chat_turn_replay(
+        self,
+        turn_data: Mapping[str, object],
+        model_message_data: object,
+    ) -> ChatTurnReplay:
+        if not isinstance(model_message_data, Mapping):
+            raise ChatTurnStateError("Stored model message is invalid.")
+        if (
+            set(model_message_data) != {"role", "text", "timestamp"}
+            or model_message_data.get("role") != "model"
+            or not self._is_aware_datetime(model_message_data.get("timestamp"))
+            or not isinstance(model_message_data.get("text"), str)
+        ):
+            raise ChatTurnStateError("Stored model message is invalid.")
+        if not self._is_aware_datetime(turn_data.get("completed_at")):
+            raise ChatTurnStateError("Completed chat turn is invalid.")
+        try:
+            response = ChatResponse(
+                response=model_message_data["text"],
+                actions=turn_data.get("actions", []),
+                artifacts=turn_data.get("artifacts", []),
+                citations=turn_data.get("citations", []),
+                adaptations=turn_data.get("adaptations", []),
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn response is invalid."
+            ) from exc
+        return ChatTurnReplay(response=response)
+
+    @staticmethod
+    def _is_aware_datetime(value: object) -> bool:
+        return (
+            isinstance(value, datetime)
+            and value.tzinfo is not None
+            and value.utcoffset() is not None
+        )
+
     async def save_blueprint(
         self,
         project_id: str,
@@ -187,6 +718,8 @@ class MemoryEngine:
         self,
         session_id: str,
         limit: int | None = None,
+        *,
+        exclude_message_id: str | None = None,
     ) -> list[dict[str, object]]:
         """Return all or the newest session messages chronologically."""
         self._validate_string(session_id, "session_id")
@@ -196,6 +729,15 @@ class MemoryEngine:
             or not 1 <= limit <= 100
         ):
             raise ValueError("limit must be an integer between 1 and 100.")
+        if exclude_message_id is not None:
+            self._validate_string(
+                exclude_message_id,
+                "exclude_message_id",
+            )
+            if len(exclude_message_id) > 128:
+                raise ValueError(
+                    "exclude_message_id must not exceed 128 characters."
+                )
 
         try:
             messages_ref = (
@@ -213,16 +755,24 @@ class MemoryEngine:
                 direction=direction,
             )
             if limit is not None:
-                query = query.limit(limit)
+                query = query.limit(
+                    limit + 1 if exclude_message_id is not None else limit
+                )
 
             history: list[dict[str, object]] = []
 
             async for snapshot in query.stream():
+                if (
+                    exclude_message_id is not None
+                    and snapshot.id == exclude_message_id
+                ):
+                    continue
                 data = snapshot.to_dict()
                 if data is not None:
                     history.append(data)
 
             if limit is not None:
+                history = history[:limit]
                 history.reverse()
 
             return history
