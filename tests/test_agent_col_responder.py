@@ -84,6 +84,17 @@ def test_responder_instruction_preserves_final_response_authority() -> None:
         assert required_rule in normalized
 
 
+def test_responder_instruction_integrates_validated_computation_evidence(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    assert "source, research, or computation route" in normalized
+    assert "completed validated result" in normalized
+    assert "calculation" in normalized
+
+
 def test_responder_instruction_preserves_governed_memory_restraint() -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION
 

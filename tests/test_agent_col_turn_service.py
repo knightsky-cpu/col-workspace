@@ -4,8 +4,10 @@ from datetime import UTC, datetime
 import pytest
 from google.genai import types
 
-from agent_col_responder_context import AgentColResponderContext
-from agent_col_routing import AgentColRoutingDirective
+from agent_col_responder_context_v2 import (
+    AgentColResponderContextV2 as AgentColResponderContext,
+)
+from agent_col_routing_v2 import AgentColRoutingDirective
 from memory_proposals import ProposalTurnLease
 from schemas import AgentActionReceipt, MemoryProposalReceipt
 from supervisor_runtime import SupervisorTurnResult
@@ -153,6 +155,29 @@ class DelayedExecutor(RecordingExecutor):
             self.cleaned = True
 
 
+class BudgetBlockingExecutor(RecordingExecutor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.available_capabilities = (
+            "source",
+            "research",
+            "computation",
+        )
+        self.cleaned = False
+
+    async def execute(
+        self,
+        directive: AgentColRoutingDirective,
+        routing_input: object,
+    ) -> AgentColResponderContext:
+        self.calls.append((directive, routing_input))
+        try:
+            await asyncio.sleep(30.0)
+            raise AssertionError("expert budget failed to cancel execution")
+        finally:
+            self.cleaned = True
+
+
 class DelayedResponder(RecordingResponder):
     def __init__(self, *, delay: float) -> None:
         super().__init__()
@@ -288,6 +313,85 @@ async def test_turn_service_projects_only_minimal_routing_input() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_service_v2_projects_current_message_numeric_candidates(
+) -> None:
+    from agent_col_responder_context_v2 import AgentColResponderContextV2
+    from agent_col_routing_v2 import AgentColRoutingDirective
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    class V2Executor:
+        available_capabilities = ("source", "research", "computation")
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, object]] = []
+
+        async def execute(self, directive, routing_input):
+            self.calls.append((directive, routing_input))
+            return AgentColResponderContextV2(
+                routing_directive=directive
+            )
+
+    routing_request = RecordingRoutingRequest(
+        AgentColRoutingDirective(route="direct")
+    )
+    executor = V2Executor()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=RecordingResponder(),
+        routing_request=routing_request,
+    )
+    command = AgentColTurnCommand(
+        project_id="private-project",
+        session_id="private-session",
+        user_id="private-user",
+        message="Calculate $12 plus 15% and 20.",
+        recent_user_messages=("Earlier value 999 must stay private.",),
+    )
+
+    await service.run_turn(command)
+
+    routing_input = routing_request.calls[0]["routing_input"]
+    assert routing_input.model_dump(mode="json") == {
+        "current_message": "Calculate $12 plus 15% and 20.",
+        "candidate_urls": [],
+        "numeric_candidates": [
+            {
+                "candidate_id": "number-1",
+                "raw_text": "$12",
+                "value": 12.0,
+                "notation": "currency",
+                "unit_symbol": "$",
+                "start_index": 10,
+                "end_index": 13,
+            },
+            {
+                "candidate_id": "number-2",
+                "raw_text": "15%",
+                "value": 15.0,
+                "notation": "percent",
+                "unit_symbol": "%",
+                "start_index": 19,
+                "end_index": 22,
+            },
+            {
+                "candidate_id": "number-3",
+                "raw_text": "20",
+                "value": 20.0,
+                "notation": "plain",
+                "unit_symbol": None,
+                "start_index": 27,
+                "end_index": 29,
+            },
+        ],
+        "numeric_projection_incomplete": False,
+        "available_capabilities": ["source", "research", "computation"],
+    }
+    assert "999" not in routing_input.model_dump_json()
+    assert len(executor.calls) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("provider_error", "expected_error_name"),
     (
@@ -300,11 +404,11 @@ async def test_turn_service_stops_after_safe_routing_failure(
     expected_error_name: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from agent_col_routing import RoutingDirectiveInputError
-    from agent_col_routing_provider import (
-        AgentColRoutingProviderError,
-        AgentColRoutingProviderOutputError,
-        AgentColRoutingProviderTimeoutError,
+    from agent_col_routing_v2 import RoutingDirectiveInputError
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderError,
+        AgentColRoutingV2ProviderOutputError,
+        AgentColRoutingV2ProviderTimeoutError,
     )
     from agent_col_turn_service import (
         AgentColTurnRoutingError,
@@ -313,15 +417,15 @@ async def test_turn_service_stops_after_safe_routing_failure(
     )
 
     if type(provider_error) is RuntimeError:
-        provider_error = AgentColRoutingProviderError(
+        provider_error = AgentColRoutingV2ProviderError(
             "private-provider-payload"
         )
     elif type(provider_error) is TimeoutError:
-        provider_error = AgentColRoutingProviderTimeoutError(
+        provider_error = AgentColRoutingV2ProviderTimeoutError(
             "private-timeout-payload"
         )
     else:
-        provider_error = AgentColRoutingProviderOutputError(
+        provider_error = AgentColRoutingV2ProviderOutputError(
             "private-output-payload"
         )
     assert not isinstance(provider_error, RoutingDirectiveInputError)
@@ -383,15 +487,17 @@ async def test_turn_service_stops_after_safe_routing_failure(
 async def test_turn_service_classifies_invalid_routing_without_downstream_access(
     provider_error: str,
 ) -> None:
-    from agent_col_routing import RoutingDirectiveInputError
-    from agent_col_routing_provider import AgentColRoutingProviderOutputError
+    from agent_col_routing_v2 import RoutingDirectiveInputError
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderOutputError,
+    )
     from agent_col_turn_service import (
         AgentColTurnRoutingError,
         AgentColTurnService,
     )
 
     error = (
-        AgentColRoutingProviderOutputError("private-invalid-output")
+        AgentColRoutingV2ProviderOutputError("private-invalid-output")
         if provider_error == "invalid_output"
         else RoutingDirectiveInputError("private-directive-mismatch")
     )
@@ -714,8 +820,8 @@ async def test_failed_expert_context_adds_no_cognitive_receipt() -> None:
 async def test_executor_configuration_failure_is_content_safe_and_stops_responder(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from agent_col_expert_executor import (
-        AgentColExpertExecutorConfigurationError,
+    from agent_col_expert_executor_v2 import (
+        AgentColExpertExecutorV2ConfigurationError,
     )
     from agent_col_turn_service import (
         AgentColTurnCommand,
@@ -723,7 +829,7 @@ async def test_executor_configuration_failure_is_content_safe_and_stops_responde
         AgentColTurnServiceError,
     )
 
-    executor_error = AgentColExpertExecutorConfigurationError(
+    executor_error = AgentColExpertExecutorV2ConfigurationError(
         "private-executor-configuration"
     )
 
@@ -845,7 +951,7 @@ async def test_responder_failure_preserves_only_trusted_partial_effects(
 
 
 @pytest.mark.asyncio
-async def test_responder_reserve_prevents_late_expert_start() -> None:
+async def test_responder_reserve_prevents_expert_start_without_budget() -> None:
     from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
 
     directive = AgentColRoutingDirective(
@@ -862,7 +968,7 @@ async def test_responder_reserve_prevents_late_expert_start() -> None:
         expert_executor=executor,
         responder_runtime=responder,
         routing_request=RecordingRoutingRequest(directive),
-        clock=SequenceClock(0.0, 0.0, 26.0, 26.0),
+        clock=SequenceClock(0.0, 0.0, 70.0, 70.0),
     )
 
     result = await service.run_turn(
@@ -888,7 +994,7 @@ async def test_responder_reserve_prevents_late_expert_start() -> None:
 
 
 @pytest.mark.asyncio
-async def test_expert_starts_at_exact_responder_reserve_boundary() -> None:
+async def test_expert_starts_when_time_exceeds_responder_reserve() -> None:
     from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
 
     expert_context = completed_source_context()
@@ -899,7 +1005,7 @@ async def test_expert_starts_at_exact_responder_reserve_boundary() -> None:
         expert_executor=executor,
         responder_runtime=RecordingResponder(),
         routing_request=RecordingRoutingRequest(directive),
-        clock=SequenceClock(0.0, 0.0, 25.0, 25.0),
+        clock=SequenceClock(0.0, 0.0, 69.0, 69.0),
     )
 
     result = await service.run_turn(
@@ -907,13 +1013,99 @@ async def test_expert_starts_at_exact_responder_reserve_boundary() -> None:
             project_id="project-1",
             session_id="session-1",
             user_id="user-1",
-            message="Analyze https://example.com/ at the boundary.",
+            message="Analyze https://example.com/ with one second available.",
         )
     )
 
     assert len(executor.calls) == 1
     assert result.actions == expert_context.actions
     assert result.citations == expert_context.citations
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("directive", "message", "expected_capability"),
+    (
+        (
+            AgentColRoutingDirective(
+                route="source",
+                source_intent={
+                    "objective": "Analyze the supplied page.",
+                    "selected_url_ids": ["url-1"],
+                },
+            ),
+            "Analyze https://example.com/.",
+            "source",
+        ),
+        (
+            AgentColRoutingDirective(
+                route="research",
+                research_intent={
+                    "question": "What is current?",
+                    "objective": "Verify with current evidence.",
+                },
+            ),
+            "Verify the current stable Python release.",
+            "research",
+        ),
+        (
+            AgentColRoutingDirective(
+                route="computation",
+                computation_intent={
+                    "objective": "Calculate the mean.",
+                    "series_inputs": [
+                        {
+                            "name": "values",
+                            "numeric_ids": ["number-1", "number-2"],
+                        }
+                    ],
+                },
+            ),
+            "Calculate the mean of 12 and 15.",
+            "computation",
+        ),
+    ),
+)
+async def test_expert_budget_cancels_with_typed_receipt_free_timeout(
+    directive: AgentColRoutingDirective,
+    message: str,
+    expected_capability: str,
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    executor = BudgetBlockingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(directive),
+        turn_timeout_seconds=0.1,
+        routing_timeout_seconds=0.02,
+        expert_budget_seconds=0.005,
+        responder_reserve_seconds=0.02,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        )
+    )
+
+    assert len(executor.calls) == 1
+    assert executor.cleaned is True
+    assert result.actions == ()
+    assert result.citations == ()
+    assert len(responder.contexts) == 1
+    routed_text = responder.contexts[0].model_input_context[-1].parts[0].text
+    assert routed_text is not None
+    assert f'"capability":"{expected_capability}"' in routed_text
+    assert '"status":"timed_out"' in routed_text
+    assert '"actions":[]' in routed_text
+    assert '"citations":[]' in routed_text
 
 
 def short_deadline_command(message: str) -> object:
@@ -960,11 +1152,8 @@ async def test_outer_deadline_contains_routing_phase() -> None:
 
 
 @pytest.mark.asyncio
-async def test_outer_deadline_contains_expert_phase() -> None:
-    from agent_col_turn_service import (
-        AgentColTurnService,
-        AgentColTurnTimeoutError,
-    )
+async def test_expert_budget_preserves_time_for_responder_phase() -> None:
+    from agent_col_turn_service import AgentColTurnService
 
     expert_context = completed_source_context()
     executor = DelayedExecutor(expert_context, delay=0.03)
@@ -982,16 +1171,21 @@ async def test_outer_deadline_contains_expert_phase() -> None:
         responder_reserve_seconds=0.001,
     )
 
-    with pytest.raises(AgentColTurnTimeoutError):
-        await service.run_turn(
-            short_deadline_command(
-                "Analyze https://example.com/ within this turn."
-            )
+    result = await service.run_turn(
+        short_deadline_command(
+            "Analyze https://example.com/ within this turn."
         )
+    )
 
     assert len(executor.calls) == 1
     assert executor.cleaned is True
-    assert responder.contexts == []
+    assert len(responder.contexts) == 1
+    assert result.actions == ()
+    assert result.citations == ()
+    routed_text = responder.contexts[0].model_input_context[-1].parts[0].text
+    assert routed_text is not None
+    assert '"capability":"source"' in routed_text
+    assert '"status":"timed_out"' in routed_text
 
 
 @pytest.mark.asyncio
