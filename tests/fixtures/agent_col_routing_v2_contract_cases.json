@@ -1,0 +1,73 @@
+{
+  "fixture_version": "2.0",
+  "scenarios": [
+    {
+      "scenario_id": "direct-restraint",
+      "routing_input": {
+        "current_message": "Explain idempotency in stable general terms without using external tools.",
+        "candidate_urls": [],
+        "numeric_candidates": [],
+        "numeric_projection_incomplete": false,
+        "available_capabilities": ["source", "research", "computation"]
+      },
+      "expected_route": "direct"
+    },
+    {
+      "scenario_id": "clarify-unsupported-fraction",
+      "routing_input": {
+        "current_message": "Calculate the result using 1/2 as the essential input.",
+        "candidate_urls": [],
+        "numeric_candidates": [],
+        "numeric_projection_incomplete": true,
+        "available_capabilities": ["source", "research", "computation"]
+      },
+      "expected_route": "clarify"
+    },
+    {
+      "scenario_id": "source-regression",
+      "routing_input": {
+        "current_message": "Analyze the stated purpose of the supplied public page using only evidence retrieved from it: https://example.com/",
+        "candidate_urls": [
+          {
+            "candidate_id": "url-1",
+            "url": "https://example.com/",
+            "source": "current_message"
+          }
+        ],
+        "numeric_candidates": [],
+        "numeric_projection_incomplete": false,
+        "available_capabilities": ["source", "research", "computation"]
+      },
+      "expected_route": "source"
+    },
+    {
+      "scenario_id": "research-regression",
+      "routing_input": {
+        "current_message": "Verify the current stable Python release using current public evidence.",
+        "candidate_urls": [],
+        "numeric_candidates": [],
+        "numeric_projection_incomplete": false,
+        "available_capabilities": ["source", "research", "computation"]
+      },
+      "expected_route": "research"
+    },
+    {
+      "scenario_id": "computation-series",
+      "routing_input": {
+        "current_message": "Calculate the mean and population standard deviation for 12, 15, 18, 21, 24, and 27.",
+        "candidate_urls": [],
+        "numeric_candidates": [
+          {"candidate_id":"number-1","raw_text":"12","value":12,"notation":"plain","unit_symbol":null,"start_index":57,"end_index":59},
+          {"candidate_id":"number-2","raw_text":"15","value":15,"notation":"plain","unit_symbol":null,"start_index":61,"end_index":63},
+          {"candidate_id":"number-3","raw_text":"18","value":18,"notation":"plain","unit_symbol":null,"start_index":65,"end_index":67},
+          {"candidate_id":"number-4","raw_text":"21","value":21,"notation":"plain","unit_symbol":null,"start_index":69,"end_index":71},
+          {"candidate_id":"number-5","raw_text":"24","value":24,"notation":"plain","unit_symbol":null,"start_index":73,"end_index":75},
+          {"candidate_id":"number-6","raw_text":"27","value":27,"notation":"plain","unit_symbol":null,"start_index":81,"end_index":83}
+        ],
+        "numeric_projection_incomplete": false,
+        "available_capabilities": ["source", "research", "computation"]
+      },
+      "expected_route": "computation"
+    }
+  ]
+}

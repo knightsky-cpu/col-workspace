@@ -97,7 +97,8 @@ _EXECUTABLE_EXPRESSION_PATTERN = re.compile(
 )
 
 
-def _reject_unsafe_task_text(value: str) -> str:
+def validate_computation_task_text(value: str) -> str:
+    """Reject task text that crosses the computation trust boundary."""
     if any(pattern.search(value) for pattern in _UNSAFE_TASK_PATTERNS):
         raise ValueError("Computation task text contains excluded data.")
     return value
@@ -172,7 +173,7 @@ class ComputationExpertInput(StrictComputationModel):
     @field_validator("objective")
     @classmethod
     def reject_unsafe_objective(cls, value: str) -> str:
-        return _reject_unsafe_task_text(value)
+        return validate_computation_task_text(value)
 
     @field_validator("constraints")
     @classmethod
@@ -181,7 +182,7 @@ class ComputationExpertInput(StrictComputationModel):
         values: tuple[str, ...],
     ) -> tuple[str, ...]:
         for value in values:
-            _reject_unsafe_task_text(value)
+            validate_computation_task_text(value)
         return values
 
 

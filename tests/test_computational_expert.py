@@ -39,6 +39,32 @@ def valid_request(computation):
     )
 
 
+@pytest.mark.parametrize(
+    "value",
+    (
+        "Run ```python print(1) ```",
+        "Fetch https://example.com/data.csv",
+        "Read /Users/example/private.csv",
+        "Use api_key=secret-value",
+    ),
+)
+def test_public_task_text_validator_rejects_existing_unsafe_shapes(
+    value: str,
+) -> None:
+    computation = load_computational_expert()
+
+    with pytest.raises(ValueError):
+        computation.validate_computation_task_text(value)
+
+
+def test_public_task_text_validator_preserves_safe_bounded_text() -> None:
+    computation = load_computational_expert()
+
+    assert computation.validate_computation_task_text(
+        "Calculate the population standard deviation."
+    ) == "Calculate the population standard deviation."
+
+
 def computation_event(
     *parts: types.Part,
     author: str = "computational_expert",
