@@ -1,0 +1,68 @@
+{
+  "fixture_version": "3.0",
+  "scenarios": [
+    {
+      "scenario_id": "direct-general-requirements-advice",
+      "message": "Explain how requirement traceability improves review quality.",
+      "expected_route": "direct",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "direct-explicit-no-expert",
+      "message": "Do not use experts. Briefly tell me how I could compare a draft against a rubric myself.\n\nRequirements:\n- Include one example.\n\nSubject:\nThis draft includes one example.",
+      "expected_route": "direct",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "clarify-missing-subject",
+      "message": "Compare a future draft against these requirements.\n\nRequirements:\n- Include one practical example.\n- State a material limitation.",
+      "expected_route": "clarify",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "clarify-missing-requirements",
+      "message": "Evaluate this subject against the requirements.\n\nSubject:\nThe response includes one practical example.",
+      "expected_route": "clarify",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "clarify-url-plus-verification",
+      "message": "Retrieve https://example.com/ and verify the page against these requirements in the same response.\n\nRequirements:\n- State the page purpose.",
+      "expected_route": "clarify",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "source-regression",
+      "message": "Analyze https://example.com/ and explain its stated purpose using only that page.",
+      "expected_route": "source",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "research-regression",
+      "message": "Use current authoritative public evidence to identify the latest stable Python release.",
+      "expected_route": "research",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "computation-regression",
+      "message": "Calculate the arithmetic mean and population standard deviation of these exact values: 12, 15, 18, 21, 24, 27.",
+      "expected_route": "computation",
+      "expected_requirement_block_ids": [],
+      "expected_subject_block_ids": []
+    },
+    {
+      "scenario_id": "requirements-verification",
+      "message": "Compare the subject against every requirement.\n\nRequirements:\n- Include one practical example.\n- State a material limitation.\n\nSubject:\nThe response includes one practical example but does not state a limitation.",
+      "expected_route": "requirements_verification",
+      "expected_requirement_block_ids": ["block-3", "block-4"],
+      "expected_subject_block_ids": ["block-6"]
+    }
+  ]
+}
