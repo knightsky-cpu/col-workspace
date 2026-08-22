@@ -15,9 +15,10 @@ from expert_contracts import ExpertStatus
 from research_expert import (
     RESEARCH_EXPERT_TIMEOUT_SECONDS,
     ResearchExpertInput,
+    ResearchInvalidOutputReason,
     ResearchExpertResult,
     create_research_expert,
-    normalize_research_event,
+    diagnose_research_event,
 )
 from vertex_config import VertexAISettings
 
@@ -34,8 +35,14 @@ logger = logging.getLogger(__name__)
 class ResearchExpertServiceError(RuntimeError):
     """Safe failure raised when isolated Research cannot be trusted."""
 
-    def __init__(self, status: ExpertStatus) -> None:
+    def __init__(
+        self,
+        status: ExpertStatus,
+        *,
+        invalid_output_reason: ResearchInvalidOutputReason | None = None,
+    ) -> None:
         self.status = status
+        self.invalid_output_reason = invalid_output_reason
         super().__init__("Research Expert execution failed.")
 
 
@@ -151,14 +158,36 @@ class ResearchExpertService:
                 and event.is_final_response()
             ):
                 final_events.append(event)
-        if len(final_events) != 1:
-            raise ResearchExpertServiceError(ExpertStatus.INVALID_OUTPUT)
-        result = normalize_research_event(
+        if not final_events:
+            self._raise_invalid_output(
+                ResearchInvalidOutputReason.MISSING_FINAL_EVENT
+            )
+        if len(final_events) > 1:
+            self._raise_invalid_output(
+                ResearchInvalidOutputReason.MULTIPLE_FINAL_EVENTS
+            )
+        outcome = diagnose_research_event(
             final_events[0].model_copy(update={"output": None})
         )
-        if result.status is not ExpertStatus.COMPLETED:
-            raise ResearchExpertServiceError(result.status)
-        return result
+        if outcome.result.status is not ExpertStatus.COMPLETED:
+            self._raise_invalid_output(
+                outcome.invalid_output_reason
+                or ResearchInvalidOutputReason.NORMALIZED_RESULT_VALIDATION_FAILED
+            )
+        return outcome.result
+
+    @staticmethod
+    def _raise_invalid_output(
+        reason: ResearchInvalidOutputReason,
+    ) -> None:
+        logger.warning(
+            "Research Expert output rejected (%s).",
+            reason.value,
+        )
+        raise ResearchExpertServiceError(
+            ExpertStatus.INVALID_OUTPUT,
+            invalid_output_reason=reason,
+        )
 
     @staticmethod
     def _log_failure(exc: Exception) -> None:

@@ -129,6 +129,30 @@ class ResearchConfidence(StrEnum):
     LOW = "low"
 
 
+class ResearchInvalidOutputReason(StrEnum):
+    """Content-safe reasons why Research output was rejected."""
+
+    MISSING_FINAL_EVENT = "missing_final_event"
+    MULTIPLE_FINAL_EVENTS = "multiple_final_events"
+    WRONG_EVENT_AUTHOR = "wrong_event_author"
+    MISSING_RESPONSE_TEXT = "missing_response_text"
+    MISSING_GROUNDING_METADATA = "missing_grounding_metadata"
+    MISSING_GROUNDING_CHUNKS = "missing_grounding_chunks"
+    NO_VALID_PUBLIC_SOURCES = "no_valid_public_sources"
+    MISSING_GROUNDING_SUPPORTS = "missing_grounding_supports"
+    TOO_MANY_GROUNDING_SUPPORTS = "too_many_grounding_supports"
+    NO_MAPPABLE_GROUNDING_CLAIMS = "no_mappable_grounding_claims"
+    TOO_MANY_GROUNDED_CLAIMS = "too_many_grounded_claims"
+    GROUNDED_CLAIM_WITHOUT_SOURCE = "grounded_claim_without_source"
+    TOO_MANY_SOURCES_FOR_CLAIM = "too_many_sources_for_claim"
+    STRUCTURED_OUTPUT_VALIDATION_FAILED = (
+        "structured_output_validation_failed"
+    )
+    NORMALIZED_RESULT_VALIDATION_FAILED = (
+        "normalized_result_validation_failed"
+    )
+
+
 class ResearchFindingDraft(StrictResearchModel):
     claim: ResearchFindingText
     evidence_summary: ResearchFindingText
@@ -284,6 +308,14 @@ class ResearchExpertResult(
 class ResearchExpertReceipts:
     actions: tuple[AgentActionReceipt, ...] = ()
     citations: tuple[CitationReference, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchNormalizationOutcome:
+    """A normalized result plus an internal content-safe rejection reason."""
+
+    result: ResearchExpertResult
+    invalid_output_reason: ResearchInvalidOutputReason | None = None
 
 
 class BoundedResearchAgent(Agent):
@@ -538,8 +570,15 @@ def normalize_research_failure(
 
 def normalize_research_event(event: Event) -> ResearchExpertResult:
     """Normalize one completed Research Expert ADK output event."""
+    return diagnose_research_event(event).result
+
+
+def diagnose_research_event(event: Event) -> ResearchNormalizationOutcome:
+    """Normalize one event and retain only a content-safe rejection reason."""
     if event.author != "research_expert":
-        return ResearchExpertResult(status=ExpertStatus.INVALID_OUTPUT)
+        return _invalid_research_outcome(
+            ResearchInvalidOutputReason.WRONG_EVENT_AUTHOR
+        )
     parts = event.content.parts if event.content is not None else ()
     response_text = "".join(
         part.text
@@ -547,14 +586,22 @@ def normalize_research_event(event: Event) -> ResearchExpertResult:
         if isinstance(part.text, str) and not part.thought
     ).strip()
     if event.output is None:
-        return normalize_grounded_research_text(
+        return diagnose_grounded_research_text(
             response_text=response_text,
             metadata=event.grounding_metadata,
         )
-    return normalize_research_output(
+    result = normalize_research_output(
         raw_output=event.output,
         response_text=response_text,
         metadata=event.grounding_metadata,
+    )
+    if result.status is ExpertStatus.COMPLETED:
+        return ResearchNormalizationOutcome(result=result)
+    return ResearchNormalizationOutcome(
+        result=result,
+        invalid_output_reason=(
+            ResearchInvalidOutputReason.STRUCTURED_OUTPUT_VALIDATION_FAILED
+        ),
     )
 
 
@@ -564,18 +611,47 @@ def normalize_grounded_research_text(
     metadata: types.GroundingMetadata | None,
 ) -> ResearchExpertResult:
     """Build strict findings from provider-grounded response segments."""
+    return diagnose_grounded_research_text(
+        response_text=response_text,
+        metadata=metadata,
+    ).result
+
+
+def diagnose_grounded_research_text(
+    *,
+    response_text: str,
+    metadata: types.GroundingMetadata | None,
+) -> ResearchNormalizationOutcome:
+    """Build strict findings and classify a rejection without content."""
+    if not response_text:
+        return _invalid_research_outcome(
+            ResearchInvalidOutputReason.MISSING_RESPONSE_TEXT
+        )
+    if metadata is None:
+        return _invalid_research_outcome(
+            ResearchInvalidOutputReason.MISSING_GROUNDING_METADATA
+        )
+    if not metadata.grounding_chunks:
+        return _invalid_research_outcome(
+            ResearchInvalidOutputReason.MISSING_GROUNDING_CHUNKS
+        )
     try:
         sources, source_ids_by_chunk = _extract_provider_source_index(
             metadata
         )
-        supports = tuple(metadata.grounding_supports or ()) if metadata else ()
-        if (
-            not response_text
-            or not sources
-            or not supports
-            or len(supports) > 40
-        ):
-            return ResearchExpertResult(status=ExpertStatus.INVALID_OUTPUT)
+        if not sources:
+            return _invalid_research_outcome(
+                ResearchInvalidOutputReason.NO_VALID_PUBLIC_SOURCES
+            )
+        supports = tuple(metadata.grounding_supports or ())
+        if not supports:
+            return _invalid_research_outcome(
+                ResearchInvalidOutputReason.MISSING_GROUNDING_SUPPORTS
+            )
+        if len(supports) > 40:
+            return _invalid_research_outcome(
+                ResearchInvalidOutputReason.TOO_MANY_GROUNDING_SUPPORTS
+            )
 
         source_ids_by_claim: dict[str, list[str]] = {}
         for support in supports:
@@ -594,15 +670,25 @@ def normalize_grounded_research_text(
                 ):
                     claim_source_ids.append(source_id)
 
-        if not source_ids_by_claim or len(source_ids_by_claim) > 8:
-            return ResearchExpertResult(status=ExpertStatus.INVALID_OUTPUT)
+        if not source_ids_by_claim:
+            return _invalid_research_outcome(
+                ResearchInvalidOutputReason.NO_MAPPABLE_GROUNDING_CLAIMS
+            )
+        if len(source_ids_by_claim) > 8:
+            return _invalid_research_outcome(
+                ResearchInvalidOutputReason.TOO_MANY_GROUNDED_CLAIMS
+            )
 
         findings: list[ResearchFinding] = []
         referenced_source_ids: set[str] = set()
         for claim, source_ids in source_ids_by_claim.items():
-            if not source_ids or len(source_ids) > 5:
-                return ResearchExpertResult(
-                    status=ExpertStatus.INVALID_OUTPUT
+            if not source_ids:
+                return _invalid_research_outcome(
+                    ResearchInvalidOutputReason.GROUNDED_CLAIM_WITHOUT_SOURCE
+                )
+            if len(source_ids) > 5:
+                return _invalid_research_outcome(
+                    ResearchInvalidOutputReason.TOO_MANY_SOURCES_FOR_CLAIM
                 )
             findings.append(
                 ResearchFinding(
@@ -630,19 +716,32 @@ def normalize_grounded_research_text(
             grounded_finding_count=len(findings),
             grounding_support_count=len(supports),
         )
-        return ResearchExpertResult(
-            status=ExpertStatus.COMPLETED,
-            summary=(
-                f"Research produced {len(findings)} grounded "
-                f"finding{'s' if len(findings) != 1 else ''} from "
-                f"{len(referenced_sources)} public "
-                f"source{'s' if len(referenced_sources) != 1 else ''}."
+        return ResearchNormalizationOutcome(
+            result=ResearchExpertResult(
+                status=ExpertStatus.COMPLETED,
+                summary=(
+                    f"Research produced {len(findings)} grounded "
+                    f"finding{'s' if len(findings) != 1 else ''} from "
+                    f"{len(referenced_sources)} public "
+                    f"source{'s' if len(referenced_sources) != 1 else ''}."
+                ),
+                payload=payload,
+                evidence=evidence,
             ),
-            payload=payload,
-            evidence=evidence,
         )
     except (TypeError, ValueError, ValidationError):
-        return ResearchExpertResult(status=ExpertStatus.INVALID_OUTPUT)
+        return _invalid_research_outcome(
+            ResearchInvalidOutputReason.NORMALIZED_RESULT_VALIDATION_FAILED
+        )
+
+
+def _invalid_research_outcome(
+    reason: ResearchInvalidOutputReason,
+) -> ResearchNormalizationOutcome:
+    return ResearchNormalizationOutcome(
+        result=ResearchExpertResult(status=ExpertStatus.INVALID_OUTPUT),
+        invalid_output_reason=reason,
+    )
 
 
 def _grounding_support_text(

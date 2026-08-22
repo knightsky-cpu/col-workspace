@@ -99,6 +99,35 @@ def grounded_workflow_event() -> Event:
     )
 
 
+def research_workflow_event(
+    *,
+    response_text: str,
+    grounding_chunks: list[types.GroundingChunk],
+    grounding_supports: list[types.GroundingSupport],
+) -> Event:
+    return Event(
+        author="research_expert",
+        content=types.Content(
+            role="model",
+            parts=[types.Part.from_text(text=response_text)],
+        ),
+        output=response_text,
+        grounding_metadata=types.GroundingMetadata(
+            grounding_chunks=grounding_chunks,
+            grounding_supports=grounding_supports,
+        ),
+    )
+
+
+def public_grounding_chunk(index: int = 0) -> types.GroundingChunk:
+    return types.GroundingChunk(
+        web=types.GroundingChunkWeb(
+            uri=f"https://source-{index}.example.org/evidence",
+            title=f"Provider title {index}",
+        )
+    )
+
+
 def test_research_service_uses_one_node_isolated_workflow_topology() -> None:
     from research_expert_service import (
         RESEARCH_EXPERT_APP_NAME,
@@ -233,6 +262,261 @@ async def test_research_service_rejects_invalid_event_streams_and_cleans_up(
     assert str(exc_info.value) == "Research Expert execution failed."
     assert exc_info.value.__cause__ is None
     assert len(sessions.deleted) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("events", "expected_reason"),
+    (
+        ((), "missing_final_event"),
+        (
+            (grounded_workflow_event(), grounded_workflow_event()),
+            "multiple_final_events",
+        ),
+        (
+            (
+                grounded_workflow_event().model_copy(
+                    update={"grounding_metadata": None}
+                ),
+            ),
+            "missing_grounding_metadata",
+        ),
+        (
+            (
+                grounded_workflow_event().model_copy(
+                    update={
+                        "grounding_metadata": types.GroundingMetadata(
+                            grounding_chunks=[]
+                        )
+                    }
+                ),
+            ),
+            "missing_grounding_chunks",
+        ),
+        (
+            (
+                grounded_workflow_event().model_copy(
+                    update={
+                        "grounding_metadata": types.GroundingMetadata(
+                            grounding_chunks=[
+                                types.GroundingChunk(
+                                    web=types.GroundingChunkWeb(
+                                        uri=(
+                                            "https://www.python.org/"
+                                            "downloads/"
+                                        ),
+                                        title="Private provider title",
+                                    )
+                                )
+                            ],
+                            grounding_supports=[],
+                        )
+                    }
+                ),
+            ),
+            "missing_grounding_supports",
+        ),
+    ),
+)
+async def test_research_service_reports_content_safe_invalid_output_reason(
+    events: tuple[Event, ...],
+    expected_reason: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert_service import (
+        ResearchExpertService,
+        ResearchExpertServiceError,
+    )
+
+    service = ResearchExpertService(
+        app=object(),  # type: ignore[arg-type]
+        runner=RecordingRunner(events),
+        session_service=RecordingSessionService(),
+    )
+
+    with pytest.raises(ResearchExpertServiceError) as exc_info:
+        await service.research(
+            ResearchExpertInput(
+                question="Private user question marker?",
+                objective="Private user objective marker.",
+            )
+        )
+
+    assert exc_info.value.status is ExpertStatus.INVALID_OUTPUT
+    assert getattr(exc_info.value, "invalid_output_reason", None) == (
+        expected_reason
+    )
+    assert (
+        f"Research Expert output rejected ({expected_reason})."
+        in caplog.text
+    )
+    assert "Private user question marker" not in caplog.text
+    assert "Private user objective marker" not in caplog.text
+    assert "Private provider title" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("event", "expected_reason"),
+    (
+        (
+            research_workflow_event(
+                response_text="",
+                grounding_chunks=[public_grounding_chunk()],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(text="Private claim marker."),
+                        grounding_chunk_indices=[0],
+                    )
+                ],
+            ),
+            "missing_response_text",
+        ),
+        (
+            research_workflow_event(
+                response_text="Private claim marker.",
+                grounding_chunks=[
+                    types.GroundingChunk(
+                        web=types.GroundingChunkWeb(
+                            uri="https://private.invalid/evidence",
+                            title="Private provider title",
+                        )
+                    )
+                ],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(text="Private claim marker."),
+                        grounding_chunk_indices=[0],
+                    )
+                ],
+            ),
+            "no_valid_public_sources",
+        ),
+        (
+            research_workflow_event(
+                response_text="Private claim marker.",
+                grounding_chunks=[public_grounding_chunk()],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(text="Private claim marker."),
+                        grounding_chunk_indices=[0],
+                    )
+                ]
+                * 41,
+            ),
+            "too_many_grounding_supports",
+        ),
+        (
+            research_workflow_event(
+                response_text="Private claim marker.",
+                grounding_chunks=[public_grounding_chunk()],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(start_index=10, end_index=5),
+                        grounding_chunk_indices=[0],
+                    )
+                ],
+            ),
+            "no_mappable_grounding_claims",
+        ),
+        (
+            research_workflow_event(
+                response_text="Private claims marker.",
+                grounding_chunks=[public_grounding_chunk()],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(text=f"Private claim {index}."),
+                        grounding_chunk_indices=[0],
+                    )
+                    for index in range(9)
+                ],
+            ),
+            "too_many_grounded_claims",
+        ),
+        (
+            research_workflow_event(
+                response_text="Private claim marker.",
+                grounding_chunks=[public_grounding_chunk()],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(text="Private claim marker."),
+                        grounding_chunk_indices=[99],
+                    )
+                ],
+            ),
+            "grounded_claim_without_source",
+        ),
+        (
+            research_workflow_event(
+                response_text="Private claim marker.",
+                grounding_chunks=[
+                    public_grounding_chunk(index) for index in range(6)
+                ],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(text="Private claim marker."),
+                        grounding_chunk_indices=list(range(6)),
+                    )
+                ],
+            ),
+            "too_many_sources_for_claim",
+        ),
+        (
+            research_workflow_event(
+                response_text="x" * 1_001,
+                grounding_chunks=[public_grounding_chunk()],
+                grounding_supports=[
+                    types.GroundingSupport(
+                        segment=types.Segment(text="x" * 1_001),
+                        grounding_chunk_indices=[0],
+                    )
+                ],
+            ),
+            "normalized_result_validation_failed",
+        ),
+    ),
+)
+async def test_research_service_distinguishes_normalization_rejection_reason(
+    event: Event,
+    expected_reason: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert_service import (
+        ResearchExpertService,
+        ResearchExpertServiceError,
+    )
+
+    service = ResearchExpertService(
+        app=object(),  # type: ignore[arg-type]
+        runner=RecordingRunner((event,)),
+        session_service=RecordingSessionService(),
+    )
+
+    with pytest.raises(ResearchExpertServiceError) as exc_info:
+        await service.research(
+            ResearchExpertInput(
+                question="Private user question marker?",
+                objective="Private user objective marker.",
+            )
+        )
+
+    assert exc_info.value.status is ExpertStatus.INVALID_OUTPUT
+    assert getattr(exc_info.value, "invalid_output_reason", None) == (
+        expected_reason
+    )
+    assert (
+        f"Research Expert output rejected ({expected_reason})."
+        in caplog.text
+    )
+    for private_marker in (
+        "Private user question marker",
+        "Private user objective marker",
+        "Private provider title",
+        "Private claim marker",
+    ):
+        assert private_marker not in caplog.text
 
 
 def rejected_input_error() -> ValidationError:
