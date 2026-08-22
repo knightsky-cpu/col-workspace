@@ -88,6 +88,7 @@ class AgentActionReceipt(StrictModel):
         "synthesize_project",
         "google_search",
         "url_context",
+        "run_computation",
         "record_blueprint_feedback",
         "propose_memory_signal",
         "approve_memory_signal",

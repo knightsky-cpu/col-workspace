@@ -1,5 +1,6 @@
 """Bounded Computational Expert contracts and provider normalization."""
 
+from dataclasses import dataclass
 import re
 from typing import Annotated, Literal, Self
 
@@ -22,6 +23,7 @@ from pydantic import (
 )
 
 from expert_contracts import ExpertCapability, ExpertResult, ExpertStatus
+from schemas import AgentActionReceipt, CitationReference
 from vertex_config import VertexAISettings
 
 
@@ -215,6 +217,85 @@ class ComputationExpertResult(
 ):
     capability: Literal[ExpertCapability.COMPUTATION] = (
         ExpertCapability.COMPUTATION
+    )
+
+
+class ComputationResponderPayload(StrictComputationModel):
+    """Validated computation content safe for Agent_Col's prompt."""
+
+    method: ComputationResultText
+    inputs_used: ComputationInputs
+    result: ComputationResultText
+
+
+class ComputationResponderEvidence(StrictComputationModel):
+    """Bounded proof metadata with raw code and output removed."""
+
+    execution_verified: Literal[True] = True
+    execution_count: int = Field(ge=1, le=5)
+    successful_execution_count: int = Field(ge=1, le=5)
+    code_character_count: int = Field(ge=1, le=40_000)
+    output_character_count: int = Field(ge=1, le=40_000)
+
+
+class ComputationResponderResult(
+    ExpertResult[ComputationResponderPayload, ComputationResponderEvidence]
+):
+    """Information-minimized computation result for responder context."""
+
+    capability: Literal[ExpertCapability.COMPUTATION] = (
+        ExpertCapability.COMPUTATION
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ComputationExpertReceipts:
+    actions: tuple[AgentActionReceipt, ...] = ()
+    citations: tuple[CitationReference, ...] = ()
+
+
+def project_computation_responder_result(
+    result: ComputationExpertResult,
+) -> ComputationResponderResult:
+    """Remove raw execution material from a locally validated result."""
+    if result.status is not ExpertStatus.COMPLETED:
+        return ComputationResponderResult(status=result.status)
+
+    assert result.payload is not None
+    assert result.evidence is not None
+    return ComputationResponderResult(
+        status=result.status,
+        summary=result.summary,
+        limitations=result.limitations,
+        payload=ComputationResponderPayload(
+            method=result.payload.method,
+            inputs_used=result.payload.inputs_used,
+            result=result.payload.result,
+        ),
+        evidence=ComputationResponderEvidence(
+            execution_count=result.evidence.execution_count,
+            successful_execution_count=(
+                result.evidence.successful_execution_count
+            ),
+            code_character_count=result.evidence.code_character_count,
+            output_character_count=result.evidence.output_character_count,
+        ),
+    )
+
+
+def build_computation_receipts(
+    result: ComputationResponderResult,
+) -> ComputationExpertReceipts:
+    """Return an action receipt only for verified completed computation."""
+    if result.status is not ExpertStatus.COMPLETED:
+        return ComputationExpertReceipts()
+    return ComputationExpertReceipts(
+        actions=(
+            AgentActionReceipt(
+                action_name="run_computation",
+                status="completed",
+            ),
+        ),
     )
 
 

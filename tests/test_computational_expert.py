@@ -234,6 +234,94 @@ def test_native_success_normalizes_to_completed_expert_result() -> None:
     assert result.evidence.output_character_count == len(output)
 
 
+def test_computation_responder_projection_excludes_raw_execution_material(
+) -> None:
+    computation = load_computational_expert()
+    request = valid_request(computation)
+    code = "print('PRIVATE_CODE_MARKER')"
+    output = "PRIVATE_OUTPUT_MARKER\n"
+    result = computation.normalize_computation_events(
+        request,
+        (
+            successful_computation_event(
+                code=code,
+                output=output,
+                final_text="The arithmetic mean is 2.00.",
+            ),
+        ),
+    )
+
+    projected = computation.project_computation_responder_result(result)
+
+    assert projected.status is ExpertStatus.COMPLETED
+    assert projected.summary == result.summary
+    assert projected.limitations == result.limitations
+    assert projected.payload is not None
+    assert result.payload is not None
+    assert projected.payload.method == result.payload.method
+    assert projected.payload.inputs_used == request.inputs
+    assert projected.payload.result == result.payload.result
+    assert projected.evidence is not None
+    assert projected.evidence.execution_verified is True
+    assert projected.evidence.execution_count == 1
+    assert projected.evidence.successful_execution_count == 1
+    assert projected.evidence.code_character_count == len(code)
+    assert projected.evidence.output_character_count == len(output)
+    serialized = projected.model_dump_json()
+    assert "execution_runs" not in serialized
+    assert '"code"' not in serialized
+    assert '"output"' not in serialized
+    assert "PRIVATE_CODE_MARKER" not in serialized
+    assert "PRIVATE_OUTPUT_MARKER" not in serialized
+
+
+@pytest.mark.parametrize(
+    "status",
+    tuple(status for status in ExpertStatus if status is not ExpertStatus.COMPLETED),
+)
+def test_computation_responder_projection_preserves_contentless_failures(
+    status: ExpertStatus,
+) -> None:
+    computation = load_computational_expert()
+
+    projected = computation.project_computation_responder_result(
+        computation.ComputationExpertResult(status=status)
+    )
+
+    assert projected.status is status
+    assert projected.summary is None
+    assert projected.limitations == ()
+    assert projected.payload is None
+    assert projected.evidence is None
+
+
+def test_computation_receipts_exist_only_for_completed_validated_result(
+) -> None:
+    computation = load_computational_expert()
+    completed = computation.normalize_computation_events(
+        valid_request(computation),
+        (successful_computation_event(),),
+    )
+
+    receipts = computation.build_computation_receipts(
+        computation.project_computation_responder_result(completed)
+    )
+
+    assert tuple(receipt.model_dump() for receipt in receipts.actions) == (
+        {"action_name": "run_computation", "status": "completed"},
+    )
+    assert receipts.citations == ()
+
+    for status in ExpertStatus:
+        if status is ExpertStatus.COMPLETED:
+            continue
+        failed_receipts = computation.build_computation_receipts(
+            computation.ComputationResponderResult(status=status)
+        )
+        assert failed_receipts.actions == ()
+        assert failed_receipts.citations == ()
+
+
 @pytest.mark.parametrize(
     "events",
     (

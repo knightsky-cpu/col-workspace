@@ -666,6 +666,20 @@ def test_action_receipt_rejects_unverified_public_values(
         AgentActionReceipt.model_validate(receipt_payload)
 
 
+def test_action_receipt_accepts_completed_computation() -> None:
+    from schemas import AgentActionReceipt
+
+    receipt = AgentActionReceipt(
+        action_name="run_computation",
+        status="completed",
+    )
+
+    assert receipt.model_dump() == {
+        "action_name": "run_computation",
+        "status": "completed",
+    }
+
+
 def test_artifact_and_citation_references_validate_public_fields() -> None:
     from schemas import ArtifactReference, CitationReference
 
