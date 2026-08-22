@@ -1,9 +1,9 @@
 import asyncio
 import logging
 
-from agent_col_responder_context_v2 import AgentColResponderContextV2
-from agent_col_routing_v2 import AgentColRoute, AgentColRoutingDirective
-from agent_col_routing_provider_v2 import AgentColRoutingV2ProviderError
+from agent_col_responder_context_v3 import AgentColResponderContextV3
+from agent_col_routing_v3 import AgentColRoute, AgentColRoutingDirective
+from agent_col_routing_provider_v3 import AgentColRoutingV3ProviderError
 from agent_col_turn_service import (
     AgentColTurnCommand,
     AgentColTurnRoutingError,
@@ -46,9 +46,10 @@ class _ExpertExecutor:
         ExpertCapability.SOURCE,
         ExpertCapability.RESEARCH,
         ExpertCapability.COMPUTATION,
+        ExpertCapability.REQUIREMENTS_VERIFICATION,
     )
 
-    def __init__(self, source_context: AgentColResponderContextV2) -> None:
+    def __init__(self, source_context: AgentColResponderContextV3) -> None:
         self.source_context = source_context
         self.dispatches = 0
         self.expert_attempts = 0
@@ -57,13 +58,13 @@ class _ExpertExecutor:
         self,
         directive: AgentColRoutingDirective,
         routing_input: object,
-    ) -> AgentColResponderContextV2:
+    ) -> AgentColResponderContextV3:
         del routing_input
         self.dispatches += 1
         if directive.route is AgentColRoute.SOURCE:
             self.expert_attempts += 1
             return self.source_context
-        return AgentColResponderContextV2(routing_directive=directive)
+        return AgentColResponderContextV3(routing_directive=directive)
 
 
 class _Responder:
@@ -88,7 +89,7 @@ class _Clock:
         return self._last
 
 
-def _source_context() -> AgentColResponderContextV2:
+def _source_context() -> AgentColResponderContextV3:
     directive = AgentColRoutingDirective(
         route="source",
         source_intent={
@@ -131,7 +132,7 @@ def _source_context() -> AgentColResponderContextV2:
         }
     )
     receipts = build_source_receipts(result)
-    return AgentColResponderContextV2(
+    return AgentColResponderContextV3(
         routing_directive=directive,
         expert_result=result,
         actions=receipts.actions,
@@ -194,7 +195,7 @@ async def run_smoke() -> str:
         expert_executor=failing_executor,
         responder_runtime=failing_responder,
         routing_request=_RoutingRequest(
-            error=AgentColRoutingV2ProviderError("hidden-provider-error")
+            error=AgentColRoutingV3ProviderError("hidden-provider-error")
         ),
     )
     try:

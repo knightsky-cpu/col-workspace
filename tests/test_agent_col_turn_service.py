@@ -4,10 +4,10 @@ from datetime import UTC, datetime
 import pytest
 from google.genai import types
 
-from agent_col_responder_context_v2 import (
-    AgentColResponderContextV2 as AgentColResponderContext,
+from agent_col_responder_context_v3 import (
+    AgentColResponderContextV3 as AgentColResponderContext,
 )
-from agent_col_routing_v2 import AgentColRoutingDirective
+from agent_col_routing_v3 import AgentColRoutingDirective
 from memory_proposals import ProposalTurnLease
 from schemas import AgentActionReceipt, MemoryProposalReceipt
 from supervisor_runtime import SupervisorTurnResult
@@ -162,6 +162,7 @@ class BudgetBlockingExecutor(RecordingExecutor):
             "source",
             "research",
             "computation",
+            "requirements_verification",
         )
         self.cleaned = False
 
@@ -313,13 +314,13 @@ async def test_turn_service_projects_only_minimal_routing_input() -> None:
 
 
 @pytest.mark.asyncio
-async def test_turn_service_v2_projects_current_message_numeric_candidates(
+async def test_turn_service_v3_projects_current_message_numeric_candidates(
 ) -> None:
-    from agent_col_responder_context_v2 import AgentColResponderContextV2
-    from agent_col_routing_v2 import AgentColRoutingDirective
+    from agent_col_responder_context_v3 import AgentColResponderContextV3
+    from agent_col_routing_v3 import AgentColRoutingDirective
     from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
 
-    class V2Executor:
+    class V3Executor:
         available_capabilities = ("source", "research", "computation")
 
         def __init__(self) -> None:
@@ -327,14 +328,14 @@ async def test_turn_service_v2_projects_current_message_numeric_candidates(
 
         async def execute(self, directive, routing_input):
             self.calls.append((directive, routing_input))
-            return AgentColResponderContextV2(
+            return AgentColResponderContextV3(
                 routing_directive=directive
             )
 
     routing_request = RecordingRoutingRequest(
         AgentColRoutingDirective(route="direct")
     )
-    executor = V2Executor()
+    executor = V3Executor()
     service = AgentColTurnService(
         routing_client=object(),
         expert_executor=executor,
@@ -385,10 +386,114 @@ async def test_turn_service_v2_projects_current_message_numeric_candidates(
             },
         ],
         "numeric_projection_incomplete": False,
+        "text_block_candidates": [
+            {
+                "candidate_id": "block-1",
+                "text": "Calculate $12 plus 15% and 20.",
+                "start_index": 0,
+                "end_index": 30,
+                "structural_kind": "paragraph",
+            }
+        ],
+        "text_projection_incomplete": False,
         "available_capabilities": ["source", "research", "computation"],
     }
     assert "999" not in routing_input.model_dump_json()
     assert len(executor.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_service_projects_v3_current_message_text_blocks_only(
+) -> None:
+    from agent_col_responder_context_v3 import AgentColResponderContextV3
+    from agent_col_routing_v3 import AgentColRoutingDirective as V3Directive
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    class V3Executor:
+        available_capabilities = (
+            "source",
+            "research",
+            "computation",
+            "requirements_verification",
+        )
+
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, object]] = []
+
+        async def execute(self, directive, routing_input):
+            self.calls.append((directive, routing_input))
+            return AgentColResponderContextV3(
+                routing_directive=directive
+            )
+
+    message = (
+        "Compare the draft against every requirement.\n\n"
+        "Requirements:\n"
+        "- Include one practical example.\n"
+        "- State one material limitation.\n\n"
+        "Subject:\n"
+        "The draft includes one practical example but states no limitation."
+    )
+    routing_request = RecordingRoutingRequest(V3Directive(route="direct"))
+    executor = V3Executor()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=RecordingResponder(),
+        routing_request=routing_request,
+    )
+
+    await service.run_turn(
+        AgentColTurnCommand(
+            project_id="private-project",
+            session_id="private-session",
+            user_id="private-user",
+            message=message,
+            recent_user_messages=(
+                "Private history must not become verification input.",
+            ),
+            model_input_context=(
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text="private-profile")],
+                ),
+            ),
+        )
+    )
+
+    routing_input = routing_request.calls[0]["routing_input"]
+    payload = routing_input.model_dump(mode="json")
+    assert payload.get("text_projection_incomplete") is False
+    assert [
+        (candidate["candidate_id"], candidate["text"])
+        for candidate in payload.get("text_block_candidates", [])
+    ] == [
+        ("block-1", "Compare the draft against every requirement."),
+        ("block-2", "Requirements:"),
+        ("block-3", "- Include one practical example."),
+        ("block-4", "- State one material limitation."),
+        ("block-5", "Subject:"),
+        (
+            "block-6",
+            "The draft includes one practical example but states no "
+            "limitation.",
+        ),
+    ]
+    assert payload["available_capabilities"] == [
+        "source",
+        "research",
+        "computation",
+        "requirements_verification",
+    ]
+    serialized = routing_input.model_dump_json()
+    for excluded in (
+        "private-project",
+        "private-session",
+        "private-user",
+        "Private history",
+        "private-profile",
+    ):
+        assert excluded not in serialized
 
 
 @pytest.mark.asyncio
@@ -404,12 +509,12 @@ async def test_turn_service_stops_after_safe_routing_failure(
     expected_error_name: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from agent_col_routing_v2 import RoutingDirectiveInputError
-    from agent_col_routing_provider_v2 import (
-        AgentColRoutingV2InvalidOutputReason,
-        AgentColRoutingV2ProviderError,
-        AgentColRoutingV2ProviderOutputError,
-        AgentColRoutingV2ProviderTimeoutError,
+    from agent_col_routing_v3 import RoutingDirectiveInputError
+    from agent_col_routing_provider_v3 import (
+        AgentColRoutingV3InvalidOutputReason,
+        AgentColRoutingV3ProviderError,
+        AgentColRoutingV3ProviderOutputError,
+        AgentColRoutingV3ProviderTimeoutError,
     )
     from agent_col_turn_service import (
         AgentColTurnRoutingError,
@@ -418,16 +523,16 @@ async def test_turn_service_stops_after_safe_routing_failure(
     )
 
     if type(provider_error) is RuntimeError:
-        provider_error = AgentColRoutingV2ProviderError(
+        provider_error = AgentColRoutingV3ProviderError(
             "private-provider-payload"
         )
     elif type(provider_error) is TimeoutError:
-        provider_error = AgentColRoutingV2ProviderTimeoutError(
+        provider_error = AgentColRoutingV3ProviderTimeoutError(
             "private-timeout-payload"
         )
     else:
-        provider_error = AgentColRoutingV2ProviderOutputError(
-            AgentColRoutingV2InvalidOutputReason.SCHEMA_VALIDATION_FAILED
+        provider_error = AgentColRoutingV3ProviderOutputError(
+            AgentColRoutingV3InvalidOutputReason.SCHEMA_VALIDATION_FAILED
         )
     assert not isinstance(provider_error, RoutingDirectiveInputError)
     expected_error = (
@@ -488,10 +593,10 @@ async def test_turn_service_stops_after_safe_routing_failure(
 async def test_turn_service_classifies_invalid_routing_without_downstream_access(
     provider_error: str,
 ) -> None:
-    from agent_col_routing_v2 import RoutingDirectiveInputError
-    from agent_col_routing_provider_v2 import (
-        AgentColRoutingV2InvalidOutputReason,
-        AgentColRoutingV2ProviderOutputError,
+    from agent_col_routing_v3 import RoutingDirectiveInputError
+    from agent_col_routing_provider_v3 import (
+        AgentColRoutingV3InvalidOutputReason,
+        AgentColRoutingV3ProviderOutputError,
     )
     from agent_col_turn_service import (
         AgentColTurnRoutingError,
@@ -499,8 +604,8 @@ async def test_turn_service_classifies_invalid_routing_without_downstream_access
     )
 
     error = (
-        AgentColRoutingV2ProviderOutputError(
-            AgentColRoutingV2InvalidOutputReason.SCHEMA_VALIDATION_FAILED
+        AgentColRoutingV3ProviderOutputError(
+            AgentColRoutingV3InvalidOutputReason.SCHEMA_VALIDATION_FAILED
         )
         if provider_error == "invalid_output"
         else RoutingDirectiveInputError("private-directive-mismatch")
@@ -706,6 +811,129 @@ def completed_source_context() -> AgentColResponderContext:
     )
 
 
+def completed_requirements_verification_context():
+    from agent_col_responder_context_v3 import AgentColResponderContextV3
+    from agent_col_routing_v3 import AgentColRoutingDirective as V3Directive
+    from requirements_verification import (
+        RequirementAssessment,
+        RequirementStatusCounts,
+        RequirementsVerificationEvidence,
+        RequirementsVerificationPayload,
+        RequirementsVerificationResult,
+        SubjectEvidence,
+        build_requirements_verification_receipts,
+    )
+
+    directive = V3Directive(
+        route="requirements_verification",
+        requirements_verification_intent={
+            "objective": "Assess every requirement against the draft.",
+            "requirement_block_ids": ["block-3", "block-4"],
+            "subject_block_ids": ["block-6"],
+        },
+    )
+    result = RequirementsVerificationResult(
+        status="completed",
+        summary="Requirements verification completed for 2 requirements.",
+        payload=RequirementsVerificationPayload(
+            assessments=(
+                RequirementAssessment(
+                    requirement_id="REQ-001",
+                    requirement_text="Include one practical example.",
+                    status="covered",
+                    evidence=(
+                        SubjectEvidence(
+                            subject_block_id="SUBJECT-001",
+                            excerpt="includes one practical example",
+                            explanation="The subject addresses the requirement.",
+                        ),
+                    ),
+                ),
+                RequirementAssessment(
+                    requirement_id="REQ-002",
+                    requirement_text="State one material limitation.",
+                    status="contradictory",
+                    evidence=(
+                        SubjectEvidence(
+                            subject_block_id="SUBJECT-001",
+                            excerpt="states no limitation",
+                            explanation="The subject contradicts the requirement.",
+                        ),
+                    ),
+                    gap="The required limitation is absent.",
+                    recommended_action="State one material limitation.",
+                ),
+            ),
+            counts=RequirementStatusCounts(
+                covered=1,
+                partial=0,
+                missing=0,
+                contradictory=1,
+                unsupported=0,
+            ),
+        ),
+        evidence=RequirementsVerificationEvidence(
+            requirement_count=2,
+            assessed_requirement_count=2,
+            validated_evidence_count=2,
+            referenced_subject_block_ids=("SUBJECT-001",),
+        ),
+    )
+    receipts = build_requirements_verification_receipts(result)
+    return AgentColResponderContextV3(
+        routing_directive=directive,
+        expert_result=result,
+        actions=receipts.actions,
+        citations=receipts.citations,
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_service_projects_completed_verification_to_responder(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    context = completed_requirements_verification_context()
+
+    class VerificationExecutor(RecordingExecutor):
+        available_capabilities = ("requirements_verification",)
+
+    executor = VerificationExecutor(context)
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(context.routing_directive),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=(
+                "Compare the draft against every requirement.\n\n"
+                "Requirements:\n"
+                "- Include one practical example.\n"
+                "- State one material limitation.\n\n"
+                "Subject:\n"
+                "The draft includes one practical example but states no "
+                "limitation."
+            ),
+        )
+    )
+
+    assert len(executor.calls) == 1
+    assert result.actions == context.actions
+    assert result.actions[0].action_name == "verify_requirements"
+    assert result.citations == ()
+    responder_text = responder.contexts[0].model_input_context[-1].parts[0].text
+    assert responder_text is not None
+    assert '"requirement_id":"REQ-001"' in responder_text
+    assert "evidence-backed assessment, not a certification" in responder_text
+
+
 @pytest.mark.asyncio
 async def test_turn_service_stably_merges_authoritative_receipts() -> None:
     from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
@@ -824,8 +1052,8 @@ async def test_failed_expert_context_adds_no_cognitive_receipt() -> None:
 async def test_executor_configuration_failure_is_content_safe_and_stops_responder(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    from agent_col_expert_executor_v2 import (
-        AgentColExpertExecutorV2ConfigurationError,
+    from agent_col_expert_executor_v3 import (
+        AgentColExpertExecutorV3ConfigurationError,
     )
     from agent_col_turn_service import (
         AgentColTurnCommand,
@@ -833,7 +1061,7 @@ async def test_executor_configuration_failure_is_content_safe_and_stops_responde
         AgentColTurnServiceError,
     )
 
-    executor_error = AgentColExpertExecutorV2ConfigurationError(
+    executor_error = AgentColExpertExecutorV3ConfigurationError(
         "private-executor-configuration"
     )
 
@@ -1067,6 +1295,21 @@ async def test_expert_starts_when_time_exceeds_responder_reserve() -> None:
             ),
             "Calculate the mean of 12 and 15.",
             "computation",
+        ),
+        (
+            AgentColRoutingDirective(
+                route="requirements_verification",
+                requirements_verification_intent={
+                    "objective": "Assess every requirement.",
+                    "requirement_block_ids": ["block-3"],
+                    "subject_block_ids": ["block-5"],
+                },
+            ),
+            (
+                "Compare the draft.\n\nRequirements:\n- Include one "
+                "example.\n\nSubject:\nThe draft includes one example."
+            ),
+            "requirements_verification",
         ),
     ),
 )

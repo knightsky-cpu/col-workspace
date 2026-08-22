@@ -483,6 +483,7 @@ class ServiceState:
     source_service: FakeSourceExpertService
     research_service: object
     computation_service: object
+    requirements_verification_service: object
     expert_executor: object
     supervisor: FakeSupervisorRuntime
     turn_service: FakeAgentColTurnService
@@ -491,8 +492,11 @@ class ServiceState:
     responder_vertex_settings: list[VertexAISettings]
     research_vertex_settings: list[VertexAISettings]
     computation_vertex_settings: list[VertexAISettings]
+    requirements_verification_clients: list[object]
     responder_memory_services: list[object]
-    expert_executor_dependencies: list[tuple[object, object, object | None]]
+    expert_executor_dependencies: list[
+        tuple[object, object, object | None, object | None]
+    ]
     turn_service_dependencies: list[tuple[object, object, object]]
 
 
@@ -506,6 +510,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     source_service = FakeSourceExpertService(client=genai_client)
     research_service = object()
     computation_service = object()
+    requirements_verification_service = object()
     expert_executor = object()
     responder_app = object()
     supervisor = FakeSupervisorRuntime(events)
@@ -587,9 +592,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     responder_vertex_settings: list[VertexAISettings] = []
     research_vertex_settings: list[VertexAISettings] = []
     computation_vertex_settings: list[VertexAISettings] = []
+    requirements_verification_clients: list[object] = []
     responder_memory_services: list[object] = []
     expert_executor_dependencies: list[
-        tuple[object, object, object | None]
+        tuple[object, object, object | None, object | None]
     ] = []
     turn_service_dependencies: list[tuple[object, object, object]] = []
     state = ServiceState(
@@ -600,6 +606,9 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         source_service=source_service,
         research_service=research_service,
         computation_service=computation_service,
+        requirements_verification_service=(
+            requirements_verification_service
+        ),
         expert_executor=expert_executor,
         supervisor=supervisor,
         turn_service=turn_service,
@@ -608,6 +617,9 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         responder_vertex_settings=responder_vertex_settings,
         research_vertex_settings=research_vertex_settings,
         computation_vertex_settings=computation_vertex_settings,
+        requirements_verification_clients=(
+            requirements_verification_clients
+        ),
         responder_memory_services=responder_memory_services,
         expert_executor_dependencies=expert_executor_dependencies,
         turn_service_dependencies=turn_service_dependencies,
@@ -676,6 +688,20 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         raising=False,
     )
 
+    def create_requirements_verification_service(
+        *,
+        client: object,
+    ) -> object:
+        requirements_verification_clients.append(client)
+        return requirements_verification_service
+
+    monkeypatch.setattr(
+        main,
+        "RequirementsVerificationService",
+        create_requirements_verification_service,
+        raising=False,
+    )
+
     def create_responder_app(
         *,
         vertex_settings: VertexAISettings,
@@ -697,21 +723,21 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         source_service: object,
         research_service: object,
         computation_service: object | None = None,
+        requirements_verification_service: object | None = None,
     ) -> object:
         expert_executor_dependencies.append(
-            (source_service, research_service, computation_service)
+            (
+                source_service,
+                research_service,
+                computation_service,
+                requirements_verification_service,
+            )
         )
         return expert_executor
 
     monkeypatch.setattr(
         main,
-        "AgentColExpertExecutor",
-        create_expert_executor,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        main,
-        "AgentColExpertExecutorV2",
+        "AgentColExpertExecutorV3",
         create_expert_executor,
         raising=False,
     )
@@ -1160,11 +1186,15 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
         assert service_state.computation_vertex_settings == [
             VertexAISettings(project="project-1", location="global")
         ]
+        assert service_state.requirements_verification_clients == [
+            service_state.genai_client
+        ]
         assert service_state.expert_executor_dependencies == [
             (
                 service_state.source_service,
                 service_state.research_service,
                 service_state.computation_service,
+                service_state.requirements_verification_service,
             )
         ]
         assert service_state.turn_service_dependencies == [
@@ -2145,26 +2175,50 @@ async def test_chat_replays_completed_expert_receipts_without_service_access(
 
 
 @pytest.mark.asyncio
-async def test_chat_replays_completed_computation_without_reexecution(
+@pytest.mark.parametrize(
+    ("action_name", "response_text", "idempotency_key", "message"),
+    (
+        (
+            "run_computation",
+            "The verified mean is 19.5.",
+            "computation-replay-key-1",
+            "Calculate the mean of 12, 15, 18, 21, 24, and 27.",
+        ),
+        (
+            "verify_requirements",
+            "One requirement is covered and one is contradictory.",
+            "verification-replay-key-1",
+            (
+                "Compare the supplied draft against every supplied "
+                "requirement."
+            ),
+        ),
+    ),
+)
+async def test_chat_replays_completed_cognitive_action_without_reexecution(
     client: httpx.AsyncClient,
     service_state: ServiceState,
+    action_name: str,
+    response_text: str,
+    idempotency_key: str,
+    message: str,
 ) -> None:
     claim = make_chat_turn_claim()
     action = AgentActionReceipt(
-        action_name="run_computation",
+        action_name=action_name,
         status="completed",
     )
     service_state.database.chat_turn_result = claim
     service_state.turn_service.turn_result = AgentColTurnResult(
-        response="The verified mean is 19.5.",
+        response=response_text,
         actions=(action,),
     )
-    headers = {"Idempotency-Key": "computation-replay-key-1"}
+    headers = {"Idempotency-Key": idempotency_key}
     payload = {
         "project_id": "project-1",
         "session_id": "session-1",
         "user_id": "user-1",
-        "message": "Calculate the mean of 12, 15, 18, 21, 24, and 27.",
+        "message": message,
     }
 
     first_response = await client.post(

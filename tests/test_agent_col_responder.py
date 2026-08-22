@@ -95,6 +95,20 @@ def test_responder_instruction_integrates_validated_computation_evidence(
     assert "calculation" in normalized
 
 
+def test_responder_instruction_integrates_requirements_assessment_without_certifying(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    assert "requirements verification route" in normalized
+    assert "requirement status" in normalized
+    assert "validated subject evidence" in normalized
+    assert "gaps" in normalized
+    assert "recommended actions" in normalized
+    assert "not a certification" in normalized
+
+
 def test_responder_instruction_preserves_governed_memory_restraint() -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION
 

@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
 
-from agent_col_expert_executor_v2 import AgentColExpertExecutorV2
+from agent_col_expert_executor_v3 import AgentColExpertExecutorV3
 from agent_col_responder import create_responder_app
 from agent_col_turn_service import (
     AgentColTurnCommand,
@@ -48,6 +48,7 @@ from database import (
 from memory_context import MemoryContextRenderer
 from memory_proposals import ProposalTurnLease
 from research_expert_service import ResearchExpertService
+from requirements_verification_service import RequirementsVerificationService
 from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
@@ -319,10 +320,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         computation_service = ComputationalExpertService.from_vertex_settings(
             vertex_settings
         )
-        expert_executor = AgentColExpertExecutorV2(
+        requirements_verification_service = RequirementsVerificationService(
+            client=client
+        )
+        expert_executor = AgentColExpertExecutorV3(
             source_service=source_service,
             research_service=research_service,
             computation_service=computation_service,
+            requirements_verification_service=(
+                requirements_verification_service
+            ),
         )
         responder = SupervisorRuntime.from_app(
             create_responder_app(

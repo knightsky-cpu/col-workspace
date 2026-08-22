@@ -8,30 +8,32 @@ from typing import Protocol, TypeVar
 from google import genai
 from google.genai import types
 
-from agent_col_expert_executor_v2 import (
-    AgentColExpertExecutorV2ConfigurationError,
+from agent_col_expert_executor_v3 import (
+    AgentColExpertExecutorV3ConfigurationError,
 )
 from agent_col_numeric_projection import project_routing_numeric_candidates
-from agent_col_responder_context_v2 import (
-    AgentColResponderContextV2,
-    build_agent_col_responder_v2_model_context,
+from agent_col_responder_context_v3 import (
+    AgentColResponderContextV3,
+    build_agent_col_responder_v3_model_context,
 )
 from agent_col_routing import project_routing_url_candidates
-from agent_col_routing_v2 import (
+from agent_col_routing_v3 import (
     AgentColRoute,
     AgentColRoutingDirective,
     AgentColRoutingInput,
     RoutingDirectiveInputError,
 )
-from agent_col_routing_provider_v2 import (
-    AgentColRoutingV2ProviderError,
-    AgentColRoutingV2ProviderTimeoutError,
-    request_agent_col_routing_v2_directive,
+from agent_col_routing_provider_v3 import (
+    AgentColRoutingV3ProviderError,
+    AgentColRoutingV3ProviderTimeoutError,
+    request_agent_col_routing_v3_directive,
 )
+from agent_col_text_projection import project_routing_text_blocks
 from computational_expert import ComputationResponderResult
 from expert_contracts import ExpertCapability, ExpertStatus
 from memory_proposals import ProposalTurnLease
 from research_expert import ResearchExpertResult
+from requirements_verification import RequirementsVerificationResult
 from schemas import (
     AgentActionReceipt,
     ArtifactReference,
@@ -73,7 +75,7 @@ class ExpertExecutor(Protocol):
         self,
         directive: AgentColRoutingDirective,
         routing_input: AgentColRoutingInput,
-    ) -> AgentColResponderContextV2: ...
+    ) -> AgentColResponderContextV3: ...
 
 
 class ResponderRuntime(Protocol):
@@ -157,7 +159,7 @@ class AgentColTurnService:
         expert_executor: ExpertExecutor,
         responder_runtime: ResponderRuntime,
         routing_request: RoutingRequest = (
-            request_agent_col_routing_v2_directive
+            request_agent_col_routing_v3_directive
         ),
         turn_timeout_seconds: float = TURN_TIMEOUT_SECONDS,
         routing_timeout_seconds: float = TURN_ROUTING_TIMEOUT_SECONDS,
@@ -212,6 +214,7 @@ class AgentColTurnService:
         numeric_projection = project_routing_numeric_candidates(
             command.message
         )
+        text_projection = project_routing_text_blocks(command.message)
         routing_input = AgentColRoutingInput(
             current_message=command.message,
             candidate_urls=project_routing_url_candidates(
@@ -221,6 +224,10 @@ class AgentColTurnService:
             numeric_candidates=numeric_projection.candidates,
             numeric_projection_incomplete=(
                 numeric_projection.numeric_projection_incomplete
+            ),
+            text_block_candidates=text_projection.candidates,
+            text_projection_incomplete=(
+                text_projection.text_projection_incomplete
             ),
             available_capabilities=(
                 self._expert_executor.available_capabilities
@@ -236,7 +243,7 @@ class AgentColTurnService:
                 routing_input,
                 timeout_seconds=routing_timeout,
             )
-        except AgentColRoutingV2ProviderTimeoutError as exc:
+        except AgentColRoutingV3ProviderTimeoutError as exc:
             logger.error(
                 "Agent_Col routing failed (%s).",
                 type(exc).__name__,
@@ -247,7 +254,7 @@ class AgentColTurnService:
                 memory_proposals=command.precompleted_memory_proposals,
             ) from exc
         except (
-            AgentColRoutingV2ProviderError,
+            AgentColRoutingV3ProviderError,
             RoutingDirectiveInputError,
         ) as exc:
             logger.error(
@@ -263,6 +270,7 @@ class AgentColTurnService:
             AgentColRoute.SOURCE,
             AgentColRoute.RESEARCH,
             AgentColRoute.COMPUTATION,
+            AgentColRoute.REQUIREMENTS_VERIFICATION,
         }
         if directive.route in expert_routes:
             remaining_expert_time = (
@@ -289,7 +297,7 @@ class AgentColTurnService:
                         directive
                     )
                 except (
-                    AgentColExpertExecutorV2ConfigurationError,
+                    AgentColExpertExecutorV3ConfigurationError,
                     RoutingDirectiveInputError,
                 ) as exc:
                     logger.error(
@@ -310,7 +318,7 @@ class AgentColTurnService:
                     routing_input,
                 )
             except (
-                AgentColExpertExecutorV2ConfigurationError,
+                AgentColExpertExecutorV3ConfigurationError,
                 RoutingDirectiveInputError,
             ) as exc:
                 logger.error(
@@ -326,7 +334,7 @@ class AgentColTurnService:
                 ) from exc
         model_input_context = (
             *command.model_input_context,
-            build_agent_col_responder_v2_model_context(responder_context),
+            build_agent_col_responder_v3_model_context(responder_context),
         )
         try:
             async with asyncio.timeout(self._remaining_seconds(deadline)):
@@ -409,16 +417,20 @@ class AgentColTurnService:
     @staticmethod
     def _timed_out_expert_context(
         directive: AgentColRoutingDirective,
-    ) -> AgentColResponderContextV2:
+    ) -> AgentColResponderContextV3:
         if directive.route is AgentColRoute.SOURCE:
             result = SourceExpertResult(status=ExpertStatus.TIMED_OUT)
         elif directive.route is AgentColRoute.RESEARCH:
             result = ResearchExpertResult(status=ExpertStatus.TIMED_OUT)
         elif directive.route is AgentColRoute.COMPUTATION:
             result = ComputationResponderResult(status=ExpertStatus.TIMED_OUT)
+        elif directive.route is AgentColRoute.REQUIREMENTS_VERIFICATION:
+            result = RequirementsVerificationResult(
+                status=ExpertStatus.TIMED_OUT
+            )
         else:
             raise RuntimeError("Only expert routes can be time constrained.")
-        return AgentColResponderContextV2(
+        return AgentColResponderContextV3(
             routing_directive=directive,
             expert_result=result,
         )
