@@ -12,7 +12,7 @@ class FakeRoutingModels:
     def __init__(
         self,
         *,
-        response_text: str = (
+        response_text: object = (
             '{"schema_version":"2.0","route":"computation",'
             '"computation_intent":{'
             '"objective":"Calculate descriptive statistics.",'
@@ -133,6 +133,47 @@ async def test_v2_request_uses_tool_free_structured_vertex_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_v2_request_sends_multi_capability_clarification_policy() -> None:
+    from agent_col_routing_provider_v2 import (
+        request_agent_col_routing_v2_directive,
+    )
+
+    models = FakeRoutingModels()
+    await request_agent_col_routing_v2_directive(
+        fake_client(models),
+        computation_routing_input(),
+    )
+
+    config = models.calls[0]["config"]
+    assert isinstance(config, types.GenerateContentConfig)
+    instruction = config.system_instruction
+    assert isinstance(instruction, str)
+    normalized_instruction = " ".join(instruction.split())
+    assert (
+        "A routing directive can select at most one expert capability."
+        in normalized_instruction
+    )
+    assert (
+        "If satisfying the complete user request materially requires two or "
+        "more distinct expert capabilities, choose clarify."
+        in normalized_instruction
+    )
+    assert (
+        "which capability to prioritize or whether to proceed in stages"
+        in normalized_instruction
+    )
+    assert (
+        "Multiple URLs handled by one Source request count as one capability."
+        in normalized_instruction
+    )
+    assert (
+        "Incidental numeric text that requires no calculation does not create "
+        "a Computation requirement."
+        in normalized_instruction
+    )
+
+
+@pytest.mark.asyncio
 async def test_v2_request_classifies_provider_failure_without_content_leak(
 ) -> None:
     from agent_col_routing_provider_v2 import (
@@ -171,24 +212,37 @@ async def test_v2_request_classifies_timeout_separately() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "response_text",
+    ("response_text", "expected_reason"),
     (
-        "",
-        "not-json",
-        '{"schema_version":"1.0","route":"direct"}',
-        '{"schema_version":"2.0","route":"direct","private_reasoning":"secret"}',
+        ("", "missing_response_text"),
+        (None, "missing_response_text"),
+        ("not-json", "invalid_json"),
         (
-            '{"schema_version":"2.0","route":"computation",'
-            '"computation_intent":{'
-            '"objective":"Calculate descriptive statistics.",'
-            '"values":[12,15],"scalar_inputs":[],"series_inputs":[{'
-            '"name":"values","numeric_ids":["number-1","number-2"]}],'
-            '"precision":null,"constraints":[]}}'
+            '{"schema_version":"1.0","route":"direct"}',
+            "schema_validation_failed",
+        ),
+        (
+            '{"schema_version":"2.0","route":"direct",'
+            '"private_reasoning":"secret"}',
+            "schema_validation_failed",
+        ),
+        (
+            (
+                '{"schema_version":"2.0","route":"computation",'
+                '"computation_intent":{'
+                '"objective":"Calculate descriptive statistics.",'
+                '"values":[12,15],"scalar_inputs":[],"series_inputs":[{'
+                '"name":"values","numeric_ids":['
+                '"number-1","number-2"]}],'
+                '"precision":null,"constraints":[]}}'
+            ),
+            "schema_validation_failed",
         ),
     ),
 )
 async def test_v2_request_classifies_malformed_output_without_content_leak(
-    response_text: str,
+    response_text: object,
+    expected_reason: str,
 ) -> None:
     from agent_col_routing_provider_v2 import (
         AgentColRoutingV2ProviderOutputError,
@@ -204,7 +258,259 @@ async def test_v2_request_classifies_malformed_output_without_content_leak(
     assert str(error.value) == (
         "Routing v2 provider returned invalid structured output."
     )
+    assert getattr(error.value, "reason", None) == expected_reason
     assert "secret" not in str(error.value)
+    assert "secret" not in repr(error.value)
+    if expected_reason != "missing_response_text":
+        assert error.value.__cause__ is None
+        assert error.value.__context__ is None
+        assert error.value.__suppress_context__ is True
+
+
+def test_v2_classifier_uses_safe_unknown_schema_failure_fallback() -> None:
+    from pydantic import BaseModel, ValidationError, model_validator
+
+    from agent_col_routing_provider_v2 import (
+        _classify_schema_failure,
+    )
+
+    class UnknownSchemaModel(BaseModel):
+        value: str
+
+        @model_validator(mode="after")
+        def reject_with_unclassified_error(self):
+            raise AssertionError("private-unclassified-content")
+
+    with pytest.raises(ValidationError) as error:
+        UnknownSchemaModel(value="private-model-content")
+
+    assert _classify_schema_failure(error.value) == (
+        "unknown_schema_failure"
+    )
+
+
+@pytest.mark.asyncio
+async def test_v2_request_subclassifies_route_payload_mismatch() -> None:
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderOutputError,
+        request_agent_col_routing_v2_directive,
+    )
+
+    with pytest.raises(AgentColRoutingV2ProviderOutputError) as error:
+        await request_agent_col_routing_v2_directive(
+            fake_client(
+                FakeRoutingModels(
+                    response_text=(
+                        '{"schema_version":"2.0","route":"clarify"}'
+                    )
+                )
+            ),
+            computation_routing_input(),
+        )
+
+    assert error.value.reason == "schema_validation_failed"
+    assert error.value.schema_failure_reason == "route_payload_mismatch"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response_text", "expected_field", "expected_constraint"),
+    (
+        (
+            '{"schema_version":"2.0","route":"clarify",'
+            '"clarifying_question":""}',
+            "clarifying_question",
+            "string_too_short",
+        ),
+        (
+            '{"schema_version":"2.0","route":"clarify",'
+            f'"clarifying_question":"{"x" * 301}"}}',
+            "clarifying_question",
+            "string_too_long",
+        ),
+        (
+            '{"schema_version":"1.0","route":"direct"}',
+            "schema_version",
+            "literal_error",
+        ),
+        (
+            '{"schema_version":"2.0","route":"unsupported"}',
+            "route",
+            "enum",
+        ),
+    ),
+)
+async def test_v2_request_locates_safe_field_constraint_failure(
+    response_text: str,
+    expected_field: str,
+    expected_constraint: str,
+) -> None:
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderOutputError,
+        request_agent_col_routing_v2_directive,
+    )
+
+    with pytest.raises(AgentColRoutingV2ProviderOutputError) as error:
+        await request_agent_col_routing_v2_directive(
+            fake_client(
+                FakeRoutingModels(response_text=response_text)
+            ),
+            computation_routing_input(),
+        )
+
+    assert error.value.schema_failure_reason == "field_constraint_failed"
+    assert getattr(error.value, "schema_failure_field", None) == expected_field
+    assert getattr(error.value, "schema_failure_constraint", None) == (
+        expected_constraint
+    )
+    assert response_text not in repr(error.value)
+
+
+@pytest.mark.asyncio
+async def test_v2_request_collapses_multiple_field_failures_safely() -> None:
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderOutputError,
+        request_agent_col_routing_v2_directive,
+    )
+
+    response_text = (
+        '{"schema_version":"1.0","route":"clarify",'
+        '"clarifying_question":""}'
+    )
+    with pytest.raises(AgentColRoutingV2ProviderOutputError) as error:
+        await request_agent_col_routing_v2_directive(
+            fake_client(FakeRoutingModels(response_text=response_text)),
+            computation_routing_input(),
+        )
+
+    assert error.value.schema_failure_reason == "field_constraint_failed"
+    assert error.value.schema_failure_field == "unknown_field"
+    assert error.value.schema_failure_constraint == "unknown_constraint"
+    assert response_text not in repr(error.value)
+
+
+def test_v2_locator_collapses_unrecognized_field_safely() -> None:
+    from typing import Annotated
+
+    from pydantic import (
+        BaseModel,
+        StringConstraints,
+        ValidationError,
+    )
+
+    from agent_col_routing_provider_v2 import _locate_field_constraint
+
+    class UnrecognizedFieldModel(BaseModel):
+        private_field: Annotated[str, StringConstraints(min_length=2)]
+
+    with pytest.raises(ValidationError) as error:
+        UnrecognizedFieldModel(private_field="x")
+
+    field, constraint = _locate_field_constraint(error.value)
+
+    assert field == "unknown_field"
+    assert constraint == "unknown_constraint"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response_text", "expected_field", "expected_constraint"),
+    (
+        (
+            '{"schema_version":"2.0","route":"source",'
+            '"source_intent":{"objective":"",'
+            '"selected_url_ids":["url-1"],"constraints":[]}}',
+            "source_intent",
+            "string_too_short",
+        ),
+        (
+            '{"schema_version":"2.0","route":"research",'
+            '"research_intent":{"question":"","objective":"Verify it.",'
+            '"constraints":[]}}',
+            "research_intent",
+            "string_too_short",
+        ),
+        (
+            '{"schema_version":"2.0","route":"computation",'
+            '"computation_intent":{"objective":"Calculate it.",'
+            '"scalar_inputs":[{"name":"Invalid Name",'
+            '"numeric_id":"number-1"}],"series_inputs":[],"precision":null,'
+            '"constraints":[]}}',
+            "computation_intent",
+            "string_pattern_mismatch",
+        ),
+    ),
+)
+async def test_v2_request_maps_nested_constraints_to_safe_field_family(
+    response_text: str,
+    expected_field: str,
+    expected_constraint: str,
+) -> None:
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderOutputError,
+        request_agent_col_routing_v2_directive,
+    )
+
+    with pytest.raises(AgentColRoutingV2ProviderOutputError) as error:
+        await request_agent_col_routing_v2_directive(
+            fake_client(FakeRoutingModels(response_text=response_text)),
+            computation_routing_input(),
+        )
+
+    assert error.value.schema_failure_reason == "field_constraint_failed"
+    assert error.value.schema_failure_field == expected_field
+    assert error.value.schema_failure_constraint == expected_constraint
+    assert response_text not in repr(error.value)
+
+
+@pytest.mark.asyncio
+async def test_v2_request_subclassifies_intent_invariant_failure() -> None:
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderOutputError,
+        request_agent_col_routing_v2_directive,
+    )
+
+    with pytest.raises(AgentColRoutingV2ProviderOutputError) as error:
+        await request_agent_col_routing_v2_directive(
+            fake_client(
+                FakeRoutingModels(
+                    response_text=(
+                        '{"schema_version":"2.0","route":"source",'
+                        '"source_intent":{"objective":"Analyze the page.",'
+                        '"selected_url_ids":["url-1","url-1"],'
+                        '"constraints":[]}}'
+                    )
+                )
+            ),
+            computation_routing_input(),
+        )
+
+    assert error.value.schema_failure_reason == "intent_invariant_failed"
+
+
+@pytest.mark.asyncio
+async def test_v2_request_subclassifies_unexpected_field_failure() -> None:
+    from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2ProviderOutputError,
+        request_agent_col_routing_v2_directive,
+    )
+
+    with pytest.raises(AgentColRoutingV2ProviderOutputError) as error:
+        await request_agent_col_routing_v2_directive(
+            fake_client(
+                FakeRoutingModels(
+                    response_text=(
+                        '{"schema_version":"2.0","route":"direct",'
+                        '"private_reasoning":"private-model-content"}'
+                    )
+                )
+            ),
+            computation_routing_input(),
+        )
+
+    assert error.value.schema_failure_reason == "unexpected_field"
+    assert "private" not in str(error.value)
+    assert "private" not in repr(error.value)
 
 
 @pytest.mark.asyncio

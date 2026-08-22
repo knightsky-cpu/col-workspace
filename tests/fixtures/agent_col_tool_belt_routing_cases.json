@@ -1,0 +1,146 @@
+{
+  "fixture_version": "1.0",
+  "scenarios": [
+    {
+      "scenario_id": "stable-explanation",
+      "message": "Explain in one paragraph why explicit approval matters for persistent memory.",
+      "expected_route": "direct",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "explicit-no-tools-with-url",
+      "message": "Explain what a URL is. Do not use tools or open https://example.com/.",
+      "expected_route": "direct",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "trivial-arithmetic",
+      "message": "What is 2 + 2? Answer directly without tools.",
+      "expected_route": "direct",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "incidental-status-code",
+      "message": "Explain what HTTP 409 means in stable general terms.",
+      "expected_route": "direct",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "missing-operands",
+      "message": "Calculate the percentage change for my results.",
+      "expected_route": "clarify",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "clarification_quality"
+    },
+    {
+      "scenario_id": "unsupported-fraction",
+      "message": "Calculate the result using 1/2 as the essential input.",
+      "expected_route": "clarify",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "clarification_quality"
+    },
+    {
+      "scenario_id": "cross-capability-boundary",
+      "message": "Analyze https://example.com/, research its current operator, and calculate the percentage change from 10 to 15 in one response.",
+      "expected_route": "clarify",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "cross_capability_quality"
+    },
+    {
+      "scenario_id": "explicit-single-url",
+      "message": "Analyze https://example.com/ and explain its stated purpose using only that page.",
+      "expected_route": "source",
+      "expected_url_ids": ["url-1"],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "explicit-multiple-urls",
+      "message": "Compare the stated purposes of https://example.com/ and https://www.iana.org/help/example-domains using only those pages.",
+      "expected_route": "source",
+      "expected_url_ids": ["url-1", "url-2"],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "numeric-url-source",
+      "message": "Analyze https://example.com/report/2026 using only the supplied page.",
+      "expected_route": "source",
+      "expected_url_ids": ["url-1"],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "current-public-fact",
+      "message": "Use current authoritative public evidence to identify the latest stable Python release.",
+      "expected_route": "research",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "current-authoritative-evidence",
+      "message": "Find current authoritative public evidence for the latest FastAPI release and cite it.",
+      "expected_route": "research",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "computation-series",
+      "message": "Calculate the arithmetic mean and population standard deviation of these exact values: 12, 15, 18, 21, 24, 27.",
+      "expected_route": "computation",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": [],
+      "expected_series_numeric_ids": [["number-1", "number-2", "number-3", "number-4", "number-5", "number-6"]],
+      "expected_precision_numeric_id": null,
+      "manual_semantic_review": "none"
+    },
+    {
+      "scenario_id": "computation-percent-currency",
+      "message": "Calculate 15% of $200. Report the result using 2 decimal places.",
+      "expected_route": "computation",
+      "expected_url_ids": [],
+      "expected_scalar_numeric_ids": ["number-1", "number-2"],
+      "expected_series_numeric_ids": [],
+      "expected_precision_numeric_id": "number-3",
+      "expected_precision_mode": "decimal_places",
+      "manual_semantic_review": "none"
+    }
+  ]
+}

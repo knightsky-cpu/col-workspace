@@ -406,6 +406,7 @@ async def test_turn_service_stops_after_safe_routing_failure(
 ) -> None:
     from agent_col_routing_v2 import RoutingDirectiveInputError
     from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2InvalidOutputReason,
         AgentColRoutingV2ProviderError,
         AgentColRoutingV2ProviderOutputError,
         AgentColRoutingV2ProviderTimeoutError,
@@ -426,7 +427,7 @@ async def test_turn_service_stops_after_safe_routing_failure(
         )
     else:
         provider_error = AgentColRoutingV2ProviderOutputError(
-            "private-output-payload"
+            AgentColRoutingV2InvalidOutputReason.SCHEMA_VALIDATION_FAILED
         )
     assert not isinstance(provider_error, RoutingDirectiveInputError)
     expected_error = (
@@ -489,6 +490,7 @@ async def test_turn_service_classifies_invalid_routing_without_downstream_access
 ) -> None:
     from agent_col_routing_v2 import RoutingDirectiveInputError
     from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2InvalidOutputReason,
         AgentColRoutingV2ProviderOutputError,
     )
     from agent_col_turn_service import (
@@ -497,7 +499,9 @@ async def test_turn_service_classifies_invalid_routing_without_downstream_access
     )
 
     error = (
-        AgentColRoutingV2ProviderOutputError("private-invalid-output")
+        AgentColRoutingV2ProviderOutputError(
+            AgentColRoutingV2InvalidOutputReason.SCHEMA_VALIDATION_FAILED
+        )
         if provider_error == "invalid_output"
         else RoutingDirectiveInputError("private-directive-mismatch")
     )

@@ -160,6 +160,7 @@ async def test_v2_runner_reports_routes_without_executing_experts() -> None:
 @pytest.mark.asyncio
 async def test_v2_runner_distinguishes_mismatch_and_safe_failures() -> None:
     from agent_col_routing_provider_v2 import (
+        AgentColRoutingV2InvalidOutputReason,
         AgentColRoutingV2ProviderError,
         AgentColRoutingV2ProviderOutputError,
         AgentColRoutingV2ProviderTimeoutError,
@@ -186,7 +187,9 @@ async def test_v2_runner_distinguishes_mismatch_and_safe_failures() -> None:
         ),
         AgentColRoutingV2ProviderError("private-provider-data"),
         AgentColRoutingV2ProviderTimeoutError("private-timeout-data"),
-        AgentColRoutingV2ProviderOutputError("private-model-output"),
+        AgentColRoutingV2ProviderOutputError(
+            AgentColRoutingV2InvalidOutputReason.SCHEMA_VALIDATION_FAILED
+        ),
         RoutingDirectiveInputError("private-routing-input"),
     )
 
