@@ -1,0 +1,52 @@
+{
+  "fixture_version": "1.0",
+  "scenarios": [
+    {
+      "scenario_id": "direct",
+      "routing_input": {
+        "current_message": "Explain idempotency in stable general terms without using external tools.",
+        "candidate_urls": [],
+        "available_capabilities": ["source", "research"]
+      },
+      "expected_route": "direct"
+    },
+    {
+      "scenario_id": "clarify",
+      "routing_input": {
+        "current_message": "Analyze the page I mentioned, but I have not supplied or identified a URL.",
+        "candidate_urls": [],
+        "available_capabilities": ["source", "research"]
+      },
+      "expected_route": "clarify"
+    },
+    {
+      "scenario_id": "source",
+      "routing_input": {
+        "current_message": "Compare the stated purposes of both supplied public pages using only evidence retrieved from those pages.",
+        "candidate_urls": [
+          {
+            "candidate_id": "url-1",
+            "url": "https://example.com/",
+            "source": "current_message"
+          },
+          {
+            "candidate_id": "url-2",
+            "url": "https://www.iana.org/help/example-domains",
+            "source": "current_message"
+          }
+        ],
+        "available_capabilities": ["source", "research"]
+      },
+      "expected_route": "source"
+    },
+    {
+      "scenario_id": "research",
+      "routing_input": {
+        "current_message": "Verify the current stable Python release using current public evidence.",
+        "candidate_urls": [],
+        "available_capabilities": ["source", "research"]
+      },
+      "expected_route": "research"
+    }
+  ]
+}
