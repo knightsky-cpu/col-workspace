@@ -1,0 +1,1126 @@
+import asyncio
+from datetime import UTC, datetime
+
+import pytest
+from google.genai import types
+
+from agent_col_responder_context import AgentColResponderContext
+from agent_col_routing import AgentColRoutingDirective
+from memory_proposals import ProposalTurnLease
+from schemas import AgentActionReceipt, MemoryProposalReceipt
+from supervisor_runtime import SupervisorTurnResult
+
+
+class RecordingRoutingRequest:
+    def __init__(
+        self,
+        directive: AgentColRoutingDirective | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.directive = directive
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    async def __call__(
+        self,
+        client: object,
+        routing_input: object,
+        *,
+        timeout_seconds: float,
+    ) -> AgentColRoutingDirective:
+        self.calls.append(
+            {
+                "client": client,
+                "routing_input": routing_input,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        assert self.directive is not None
+        return self.directive
+
+
+class RecordingExecutor:
+    def __init__(
+        self,
+        responder_context: AgentColResponderContext | None = None,
+    ) -> None:
+        self.available_capabilities = ("source", "research")
+        self.responder_context = responder_context
+        self.calls: list[tuple[object, object]] = []
+
+    async def execute(
+        self,
+        directive: AgentColRoutingDirective,
+        routing_input: object,
+    ) -> AgentColResponderContext:
+        self.calls.append((directive, routing_input))
+        if self.responder_context is not None:
+            return self.responder_context
+        return AgentColResponderContext(routing_directive=directive)
+
+
+class RecordingResponder:
+    def __init__(
+        self,
+        result: SupervisorTurnResult | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.result = result or SupervisorTurnResult(
+            response="Agent_Col response."
+        )
+        self.error = error
+        self.contexts: list[object] = []
+
+    async def run_turn(self, context: object) -> SupervisorTurnResult:
+        self.contexts.append(context)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class SequenceClock:
+    def __init__(self, *values: float) -> None:
+        self._values = iter(values)
+        self._last = values[-1]
+
+    def __call__(self) -> float:
+        try:
+            self._last = next(self._values)
+        except StopIteration:
+            pass
+        return self._last
+
+
+class DelayedRoutingRequest(RecordingRoutingRequest):
+    def __init__(
+        self,
+        directive: AgentColRoutingDirective,
+        *,
+        delay: float,
+    ) -> None:
+        super().__init__(directive)
+        self.delay = delay
+        self.cleaned = False
+
+    async def __call__(
+        self,
+        client: object,
+        routing_input: object,
+        *,
+        timeout_seconds: float,
+    ) -> AgentColRoutingDirective:
+        self.calls.append(
+            {
+                "client": client,
+                "routing_input": routing_input,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        try:
+            await asyncio.sleep(self.delay)
+            assert self.directive is not None
+            return self.directive
+        finally:
+            self.cleaned = True
+
+
+class DelayedExecutor(RecordingExecutor):
+    def __init__(
+        self,
+        responder_context: AgentColResponderContext,
+        *,
+        delay: float,
+    ) -> None:
+        super().__init__(responder_context)
+        self.delay = delay
+        self.cleaned = False
+
+    async def execute(
+        self,
+        directive: AgentColRoutingDirective,
+        routing_input: object,
+    ) -> AgentColResponderContext:
+        self.calls.append((directive, routing_input))
+        try:
+            await asyncio.sleep(self.delay)
+            assert self.responder_context is not None
+            return self.responder_context
+        finally:
+            self.cleaned = True
+
+
+class DelayedResponder(RecordingResponder):
+    def __init__(self, *, delay: float) -> None:
+        super().__init__()
+        self.delay = delay
+        self.cleaned = False
+
+    async def run_turn(self, context: object) -> SupervisorTurnResult:
+        self.contexts.append(context)
+        try:
+            await asyncio.sleep(self.delay)
+            return self.result
+        finally:
+            self.cleaned = True
+
+
+def command_with_precompleted_effects() -> object:
+    from agent_col_turn_service import AgentColTurnCommand
+
+    return AgentColTurnCommand(
+        project_id="secret-project",
+        session_id="secret-session",
+        user_id="secret-user",
+        message="secret-message-content",
+        precompleted_actions=(
+            AgentActionReceipt(
+                action_name="propose_memory_signal",
+                status="completed",
+            ),
+        ),
+        precompleted_memory_proposals=(
+            MemoryProposalReceipt(
+                proposal_id="response_length--proposal-2",
+                category="response_length",
+                proposed_value="concise",
+                expires_at=datetime(2026, 8, 23, tzinfo=UTC),
+            ),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_service_projects_only_minimal_routing_input() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    routing_client = object()
+    routing_request = RecordingRoutingRequest(
+        AgentColRoutingDirective(route="direct")
+    )
+    executor = RecordingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=routing_client,
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=routing_request,
+    )
+    command = AgentColTurnCommand(
+        project_id="private-project",
+        session_id="private-session",
+        user_id="private-user",
+        message=(
+            "Compare https://example.com/current and answer concisely."
+        ),
+        recent_user_messages=(
+            "Old context with https://example.com/old and private-history.",
+            "New context with https://example.com/new and private-recent.",
+        ),
+        model_input_context=(
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text="private-profile-value")],
+            ),
+        ),
+        source_message_id="private-message-id",
+        memory_decision_present=True,
+        turn_lease=ProposalTurnLease(
+            turn_id="a" * 64,
+            owner_token="private-owner-token",
+        ),
+        precompleted_actions=(
+            AgentActionReceipt(
+                action_name="approve_memory_signal",
+                status="completed",
+            ),
+        ),
+        precompleted_memory_proposals=(
+            MemoryProposalReceipt(
+                proposal_id="response_length--proposal-1",
+                category="response_length",
+                proposed_value="concise",
+                expires_at=datetime(2026, 8, 23, tzinfo=UTC),
+            ),
+        ),
+    )
+
+    result = await service.run_turn(command)
+
+    assert result.response == "Agent_Col response."
+    assert len(routing_request.calls) == 1
+    call = routing_request.calls[0]
+    assert call["client"] is routing_client
+    assert call["timeout_seconds"] == 15.0
+    routing_input = call["routing_input"]
+    assert routing_input.current_message == command.message
+    assert tuple(
+        (
+            candidate.candidate_id,
+            str(candidate.url),
+            candidate.source,
+        )
+        for candidate in routing_input.candidate_urls
+    ) == (
+        ("url-1", "https://example.com/current", "current_message"),
+        ("url-2", "https://example.com/new", "recent_user_history"),
+        ("url-3", "https://example.com/old", "recent_user_history"),
+    )
+    assert routing_input.available_capabilities == ("source", "research")
+    serialized = routing_input.model_dump_json()
+    for forbidden in (
+        "private-project",
+        "private-session",
+        "private-user",
+        "private-history",
+        "private-recent",
+        "private-profile-value",
+        "private-message-id",
+        "a" * 64,
+        "private-owner-token",
+        "approve_memory_signal",
+        "response_length--proposal-1",
+    ):
+        assert forbidden not in serialized
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider_error", "expected_error_name"),
+    (
+        (RuntimeError("private-provider-payload"), "routing"),
+        (TimeoutError("private-timeout-payload"), "routing_timeout"),
+    ),
+)
+async def test_turn_service_stops_after_safe_routing_failure(
+    provider_error: Exception,
+    expected_error_name: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from agent_col_routing import RoutingDirectiveInputError
+    from agent_col_routing_provider import (
+        AgentColRoutingProviderError,
+        AgentColRoutingProviderOutputError,
+        AgentColRoutingProviderTimeoutError,
+    )
+    from agent_col_turn_service import (
+        AgentColTurnRoutingError,
+        AgentColTurnRoutingTimeoutError,
+        AgentColTurnService,
+    )
+
+    if type(provider_error) is RuntimeError:
+        provider_error = AgentColRoutingProviderError(
+            "private-provider-payload"
+        )
+    elif type(provider_error) is TimeoutError:
+        provider_error = AgentColRoutingProviderTimeoutError(
+            "private-timeout-payload"
+        )
+    else:
+        provider_error = AgentColRoutingProviderOutputError(
+            "private-output-payload"
+        )
+    assert not isinstance(provider_error, RoutingDirectiveInputError)
+    expected_error = (
+        AgentColTurnRoutingTimeoutError
+        if expected_error_name == "routing_timeout"
+        else AgentColTurnRoutingError
+    )
+    routing_request = RecordingRoutingRequest(error=provider_error)
+    executor = RecordingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=routing_request,
+    )
+    command = command_with_precompleted_effects()
+
+    with pytest.raises(expected_error) as captured:
+        await service.run_turn(command)
+
+    assert captured.value.__cause__ is provider_error
+    assert captured.value.actions == command.precompleted_actions
+    assert (
+        captured.value.memory_proposals
+        == command.precompleted_memory_proposals
+    )
+    assert len(routing_request.calls) == 1
+    assert executor.calls == []
+    assert responder.contexts == []
+    for secret in (
+        "private-provider-payload",
+        "private-timeout-payload",
+        "secret-message-content",
+        "secret-project",
+        "secret-session",
+        "secret-user",
+        "response_length--proposal-2",
+    ):
+        assert secret not in str(captured.value)
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider_error",
+    (
+        pytest.param(
+            "invalid_output",
+            id="invalid-output",
+        ),
+        pytest.param(
+            "directive_mismatch",
+            id="directive-input-mismatch",
+        ),
+    ),
+)
+async def test_turn_service_classifies_invalid_routing_without_downstream_access(
+    provider_error: str,
+) -> None:
+    from agent_col_routing import RoutingDirectiveInputError
+    from agent_col_routing_provider import AgentColRoutingProviderOutputError
+    from agent_col_turn_service import (
+        AgentColTurnRoutingError,
+        AgentColTurnService,
+    )
+
+    error = (
+        AgentColRoutingProviderOutputError("private-invalid-output")
+        if provider_error == "invalid_output"
+        else RoutingDirectiveInputError("private-directive-mismatch")
+    )
+    executor = RecordingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(error=error),
+    )
+
+    with pytest.raises(AgentColTurnRoutingError) as captured:
+        await service.run_turn(command_with_precompleted_effects())
+
+    assert captured.value.__cause__ is error
+    assert executor.calls == []
+    assert responder.contexts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("directive", "responder_context"),
+    (
+        (
+            AgentColRoutingDirective(route="direct"),
+            AgentColResponderContext(
+                routing_directive=AgentColRoutingDirective(route="direct")
+            ),
+        ),
+        (
+            AgentColRoutingDirective(
+                route="clarify",
+                clarifying_question="Which public page should I analyze?",
+            ),
+            AgentColResponderContext(
+                routing_directive=AgentColRoutingDirective(
+                    route="clarify",
+                    clarifying_question=(
+                        "Which public page should I analyze?"
+                    ),
+                )
+            ),
+        ),
+        (
+            AgentColRoutingDirective(
+                route="source",
+                source_intent={
+                    "objective": "Analyze the selected page.",
+                    "selected_url_ids": ["url-1"],
+                },
+            ),
+            AgentColResponderContext(
+                routing_directive=AgentColRoutingDirective(
+                    route="source",
+                    source_intent={
+                        "objective": "Analyze the selected page.",
+                        "selected_url_ids": ["url-1"],
+                    },
+                ),
+                expert_result={
+                    "capability": "source",
+                    "status": "unavailable",
+                },
+            ),
+        ),
+        (
+            AgentColRoutingDirective(
+                route="research",
+                research_intent={
+                    "question": "What is current?",
+                    "objective": "Find current public evidence.",
+                },
+            ),
+            AgentColResponderContext(
+                routing_directive=AgentColRoutingDirective(
+                    route="research",
+                    research_intent={
+                        "question": "What is current?",
+                        "objective": "Find current public evidence.",
+                    },
+                ),
+                expert_result={
+                    "capability": "research",
+                    "status": "unavailable",
+                },
+            ),
+        ),
+    ),
+)
+async def test_turn_service_composes_each_route_into_responder_context(
+    directive: AgentColRoutingDirective,
+    responder_context: AgentColResponderContext,
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    original_context = types.Content(
+        role="user",
+        parts=[types.Part.from_text(text="existing-context")],
+    )
+    lease = ProposalTurnLease(
+        turn_id="b" * 64,
+        owner_token="owner-token",
+    )
+    command = AgentColTurnCommand(
+        project_id="project-1",
+        session_id="session-1",
+        user_id="user-1",
+        message=(
+            "Current user request https://example.com/current-page"
+        ),
+        model_input_context=(original_context,),
+        source_message_id="message-1",
+        memory_decision_present=True,
+        turn_lease=lease,
+    )
+    routing_request = RecordingRoutingRequest(directive)
+    executor = RecordingExecutor(responder_context)
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=routing_request,
+    )
+
+    result = await service.run_turn(command)
+
+    assert result.response == "Agent_Col response."
+    assert len(executor.calls) == 1
+    routed_directive, routed_input = executor.calls[0]
+    assert routed_directive is directive
+    assert routed_input is routing_request.calls[0]["routing_input"]
+    assert len(responder.contexts) == 1
+    runtime_context = responder.contexts[0]
+    assert runtime_context.project_id == command.project_id
+    assert runtime_context.session_id == command.session_id
+    assert runtime_context.user_id == command.user_id
+    assert runtime_context.message == command.message
+    assert runtime_context.source_message_id == command.source_message_id
+    assert runtime_context.memory_decision_present is True
+    assert runtime_context.turn_lease is lease
+    assert runtime_context.model_input_context[0] is original_context
+    assert len(runtime_context.model_input_context) == 2
+    routed_context = runtime_context.model_input_context[1]
+    routed_text = routed_context.parts[0].text
+    assert routed_text is not None
+    assert command.message not in routed_text
+    assert responder_context.model_dump_json() in routed_text
+
+
+def completed_source_context() -> AgentColResponderContext:
+    from source_expert import SourceExpertResult, build_source_receipts
+
+    directive = AgentColRoutingDirective(
+        route="source",
+        source_intent={
+            "objective": "Explain the selected page.",
+            "selected_url_ids": ["url-1"],
+        },
+    )
+    result = SourceExpertResult.model_validate(
+        {
+            "status": "completed",
+            "summary": "The page provides grounded documentation evidence.",
+            "payload": {
+                "documents": [
+                    {
+                        "source_id": "source-1",
+                        "url": "https://example.com/",
+                        "retrieval_status": "retrieved",
+                        "evidence_summary": "Example Domain documentation.",
+                    }
+                ],
+                "facts": [
+                    {
+                        "text": "Example Domain is used in documentation.",
+                        "source_ids": ["source-1"],
+                    }
+                ],
+                "sources": [
+                    {
+                        "source_id": "source-1",
+                        "uri": "https://example.com/",
+                        "label": "Example Domain",
+                    }
+                ],
+            },
+            "evidence": {
+                "source_ids": ["source-1"],
+                "grounded_statement_count": 1,
+                "grounding_support_count": 1,
+            },
+        }
+    )
+    receipts = build_source_receipts(result)
+    return AgentColResponderContext(
+        routing_directive=directive,
+        expert_result=result,
+        actions=receipts.actions,
+        citations=receipts.citations,
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_service_stably_merges_authoritative_receipts() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from schemas import ArtifactReference, CitationReference
+
+    expert_context = completed_source_context()
+    precompleted_action = AgentActionReceipt(
+        action_name="approve_memory_signal",
+        status="completed",
+    )
+    proposal_action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = MemoryProposalReceipt(
+        proposal_id="response_length--proposal-3",
+        category="response_length",
+        proposed_value="concise",
+        expires_at=datetime(2026, 8, 23, tzinfo=UTC),
+    )
+    artifact = ArtifactReference(
+        artifact_type="synthesis_blueprint",
+        project_id="project-1",
+        artifact_id="artifact-1",
+        schema_version="2.0",
+        display_label="Project blueprint",
+    )
+    responder_citation = CitationReference(
+        uri="https://example.org/",
+        label="Responder application citation",
+    )
+    responder_result = SupervisorTurnResult(
+        response="Integrated final response.",
+        actions=(
+            precompleted_action,
+            proposal_action,
+            *expert_context.actions,
+        ),
+        artifacts=(artifact,),
+        citations=(*expert_context.citations, responder_citation),
+        memory_proposals=(proposal,),
+    )
+    executor = RecordingExecutor(expert_context)
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=RecordingResponder(responder_result),
+        routing_request=RecordingRoutingRequest(
+            expert_context.routing_directive
+        ),
+    )
+    command = AgentColTurnCommand(
+        project_id="project-1",
+        session_id="session-1",
+        user_id="user-1",
+        message="Explain https://example.com/ using the supplied page.",
+        precompleted_actions=(precompleted_action,),
+        precompleted_memory_proposals=(proposal,),
+    )
+
+    result = await service.run_turn(command)
+
+    assert result.response == "Integrated final response."
+    assert result.actions == (
+        precompleted_action,
+        *expert_context.actions,
+        proposal_action,
+    )
+    assert result.artifacts == (artifact,)
+    assert result.citations == (
+        *expert_context.citations,
+        responder_citation,
+    )
+    assert result.memory_proposals == (proposal,)
+
+
+@pytest.mark.asyncio
+async def test_failed_expert_context_adds_no_cognitive_receipt() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    directive = AgentColRoutingDirective(
+        route="research",
+        research_intent={
+            "question": "What is current?",
+            "objective": "Find current public evidence.",
+        },
+    )
+    failed_context = AgentColResponderContext(
+        routing_directive=directive,
+        expert_result={
+            "capability": "research",
+            "status": "unavailable",
+        },
+    )
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(failed_context),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(directive),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Find current public evidence.",
+        )
+    )
+
+    assert result.actions == ()
+    assert result.citations == ()
+
+
+@pytest.mark.asyncio
+async def test_executor_configuration_failure_is_content_safe_and_stops_responder(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from agent_col_expert_executor import (
+        AgentColExpertExecutorConfigurationError,
+    )
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnService,
+        AgentColTurnServiceError,
+    )
+
+    executor_error = AgentColExpertExecutorConfigurationError(
+        "private-executor-configuration"
+    )
+
+    class ConfigurationFailingExecutor(RecordingExecutor):
+        async def execute(
+            self,
+            directive: AgentColRoutingDirective,
+            routing_input: object,
+        ) -> AgentColResponderContext:
+            self.calls.append((directive, routing_input))
+            raise executor_error
+
+    executor = ConfigurationFailingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+    )
+    command = AgentColTurnCommand(
+        project_id="private-project-executor",
+        session_id="private-session-executor",
+        user_id="private-user-executor",
+        message="private-message-executor",
+    )
+
+    with pytest.raises(AgentColTurnServiceError) as captured:
+        await service.run_turn(command)
+
+    assert captured.value.__cause__ is executor_error
+    assert len(executor.calls) == 1
+    assert responder.contexts == []
+    for secret in (
+        "private-executor-configuration",
+        "private-project-executor",
+        "private-session-executor",
+        "private-user-executor",
+        "private-message-executor",
+    ):
+        assert secret not in str(captured.value)
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_responder_failure_preserves_only_trusted_partial_effects(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnResponderError,
+        AgentColTurnService,
+    )
+    from supervisor_runtime import SupervisorRuntimeError
+
+    expert_context = completed_source_context()
+    precompleted_action = AgentActionReceipt(
+        action_name="approve_memory_signal",
+        status="completed",
+    )
+    proposal_action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = MemoryProposalReceipt(
+        proposal_id="response_length--proposal-4",
+        category="response_length",
+        proposed_value="concise",
+        expires_at=datetime(2026, 8, 23, tzinfo=UTC),
+    )
+    runtime_error = SupervisorRuntimeError(
+        "private-responder-output",
+        actions=(precompleted_action, proposal_action),
+        memory_proposals=(proposal,),
+    )
+    executor = RecordingExecutor(expert_context)
+    responder = RecordingResponder(error=runtime_error)
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            expert_context.routing_directive
+        ),
+    )
+    command = AgentColTurnCommand(
+        project_id="private-project-r5",
+        session_id="private-session-r5",
+        user_id="private-user-r5",
+        message="private-message-r5 https://example.com/",
+        precompleted_actions=(precompleted_action,),
+        precompleted_memory_proposals=(proposal,),
+    )
+
+    with pytest.raises(AgentColTurnResponderError) as captured:
+        await service.run_turn(command)
+
+    assert captured.value.__cause__ is runtime_error
+    assert captured.value.actions == (
+        precompleted_action,
+        *expert_context.actions,
+        proposal_action,
+    )
+    assert captured.value.memory_proposals == (proposal,)
+    assert len(executor.calls) == 1
+    assert len(responder.contexts) == 1
+    for secret in (
+        "private-responder-output",
+        "private-project-r5",
+        "private-session-r5",
+        "private-user-r5",
+        "private-message-r5",
+        "response_length--proposal-4",
+    ):
+        assert secret not in str(captured.value)
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_responder_reserve_prevents_late_expert_start() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    directive = AgentColRoutingDirective(
+        route="source",
+        source_intent={
+            "objective": "Analyze the selected page.",
+            "selected_url_ids": ["url-1"],
+        },
+    )
+    executor = RecordingExecutor(completed_source_context())
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(directive),
+        clock=SequenceClock(0.0, 0.0, 26.0, 26.0),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Analyze https://example.com/ before time expires.",
+        )
+    )
+
+    assert executor.calls == []
+    assert result.actions == ()
+    assert result.citations == ()
+    assert len(responder.contexts) == 1
+    runtime_context = responder.contexts[0]
+    routed_text = runtime_context.model_input_context[-1].parts[0].text
+    assert routed_text is not None
+    assert '"capability":"source"' in routed_text
+    assert '"status":"timed_out"' in routed_text
+    assert '"actions":[]' in routed_text
+    assert '"citations":[]' in routed_text
+
+
+@pytest.mark.asyncio
+async def test_expert_starts_at_exact_responder_reserve_boundary() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    expert_context = completed_source_context()
+    directive = expert_context.routing_directive
+    executor = RecordingExecutor(expert_context)
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(directive),
+        clock=SequenceClock(0.0, 0.0, 25.0, 25.0),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Analyze https://example.com/ at the boundary.",
+        )
+    )
+
+    assert len(executor.calls) == 1
+    assert result.actions == expert_context.actions
+    assert result.citations == expert_context.citations
+
+
+def short_deadline_command(message: str) -> object:
+    from agent_col_turn_service import AgentColTurnCommand
+
+    return AgentColTurnCommand(
+        project_id="project-1",
+        session_id="session-1",
+        user_id="user-1",
+        message=message,
+    )
+
+
+@pytest.mark.asyncio
+async def test_outer_deadline_contains_routing_phase() -> None:
+    from agent_col_turn_service import (
+        AgentColTurnService,
+        AgentColTurnTimeoutError,
+    )
+
+    routing = DelayedRoutingRequest(
+        AgentColRoutingDirective(route="direct"),
+        delay=0.03,
+    )
+    executor = RecordingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=routing,
+        turn_timeout_seconds=0.005,
+        expert_budget_seconds=0.001,
+        responder_reserve_seconds=0.001,
+    )
+
+    with pytest.raises(AgentColTurnTimeoutError):
+        await service.run_turn(short_deadline_command("Direct request."))
+
+    assert len(routing.calls) == 1
+    assert routing.cleaned is True
+    assert executor.calls == []
+    assert responder.contexts == []
+
+
+@pytest.mark.asyncio
+async def test_outer_deadline_contains_expert_phase() -> None:
+    from agent_col_turn_service import (
+        AgentColTurnService,
+        AgentColTurnTimeoutError,
+    )
+
+    expert_context = completed_source_context()
+    executor = DelayedExecutor(expert_context, delay=0.03)
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            expert_context.routing_directive
+        ),
+        turn_timeout_seconds=0.01,
+        routing_timeout_seconds=0.005,
+        expert_budget_seconds=0.001,
+        responder_reserve_seconds=0.001,
+    )
+
+    with pytest.raises(AgentColTurnTimeoutError):
+        await service.run_turn(
+            short_deadline_command(
+                "Analyze https://example.com/ within this turn."
+            )
+        )
+
+    assert len(executor.calls) == 1
+    assert executor.cleaned is True
+    assert responder.contexts == []
+
+
+@pytest.mark.asyncio
+async def test_outer_deadline_contains_responder_phase() -> None:
+    from agent_col_turn_service import (
+        AgentColTurnService,
+        AgentColTurnTimeoutError,
+    )
+
+    executor = RecordingExecutor()
+    responder = DelayedResponder(delay=0.03)
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        turn_timeout_seconds=0.005,
+        expert_budget_seconds=0.001,
+        responder_reserve_seconds=0.001,
+    )
+
+    with pytest.raises(AgentColTurnTimeoutError):
+        await service.run_turn(short_deadline_command("Direct request."))
+
+    assert len(executor.calls) == 1
+    assert len(responder.contexts) == 1
+    assert responder.cleaned is True
+
+
+@pytest.mark.asyncio
+async def test_responder_runtime_timeout_uses_turn_timeout_classification() -> None:
+    from agent_col_turn_service import (
+        AgentColTurnService,
+        AgentColTurnTimeoutError,
+    )
+    from supervisor_runtime import SupervisorTimeoutError
+
+    runtime_error = SupervisorTimeoutError("private-runtime-timeout")
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(error=runtime_error),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+    )
+
+    with pytest.raises(AgentColTurnTimeoutError) as captured:
+        await service.run_turn(short_deadline_command("Direct request."))
+
+    assert captured.value.__cause__ is runtime_error
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_propagates_after_responder_cleanup() -> None:
+    from agent_col_turn_service import AgentColTurnService
+
+    responder = DelayedResponder(delay=30.0)
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+    )
+    task = asyncio.create_task(
+        service.run_turn(short_deadline_command("Direct request."))
+    )
+    while not responder.contexts:
+        await asyncio.sleep(0)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert responder.cleaned is True
+    assert len(responder.contexts) == 1
+
+
+@pytest.mark.parametrize(
+    "invalid_setting",
+    (
+        "turn_timeout_seconds",
+        "routing_timeout_seconds",
+        "expert_budget_seconds",
+        "responder_reserve_seconds",
+    ),
+)
+def test_turn_service_rejects_nonpositive_deadline_settings(
+    invalid_setting: str,
+) -> None:
+    from agent_col_turn_service import AgentColTurnService
+
+    kwargs = {invalid_setting: 0.0}
+
+    with pytest.raises(
+        ValueError,
+        match=rf"^{invalid_setting} must be positive\.$",
+    ):
+        AgentColTurnService(
+            routing_client=object(),
+            expert_executor=RecordingExecutor(),
+            responder_runtime=RecordingResponder(),
+            **kwargs,
+        )
+
+
+@pytest.mark.asyncio
+async def test_routing_timeout_never_exceeds_outer_remainder() -> None:
+    from agent_col_turn_service import AgentColTurnService
+
+    routing = RecordingRoutingRequest(
+        AgentColRoutingDirective(route="direct")
+    )
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=routing,
+        turn_timeout_seconds=10.0,
+        routing_timeout_seconds=15.0,
+        expert_budget_seconds=1.0,
+        responder_reserve_seconds=1.0,
+        clock=SequenceClock(0.0, 1.0, 1.0, 1.0),
+    )
+
+    await service.run_turn(short_deadline_command("Direct request."))
+
+    assert routing.calls[0]["timeout_seconds"] == 9.0
