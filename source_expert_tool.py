@@ -103,7 +103,7 @@ def create_source_expert_tool(
         constraints: list[str],
         tool_context: ToolContext,
     ) -> dict[str, object]:
-        """Analyze explicit public URLs and return grounded evidence."""
+        """Analyze or compare one to three supplied public URLs."""
         state = getattr(tool_context, "state", None)
         state_get = getattr(state, "get", None)
         token = (

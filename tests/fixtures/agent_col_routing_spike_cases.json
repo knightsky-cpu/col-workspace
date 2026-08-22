@@ -1,0 +1,40 @@
+{
+  "fixture_version": "1.0",
+  "scenarios": [
+    {
+      "scenario_id": "explicit-single-url",
+      "message": "Analyze this supplied public URL and explain its stated purpose using only evidence from the page: https://example.com/",
+      "expected_route": "source"
+    },
+    {
+      "scenario_id": "explicit-multiple-urls",
+      "message": "Analyze these two supplied public URLs and compare what they say about example domains: https://example.com/ and https://www.iana.org/help/example-domains",
+      "expected_route": "source"
+    },
+    {
+      "scenario_id": "stable-no-url",
+      "message": "Explain why idempotency matters for retry-safe API requests using one practical example.",
+      "expected_route": "direct"
+    },
+    {
+      "scenario_id": "incidental-url",
+      "message": "For context, my project's public site is https://example.com/. Explain why idempotency matters for retry-safe API requests.",
+      "expected_route": "direct"
+    },
+    {
+      "scenario_id": "explicit-no-tools-with-url",
+      "message": "Do not access, analyze, or use external tools for https://example.com/. Explain what a URL is.",
+      "expected_route": "direct"
+    },
+    {
+      "scenario_id": "ambiguous-url",
+      "message": "Can you help me with https://example.com/?",
+      "expected_route": "clarify"
+    },
+    {
+      "scenario_id": "current-public-fact",
+      "message": "What is the current stable release of Python as of today? Verify it with current public evidence.",
+      "expected_route": "research"
+    }
+  ]
+}

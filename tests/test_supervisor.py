@@ -177,3 +177,19 @@ def test_create_supervisor_app_registers_injected_source_tool_only() -> None:
         "final response",
     ):
         assert required_rule in normalized_instruction
+
+
+def test_supervisor_source_contract_covers_multi_url_comparisons() -> None:
+    from expert_delegation import ExpertDelegationRegistry
+    from supervisor import create_supervisor_app
+
+    app = create_supervisor_app(
+        vertex_settings=VERTEX_SETTINGS,
+        source_service=object(),
+        delegation_registry=ExpertDelegationRegistry(),
+    )
+    instruction = " ".join(app.root_agent.instruction.split())
+
+    assert "one to three" in instruction
+    assert "compare multiple supplied URLs" in instruction
+    assert "Do not answer from model memory" in instruction

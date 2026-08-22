@@ -93,6 +93,14 @@ def registered_tool(service: RecordingSourceService):
     )
 
 
+def test_source_tool_description_exposes_multi_url_comparison_scope() -> None:
+    service = RecordingSourceService(completed_source_result())
+    tool, _token = registered_tool(service)
+
+    assert "one to three" in tool.description
+    assert "compare" in tool.description
+
+
 @pytest.mark.asyncio
 async def test_source_tool_claims_and_returns_validated_completed_result(
 ) -> None:
