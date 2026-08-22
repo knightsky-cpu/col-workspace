@@ -695,3 +695,38 @@ def test_normalized_assessment_cannot_bypass_status_coherence() -> None:
 
     with pytest.raises(ValidationError):
         verification.RequirementsVerificationResult.model_validate(payload)
+
+
+def test_completed_verification_derives_one_action_and_no_citations() -> None:
+    verification = load_requirements_verification()
+    result = verification.normalize_requirements_verification_candidate(
+        five_status_request(verification),
+        five_status_candidate(verification),
+    )
+
+    receipts = verification.build_requirements_verification_receipts(result)
+
+    assert tuple(action.model_dump() for action in receipts.actions) == (
+        {"action_name": "verify_requirements", "status": "completed"},
+    )
+    assert receipts.citations == ()
+
+
+@pytest.mark.parametrize(
+    "status",
+    tuple(
+        status
+        for status in ExpertStatus
+        if status is not ExpertStatus.COMPLETED
+    ),
+)
+def test_noncompleted_verification_derives_no_receipts(
+    status: ExpertStatus,
+) -> None:
+    verification = load_requirements_verification()
+    result = verification.RequirementsVerificationResult(status=status)
+
+    receipts = verification.build_requirements_verification_receipts(result)
+
+    assert receipts.actions == ()
+    assert receipts.citations == ()

@@ -1,5 +1,6 @@
 """Provider-independent Requirements Verification contracts and validation."""
 
+from dataclasses import dataclass
 from enum import StrEnum
 import re
 from typing import Annotated, Literal, Self
@@ -15,6 +16,7 @@ from pydantic import (
 
 from agent_col_text_projection import RoutingTextBlockId
 from expert_contracts import ExpertCapability, ExpertResult, ExpertStatus
+from schemas import AgentActionReceipt, CitationReference
 
 
 RequirementId = Annotated[
@@ -329,6 +331,28 @@ class RequirementsVerificationResult(
                 "Requirements verification evidence must match its payload."
             )
         return self
+
+
+@dataclass(frozen=True, slots=True)
+class RequirementsVerificationReceipts:
+    actions: tuple[AgentActionReceipt, ...] = ()
+    citations: tuple[CitationReference, ...] = ()
+
+
+def build_requirements_verification_receipts(
+    result: RequirementsVerificationResult,
+) -> RequirementsVerificationReceipts:
+    """Return one action only for completed local verification."""
+    if result.status is not ExpertStatus.COMPLETED:
+        return RequirementsVerificationReceipts()
+    return RequirementsVerificationReceipts(
+        actions=(
+            AgentActionReceipt(
+                action_name="verify_requirements",
+                status="completed",
+            ),
+        ),
+    )
 
 
 def _invalid_requirements_verification_result() -> RequirementsVerificationResult:
