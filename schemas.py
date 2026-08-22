@@ -32,6 +32,14 @@ NonEmptyStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
+ChatMessageText = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=10_000,
+    ),
+]
 IdentifierStr = Annotated[
     str,
     StringConstraints(
@@ -153,7 +161,7 @@ class ChatRequest(StrictModel):
     project_id: IdentifierStr
     session_id: IdentifierStr
     user_id: IdentifierStr
-    message: NonEmptyStr
+    message: ChatMessageText
     memory_decision: MemoryDecisionRequest | None = None
 
 

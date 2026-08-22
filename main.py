@@ -13,6 +13,15 @@ from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
 
+from agent_col_expert_executor import AgentColExpertExecutor
+from agent_col_responder import create_responder_app
+from agent_col_turn_service import (
+    AgentColTurnCommand,
+    AgentColTurnRoutingTimeoutError,
+    AgentColTurnService,
+    AgentColTurnServiceError,
+    AgentColTurnTimeoutError,
+)
 from chat_turns import (
     ChatTurnClaim,
     ChatTurnConflictError,
@@ -35,9 +44,9 @@ from database import (
     MemorySignalConflictError,
     MemorySignalNotFoundError,
 )
-from expert_delegation import ExpertDelegationRegistry
 from memory_context import MemoryContextRenderer
 from memory_proposals import ProposalTurnLease
+from research_expert_service import ResearchExpertService
 from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
@@ -52,14 +61,8 @@ from schemas import (
     SynthesisRequest,
     SynthesisResponse,
 )
-from supervisor import create_supervisor_app
-from supervisor_runtime import (
-    SupervisorRuntime,
-    SupervisorRuntimeError,
-    SupervisorTimeoutError,
-    SupervisorTurnContext,
-)
 from source_expert_service import SourceExpertService
+from supervisor_runtime import SupervisorRuntime
 from synthesis import (
     SynthesisEngineError,
     SynthesisTimeoutError,
@@ -211,7 +214,7 @@ def _partial_failure_response(
     status_code: int,
     detail: str,
     decision_actions: tuple[AgentActionReceipt, ...],
-    runtime_error: SupervisorRuntimeError,
+    runtime_error: AgentColTurnServiceError,
     released_claim: ChatTurnClaim | None,
 ) -> JSONResponse | None:
     released_actions = (
@@ -262,7 +265,7 @@ def _partial_failure_response(
 
 
 def _raise_governed_tool_cause_http_error(
-    runtime_error: SupervisorRuntimeError,
+    runtime_error: AgentColTurnServiceError,
 ) -> None:
     cause = runtime_error.__cause__
     visited: set[int] = set()
@@ -309,15 +312,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         memory_service = TrustedMemoryService(database=database)
         source_service = SourceExpertService(client=client)
-        delegation_registry = ExpertDelegationRegistry()
-        supervisor = SupervisorRuntime.from_app(
-            create_supervisor_app(
+        research_service = ResearchExpertService.from_vertex_settings(
+            vertex_settings
+        )
+        expert_executor = AgentColExpertExecutor(
+            source_service=source_service,
+            research_service=research_service,
+        )
+        responder = SupervisorRuntime.from_app(
+            create_responder_app(
                 vertex_settings=vertex_settings,
                 memory_service=memory_service,
-                source_service=source_service,
-                delegation_registry=delegation_registry,
-            ),
-            delegation_registry=delegation_registry,
+            )
+        )
+        turn_service = AgentColTurnService(
+            routing_client=client,
+            expert_executor=expert_executor,
+            responder_runtime=responder,
         )
     except Exception:
         try:
@@ -334,7 +345,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = database
     app.state.synthesis_service = synthesis_service
     app.state.memory_service = memory_service
-    app.state.supervisor = supervisor
+    app.state.turn_service = turn_service
 
     try:
         yield
@@ -497,7 +508,7 @@ async def chat(
 ) -> ChatResponse:
     database = request.app.state.db
     memory_service = request.app.state.memory_service
-    supervisor = request.app.state.supervisor
+    turn_service = request.app.state.turn_service
     decision_actions = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
@@ -720,12 +731,17 @@ async def chat(
             _raise_chat_turn_operation_http_error(exc, "renewal")
 
     try:
-        result = await supervisor.run_turn(
-            SupervisorTurnContext(
+        result = await turn_service.run_turn(
+            AgentColTurnCommand(
                 project_id=payload.project_id,
                 session_id=payload.session_id,
                 user_id=payload.user_id,
                 message=payload.message,
+                recent_user_messages=tuple(
+                    message["text"]
+                    for message in validated_history
+                    if message["role"] == "user"
+                ),
                 model_input_context=model_input_context,
                 source_message_id=user_message_id,
                 memory_decision_present=(
@@ -751,7 +767,10 @@ async def chat(
                 ),
             )
         )
-    except SupervisorTimeoutError as exc:
+    except (
+        AgentColTurnRoutingTimeoutError,
+        AgentColTurnTimeoutError,
+    ) as exc:
         released_claim = None
         if chat_turn_claim is not None:
             released_claim = await _release_chat_turn_safely(
@@ -774,7 +793,7 @@ async def chat(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="Agent_Col response timed out.",
         ) from exc
-    except SupervisorRuntimeError as exc:
+    except AgentColTurnServiceError as exc:
         logger.error(
             "Agent_Col response failed (%s).",
             type(exc).__name__,

@@ -9,6 +9,15 @@ import pytest
 import pytest_asyncio
 
 import main
+from agent_col_turn_service import (
+    AgentColTurnCommand,
+    AgentColTurnResponderError,
+    AgentColTurnResult,
+    AgentColTurnRoutingError,
+    AgentColTurnRoutingTimeoutError,
+    AgentColTurnServiceError,
+    AgentColTurnTimeoutError,
+)
 from chat_turns import (
     ChatTurnClaim,
     ChatTurnConflictError,
@@ -379,6 +388,27 @@ class FakeSupervisorRuntime:
 
 
 @dataclass
+class FakeAgentColTurnService:
+    events: list[tuple[Any, ...]]
+    response_text: str = "Generated answer"
+    error: Exception | None = None
+    calls: list[AgentColTurnCommand] = field(default_factory=list)
+    turn_result: AgentColTurnResult | None = None
+
+    async def run_turn(
+        self,
+        command: AgentColTurnCommand,
+    ) -> AgentColTurnResult:
+        self.calls.append(command)
+        self.events.append(("turn_service",))
+        if self.error is not None:
+            raise self.error
+        if self.turn_result is not None:
+            return self.turn_result
+        return AgentColTurnResult(response=self.response_text)
+
+
+@dataclass
 class FakeTrustedMemoryService:
     events: list[tuple[Any, ...]]
     result: TrustedMemoryInspectionResult
@@ -451,14 +481,17 @@ class ServiceState:
     genai_client: FakeGenAIClient
     synthesis_service: FakeSynthesisApplicationService
     source_service: FakeSourceExpertService
+    research_service: object
+    expert_executor: object
     supervisor: FakeSupervisorRuntime
+    turn_service: FakeAgentColTurnService
     memory_service: FakeTrustedMemoryService
-    supervisor_memory_services: list[object]
-    supervisor_source_services: list[object]
-    supervisor_delegation_registries: list[object]
-    runtime_delegation_registries: list[object]
     genai_client_kwargs: list[dict[str, object]]
-    supervisor_vertex_settings: list[VertexAISettings]
+    responder_vertex_settings: list[VertexAISettings]
+    research_vertex_settings: list[VertexAISettings]
+    responder_memory_services: list[object]
+    expert_executor_dependencies: list[tuple[object, object]]
+    turn_service_dependencies: list[tuple[object, object, object]]
 
 
 @pytest.fixture
@@ -469,7 +502,11 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
     synthesis_service = FakeSynthesisApplicationService(events, blueprint)
     source_service = FakeSourceExpertService(client=genai_client)
+    research_service = object()
+    expert_executor = object()
+    responder_app = object()
     supervisor = FakeSupervisorRuntime(events)
+    turn_service = FakeAgentColTurnService(events)
     pending_proposal = MemoryProposal(
         proposal_id="example_usage--proposal-1",
         category="example_usage",
@@ -543,28 +580,29 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             profile=approved_profile,
         ),
     )
-    supervisor_memory_services: list[object] = []
-    supervisor_source_services: list[object] = []
-    supervisor_delegation_registries: list[object] = []
-    runtime_delegation_registries: list[object] = []
     genai_client_kwargs: list[dict[str, object]] = []
-    supervisor_vertex_settings: list[VertexAISettings] = []
+    responder_vertex_settings: list[VertexAISettings] = []
+    research_vertex_settings: list[VertexAISettings] = []
+    responder_memory_services: list[object] = []
+    expert_executor_dependencies: list[tuple[object, object]] = []
+    turn_service_dependencies: list[tuple[object, object, object]] = []
     state = ServiceState(
         events=events,
         database=database,
         genai_client=genai_client,
         synthesis_service=synthesis_service,
         source_service=source_service,
+        research_service=research_service,
+        expert_executor=expert_executor,
         supervisor=supervisor,
+        turn_service=turn_service,
         memory_service=memory_service,
-        supervisor_memory_services=supervisor_memory_services,
-        supervisor_source_services=supervisor_source_services,
-        supervisor_delegation_registries=(
-            supervisor_delegation_registries
-        ),
-        runtime_delegation_registries=runtime_delegation_registries,
         genai_client_kwargs=genai_client_kwargs,
-        supervisor_vertex_settings=supervisor_vertex_settings,
+        responder_vertex_settings=responder_vertex_settings,
+        research_vertex_settings=research_vertex_settings,
+        responder_memory_services=responder_memory_services,
+        expert_executor_dependencies=expert_executor_dependencies,
+        turn_service_dependencies=turn_service_dependencies,
     )
 
     def create_synthesis_service(**kwargs: object) -> object:
@@ -604,35 +642,75 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         raising=False,
     )
 
-    def create_supervisor_app(
-        *,
+    def create_research_service(
         vertex_settings: VertexAISettings,
-        memory_service: object | None = None,
-        source_service: object | None = None,
-        delegation_registry: object | None = None,
     ) -> object:
-        supervisor_vertex_settings.append(vertex_settings)
-        supervisor_memory_services.append(memory_service)
-        supervisor_source_services.append(source_service)
-        supervisor_delegation_registries.append(delegation_registry)
-        return object()
+        research_vertex_settings.append(vertex_settings)
+        return research_service
 
     monkeypatch.setattr(
         main,
-        "create_supervisor_app",
-        create_supervisor_app,
+        "ResearchExpertService",
+        SimpleNamespace(from_vertex_settings=create_research_service),
         raising=False,
     )
+
+    def create_responder_app(
+        *,
+        vertex_settings: VertexAISettings,
+        memory_service: object | None = None,
+    ) -> object:
+        responder_vertex_settings.append(vertex_settings)
+        responder_memory_services.append(memory_service)
+        return responder_app
+
+    monkeypatch.setattr(
+        main,
+        "create_responder_app",
+        create_responder_app,
+        raising=False,
+    )
+
+    def create_expert_executor(
+        *,
+        source_service: object,
+        research_service: object,
+    ) -> object:
+        expert_executor_dependencies.append(
+            (source_service, research_service)
+        )
+        return expert_executor
+
+    monkeypatch.setattr(
+        main,
+        "AgentColExpertExecutor",
+        create_expert_executor,
+        raising=False,
+    )
+
+    def create_turn_service(
+        *,
+        routing_client: object,
+        expert_executor: object,
+        responder_runtime: object,
+    ) -> object:
+        turn_service_dependencies.append(
+            (routing_client, expert_executor, responder_runtime)
+        )
+        return turn_service
+
+    monkeypatch.setattr(
+        main,
+        "AgentColTurnService",
+        create_turn_service,
+        raising=False,
+    )
+
     monkeypatch.setattr(
         main,
         "SupervisorRuntime",
         SimpleNamespace(
-            from_app=lambda app, *, delegation_registry=None: (
-                runtime_delegation_registries.append(
-                    delegation_registry
-                )
-                or supervisor
-            )
+            from_app=lambda app: supervisor
         ),
         raising=False,
     )
@@ -996,11 +1074,19 @@ async def test_memory_mutations_translate_database_failure_safely(
 
 
 @pytest.mark.asyncio
-async def test_lifespan_exposes_supervisor_runtime(
+async def test_lifespan_does_not_expose_unrestricted_supervisor(
     service_state: ServiceState,
 ) -> None:
     async with main.lifespan(main.app):
-        assert main.app.state.supervisor is service_state.supervisor
+        assert not hasattr(main.app.state, "supervisor")
+
+
+@pytest.mark.asyncio
+async def test_lifespan_exposes_agent_col_turn_service(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        assert main.app.state.turn_service is service_state.turn_service
 
 
 @pytest.mark.asyncio
@@ -1017,36 +1103,45 @@ async def test_lifespan_uses_explicit_vertex_clients_without_api_key(
             "location": "global",
         }
     ]
-    assert service_state.supervisor_vertex_settings == [
+    assert service_state.responder_vertex_settings == [
         VertexAISettings(project="project-1", location="global")
     ]
 
 
 @pytest.mark.asyncio
-async def test_lifespan_injects_shared_memory_service_into_supervisor(
+async def test_lifespan_injects_memory_only_into_responder_app(
     service_state: ServiceState,
 ) -> None:
     async with main.lifespan(main.app):
-        assert service_state.supervisor_memory_services == [
+        assert service_state.responder_memory_services == [
             service_state.memory_service
         ]
 
 
 @pytest.mark.asyncio
-async def test_lifespan_shares_source_service_client_and_registry(
+async def test_lifespan_composes_deterministic_experts_and_turn_service(
     service_state: ServiceState,
 ) -> None:
     async with main.lifespan(main.app):
         assert service_state.source_service.client is (
             service_state.genai_client
         )
-        assert service_state.supervisor_source_services == [
-            service_state.source_service
+        assert service_state.research_vertex_settings == [
+            VertexAISettings(project="project-1", location="global")
         ]
-        assert len(service_state.supervisor_delegation_registries) == 1
-        assert service_state.supervisor_delegation_registries[0] is (
-            service_state.runtime_delegation_registries[0]
-        )
+        assert service_state.expert_executor_dependencies == [
+            (
+                service_state.source_service,
+                service_state.research_service,
+            )
+        ]
+        assert service_state.turn_service_dependencies == [
+            (
+                service_state.genai_client,
+                service_state.expert_executor,
+                service_state.supervisor,
+            )
+        ]
 
 
 @pytest.mark.asyncio
@@ -1372,7 +1467,7 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
             "Yes, remember that preference.",
         ),
         ("memory_decision",),
-        ("supervisor",),
+        ("turn_service",),
         (
             "save",
             "confirmation-session",
@@ -1390,8 +1485,8 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
             confirmation_message_id="user-message-1",
         )
     ]
-    assert len(service_state.supervisor.calls) == 1
-    context = service_state.supervisor.calls[0]
+    assert len(service_state.turn_service.calls) == 1
+    context = service_state.turn_service.calls[0]
     assert context.message == "Yes, remember that preference."
     context_text = "\n".join(
         part.text
@@ -1513,7 +1608,7 @@ async def test_chat_decision_maps_domain_errors_before_supervisor(
         ),
         ("memory_decision",),
     ]
-    assert service_state.supervisor.calls == []
+    assert service_state.turn_service.calls == []
 
 
 @pytest.mark.asyncio
@@ -1542,14 +1637,14 @@ async def test_chat_decision_translates_database_failure_safely(
 
     assert response.status_code == 500
     assert response.json() == {"detail": "Database operation failed."}
-    assert service_state.supervisor.calls == []
+    assert service_state.turn_service.calls == []
     assert "private-user" not in caplog.text
     assert "private-proposal" not in caplog.text
     assert "private-value" not in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_chat_uses_context_and_persists_both_messages(
+async def test_chat_builds_turn_command_and_persists_both_messages(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
@@ -1592,16 +1687,17 @@ async def test_chat_uses_context_and_persists_both_messages(
     }
     assert service_state.events[2:] == [
         ("save", "session-1", "user", "New question"),
-        ("supervisor",),
+        ("turn_service",),
         ("save", "session-1", "model", "Generated answer"),
     ]
 
-    assert len(service_state.supervisor.calls) == 1
-    context = service_state.supervisor.calls[0]
+    assert len(service_state.turn_service.calls) == 1
+    context = service_state.turn_service.calls[0]
     assert context.project_id == "project-1"
     assert context.session_id == "session-1"
     assert context.user_id == "user-1"
     assert context.message == "New question"
+    assert context.recent_user_messages == ("Earlier question",)
     assert len(context.model_input_context) == 1
     context_content = context.model_input_context[0]
     assert context_content.role == "user"
@@ -1622,7 +1718,7 @@ async def test_headerless_chat_returns_proposal_from_persisted_source_message(
         proposed_value="concise",
         expires_at=MEMORY_NOW + timedelta(hours=24),
     )
-    service_state.supervisor.turn_result = SupervisorTurnResult(
+    service_state.turn_service.turn_result = AgentColTurnResult(
         response="I created a pending proposal for your review.",
         actions=(
             AgentActionReceipt(
@@ -1653,7 +1749,7 @@ async def test_headerless_chat_returns_proposal_from_persisted_source_message(
     assert response.json()["memory_proposals"] == [
         proposal.model_dump(mode="json")
     ]
-    context = service_state.supervisor.calls[0]
+    context = service_state.turn_service.calls[0]
     assert context.source_message_id == "user-message-1"
     assert context.memory_decision_present is False
     assert context.turn_lease is None
@@ -1693,7 +1789,49 @@ async def test_chat_rejects_invalid_idempotency_key_before_service_access(
     assert response.json() == {"detail": "Idempotency key is invalid."}
     assert service_state.events == []
     assert service_state.memory_service.decision_calls == []
-    assert service_state.supervisor.calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_oversized_message_before_service_access(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "x" * 10_001,
+        },
+    )
+
+    assert response.status_code == 422
+    assert service_state.events == []
+    assert service_state.memory_service.decision_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_accepts_message_at_exact_upper_bound(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    message = "x" * 10_000
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": message,
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.turn_service.calls[0].message == message
 
 
 @pytest.mark.asyncio
@@ -1753,7 +1891,7 @@ async def test_chat_replays_completed_idempotent_turn_without_downstream_access(
     assert response.json() == stored_response.model_dump(mode="json")
     assert service_state.events == [("claim_chat_turn",)]
     assert service_state.memory_service.decision_calls == []
-    assert service_state.supervisor.calls == []
+    assert service_state.turn_service.calls == []
     assert service_state.database.renew_calls == []
     assert service_state.database.release_calls == []
     assert service_state.database.complete_calls == []
@@ -1819,7 +1957,7 @@ async def test_chat_translates_idempotent_claim_errors_without_downstream_access
         assert response.headers["Retry-After"] == retry_after
     assert service_state.events == [("claim_chat_turn",)]
     assert service_state.memory_service.decision_calls == []
-    assert service_state.supervisor.calls == []
+    assert service_state.turn_service.calls == []
     assert service_state.database.renew_calls == []
     assert service_state.database.release_calls == []
     assert service_state.database.complete_calls == []
@@ -1884,7 +2022,7 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
     }
     assert service_state.events[3:] == [
         ("renew_chat_turn_lease",),
-        ("supervisor",),
+        ("turn_service",),
         ("complete_chat_turn",),
     ]
     assert not any(event[0] == "save" for event in service_state.events)
@@ -1902,8 +2040,8 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
         )
     ]
     assert service_state.database.complete_calls[0][2].tzinfo is not None
-    assert len(service_state.supervisor.calls) == 1
-    context = service_state.supervisor.calls[0]
+    assert len(service_state.turn_service.calls) == 1
+    context = service_state.turn_service.calls[0]
     assert context.message == "New question"
     context_text = "\n".join(
         part.text
@@ -1914,6 +2052,64 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
     assert "Earlier question" in context_text
     assert "Earlier answer" in context_text
     assert "New question" not in context_text
+
+
+@pytest.mark.asyncio
+async def test_chat_replays_completed_expert_receipts_without_service_access(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    action = AgentActionReceipt(
+        action_name="url_context",
+        status="completed",
+    )
+    citation = CitationReference(
+        uri="https://example.com/evidence",
+        label="Example evidence",
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="Evidence-backed answer",
+        actions=(action,),
+        citations=(citation,),
+    )
+    headers = {"Idempotency-Key": "expert-replay-key-1"}
+    payload = {
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "message": "Analyze https://example.com/evidence",
+    }
+
+    first_response = await client.post(
+        "/api/chat",
+        headers=headers,
+        json=payload,
+    )
+
+    assert first_response.status_code == 200
+    stored_response = service_state.database.complete_calls[0][1]
+    assert stored_response.actions == [action]
+    assert stored_response.citations == [citation]
+    assert len(service_state.turn_service.calls) == 1
+
+    service_state.database.chat_turn_result = ChatTurnReplay(
+        response=stored_response
+    )
+    event_count = len(service_state.events)
+
+    replay_response = await client.post(
+        "/api/chat",
+        headers=headers,
+        json=payload,
+    )
+
+    assert replay_response.status_code == 200
+    assert replay_response.json() == first_response.json()
+    assert service_state.events[event_count:] == [("claim_chat_turn",)]
+    assert len(service_state.turn_service.calls) == 1
+    assert len(service_state.database.complete_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -1951,7 +2147,7 @@ async def test_resumed_idempotent_chat_supplies_owned_precompleted_effects(
         precompleted_memory_proposals=(proposal,),
     )
     service_state.database.chat_turn_result = claim
-    service_state.supervisor.turn_result = SupervisorTurnResult(
+    service_state.turn_service.turn_result = AgentColTurnResult(
         response="Your proposal remains pending.",
         actions=(action,),
         memory_proposals=(proposal,),
@@ -1969,7 +2165,7 @@ async def test_resumed_idempotent_chat_supplies_owned_precompleted_effects(
     )
 
     assert response.status_code == 200
-    context = service_state.supervisor.calls[0]
+    context = service_state.turn_service.calls[0]
     assert context.source_message_id == f"turn--{turn_id}--user"
     assert context.turn_lease == ProposalTurnLease(
         turn_id=turn_id,
@@ -2036,7 +2232,7 @@ async def test_chat_claimed_turn_starts_context_reads_concurrently(
     except TimeoutError:
         both_reads_started = False
     finally:
-        assert service_state.supervisor.calls == []
+        assert service_state.turn_service.calls == []
         release.set()
         response = await request_task
 
@@ -2075,7 +2271,7 @@ async def test_chat_idempotent_decision_uses_deterministic_confirmation_message_
         action_name="approve_memory_signal",
         status="completed",
     )
-    service_state.supervisor.turn_result = SupervisorTurnResult(
+    service_state.turn_service.turn_result = AgentColTurnResult(
         response="Generated answer",
         actions=(completed_action,),
     )
@@ -2121,7 +2317,7 @@ async def test_chat_idempotent_decision_uses_deterministic_confirmation_message_
         ("memory_decision",),
         ("record_chat_turn_decision_action",),
         ("renew_chat_turn_lease",),
-        ("supervisor",),
+        ("turn_service",),
         ("complete_chat_turn",),
     ]
     assert service_state.memory_service.decision_calls == [
@@ -2228,10 +2424,10 @@ async def test_chat_translates_owned_turn_persistence_errors_safely(
     assert response.json() == {"detail": expected_detail}
     assert not any(event[0] == "save" for event in service_state.events)
     if failure_operation == "renew":
-        assert service_state.supervisor.calls == []
+        assert service_state.turn_service.calls == []
         assert service_state.database.complete_calls == []
     else:
-        assert len(service_state.supervisor.calls) == 1
+        assert len(service_state.turn_service.calls) == 1
         assert len(service_state.database.complete_calls) == 1
     assert service_state.database.release_calls == []
     for private_marker in (
@@ -2248,25 +2444,40 @@ async def test_chat_translates_owned_turn_persistence_errors_safely(
 
 
 @pytest.mark.parametrize(
-    ("supervisor_error", "expected_status", "expected_detail"),
+    ("turn_error", "expected_status", "expected_detail"),
     (
         (
-            SupervisorRuntimeError("provider failed"),
+            AgentColTurnRoutingError("routing failed"),
             502,
             "Agent_Col response failed.",
         ),
         (
-            SupervisorTimeoutError("provider timed out"),
+            AgentColTurnRoutingTimeoutError("routing timed out"),
             504,
             "Agent_Col response timed out.",
+        ),
+        (
+            AgentColTurnResponderError("responder failed"),
+            502,
+            "Agent_Col response failed.",
+        ),
+        (
+            AgentColTurnTimeoutError("turn timed out"),
+            504,
+            "Agent_Col response timed out.",
+        ),
+        (
+            AgentColTurnServiceError("turn failed"),
+            502,
+            "Agent_Col response failed.",
         ),
     ),
 )
 @pytest.mark.asyncio
-async def test_chat_releases_claim_after_supervisor_failure(
+async def test_chat_releases_claim_after_turn_service_failure(
     client: httpx.AsyncClient,
     service_state: ServiceState,
-    supervisor_error: Exception,
+    turn_error: Exception,
     expected_status: int,
     expected_detail: str,
 ) -> None:
@@ -2280,7 +2491,7 @@ async def test_chat_releases_claim_after_supervisor_failure(
     )
     service_state.database.chat_turn_result = claim
     service_state.database.renewed_claim = renewed_claim
-    service_state.supervisor.error = supervisor_error
+    service_state.turn_service.error = turn_error
 
     response = await client.post(
         "/api/chat",
@@ -2296,7 +2507,7 @@ async def test_chat_releases_claim_after_supervisor_failure(
     assert response.status_code == expected_status
     assert response.json() == {"detail": expected_detail}
     assert len(service_state.database.renew_calls) == 1
-    assert len(service_state.supervisor.calls) == 1
+    assert len(service_state.turn_service.calls) == 1
     assert len(service_state.database.release_calls) == 1
     assert service_state.database.release_calls[0][0] == renewed_claim
     assert service_state.database.release_calls[0][1].tzinfo is not None
@@ -2305,15 +2516,15 @@ async def test_chat_releases_claim_after_supervisor_failure(
 
 
 @pytest.mark.parametrize(
-    ("supervisor_error_type", "expected_status", "expected_detail"),
+    ("turn_error_type", "expected_status", "expected_detail"),
     (
         (
-            SupervisorRuntimeError,
+            AgentColTurnResponderError,
             502,
             "Agent_Col response failed after a completed action.",
         ),
         (
-            SupervisorTimeoutError,
+            AgentColTurnTimeoutError,
             504,
             "Agent_Col response timed out after a completed action.",
         ),
@@ -2323,7 +2534,7 @@ async def test_chat_releases_claim_after_supervisor_failure(
 async def test_headerless_chat_returns_completed_effects_on_provider_failure(
     client: httpx.AsyncClient,
     service_state: ServiceState,
-    supervisor_error_type: type[SupervisorRuntimeError],
+    turn_error_type: type[AgentColTurnServiceError],
     expected_status: int,
     expected_detail: str,
 ) -> None:
@@ -2332,7 +2543,7 @@ async def test_headerless_chat_returns_completed_effects_on_provider_failure(
         status="completed",
     )
     proposal = make_memory_proposal_receipt()
-    service_state.supervisor.error = supervisor_error_type(
+    service_state.turn_service.error = turn_error_type(
         "private provider failure",
         actions=(action,),
         memory_proposals=(proposal,),
@@ -2377,7 +2588,7 @@ async def test_idempotent_failure_recovers_completed_effects_from_turn_ledger(
         precompleted_actions=(action,),
         precompleted_memory_proposals=(proposal,),
     )
-    service_state.supervisor.error = SupervisorRuntimeError(
+    service_state.turn_service.error = AgentColTurnResponderError(
         "private provider failure"
     )
 
@@ -2446,7 +2657,9 @@ async def test_chat_maps_governed_proposal_tool_failures_by_typed_cause(
 ) -> None:
     runtime_error = SupervisorRuntimeError("private runtime wrapper")
     runtime_error.__cause__ = cause
-    service_state.supervisor.error = runtime_error
+    turn_error = AgentColTurnResponderError("responder failed")
+    turn_error.__cause__ = runtime_error
+    service_state.turn_service.error = turn_error
 
     response = await client.post(
         "/api/chat",
@@ -2474,7 +2687,7 @@ async def test_chat_maps_governed_proposal_tool_failures_by_typed_cause(
     ),
 )
 @pytest.mark.asyncio
-async def test_chat_release_failure_does_not_replace_supervisor_error(
+async def test_chat_release_failure_does_not_replace_turn_service_error(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     caplog: pytest.LogCaptureFixture,
@@ -2482,7 +2695,7 @@ async def test_chat_release_failure_does_not_replace_supervisor_error(
 ) -> None:
     claim = make_chat_turn_claim(owner_token="private-owner-marker")
     service_state.database.chat_turn_result = claim
-    service_state.supervisor.error = SupervisorRuntimeError(
+    service_state.turn_service.error = AgentColTurnResponderError(
         "private-provider-marker"
     )
     service_state.database.release_error = release_error
@@ -2610,13 +2823,13 @@ async def test_chat_translates_database_failures(
 
 
 @pytest.mark.asyncio
-async def test_chat_translates_supervisor_failure_without_model_write(
+async def test_chat_translates_turn_service_failure_without_model_write(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     private_message = "private prompt text"
-    service_state.supervisor.error = SupervisorRuntimeError(
+    service_state.turn_service.error = AgentColTurnResponderError(
         f"provider echoed {private_message}"
     )
 
@@ -2649,11 +2862,11 @@ async def test_chat_translates_supervisor_failure_without_model_write(
 
 
 @pytest.mark.asyncio
-async def test_chat_translates_supervisor_timeout_without_model_write(
+async def test_chat_translates_turn_timeout_without_model_write(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
-    service_state.supervisor.error = SupervisorTimeoutError(
+    service_state.turn_service.error = AgentColTurnTimeoutError(
         "turn timed out"
     )
 
@@ -2729,7 +2942,7 @@ async def test_chat_starts_context_reads_concurrently(
     except TimeoutError:
         both_reads_started = False
     finally:
-        assert ("supervisor",) not in service_state.events
+        assert ("turn_service",) not in service_state.events
         release.set()
         response = await request_task
 
@@ -2759,7 +2972,7 @@ async def test_chat_rejects_invalid_stored_history_before_writes(
     assert response.status_code == 500
     assert response.json() == {"detail": "Chat history is invalid."}
     assert not any(event[0] == "save" for event in service_state.events)
-    assert ("supervisor",) not in service_state.events
+    assert ("turn_service",) not in service_state.events
 
 
 @pytest.mark.asyncio
