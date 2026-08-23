@@ -143,6 +143,7 @@ class ArtifactFeedbackDecisionRequest(StrictModel):
     feedback_text: ArtifactFeedbackText
     correction_text: ArtifactFeedbackText | None = None
     expected_schema_version: Literal["2.0"]
+    supersedes_feedback_id: IdentifierStr | None = None
 
     @field_validator("feedback_text", "correction_text")
     @classmethod
@@ -184,6 +185,48 @@ class ArtifactFeedbackReference(StrictModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("created_at must be timezone aware.")
         return value
+
+
+ArtifactFeedbackStatus = Literal["active", "superseded"]
+
+
+class ArtifactFeedbackEvent(StrictModel):
+    reference: ArtifactFeedbackReference
+    feedback_text: ArtifactFeedbackText
+    correction_text: ArtifactFeedbackText | None = None
+    originating_session_id: IdentifierStr
+    source_message_id: IdentifierStr
+    originating_turn_id: IdentifierStr
+    status: ArtifactFeedbackStatus
+    supersedes_feedback_id: IdentifierStr | None = None
+    superseded_by_feedback_id: IdentifierStr | None = None
+
+    @model_validator(mode="after")
+    def validate_derived_lifecycle(self) -> Self:
+        feedback_id = self.reference.feedback_id
+        if (
+            self.supersedes_feedback_id == feedback_id
+            or self.superseded_by_feedback_id == feedback_id
+        ):
+            raise ValueError("Feedback lifecycle cannot reference itself.")
+        if (
+            self.status == "active"
+            and self.superseded_by_feedback_id is not None
+        ):
+            raise ValueError("Active feedback cannot have a successor.")
+        if (
+            self.status == "superseded"
+            and self.superseded_by_feedback_id is None
+        ):
+            raise ValueError("Superseded feedback requires a successor.")
+        return self
+
+
+class BlueprintArtifactFeedbackListResponse(StrictModel):
+    feedback_contract_version: Literal["1.0"] = "1.0"
+    artifact_id: IdentifierStr
+    events: list[ArtifactFeedbackEvent] = Field(max_length=50)
+    next_before: IdentifierStr | None = None
 
 
 class BlueprintArtifactMetadata(StrictModel):

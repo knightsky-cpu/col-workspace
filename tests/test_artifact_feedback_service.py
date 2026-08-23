@@ -4,6 +4,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from artifact_read_service import GetBlueprintArtifactCommand
+from database import (
+    BlueprintFeedbackDocumentPage,
+    BlueprintFeedbackDocumentRecord,
+)
 from schemas import (
     ArtifactFeedbackCounts,
     ArtifactFeedbackDecisionRequest,
@@ -103,6 +107,7 @@ def request(
     *,
     target_id: str = TARGET_ID,
     expected_schema_version: str = "2.0",
+    supersedes_feedback_id: str | None = None,
 ) -> ArtifactFeedbackDecisionRequest:
     return ArtifactFeedbackDecisionRequest.model_validate(
         {
@@ -111,6 +116,7 @@ def request(
             "decision": "accepted",
             "feedback_text": "The approval boundary is correct.",
             "expected_schema_version": expected_schema_version,
+            "supersedes_feedback_id": supersedes_feedback_id,
         }
     )
 
@@ -131,13 +137,33 @@ class FakeReader:
 
 
 class FakeRepository:
-    def __init__(self, result: ArtifactFeedbackReference) -> None:
+    def __init__(
+        self,
+        result: ArtifactFeedbackReference,
+        *,
+        list_result: BlueprintFeedbackDocumentPage | None = None,
+    ) -> None:
         self.result = result
+        self.list_result = list_result
         self.calls: list[dict[str, object]] = []
+        self.list_calls: list[tuple[str, str, int, str | None]] = []
 
     async def record_blueprint_feedback(self, **kwargs):
         self.calls.append(kwargs)
         return self.result
+
+    async def list_blueprint_feedback_documents(
+        self,
+        project_id: str,
+        blueprint_id: str,
+        *,
+        limit: int,
+        before: str | None,
+    ) -> BlueprintFeedbackDocumentPage:
+        self.list_calls.append((project_id, blueprint_id, limit, before))
+        if self.list_result is None:
+            raise AssertionError("Feedback list result is unavailable.")
+        return self.list_result
 
 
 def reference() -> ArtifactFeedbackReference:
@@ -196,6 +222,7 @@ async def test_feedback_service_resolves_target_and_records_bounded_event(
             "decision": "accepted",
             "feedback_text": "The approval boundary is correct.",
             "correction_text": None,
+            "supersedes_feedback_id": None,
             "expected_schema_version": "2.0",
             "session_id": "feedback-session",
             "user_id": "user-1",
@@ -209,6 +236,25 @@ async def test_feedback_service_resolves_target_and_records_bounded_event(
         "status": "completed",
     }
     assert result.feedback == reference()
+
+
+@pytest.mark.asyncio
+async def test_feedback_service_forwards_explicit_supersession_authority(
+) -> None:
+    from artifact_feedback_service import ArtifactFeedbackService
+
+    prior_feedback_id = "feedback--prior-event"
+    repository = FakeRepository(reference())
+    service = ArtifactFeedbackService(
+        artifact_reader=FakeReader(detail()),
+        feedback_repository=repository,
+    )
+
+    await service.record_feedback(
+        command(request(supersedes_feedback_id=prior_feedback_id))
+    )
+
+    assert repository.calls[0]["supersedes_feedback_id"] == prior_feedback_id
 
 
 @pytest.mark.asyncio
@@ -328,3 +374,94 @@ async def test_feedback_service_resolves_server_issued_target_without_write(
     assert resolved.artifact == detail().metadata.reference
     assert resolved.target == detail().feedback_targets[0]
     assert repository.calls == []
+
+
+@pytest.mark.asyncio
+async def test_feedback_service_projects_immutable_events_and_derived_status(
+) -> None:
+    import artifact_feedback_service
+
+    command_type = getattr(
+        artifact_feedback_service,
+        "ListArtifactFeedbackCommand",
+        None,
+    )
+    assert command_type is not None
+    ArtifactFeedbackService = artifact_feedback_service.ArtifactFeedbackService
+
+    new_feedback_id = "feedback--new-event"
+    prior_feedback_id = "feedback--prior-event"
+    page = BlueprintFeedbackDocumentPage(
+        records=(
+            BlueprintFeedbackDocumentRecord(
+                feedback_id=new_feedback_id,
+                document={
+                    "feedback_contract_version": "1.0",
+                    "feedback_id": new_feedback_id,
+                    "artifact_id": "blueprint-1",
+                    "target_id": TARGET_ID,
+                    "target_kind": "whole_blueprint",
+                    "decision": "rejected",
+                    "feedback_text": "I reversed the prior acceptance.",
+                    "correction_text": None,
+                    "originating_session_id": "session-2",
+                    "source_message_id": "message-2",
+                    "originating_turn_id": "turn-2",
+                    "user_id": "user-1",
+                    "schema_version": "2.0",
+                    "created_at": NOW,
+                    "status": "active",
+                    "supersedes_feedback_id": prior_feedback_id,
+                },
+                superseded_by_feedback_id=None,
+            ),
+            BlueprintFeedbackDocumentRecord(
+                feedback_id=prior_feedback_id,
+                document={
+                    "feedback_contract_version": "1.0",
+                    "feedback_id": prior_feedback_id,
+                    "artifact_id": "blueprint-1",
+                    "target_id": TARGET_ID,
+                    "target_kind": "whole_blueprint",
+                    "decision": "accepted",
+                    "feedback_text": "I accepted this initially.",
+                    "correction_text": None,
+                    "originating_session_id": "session-1",
+                    "source_message_id": "message-1",
+                    "originating_turn_id": "turn-1",
+                    "user_id": "user-1",
+                    "schema_version": "2.0",
+                    "created_at": NOW - timedelta(minutes=5),
+                    "status": "active",
+                    "supersedes_feedback_id": None,
+                },
+                superseded_by_feedback_id=new_feedback_id,
+            ),
+        ),
+        next_before=prior_feedback_id,
+    )
+    repository = FakeRepository(reference(), list_result=page)
+    service = ArtifactFeedbackService(
+        artifact_reader=FakeReader(detail()),
+        feedback_repository=repository,
+    )
+    assert hasattr(service, "list_feedback")
+
+    result = await service.list_feedback(
+        command_type(
+            project_id="project-1",
+            artifact_id="blueprint-1",
+            limit=20,
+            before=None,
+        )
+    )
+
+    assert repository.list_calls == [
+        ("project-1", "blueprint-1", 20, None)
+    ]
+    assert result.artifact_id == "blueprint-1"
+    assert result.events[0].status == "active"
+    assert result.events[0].supersedes_feedback_id == prior_feedback_id
+    assert result.events[1].status == "superseded"
+    assert result.events[1].superseded_by_feedback_id == new_feedback_id
+    assert result.next_before == prior_feedback_id

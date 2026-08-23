@@ -114,6 +114,10 @@ class BlueprintArtifactCursorNotFoundError(RuntimeError):
     """Raised when a blueprint pagination cursor cannot be resolved."""
 
 
+class BlueprintFeedbackCursorNotFoundError(RuntimeError):
+    """Raised when a feedback pagination cursor cannot be resolved."""
+
+
 class BlueprintFeedbackConflictError(RuntimeError):
     """Raised when a feedback identifier owns a different immutable event."""
 
@@ -178,6 +182,23 @@ class BlueprintDocumentPage:
     """One bounded newest-first page of blueprint documents."""
 
     records: tuple[BlueprintDocumentRecord, ...]
+    next_before: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class BlueprintFeedbackDocumentRecord:
+    """One immutable project-artifact feedback document."""
+
+    feedback_id: str
+    document: dict[str, object]
+    superseded_by_feedback_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class BlueprintFeedbackDocumentPage:
+    """One bounded newest-first page of feedback documents."""
+
+    records: tuple[BlueprintFeedbackDocumentRecord, ...]
     next_before: str | None
 
 
@@ -893,6 +914,21 @@ class MemoryEngine:
         feedback_ref = blueprint_ref.collection("feedback").document(
             feedback_id
         )
+        supersedes_feedback_id = request.supersedes_feedback_id
+        prior_feedback_ref = (
+            blueprint_ref.collection("feedback").document(
+                supersedes_feedback_id
+            )
+            if supersedes_feedback_id is not None
+            else None
+        )
+        supersession_ref = (
+            blueprint_ref.collection("feedback_supersessions").document(
+                supersedes_feedback_id
+            )
+            if supersedes_feedback_id is not None
+            else None
+        )
         transaction = self._client.transaction()
         feedback_document = {
             "feedback_contract_version": "1.0",
@@ -910,8 +946,18 @@ class MemoryEngine:
             "schema_version": request.expected_schema_version,
             "created_at": observed_at,
             "status": "active",
-            "supersedes_feedback_id": None,
+            "supersedes_feedback_id": supersedes_feedback_id,
         }
+        supersession_document = (
+            {
+                "supersession_contract_version": "1.0",
+                "supersedes_feedback_id": supersedes_feedback_id,
+                "superseded_by_feedback_id": feedback_id,
+                "created_at": observed_at,
+            }
+            if supersedes_feedback_id is not None
+            else None
+        )
 
         async def record_in_transaction(
             transaction: AsyncTransaction,
@@ -922,6 +968,16 @@ class MemoryEngine:
             )
             feedback_snapshot = await feedback_ref.get(
                 transaction=transaction
+            )
+            prior_feedback_snapshot = (
+                await prior_feedback_ref.get(transaction=transaction)
+                if prior_feedback_ref is not None
+                else None
+            )
+            supersession_snapshot = (
+                await supersession_ref.get(transaction=transaction)
+                if supersession_ref is not None
+                else None
             )
             turn_data = turn_snapshot.to_dict()
             blueprint_document = blueprint_snapshot.to_dict()
@@ -976,6 +1032,82 @@ class MemoryEngine:
                 raise BlueprintFeedbackStateError(
                     "Stored blueprint feedback state is invalid."
                 ) from exc
+            prior_decision = None
+            if supersedes_feedback_id is not None:
+                prior_document = (
+                    prior_feedback_snapshot.to_dict()
+                    if prior_feedback_snapshot is not None
+                    else None
+                )
+                if (
+                    prior_feedback_snapshot is None
+                    or not prior_feedback_snapshot.exists
+                    or not isinstance(prior_document, Mapping)
+                    or prior_document.get("feedback_contract_version")
+                    != "1.0"
+                    or prior_document.get("feedback_id")
+                    != supersedes_feedback_id
+                    or prior_document.get("artifact_id")
+                    != request.artifact_id
+                    or prior_document.get("target_id") != request.target_id
+                    or prior_document.get("target_kind") != target_kind
+                    or prior_document.get("user_id") != claim.request.user_id
+                    or prior_document.get("schema_version")
+                    != request.expected_schema_version
+                    or prior_document.get("status") != "active"
+                    or not self._is_aware_datetime(
+                        prior_document.get("created_at")
+                    )
+                    or prior_document.get("created_at") > observed_at
+                ):
+                    raise BlueprintFeedbackConflictError(
+                        "Prior feedback cannot be superseded."
+                    )
+                prior_decision = prior_document.get("decision")
+                if prior_decision not in {
+                    "accepted",
+                    "rejected",
+                    "edited",
+                }:
+                    raise BlueprintFeedbackStateError(
+                        "Stored prior feedback decision is invalid."
+                    )
+                if (
+                    supersession_snapshot is not None
+                    and supersession_snapshot.exists
+                ):
+                    existing_link = supersession_snapshot.to_dict()
+                    existing_link_created_at = (
+                        existing_link.get("created_at")
+                        if isinstance(existing_link, Mapping)
+                        else None
+                    )
+                    stable_existing_link = (
+                        dict(existing_link)
+                        if isinstance(existing_link, Mapping)
+                        else {}
+                    )
+                    stable_existing_link.pop("created_at", None)
+                    stable_supersession_document = dict(
+                        supersession_document
+                    )
+                    stable_supersession_document.pop("created_at", None)
+                    if (
+                        not isinstance(existing_link, Mapping)
+                        or not self._is_aware_datetime(
+                            existing_link_created_at
+                        )
+                        or existing_link_created_at > observed_at
+                        or stable_existing_link
+                        != stable_supersession_document
+                    ):
+                        raise BlueprintFeedbackConflictError(
+                            "Prior feedback is already superseded."
+                        )
+                if feedback_snapshot.exists != supersession_snapshot.exists:
+                    raise BlueprintFeedbackStateError(
+                        "Stored feedback supersession is incomplete."
+                    )
             stored_actions, stored_proposals, stored_artifacts = (
                 self._chat_turn_effects(turn_data)
             )
@@ -1034,10 +1166,16 @@ class MemoryEngine:
                 )
 
             actions = (*stored_actions, action)
-            updated_counts = counts.model_copy(
-                update={
-                    request.decision: getattr(counts, request.decision) + 1
-                }
+            count_values = counts.model_dump()
+            if prior_decision is not None:
+                if count_values[prior_decision] < 1:
+                    raise BlueprintFeedbackStateError(
+                        "Stored feedback counts cannot be superseded."
+                    )
+                count_values[prior_decision] -= 1
+            count_values[request.decision] += 1
+            updated_counts = ArtifactFeedbackCounts.model_validate(
+                count_values
             )
             transaction.set(
                 project_ref,
@@ -1045,6 +1183,11 @@ class MemoryEngine:
                 merge=True,
             )
             transaction.set(feedback_ref, feedback_document)
+            if supersession_ref is not None:
+                transaction.set(
+                    supersession_ref,
+                    supersession_document,
+                )
             transaction.set(
                 blueprint_ref,
                 {"feedback_counts": updated_counts.model_dump()},
@@ -1703,6 +1846,7 @@ class MemoryEngine:
         decision: str,
         feedback_text: str,
         correction_text: str | None,
+        supersedes_feedback_id: str | None,
         expected_schema_version: str,
         session_id: str,
         user_id: str,
@@ -1724,6 +1868,13 @@ class MemoryEngine:
             self._validate_memory_identifier(value, field_name)
         if feedback_id != f"feedback--{turn_id}":
             raise ValueError("feedback_id must match its originating turn.")
+        if supersedes_feedback_id is not None:
+            self._validate_memory_identifier(
+                supersedes_feedback_id,
+                "supersedes_feedback_id",
+            )
+            if supersedes_feedback_id == feedback_id:
+                raise ValueError("feedback cannot supersede itself.")
         if not self._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
         request = ArtifactFeedbackDecisionRequest(
@@ -1733,6 +1884,7 @@ class MemoryEngine:
             feedback_text=feedback_text,
             correction_text=correction_text,
             expected_schema_version=expected_schema_version,
+            supersedes_feedback_id=supersedes_feedback_id,
         )
         reference = ArtifactFeedbackReference(
             feedback_id=feedback_id,
@@ -1749,6 +1901,20 @@ class MemoryEngine:
         )
         feedback_ref = blueprint_ref.collection("feedback").document(
             feedback_id
+        )
+        prior_feedback_ref = (
+            blueprint_ref.collection("feedback").document(
+                supersedes_feedback_id
+            )
+            if supersedes_feedback_id is not None
+            else None
+        )
+        supersession_ref = (
+            blueprint_ref.collection("feedback_supersessions").document(
+                supersedes_feedback_id
+            )
+            if supersedes_feedback_id is not None
+            else None
         )
         transaction = self._client.transaction()
         feedback_document = {
@@ -1767,8 +1933,18 @@ class MemoryEngine:
             "schema_version": request.expected_schema_version,
             "created_at": observed_at,
             "status": "active",
-            "supersedes_feedback_id": None,
+            "supersedes_feedback_id": supersedes_feedback_id,
         }
+        supersession_document = (
+            {
+                "supersession_contract_version": "1.0",
+                "supersedes_feedback_id": supersedes_feedback_id,
+                "superseded_by_feedback_id": feedback_id,
+                "created_at": observed_at,
+            }
+            if supersedes_feedback_id is not None
+            else None
+        )
 
         async def record_in_transaction(
             transaction: AsyncTransaction,
@@ -1814,9 +1990,88 @@ class MemoryEngine:
                     "Stored blueprint feedback state is invalid."
                 ) from exc
 
+            prior_decision = None
+            supersession_snapshot = None
+            if prior_feedback_ref is not None:
+                prior_snapshot = await prior_feedback_ref.get(
+                    transaction=transaction
+                )
+                supersession_snapshot = await supersession_ref.get(
+                    transaction=transaction
+                )
+                prior_document = prior_snapshot.to_dict()
+                if (
+                    not prior_snapshot.exists
+                    or not isinstance(prior_document, Mapping)
+                    or prior_document.get("feedback_contract_version")
+                    != "1.0"
+                    or prior_document.get("feedback_id")
+                    != supersedes_feedback_id
+                    or prior_document.get("artifact_id") != blueprint_id
+                    or prior_document.get("target_id") != target_id
+                    or prior_document.get("target_kind") != target_kind
+                    or prior_document.get("user_id") != user_id
+                    or prior_document.get("schema_version")
+                    != request.expected_schema_version
+                    or prior_document.get("status") != "active"
+                    or not self._is_aware_datetime(
+                        prior_document.get("created_at")
+                    )
+                    or prior_document.get("created_at") > observed_at
+                ):
+                    raise BlueprintFeedbackConflictError(
+                        "Prior feedback cannot be superseded."
+                    )
+                prior_decision = prior_document.get("decision")
+                if prior_decision not in {
+                    "accepted",
+                    "rejected",
+                    "edited",
+                }:
+                    raise BlueprintFeedbackStateError(
+                        "Stored prior feedback decision is invalid."
+                    )
+                if supersession_snapshot.exists:
+                    existing_link = supersession_snapshot.to_dict()
+                    existing_link_created_at = (
+                        existing_link.get("created_at")
+                        if isinstance(existing_link, Mapping)
+                        else None
+                    )
+                    stable_existing_link = (
+                        dict(existing_link)
+                        if isinstance(existing_link, Mapping)
+                        else {}
+                    )
+                    stable_existing_link.pop("created_at", None)
+                    stable_supersession_document = dict(
+                        supersession_document
+                    )
+                    stable_supersession_document.pop("created_at", None)
+                    if (
+                        not isinstance(existing_link, Mapping)
+                        or not self._is_aware_datetime(
+                            existing_link_created_at
+                        )
+                        or existing_link_created_at > observed_at
+                        or stable_existing_link
+                        != stable_supersession_document
+                    ):
+                        raise BlueprintFeedbackConflictError(
+                            "Prior feedback is already superseded."
+                        )
+
             existing_snapshot = await feedback_ref.get(
                 transaction=transaction
             )
+            if (
+                supersession_snapshot is not None
+                and existing_snapshot.exists
+                != supersession_snapshot.exists
+            ):
+                raise BlueprintFeedbackStateError(
+                    "Stored feedback supersession is incomplete."
+                )
             if existing_snapshot.exists:
                 existing_document = existing_snapshot.to_dict()
                 if not isinstance(existing_document, Mapping):
@@ -1843,10 +2098,16 @@ class MemoryEngine:
                     update={"created_at": existing_created_at}
                 )
 
-            updated_counts = counts.model_copy(
-                update={
-                    request.decision: getattr(counts, request.decision) + 1
-                }
+            count_values = counts.model_dump()
+            if prior_decision is not None:
+                if count_values[prior_decision] < 1:
+                    raise BlueprintFeedbackStateError(
+                        "Stored feedback counts cannot be superseded."
+                    )
+                count_values[prior_decision] -= 1
+            count_values[request.decision] += 1
+            updated_counts = ArtifactFeedbackCounts.model_validate(
+                count_values
             )
             transaction.set(
                 project_ref,
@@ -1854,6 +2115,11 @@ class MemoryEngine:
                 merge=True,
             )
             transaction.set(feedback_ref, feedback_document)
+            if supersession_ref is not None:
+                transaction.set(
+                    supersession_ref,
+                    supersession_document,
+                )
             transaction.set(
                 blueprint_ref,
                 {"feedback_counts": updated_counts.model_dump()},
@@ -1944,6 +2210,135 @@ class MemoryEngine:
             self._raise_firestore_error("list_blueprint_documents", exc)
         except ValueError as exc:
             self._raise_firestore_error("read_blueprint_documents", exc)
+
+    async def list_blueprint_feedback_documents(
+        self,
+        project_id: str,
+        blueprint_id: str,
+        *,
+        limit: int,
+        before: str | None,
+    ) -> BlueprintFeedbackDocumentPage:
+        """Return one bounded page of immutable artifact feedback."""
+        self._validate_memory_identifier(project_id, "project_id")
+        self._validate_memory_identifier(blueprint_id, "blueprint_id")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 50
+        ):
+            raise ValueError("limit must be an integer between 1 and 50.")
+        if before is not None:
+            self._validate_memory_identifier(before, "before")
+
+        try:
+            blueprint_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("blueprints")
+                .document(blueprint_id)
+            )
+            blueprint_snapshot = await blueprint_ref.get()
+            if not blueprint_snapshot.exists:
+                raise BlueprintArtifactNotFoundError(
+                    "Blueprint artifact does not exist."
+                )
+            blueprint_document = blueprint_snapshot.to_dict()
+            if (
+                not isinstance(blueprint_document, Mapping)
+                or blueprint_document.get("artifact_contract_version")
+                != ARTIFACT_CONTRACT_VERSION
+                or blueprint_document.get("artifact_type")
+                != "synthesis_blueprint"
+                or blueprint_document.get("schema_version") != "2.0"
+            ):
+                raise BlueprintFeedbackStateError(
+                    "Stored blueprint feedback parent is invalid."
+                )
+            feedback_ref = blueprint_ref.collection("feedback")
+            supersessions_ref = blueprint_ref.collection(
+                "feedback_supersessions"
+            )
+            query = feedback_ref.order_by(
+                "created_at",
+                direction=firestore.Query.DESCENDING,
+            ).order_by(
+                FieldPath.document_id(),
+                direction=firestore.Query.DESCENDING,
+            )
+            if before is not None:
+                cursor_snapshot = await feedback_ref.document(before).get()
+                if not cursor_snapshot.exists:
+                    raise BlueprintFeedbackCursorNotFoundError(
+                        "Artifact feedback cursor does not exist."
+                    )
+                query = query.start_after(cursor_snapshot)
+            query = query.limit(limit + 1)
+
+            snapshots = [snapshot async for snapshot in query.stream()]
+            bounded_snapshots = snapshots[:limit]
+            records: list[BlueprintFeedbackDocumentRecord] = []
+            for snapshot in bounded_snapshots:
+                document = snapshot.to_dict()
+                if not isinstance(document, dict):
+                    raise BlueprintFeedbackStateError(
+                        "Stored artifact feedback event is invalid."
+                    )
+                link_snapshot = await supersessions_ref.document(
+                    snapshot.id
+                ).get()
+                superseded_by_feedback_id = None
+                if link_snapshot.exists:
+                    link = link_snapshot.to_dict()
+                    if (
+                        not isinstance(link, Mapping)
+                        or link.get("supersession_contract_version") != "1.0"
+                        or link.get("supersedes_feedback_id") != snapshot.id
+                        or not isinstance(
+                            link.get("superseded_by_feedback_id"),
+                            str,
+                        )
+                        or not self._is_aware_datetime(
+                            link.get("created_at")
+                        )
+                    ):
+                        raise BlueprintFeedbackStateError(
+                            "Stored artifact feedback supersession is invalid."
+                        )
+                    superseded_by_feedback_id = link.get(
+                        "superseded_by_feedback_id"
+                    )
+                records.append(
+                    BlueprintFeedbackDocumentRecord(
+                        feedback_id=snapshot.id,
+                        document=document,
+                        superseded_by_feedback_id=(
+                            superseded_by_feedback_id
+                        ),
+                    )
+                )
+
+            has_more = len(snapshots) > limit
+            next_before = (
+                records[-1].feedback_id
+                if has_more and records
+                else None
+            )
+            return BlueprintFeedbackDocumentPage(
+                records=tuple(records),
+                next_before=next_before,
+            )
+        except (
+            BlueprintArtifactNotFoundError,
+            BlueprintFeedbackCursorNotFoundError,
+            BlueprintFeedbackStateError,
+        ):
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "list_blueprint_feedback_documents",
+                exc,
+            )
 
     async def get_blueprint_document(
         self,

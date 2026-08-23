@@ -46,6 +46,7 @@ from artifact_feedback_service import (
     ArtifactFeedbackService,
     ArtifactFeedbackStateError,
     ArtifactFeedbackTargetNotFoundError,
+    ListArtifactFeedbackCommand,
 )
 from chat_turns import (
     ChatTurnClaim,
@@ -62,6 +63,7 @@ from database import (
     BlueprintArtifactCursorNotFoundError,
     BlueprintArtifactNotFoundError,
     BlueprintFeedbackConflictError,
+    BlueprintFeedbackCursorNotFoundError,
     BlueprintFeedbackStateError,
     MemoryEngine,
     MemoryEngineError,
@@ -82,6 +84,7 @@ from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
     BlueprintArtifactDetailResponse,
+    BlueprintArtifactFeedbackListResponse,
     BlueprintArtifactListResponse,
     ChatPartialFailureResponse,
     ChatRequest,
@@ -458,6 +461,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = database
     app.state.synthesis_service = synthesis_service
     app.state.artifact_service = artifact_service
+    app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.turn_service = turn_service
 
@@ -683,6 +687,49 @@ async def get_blueprint_artifact(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Stored blueprint artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.get(
+    "/api/projects/{project_id}/blueprints/{blueprint_id}/feedback",
+    response_model=BlueprintArtifactFeedbackListResponse,
+)
+async def list_blueprint_feedback(
+    project_id: IdentifierStr,
+    blueprint_id: IdentifierStr,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    before: IdentifierStr | None = None,
+) -> BlueprintArtifactFeedbackListResponse:
+    try:
+        return await request.app.state.artifact_feedback_service.list_feedback(
+            ListArtifactFeedbackCommand(
+                project_id=project_id,
+                artifact_id=blueprint_id,
+                limit=limit,
+                before=before,
+            )
+        )
+    except BlueprintFeedbackCursorNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact feedback cursor was not found.",
+        ) from exc
+    except BlueprintArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blueprint artifact was not found.",
+        ) from exc
+    except ArtifactFeedbackStateError as exc:
+        logger.error(
+            "Stored artifact feedback list is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact feedback is invalid.",
         ) from exc
     except MemoryEngineError as exc:
         _raise_database_http_error(exc)

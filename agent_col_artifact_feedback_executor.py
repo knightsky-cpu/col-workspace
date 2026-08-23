@@ -20,6 +20,7 @@ from schemas import (
     ArtifactFeedbackReference,
     ArtifactFeedbackTargetKind,
     ArtifactReference,
+    IdentifierStr,
 )
 
 
@@ -65,6 +66,7 @@ class AgentColArtifactFeedbackResponderProjection(BaseModel):
     decision: ArtifactFeedbackDecision
     feedback_text: str = Field(min_length=1, max_length=1_500)
     correction_text: str | None = Field(default=None, max_length=1_500)
+    supersedes_feedback_id: IdentifierStr | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +146,7 @@ class AgentColArtifactFeedbackExecutor:
             decision=request.decision,
             feedback_text=request.feedback_text,
             correction_text=request.correction_text,
+            supersedes_feedback_id=request.supersedes_feedback_id,
         )
         return AgentColArtifactFeedbackExecutionResult(
             claim=effect.claim,

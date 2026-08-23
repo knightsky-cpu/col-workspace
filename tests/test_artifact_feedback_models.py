@@ -56,6 +56,25 @@ def test_feedback_request_requires_correction_only_for_edited_decision() -> None
         )
 
 
+def test_feedback_request_accepts_one_prior_feedback_to_supersede() -> None:
+    from schemas import ArtifactFeedbackDecisionRequest
+
+    request = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="rejected",
+        feedback_text="I am reversing my earlier acceptance.",
+        expected_schema_version="2.0",
+        supersedes_feedback_id=(
+            "feedback--0123456789abcdef0123456789abcdef"
+        ),
+    )
+
+    assert request.supersedes_feedback_id == (
+        "feedback--0123456789abcdef0123456789abcdef"
+    )
+
+
 @pytest.mark.parametrize(
     "unsafe_text",
     ("unsafe\x00text", "unsafe\x07text", "unsafe\x1ftext"),

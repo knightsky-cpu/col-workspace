@@ -119,6 +119,9 @@ class FeedbackEffectStore(ChatTurnStore):
         self.blueprint_ref = MagicMock()
         self.feedback_collection = MagicMock()
         self.feedback_ref = MagicMock()
+        self.prior_feedback_ref = MagicMock()
+        self.supersessions_collection = MagicMock()
+        self.supersession_ref = MagicMock()
 
         def root_collection(name: str) -> MagicMock:
             if name == "sessions":
@@ -131,8 +134,24 @@ class FeedbackEffectStore(ChatTurnStore):
         self.projects.document.return_value = self.project_ref
         self.project_ref.collection.return_value = self.blueprints
         self.blueprints.document.return_value = self.blueprint_ref
-        self.blueprint_ref.collection.return_value = self.feedback_collection
-        self.feedback_collection.document.return_value = self.feedback_ref
+
+        def blueprint_collection(name: str) -> MagicMock:
+            if name == "feedback":
+                return self.feedback_collection
+            if name == "feedback_supersessions":
+                return self.supersessions_collection
+            raise AssertionError(f"Unexpected blueprint collection: {name}")
+
+        def feedback_document(feedback_id: str) -> MagicMock:
+            if feedback_id == "feedback--prior-event":
+                return self.prior_feedback_ref
+            return self.feedback_ref
+
+        self.blueprint_ref.collection.side_effect = blueprint_collection
+        self.feedback_collection.document.side_effect = feedback_document
+        self.supersessions_collection.document.return_value = (
+            self.supersession_ref
+        )
 
 
 def turn_document(
@@ -267,13 +286,19 @@ def stored_blueprint_effect_document(
     }
 
 
-def artifact_feedback_request() -> ArtifactFeedbackDecisionRequest:
+def artifact_feedback_request(
+    *,
+    decision: str = "accepted",
+    feedback_text: str = "This boundary is correct.",
+    supersedes_feedback_id: str | None = None,
+) -> ArtifactFeedbackDecisionRequest:
     return ArtifactFeedbackDecisionRequest(
         artifact_id="blueprint-1",
         target_id="target--0123456789abcdef01234567",
-        decision="accepted",
-        feedback_text="This boundary is correct.",
+        decision=decision,
+        feedback_text=feedback_text,
         expected_schema_version="2.0",
+        supersedes_feedback_id=supersedes_feedback_id,
     )
 
 
@@ -400,6 +425,126 @@ async def test_record_chat_turn_feedback_effect_is_atomic(
             "updated_at": firestore.SERVER_TIMESTAMP,
         },
         merge=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_feedback_supersession_is_immutable_and_atomic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("artifact-feedback-supersession-1")
+    store = FeedbackEffectStore(ids)
+    prior_feedback_id = "feedback--prior-event"
+    feedback_request = artifact_feedback_request(
+        decision="rejected",
+        feedback_text="I am reversing my earlier acceptance.",
+        supersedes_feedback_id=prior_feedback_id,
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-2",
+            user_id="user-1",
+            message="Reverse my earlier artifact feedback.",
+            artifact_feedback_decision=feedback_request,
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    stored_turn = turn_document(
+        ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["artifact_feedback_decision"] = (
+        feedback_request.model_dump(mode="json")
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.blueprint_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                **stored_blueprint_effect_document(ids),
+                "user_id": "user-1",
+                "feedback_counts": {
+                    "accepted": 1,
+                    "rejected": 0,
+                    "edited": 0,
+                },
+            },
+        )
+    )
+    store.feedback_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.prior_feedback_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "feedback_contract_version": "1.0",
+                "feedback_id": prior_feedback_id,
+                "artifact_id": "blueprint-1",
+                "target_id": "target--0123456789abcdef01234567",
+                "target_kind": "whole_blueprint",
+                "decision": "accepted",
+                "feedback_text": "This boundary is correct.",
+                "correction_text": None,
+                "originating_session_id": "session-1",
+                "source_message_id": "message-1",
+                "originating_turn_id": "prior-turn",
+                "user_id": "user-1",
+                "schema_version": "2.0",
+                "created_at": NOW - timedelta(minutes=10),
+                "status": "active",
+                "supersedes_feedback_id": None,
+            },
+        )
+    )
+    store.supersession_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+
+    result = await MemoryEngine(
+        store.client
+    ).record_chat_turn_artifact_feedback_effect(
+        claim,
+        target_kind="whole_blueprint",
+        observed_at=NOW,
+    )
+
+    assert result.feedback.decision == "rejected"
+    assert store.supersessions_collection.document.call_args == call(
+        prior_feedback_id
+    )
+    assert store.transaction.set.call_args_list[1].args[1][
+        "supersedes_feedback_id"
+    ] == prior_feedback_id
+    assert store.transaction.set.call_args_list[2] == call(
+        store.supersession_ref,
+        {
+            "supersession_contract_version": "1.0",
+            "supersedes_feedback_id": prior_feedback_id,
+            "superseded_by_feedback_id": f"feedback--{ids.turn_id}",
+            "created_at": NOW,
+        },
+    )
+    assert store.transaction.set.call_args_list[3] == call(
+        store.blueprint_ref,
+        {
+            "feedback_counts": {
+                "accepted": 0,
+                "rejected": 1,
+                "edited": 0,
+            }
+        },
+        merge=True,
+    )
+    assert all(
+        item.args[0] is not store.prior_feedback_ref
+        for item in store.transaction.set.call_args_list
     )
 
 

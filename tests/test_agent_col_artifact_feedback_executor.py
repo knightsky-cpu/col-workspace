@@ -28,6 +28,7 @@ def feedback_request() -> ArtifactFeedbackDecisionRequest:
         decision="edited",
         feedback_text="The milestone needs a measurable outcome.",
         correction_text="Require one passing verification command.",
+        supersedes_feedback_id="feedback--prior-event",
         expected_schema_version="2.0",
     )
 
@@ -158,4 +159,6 @@ async def test_feedback_executor_resolves_and_records_atomic_turn_effect(
     assert result.projection.correction_text == (
         "Require one passing verification command."
     )
-
+    assert result.projection.supersedes_feedback_id == (
+        "feedback--prior-event"
+    )

@@ -14,6 +14,7 @@ from artifact_feedback_service import (
     ArtifactFeedbackSchemaConflictError,
     ArtifactFeedbackStateError,
     ArtifactFeedbackTargetNotFoundError,
+    ListArtifactFeedbackCommand,
 )
 from artifact_read_service import (
     ArtifactReadService,
@@ -45,6 +46,7 @@ from database import (
     BlueprintArtifactNotFoundError,
     BlueprintDocumentRecord,
     BlueprintFeedbackConflictError,
+    BlueprintFeedbackCursorNotFoundError,
     BlueprintFeedbackStateError,
     MemoryEventCursorNotFoundError,
     MemoryProposalConflictError,
@@ -63,8 +65,10 @@ from schemas import (
     ArtifactFeedbackDecisionRequest,
     ArtifactFeedbackReference,
     ArtifactFeedbackCounts,
+    ArtifactFeedbackEvent,
     ArtifactFeedbackTarget,
     BlueprintArtifactDetailResponse,
+    BlueprintArtifactFeedbackListResponse,
     BlueprintArtifactListResponse,
     BlueprintArtifactMetadata,
     ChatResponse,
@@ -532,6 +536,22 @@ class FakeArtifactReadService:
 
 
 @dataclass
+class FakeArtifactFeedbackService:
+    result: BlueprintArtifactFeedbackListResponse
+    error: Exception | None = None
+    calls: list[ListArtifactFeedbackCommand] = field(default_factory=list)
+
+    async def list_feedback(
+        self,
+        command: ListArtifactFeedbackCommand,
+    ) -> BlueprintArtifactFeedbackListResponse:
+        self.calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+@dataclass
 class ServiceState:
     events: list[tuple[Any, ...]]
     database: FakeMemoryEngine
@@ -547,7 +567,7 @@ class ServiceState:
     memory_service: FakeTrustedMemoryService
     artifact_service: FakeArtifactReadService
     artifact_executor: object
-    artifact_feedback_service: object
+    artifact_feedback_service: FakeArtifactFeedbackService
     artifact_feedback_executor: object
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
@@ -692,7 +712,13 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         ),
     )
     artifact_executor = object()
-    artifact_feedback_service = object()
+    artifact_feedback_service = FakeArtifactFeedbackService(
+        result=BlueprintArtifactFeedbackListResponse(
+            artifact_id="blueprint-1",
+            events=[],
+            next_before=None,
+        )
+    )
     artifact_feedback_executor = object()
     genai_client_kwargs: list[dict[str, object]] = []
     responder_vertex_settings: list[VertexAISettings] = []
@@ -1543,6 +1569,89 @@ async def test_get_blueprint_artifact_returns_canonical_detail(
             blueprint_id="blueprint-1",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_blueprint_feedback_returns_bounded_lifecycle(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    reference = ArtifactFeedbackReference(
+        feedback_id="feedback--event-1",
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        target_kind="whole_blueprint",
+        decision="accepted",
+        schema_version="2.0",
+        created_at=datetime(2026, 8, 23, 19, 0, tzinfo=UTC),
+    )
+    service_state.artifact_feedback_service.result = (
+        BlueprintArtifactFeedbackListResponse(
+            artifact_id="blueprint-1",
+            events=[
+                ArtifactFeedbackEvent(
+                    reference=reference,
+                    feedback_text="This boundary is correct.",
+                    originating_session_id="session-1",
+                    source_message_id="message-1",
+                    originating_turn_id="turn-1",
+                    status="active",
+                )
+            ],
+            next_before="feedback--event-1",
+        )
+    )
+
+    response = await client.get(
+        "/api/projects/project-1/blueprints/blueprint-1/feedback",
+        params={"limit": 10, "before": "feedback--cursor"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == (
+        service_state.artifact_feedback_service.result.model_dump(mode="json")
+    )
+    assert service_state.artifact_feedback_service.calls == [
+        ListArtifactFeedbackCommand(
+            project_id="project-1",
+            artifact_id="blueprint-1",
+            limit=10,
+            before="feedback--cursor",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    (
+        (
+            BlueprintFeedbackCursorNotFoundError("private cursor"),
+            404,
+            "Artifact feedback cursor was not found.",
+        ),
+        (
+            ArtifactFeedbackStateError("private stored payload"),
+            500,
+            "Stored artifact feedback is invalid.",
+        ),
+    ),
+)
+async def test_list_blueprint_feedback_translates_safe_errors(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    service_state.artifact_feedback_service.error = error
+
+    response = await client.get(
+        "/api/projects/project-1/blueprints/blueprint-1/feedback"
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
 
 
 @pytest.mark.asyncio
