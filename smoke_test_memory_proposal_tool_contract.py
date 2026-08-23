@@ -85,6 +85,7 @@ async def run_memory_proposal_tool_contract_smoke(
                         "I prefer concise responses."
                     ),
                     "memory_decision_present": False,
+                    "artifact_feedback_decision_present": False,
                 },
                 delta={},
             )

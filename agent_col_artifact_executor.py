@@ -177,7 +177,9 @@ class AgentColArtifactExecutor:
             or directive.artifact_intent is None
             or directive.artifact_intent.operation != "create_blueprint"
             or claim.request.memory_decision is not None
+            or claim.request.artifact_feedback_decision is not None
             or claim.precompleted_memory_proposals
+            or claim.precompleted_artifact_feedback
             or command.observed_at.tzinfo is None
             or command.observed_at.utcoffset() is None
         ):

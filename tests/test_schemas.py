@@ -595,11 +595,13 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "user_id": "user-1",
         "message": "Help me plan this.",
         "memory_decision": None,
+        "artifact_feedback_decision": None,
     }
     assert response.model_dump(mode="json") == {
         "response": "Collaborative answer.",
         "actions": [],
         "artifacts": [],
+        "artifact_feedback": [],
         "citations": [],
         "memory_proposals": [],
         "adaptations": [],

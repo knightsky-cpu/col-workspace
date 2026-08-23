@@ -10,6 +10,11 @@ import pytest
 import pytest_asyncio
 
 import main
+from artifact_feedback_service import (
+    ArtifactFeedbackSchemaConflictError,
+    ArtifactFeedbackStateError,
+    ArtifactFeedbackTargetNotFoundError,
+)
 from artifact_read_service import (
     ArtifactReadService,
     ArtifactReadStateError,
@@ -39,6 +44,8 @@ from database import (
     BlueprintArtifactCursorNotFoundError,
     BlueprintArtifactNotFoundError,
     BlueprintDocumentRecord,
+    BlueprintFeedbackConflictError,
+    BlueprintFeedbackStateError,
     MemoryEventCursorNotFoundError,
     MemoryProposalConflictError,
     MemoryProposalExpiredError,
@@ -53,6 +60,8 @@ from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
     ArtifactReference,
+    ArtifactFeedbackDecisionRequest,
+    ArtifactFeedbackReference,
     ArtifactFeedbackCounts,
     ArtifactFeedbackTarget,
     BlueprintArtifactDetailResponse,
@@ -162,6 +171,7 @@ DEFAULT_TURN_ID = "b" * 64
 def make_chat_turn_claim(
     *,
     memory_decision: MemoryDecisionRequest | None = None,
+    artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None,
     owner_token: str = "owner-token-1",
     resumed: bool = False,
 ) -> ChatTurnClaim:
@@ -172,6 +182,7 @@ def make_chat_turn_claim(
             user_id="user-1",
             message="New question",
             memory_decision=memory_decision,
+            artifact_feedback_decision=artifact_feedback_decision,
         ),
         ids=ChatTurnIds(
             turn_id=DEFAULT_TURN_ID,
@@ -536,6 +547,8 @@ class ServiceState:
     memory_service: FakeTrustedMemoryService
     artifact_service: FakeArtifactReadService
     artifact_executor: object
+    artifact_feedback_service: object
+    artifact_feedback_executor: object
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
     research_vertex_settings: list[VertexAISettings]
@@ -548,8 +561,10 @@ class ServiceState:
     artifact_executor_dependencies: list[
         tuple[object, object, object]
     ]
+    artifact_feedback_service_dependencies: list[tuple[object, object]]
+    artifact_feedback_executor_dependencies: list[tuple[object, object]]
     turn_service_dependencies: list[
-        tuple[object, object, object, object]
+        tuple[object, object, object, object, object]
     ]
 
 
@@ -677,6 +692,8 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         ),
     )
     artifact_executor = object()
+    artifact_feedback_service = object()
+    artifact_feedback_executor = object()
     genai_client_kwargs: list[dict[str, object]] = []
     responder_vertex_settings: list[VertexAISettings] = []
     research_vertex_settings: list[VertexAISettings] = []
@@ -689,8 +706,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     artifact_executor_dependencies: list[
         tuple[object, object, object]
     ] = []
+    artifact_feedback_service_dependencies: list[tuple[object, object]] = []
+    artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
     turn_service_dependencies: list[
-        tuple[object, object, object, object]
+        tuple[object, object, object, object, object]
     ] = []
     state = ServiceState(
         events=events,
@@ -709,6 +728,8 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         memory_service=memory_service,
         artifact_service=artifact_service,
         artifact_executor=artifact_executor,
+        artifact_feedback_service=artifact_feedback_service,
+        artifact_feedback_executor=artifact_feedback_executor,
         genai_client_kwargs=genai_client_kwargs,
         responder_vertex_settings=responder_vertex_settings,
         research_vertex_settings=research_vertex_settings,
@@ -719,6 +740,12 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         responder_memory_services=responder_memory_services,
         expert_executor_dependencies=expert_executor_dependencies,
         artifact_executor_dependencies=artifact_executor_dependencies,
+        artifact_feedback_service_dependencies=(
+            artifact_feedback_service_dependencies
+        ),
+        artifact_feedback_executor_dependencies=(
+            artifact_feedback_executor_dependencies
+        ),
         turn_service_dependencies=turn_service_dependencies,
     )
 
@@ -845,6 +872,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         expert_executor: object,
         responder_runtime: object,
         artifact_executor: object,
+        artifact_feedback_executor: object,
     ) -> object:
         turn_service_dependencies.append(
             (
@@ -852,6 +880,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 expert_executor,
                 responder_runtime,
                 artifact_executor,
+                artifact_feedback_executor,
             )
         )
         return turn_service
@@ -907,6 +936,40 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         main,
         "AgentColArtifactExecutor",
         create_artifact_executor,
+        raising=False,
+    )
+
+    def create_artifact_feedback_service(
+        *,
+        artifact_reader: object,
+        feedback_repository: object,
+    ) -> object:
+        artifact_feedback_service_dependencies.append(
+            (artifact_reader, feedback_repository)
+        )
+        return artifact_feedback_service
+
+    monkeypatch.setattr(
+        main,
+        "ArtifactFeedbackService",
+        create_artifact_feedback_service,
+        raising=False,
+    )
+
+    def create_artifact_feedback_executor(
+        *,
+        feedback_resolver: object,
+        feedback_ledger: object,
+    ) -> object:
+        artifact_feedback_executor_dependencies.append(
+            (feedback_resolver, feedback_ledger)
+        )
+        return artifact_feedback_executor
+
+    monkeypatch.setattr(
+        main,
+        "AgentColArtifactFeedbackExecutor",
+        create_artifact_feedback_executor,
         raising=False,
     )
     return state
@@ -1335,12 +1398,25 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 service_state.artifact_service,
             )
         ]
+        assert service_state.artifact_feedback_service_dependencies == [
+            (
+                service_state.artifact_service,
+                service_state.database,
+            )
+        ]
+        assert service_state.artifact_feedback_executor_dependencies == [
+            (
+                service_state.artifact_feedback_service,
+                service_state.database,
+            )
+        ]
         assert service_state.turn_service_dependencies == [
             (
                 service_state.genai_client,
                 service_state.expert_executor,
                 service_state.supervisor,
                 service_state.artifact_executor,
+                service_state.artifact_feedback_executor,
             )
         ]
 
@@ -1804,6 +1880,7 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
             }
             ],
             "artifacts": [],
+            "artifact_feedback": [],
             "citations": [],
             "memory_proposals": [],
             "adaptations": [
@@ -2025,9 +2102,10 @@ async def test_chat_builds_turn_command_and_persists_both_messages(
     assert response.status_code == 200
     assert response.json() == {
         "response": "Generated answer",
-        "actions": [],
-        "artifacts": [],
-        "citations": [],
+            "actions": [],
+            "artifacts": [],
+            "artifact_feedback": [],
+            "citations": [],
         "memory_proposals": [],
         "adaptations": [
             {
@@ -2552,6 +2630,368 @@ async def test_artifact_responder_failure_releases_refreshed_claim_and_receipts(
     }
     assert service_state.database.release_calls[0][0] is effect_claim
     assert service_state.database.complete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_requires_idempotency_key_for_artifact_feedback(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "I accept this blueprint boundary.",
+            "artifact_feedback_decision": {
+                "artifact_id": "blueprint-1",
+                "target_id": "target--0123456789abcdef01234567",
+                "decision": "accepted",
+                "feedback_text": "This boundary is correct.",
+                "expected_schema_version": "2.0",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Artifact feedback requires an idempotency key."
+    }
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_chat_completes_structured_artifact_feedback_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    claim = make_chat_turn_claim(artifact_feedback_decision=decision)
+    renewed_claim = replace(
+        claim,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+    )
+    action = AgentActionReceipt(
+        action_name="record_blueprint_feedback",
+        status="completed",
+    )
+    feedback = ArtifactFeedbackReference(
+        feedback_id=f"feedback--{claim.ids.turn_id}",
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        target_kind="whole_blueprint",
+        decision="accepted",
+        schema_version="2.0",
+        created_at=MEMORY_NOW,
+    )
+    effect_claim = replace(
+        renewed_claim,
+        precompleted_actions=(action,),
+        precompleted_artifact_feedback=(feedback,),
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="I recorded your artifact feedback.",
+        actions=(action,),
+        artifact_feedback=(feedback,),
+        chat_turn_claim=effect_claim,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-feedback-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["actions"] == [action.model_dump(mode="json")]
+    assert response.json()["artifact_feedback"] == [
+        feedback.model_dump(mode="json")
+    ]
+    turn_request = service_state.database.claim_calls[0][0]
+    assert turn_request.artifact_feedback_decision == decision
+    command = service_state.turn_service.calls[0]
+    assert command.artifact_feedback_decision_present is True
+    assert command.chat_turn_claim is renewed_claim
+    assert service_state.database.complete_calls[0][0] is effect_claim
+    assert service_state.database.complete_calls[0][1].artifact_feedback == [
+        feedback
+    ]
+
+
+@pytest.mark.asyncio
+async def test_feedback_responder_failure_returns_completed_receipt(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    claim = make_chat_turn_claim(artifact_feedback_decision=decision)
+    action = AgentActionReceipt(
+        action_name="record_blueprint_feedback",
+        status="completed",
+    )
+    feedback = ArtifactFeedbackReference(
+        feedback_id=f"feedback--{claim.ids.turn_id}",
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        target_kind="whole_blueprint",
+        decision="accepted",
+        schema_version="2.0",
+        created_at=MEMORY_NOW,
+    )
+    effect_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_artifact_feedback=(feedback,),
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.released_claim = effect_claim
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private responder failure",
+        actions=(action,),
+        artifact_feedback=(feedback,),
+        chat_turn_claim=effect_claim,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-feedback-failure-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["actions"] == [action.model_dump(mode="json")]
+    assert response.json()["artifact_feedback"] == [
+        feedback.model_dump(mode="json")
+    ]
+    assert service_state.database.complete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_feedback_missing_target_returns_safe_not_found(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        artifact_feedback_decision=decision
+    )
+    cause = ArtifactFeedbackTargetNotFoundError("private target locator")
+    error = AgentColTurnServiceError(
+        "Agent_Col artifact feedback execution failed."
+    )
+    error.__cause__ = cause
+    service_state.turn_service.error = error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-feedback-missing-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "Blueprint artifact or feedback target was not found."
+    }
+    assert "private target locator" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_feedback_stale_schema_returns_safe_conflict(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        artifact_feedback_decision=decision
+    )
+    cause = ArtifactFeedbackSchemaConflictError("private schema state")
+    error = AgentColTurnServiceError(
+        "Agent_Col artifact feedback execution failed."
+    )
+    error.__cause__ = cause
+    service_state.turn_service.error = error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-feedback-conflict-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Artifact feedback conflicts with the current artifact state."
+    }
+    assert "private schema state" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_feedback_ledger_conflict_returns_safe_conflict(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        artifact_feedback_decision=decision
+    )
+    cause = BlueprintFeedbackConflictError("private ledger state")
+    error = AgentColTurnServiceError(
+        "Agent_Col artifact feedback execution failed."
+    )
+    error.__cause__ = cause
+    service_state.turn_service.error = error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-feedback-ledger-conflict-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Artifact feedback conflicts with the current artifact state."
+    }
+    assert "private ledger state" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_feedback_invalid_state_returns_safe_internal_error(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        artifact_feedback_decision=decision
+    )
+    cause = ArtifactFeedbackStateError("private inconsistent receipt")
+    error = AgentColTurnServiceError(
+        "Agent_Col artifact feedback execution failed."
+    )
+    error.__cause__ = cause
+    service_state.turn_service.error = error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-feedback-state-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Artifact feedback state is invalid."}
+    assert "private inconsistent receipt" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_feedback_ledger_invalid_state_returns_safe_internal_error(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        artifact_feedback_decision=decision
+    )
+    cause = BlueprintFeedbackStateError("private ledger receipt")
+    error = AgentColTurnServiceError(
+        "Agent_Col artifact feedback execution failed."
+    )
+    error.__cause__ = cause
+    service_state.turn_service.error = error
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-feedback-ledger-state-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Artifact feedback state is invalid."}
+    assert "private ledger receipt" not in response.text
 
 
 @pytest.mark.asyncio

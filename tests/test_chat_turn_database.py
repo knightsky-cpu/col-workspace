@@ -23,6 +23,8 @@ from chat_turns import (
 from database import MemoryEngine, MemoryEngineError
 from schemas import (
     AgentActionReceipt,
+    ArtifactFeedbackDecisionRequest,
+    ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
     MemoryDecisionRequest,
@@ -108,6 +110,31 @@ class ArtifactEffectStore(ChatTurnStore):
         self.blueprints.document.return_value = self.blueprint_ref
 
 
+class FeedbackEffectStore(ChatTurnStore):
+    def __init__(self, ids: ChatTurnIds) -> None:
+        super().__init__(ids)
+        self.projects = MagicMock()
+        self.project_ref = MagicMock()
+        self.blueprints = MagicMock()
+        self.blueprint_ref = MagicMock()
+        self.feedback_collection = MagicMock()
+        self.feedback_ref = MagicMock()
+
+        def root_collection(name: str) -> MagicMock:
+            if name == "sessions":
+                return self.sessions
+            if name == "projects":
+                return self.projects
+            raise AssertionError(f"Unexpected root collection: {name}")
+
+        self.client.collection.side_effect = root_collection
+        self.projects.document.return_value = self.project_ref
+        self.project_ref.collection.return_value = self.blueprints
+        self.blueprints.document.return_value = self.blueprint_ref
+        self.blueprint_ref.collection.return_value = self.feedback_collection
+        self.feedback_collection.document.return_value = self.feedback_ref
+
+
 def turn_document(
     ids: ChatTurnIds,
     *,
@@ -136,6 +163,7 @@ def turn_document(
             {
                 "actions": [],
                 "artifacts": [],
+                "artifact_feedback": [],
                 "citations": [],
                 "memory_proposals": [],
                 "adaptations": [],
@@ -186,6 +214,29 @@ def blueprint_reference_document(
     }
 
 
+def feedback_action_document() -> dict[str, str]:
+    return {
+        "action_name": "record_blueprint_feedback",
+        "status": "completed",
+    }
+
+
+def feedback_reference_document(
+    ids: ChatTurnIds,
+    *,
+    created_at: datetime = NOW,
+) -> dict[str, object]:
+    return {
+        "feedback_id": f"feedback--{ids.turn_id}",
+        "artifact_id": "blueprint-1",
+        "target_id": "target--0123456789abcdef01234567",
+        "target_kind": "whole_blueprint",
+        "decision": "accepted",
+        "schema_version": "2.0",
+        "created_at": created_at,
+    }
+
+
 def stored_blueprint_effect_document(
     ids: ChatTurnIds,
     *,
@@ -214,6 +265,235 @@ def stored_blueprint_effect_document(
             }
         },
     }
+
+
+def artifact_feedback_request() -> ArtifactFeedbackDecisionRequest:
+    return ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+
+
+def feedback_turn_claim() -> tuple[FeedbackEffectStore, ChatTurnClaim]:
+    ids = derive_chat_turn_ids("artifact-feedback-request-1")
+    store = FeedbackEffectStore(ids)
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="I accept this blueprint boundary.",
+        artifact_feedback_decision=artifact_feedback_request(),
+    )
+    claim = ChatTurnClaim(
+        request=request,
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    stored_turn = turn_document(
+        ids,
+        owner="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+    )
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.blueprint_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                **stored_blueprint_effect_document(ids),
+                "originating_turn_id": "different-origin-turn",
+                "originating_session_id": "artifact-origin-session",
+                "feedback_counts": {
+                    "accepted": 0,
+                    "rejected": 1,
+                    "edited": 0,
+                },
+            },
+        )
+    )
+    store.feedback_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    return store, claim
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_feedback_effect_is_atomic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = feedback_turn_claim()
+
+    result = await MemoryEngine(
+        store.client
+    ).record_chat_turn_artifact_feedback_effect(
+        claim,
+        target_kind="whole_blueprint",
+        observed_at=NOW,
+    )
+
+    expected_action = AgentActionReceipt(
+        action_name="record_blueprint_feedback",
+        status="completed",
+    )
+    expected_feedback = ArtifactFeedbackReference(
+        feedback_id=f"feedback--{claim.ids.turn_id}",
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        target_kind="whole_blueprint",
+        decision="accepted",
+        schema_version="2.0",
+        created_at=NOW,
+    )
+    assert result.action == expected_action
+    assert result.feedback == expected_feedback
+    assert result.claim.precompleted_actions == (expected_action,)
+    assert result.claim.precompleted_artifact_feedback == (
+        expected_feedback,
+    )
+    feedback_document = store.transaction.set.call_args_list[1].args[1]
+    assert feedback_document == {
+        "feedback_contract_version": "1.0",
+        "feedback_id": f"feedback--{claim.ids.turn_id}",
+        "artifact_id": "blueprint-1",
+        "target_id": "target--0123456789abcdef01234567",
+        "target_kind": "whole_blueprint",
+        "decision": "accepted",
+        "feedback_text": "This boundary is correct.",
+        "correction_text": None,
+        "originating_session_id": "session-1",
+        "source_message_id": claim.ids.user_message_id,
+        "originating_turn_id": claim.ids.turn_id,
+        "user_id": "user-1",
+        "schema_version": "2.0",
+        "created_at": NOW,
+        "status": "active",
+        "supersedes_feedback_id": None,
+    }
+    assert store.transaction.set.call_args_list[2] == call(
+        store.blueprint_ref,
+        {
+            "feedback_counts": {
+                "accepted": 1,
+                "rejected": 1,
+                "edited": 0,
+            }
+        },
+        merge=True,
+    )
+    assert store.transaction.set.call_args_list[3] == call(
+        store.turn_ref,
+        {
+            "actions": [expected_action.model_dump(mode="python")],
+            "artifact_feedback": [
+                expected_feedback.model_dump(mode="python")
+            ],
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_feedback_effect_reuses_original_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = feedback_turn_claim()
+    original_created_at = NOW - timedelta(minutes=5)
+    stored_turn = turn_document(
+        claim.ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    stored_turn["actions"] = [feedback_action_document()]
+    stored_turn["artifact_feedback"] = [
+        feedback_reference_document(
+            claim.ids,
+            created_at=original_created_at,
+        )
+    ]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.feedback_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "feedback_contract_version": "1.0",
+                "feedback_id": f"feedback--{claim.ids.turn_id}",
+                "artifact_id": "blueprint-1",
+                "target_id": "target--0123456789abcdef01234567",
+                "target_kind": "whole_blueprint",
+                "decision": "accepted",
+                "feedback_text": "This boundary is correct.",
+                "correction_text": None,
+                "originating_session_id": "session-1",
+                "source_message_id": claim.ids.user_message_id,
+                "originating_turn_id": claim.ids.turn_id,
+                "user_id": "user-1",
+                "schema_version": "2.0",
+                "created_at": original_created_at,
+                "status": "active",
+                "supersedes_feedback_id": None,
+            },
+        )
+    )
+
+    result = await MemoryEngine(
+        store.client
+    ).record_chat_turn_artifact_feedback_effect(
+        claim,
+        target_kind="whole_blueprint",
+        observed_at=NOW,
+    )
+
+    assert result.feedback.created_at == original_created_at
+    assert result.claim.precompleted_artifact_feedback == (result.feedback,)
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_feedback_effect_rejects_changed_turn_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = feedback_turn_claim()
+    changed = artifact_feedback_request().model_copy(
+        update={"feedback_text": "Stored request is different."}
+    )
+    stored_turn = turn_document(
+        claim.ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["artifact_feedback_decision"] = changed.model_dump(mode="json")
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(
+            store.client
+        ).record_chat_turn_artifact_feedback_effect(
+            claim,
+            target_kind="whole_blueprint",
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
 
 
 def claimed_store(
@@ -319,6 +599,38 @@ async def test_claim_chat_turn_atomically_creates_turn_and_user_message(
 
 
 @pytest.mark.asyncio
+async def test_claim_chat_turn_persists_structured_feedback_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("artifact-feedback-request-1")
+    store = ChatTurnStore(ids)
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    monkeypatch.setattr(database.secrets, "token_hex", lambda _: "owner-token")
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="I accept this blueprint boundary.",
+        artifact_feedback_decision=artifact_feedback_request(),
+    )
+
+    await MemoryEngine(store.client).claim_chat_turn(
+        request,
+        idempotency_key="artifact-feedback-request-1",
+        observed_at=NOW,
+    )
+
+    stored_turn = store.transaction.set.call_args_list[1].args[1]
+    assert stored_turn["artifact_feedback_decision"] == (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_rejects_request_mismatch_without_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -344,6 +656,43 @@ async def test_claim_chat_turn_rejects_request_mismatch_without_writes(
     with pytest.raises(ChatTurnConflictError):
         await MemoryEngine(store.client).claim_chat_turn(
             request,
+            idempotency_key="request-1",
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_claim_chat_turn_rejects_changed_feedback_with_same_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(ids)
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    changed = artifact_feedback_request().model_copy(
+        update={"feedback_text": "This is a changed decision."}
+    )
+
+    with pytest.raises(ChatTurnConflictError):
+        await MemoryEngine(store.client).claim_chat_turn(
+            ChatTurnRequest(
+                project_id="agent-col",
+                session_id="session-1",
+                user_id="user-1",
+                message="Remember one logical turn.",
+                artifact_feedback_decision=changed,
+            ),
             idempotency_key="request-1",
             observed_at=NOW,
         )
@@ -515,6 +864,52 @@ async def test_reclaimed_chat_turn_recovers_precompleted_artifact_effect(
 
 
 @pytest.mark.asyncio
+async def test_reclaimed_chat_turn_recovers_precompleted_feedback_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(
+        ids,
+        lease_expires_at=NOW - timedelta(seconds=1),
+    )
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    stored_turn["actions"] = [feedback_action_document()]
+    stored_turn["artifact_feedback"] = [feedback_reference_document(ids)]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    monkeypatch.setattr(database.secrets, "token_hex", lambda _: "new-owner")
+
+    claim = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+            artifact_feedback_decision=artifact_feedback_request(),
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert claim.precompleted_actions == (
+        AgentActionReceipt.model_validate(feedback_action_document()),
+    )
+    assert claim.precompleted_artifact_feedback == (
+        ArtifactFeedbackReference.model_validate(
+            feedback_reference_document(ids)
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_replays_completed_response_without_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -552,6 +947,53 @@ async def test_claim_chat_turn_replays_completed_response_without_writes(
     assert result == ChatTurnReplay(
         response=ChatResponse(response="Durable answer.")
     )
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_completed_chat_turn_replay_preserves_feedback_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(ids, status="completed")
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    stored_turn["actions"] = [feedback_action_document()]
+    stored_turn["artifact_feedback"] = [feedback_reference_document(ids)]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"role": "model", "text": "Recorded.", "timestamp": NOW},
+        )
+    )
+
+    result = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+            artifact_feedback_decision=artifact_feedback_request(),
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert isinstance(result, ChatTurnReplay)
+    assert result.response.artifact_feedback == [
+        ArtifactFeedbackReference.model_validate(
+            feedback_reference_document(ids)
+        )
+    ]
     store.transaction.set.assert_not_called()
 
 
@@ -704,6 +1146,32 @@ async def test_claim_chat_turn_rejects_invalid_request_before_firestore(
 
 
 @pytest.mark.asyncio
+async def test_claim_chat_turn_rejects_two_structured_decisions_before_firestore(
+) -> None:
+    client = MagicMock()
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Apply both decisions.",
+        memory_decision=MemoryDecisionRequest(
+            proposal_id="response_length--proposal-1",
+            decision="approve",
+        ),
+        artifact_feedback_decision=artifact_feedback_request(),
+    )
+
+    with pytest.raises(ValueError):
+        await MemoryEngine(client).claim_chat_turn(
+            request,
+            idempotency_key="request-1",
+            observed_at=NOW,
+        )
+
+    client.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_preserves_firestore_failure_as_cause(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -732,6 +1200,7 @@ async def test_claim_chat_turn_preserves_firestore_failure_as_cause(
         "proposal_without_action",
         "artifact_without_action",
         "synthesis_without_artifact",
+        "feedback_without_action",
     ),
 )
 async def test_chat_turn_operations_reject_invalid_claim_effects_before_firestore(
@@ -763,12 +1232,21 @@ async def test_chat_turn_operations_reject_invalid_claim_effects_before_firestor
                 ),
             ),
         )
-    else:
+    elif invalid_effect == "synthesis_without_artifact":
         invalid_claim = replace(
             claim,
             precompleted_actions=(
                 AgentActionReceipt.model_validate(
                     blueprint_action_document()
+                ),
+            ),
+        )
+    else:
+        invalid_claim = replace(
+            claim,
+            precompleted_artifact_feedback=(
+                ArtifactFeedbackReference.model_validate(
+                    feedback_reference_document(claim.ids)
                 ),
             ),
         )
@@ -873,6 +1351,40 @@ async def test_release_chat_turn_recovers_completed_effects(
     )
     assert released.precompleted_memory_proposals == (
         MemoryProposalReceipt.model_validate(proposal_receipt_document()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_release_chat_turn_recovers_feedback_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = feedback_turn_claim()
+    stored_turn = turn_document(
+        claim.ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    stored_turn["actions"] = [feedback_action_document()]
+    stored_turn["artifact_feedback"] = [
+        feedback_reference_document(claim.ids)
+    ]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+
+    released = await MemoryEngine(store.client).release_chat_turn(
+        claim,
+        observed_at=NOW,
+    )
+
+    assert released.precompleted_artifact_feedback == (
+        ArtifactFeedbackReference.model_validate(
+            feedback_reference_document(claim.ids)
+        ),
     )
 
 
@@ -1009,6 +1521,59 @@ async def test_record_chat_turn_blueprint_effect_writes_artifact_and_ledger_atom
             merge=True,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_blueprint_effect_rejects_feedback_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-feedback-conflict")
+    store = ArtifactEffectStore(ids)
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a bounded collaboration blueprint.",
+            artifact_feedback_decision=artifact_feedback_request(),
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    stored_turn = turn_document(
+        ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.blueprint_ref.get = AsyncMock(return_value=snapshot(exists=False))
+
+    with pytest.raises(
+        ValueError,
+        match="artifact turns cannot contain artifact-feedback decisions",
+    ):
+        await MemoryEngine(store.client).record_chat_turn_blueprint_effect(
+            claim,
+            model_name="gemini-3.6-flash",
+            schema_version="2.0",
+            blueprint={
+                "synthesized_conceptual_model": {
+                    "project_name": "Bounded Collaboration",
+                }
+            },
+            display_label="Bounded Collaboration",
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1209,6 +1774,7 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
                 "status": "completed",
                 "actions": [],
                 "artifacts": [],
+                "artifact_feedback": [],
                 "citations": [],
                 "memory_proposals": [],
                 "adaptations": [],
@@ -1317,6 +1883,53 @@ async def test_complete_chat_turn_rejects_changed_precompleted_proposal_effect(
         await MemoryEngine(store.client).complete_chat_turn(
             claim,
             response,
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_complete_chat_turn_rejects_omitted_feedback_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, initial_claim = feedback_turn_claim()
+    action = AgentActionReceipt.model_validate(feedback_action_document())
+    feedback = ArtifactFeedbackReference.model_validate(
+        feedback_reference_document(initial_claim.ids)
+    )
+    claim = replace(
+        initial_claim,
+        precompleted_actions=(action,),
+        precompleted_artifact_feedback=(feedback,),
+    )
+    stored_turn = turn_document(
+        claim.ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["artifact_feedback_decision"] = (
+        artifact_feedback_request().model_dump(mode="json")
+    )
+    stored_turn["actions"] = [feedback_action_document()]
+    stored_turn["artifact_feedback"] = [
+        feedback_reference_document(claim.ids)
+    ]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(store.client).complete_chat_turn(
+            claim,
+            ChatResponse(
+                response="Unsafe omission.",
+                actions=[action],
+            ),
             observed_at=NOW,
         )
 

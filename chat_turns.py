@@ -6,6 +6,8 @@ from typing import Literal
 
 from schemas import (
     AgentActionReceipt,
+    ArtifactFeedbackDecisionRequest,
+    ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
     MemoryDecisionRequest,
@@ -60,6 +62,7 @@ class ChatTurnRequest:
     user_id: str
     message: str
     memory_decision: MemoryDecisionRequest | None = None
+    artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,9 @@ class ChatTurnClaim:
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
     precompleted_memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
     precompleted_artifacts: tuple[ArtifactReference, ...] = ()
+    precompleted_artifact_feedback: tuple[
+        ArtifactFeedbackReference, ...
+    ] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -18,6 +18,17 @@ from agent_col_artifact_executor import (
     AgentColArtifactExecutorConfigurationError,
     build_agent_col_artifact_model_context,
 )
+from agent_col_artifact_feedback_executor import (
+    AgentColArtifactFeedbackExecutionCommand,
+    AgentColArtifactFeedbackExecutionResult,
+    AgentColArtifactFeedbackExecutorConfigurationError,
+    build_agent_col_artifact_feedback_model_context,
+)
+from artifact_feedback_service import (
+    ArtifactFeedbackSchemaConflictError,
+    ArtifactFeedbackStateError,
+    ArtifactFeedbackTargetNotFoundError,
+)
 from agent_col_numeric_projection import project_routing_numeric_candidates
 from agent_col_responder_context_v3 import (
     AgentColResponderContextV3,
@@ -48,6 +59,12 @@ from agent_col_routing_v4 import (
 )
 from agent_col_text_projection import project_routing_text_blocks
 from chat_turns import ChatTurnClaim
+from database import (
+    BlueprintArtifactNotFoundError,
+    BlueprintFeedbackConflictError,
+    BlueprintFeedbackStateError,
+    MemoryEngineError,
+)
 from computational_expert import ComputationResponderResult
 from expert_contracts import ExpertCapability, ExpertStatus
 from memory_proposals import ProposalTurnLease
@@ -57,6 +74,7 @@ from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
     ArtifactReference,
+    ArtifactFeedbackReference,
     CitationReference,
     MemoryProposalReceipt,
 )
@@ -104,6 +122,13 @@ class ArtifactExecutor(Protocol):
     ) -> AgentColArtifactExecutionResult: ...
 
 
+class ArtifactFeedbackExecutor(Protocol):
+    async def execute(
+        self,
+        command: AgentColArtifactFeedbackExecutionCommand,
+    ) -> AgentColArtifactFeedbackExecutionResult: ...
+
+
 class ExpertExecutor(Protocol):
     @property
     def available_capabilities(self) -> tuple[ExpertCapability, ...]: ...
@@ -132,9 +157,13 @@ class AgentColTurnCommand:
     model_input_context: tuple[types.Content, ...] = ()
     source_message_id: str | None = None
     memory_decision_present: bool = False
+    artifact_feedback_decision_present: bool = False
     turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
     precompleted_memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
+    precompleted_artifact_feedback: tuple[
+        ArtifactFeedbackReference, ...
+    ] = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
 
@@ -143,6 +172,7 @@ class AgentColTurnResult:
     response: str
     actions: tuple[AgentActionReceipt, ...] = ()
     artifacts: tuple[ArtifactReference, ...] = ()
+    artifact_feedback: tuple[ArtifactFeedbackReference, ...] = ()
     citations: tuple[CitationReference, ...] = ()
     memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
     adaptations: tuple[AdaptationReceipt, ...] = ()
@@ -158,6 +188,7 @@ class AgentColTurnServiceError(RuntimeError):
         *,
         actions: tuple[AgentActionReceipt, ...] = (),
         artifacts: tuple[ArtifactReference, ...] = (),
+        artifact_feedback: tuple[ArtifactFeedbackReference, ...] = (),
         memory_proposals: tuple[MemoryProposalReceipt, ...] = (),
         adaptations: tuple[AdaptationReceipt, ...] = (),
         chat_turn_claim: ChatTurnClaim | None = None,
@@ -165,6 +196,7 @@ class AgentColTurnServiceError(RuntimeError):
         super().__init__(message)
         self.actions = actions
         self.artifacts = artifacts
+        self.artifact_feedback = artifact_feedback
         self.memory_proposals = memory_proposals
         self.adaptations = adaptations
         self.chat_turn_claim = chat_turn_claim
@@ -208,6 +240,7 @@ class AgentColTurnService:
             request_agent_col_routing_v3_directive
         ),
         artifact_executor: ArtifactExecutor | None = None,
+        artifact_feedback_executor: ArtifactFeedbackExecutor | None = None,
         artifact_routing_request: ArtifactRoutingRequest = (
             request_agent_col_routing_v4_directive
         ),
@@ -233,6 +266,7 @@ class AgentColTurnService:
         self._responder_runtime = responder_runtime
         self._routing_request = routing_request
         self._artifact_executor = artifact_executor
+        self._artifact_feedback_executor = artifact_feedback_executor
         self._artifact_routing_request = artifact_routing_request
         self._turn_timeout_seconds = turn_timeout_seconds
         self._routing_timeout_seconds = routing_timeout_seconds
@@ -248,6 +282,11 @@ class AgentColTurnService:
         deadline = self._clock() + self._turn_timeout_seconds
         try:
             async with asyncio.timeout(self._turn_timeout_seconds):
+                if command.artifact_feedback_decision_present:
+                    return await self._run_artifact_feedback_with_deadline(
+                        command,
+                        deadline,
+                    )
                 if (
                     self._artifact_executor is not None
                     and command.chat_turn_claim is not None
@@ -270,9 +309,138 @@ class AgentColTurnService:
                     if command.chat_turn_claim is not None
                     else ()
                 ),
+                artifact_feedback=(
+                    command.chat_turn_claim.precompleted_artifact_feedback
+                    if command.chat_turn_claim is not None
+                    else command.precompleted_artifact_feedback
+                ),
                 memory_proposals=command.precompleted_memory_proposals,
                 chat_turn_claim=command.chat_turn_claim,
             ) from exc
+
+    async def _run_artifact_feedback_with_deadline(
+        self,
+        command: AgentColTurnCommand,
+        deadline: float,
+    ) -> AgentColTurnResult:
+        claim = command.chat_turn_claim
+        executor = self._artifact_feedback_executor
+        if claim is None or executor is None:
+            raise AgentColTurnServiceError(
+                "Agent_Col artifact feedback authority is unavailable."
+            )
+        self._validate_artifact_feedback_claim(command, claim)
+        try:
+            execution = await executor.execute(
+                AgentColArtifactFeedbackExecutionCommand(
+                    claim=claim,
+                    observed_at=self._wall_clock(),
+                )
+            )
+        except (
+            AgentColArtifactFeedbackExecutorConfigurationError,
+            ArtifactFeedbackSchemaConflictError,
+            ArtifactFeedbackStateError,
+            ArtifactFeedbackTargetNotFoundError,
+            BlueprintArtifactNotFoundError,
+            BlueprintFeedbackConflictError,
+            BlueprintFeedbackStateError,
+            MemoryEngineError,
+        ) as exc:
+            raise AgentColTurnServiceError(
+                "Agent_Col artifact feedback execution failed.",
+                actions=claim.precompleted_actions,
+                artifact_feedback=claim.precompleted_artifact_feedback,
+                memory_proposals=claim.precompleted_memory_proposals,
+                chat_turn_claim=claim,
+            ) from exc
+        model_input_context = (
+            *command.model_input_context,
+            build_agent_col_artifact_feedback_model_context(
+                execution.projection
+            ),
+        )
+        authoritative_actions = _stable_merge(
+            command.precompleted_actions,
+            execution.actions,
+        )
+        try:
+            async with asyncio.timeout(self._remaining_seconds(deadline)):
+                result = await self._responder_runtime.run_turn(
+                    SupervisorTurnContext(
+                        project_id=command.project_id,
+                        session_id=command.session_id,
+                        user_id=command.user_id,
+                        message=command.message,
+                        model_input_context=model_input_context,
+                        source_message_id=command.source_message_id,
+                        memory_decision_present=False,
+                        artifact_feedback_decision_present=True,
+                        turn_lease=command.turn_lease,
+                        precompleted_actions=authoritative_actions,
+                        precompleted_memory_proposals=(
+                            command.precompleted_memory_proposals
+                        ),
+                    )
+                )
+        except SupervisorTimeoutError as exc:
+            raise AgentColTurnTimeoutError(
+                "Agent_Col turn timed out.",
+                actions=_stable_merge(authoritative_actions, exc.actions),
+                artifact_feedback=execution.artifact_feedback,
+                memory_proposals=_stable_merge(
+                    command.precompleted_memory_proposals,
+                    exc.memory_proposals,
+                ),
+                chat_turn_claim=execution.claim,
+            ) from exc
+        except SupervisorRuntimeError as exc:
+            raise AgentColTurnResponderError(
+                "Agent_Col responder failed.",
+                actions=_stable_merge(authoritative_actions, exc.actions),
+                artifact_feedback=execution.artifact_feedback,
+                memory_proposals=_stable_merge(
+                    command.precompleted_memory_proposals,
+                    exc.memory_proposals,
+                ),
+                chat_turn_claim=execution.claim,
+            ) from exc
+        return AgentColTurnResult(
+            response=result.response,
+            actions=_stable_merge(authoritative_actions, result.actions),
+            artifact_feedback=execution.artifact_feedback,
+            citations=result.citations,
+            memory_proposals=_stable_merge(
+                command.precompleted_memory_proposals,
+                result.memory_proposals,
+            ),
+            chat_turn_claim=execution.claim,
+        )
+
+    @staticmethod
+    def _validate_artifact_feedback_claim(
+        command: AgentColTurnCommand,
+        claim: ChatTurnClaim,
+    ) -> None:
+        request = claim.request
+        if (
+            request.project_id != command.project_id
+            or request.session_id != command.session_id
+            or request.user_id != command.user_id
+            or request.message != command.message
+            or request.artifact_feedback_decision is None
+            or request.memory_decision is not None
+            or not command.artifact_feedback_decision_present
+            or command.memory_decision_present
+            or claim.precompleted_actions != command.precompleted_actions
+            or claim.precompleted_memory_proposals
+            != command.precompleted_memory_proposals
+            or claim.precompleted_artifact_feedback
+            != command.precompleted_artifact_feedback
+        ):
+            raise AgentColTurnServiceError(
+                "Agent_Col artifact feedback claim is inconsistent."
+            )
 
     async def _run_artifact_capable_with_deadline(
         self,

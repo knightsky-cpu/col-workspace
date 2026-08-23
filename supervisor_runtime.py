@@ -63,6 +63,7 @@ class SupervisorTurnContext:
     model_input_context: tuple[types.Content, ...] = ()
     source_message_id: str | None = None
     memory_decision_present: bool = False
+    artifact_feedback_decision_present: bool = False
     turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
     precompleted_memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
@@ -144,6 +145,9 @@ class SupervisorRuntime:
                             "memory_source_message_text": context.message,
                             "memory_decision_present": (
                                 context.memory_decision_present
+                            ),
+                            "artifact_feedback_decision_present": (
+                                context.artifact_feedback_decision_present
                             ),
                         }
                     )

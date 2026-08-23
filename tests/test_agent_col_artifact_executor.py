@@ -10,6 +10,7 @@ from database import ChatTurnArtifactEffectResult
 from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
+    ArtifactFeedbackDecisionRequest,
     ArtifactFeedbackCounts,
     ArtifactReference,
     BlueprintArtifactDetailResponse,
@@ -406,7 +407,10 @@ async def test_artifact_executor_rejects_canonical_artifact_owned_by_other_turn(
         )
 
 
-@pytest.mark.parametrize("conflict", ("non_artifact_route", "memory_decision"))
+@pytest.mark.parametrize(
+    "conflict",
+    ("non_artifact_route", "memory_decision", "artifact_feedback_decision"),
+)
 @pytest.mark.asyncio
 async def test_artifact_executor_rejects_conflicting_authority_before_generation(
     conflict: str,
@@ -421,7 +425,7 @@ async def test_artifact_executor_rejects_conflicting_authority_before_generation
     directive = artifact_directive()
     if conflict == "non_artifact_route":
         directive = AgentColRoutingDirective(route="direct")
-    else:
+    elif conflict == "memory_decision":
         claim = replace(
             claim,
             request=replace(
@@ -429,6 +433,20 @@ async def test_artifact_executor_rejects_conflicting_authority_before_generation
                 memory_decision=MemoryDecisionRequest(
                     proposal_id="response_length--proposal-1",
                     decision="approve",
+                ),
+            ),
+        )
+    else:
+        claim = replace(
+            claim,
+            request=replace(
+                claim.request,
+                artifact_feedback_decision=ArtifactFeedbackDecisionRequest(
+                    artifact_id="blueprint-1",
+                    target_id="target--0123456789abcdef01234567",
+                    decision="accepted",
+                    feedback_text="This boundary is correct.",
+                    expected_schema_version="2.0",
                 ),
             ),
         )

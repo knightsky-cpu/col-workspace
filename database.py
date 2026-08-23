@@ -52,6 +52,7 @@ from schemas import (
     ArtifactFeedbackCounts,
     ArtifactFeedbackDecisionRequest,
     ArtifactFeedbackReference,
+    ArtifactFeedbackTargetKind,
     ArtifactReference,
     ChatResponse,
     CollaborationProfile,
@@ -188,6 +189,15 @@ class ChatTurnArtifactEffectResult:
     artifact: ArtifactReference
 
 
+@dataclass(frozen=True, slots=True)
+class ChatTurnFeedbackEffectResult:
+    """Return one atomically persisted chat-owned feedback effect."""
+
+    claim: ChatTurnClaim
+    action: AgentActionReceipt
+    feedback: ArtifactFeedbackReference
+
+
 class MemoryEngine:
     """Provide asynchronous persistence for chat messages and user profiles."""
 
@@ -247,6 +257,19 @@ class MemoryEngine:
             raise ValueError(
                 "memory_decision must be a MemoryDecisionRequest."
             )
+        if request.artifact_feedback_decision is not None and not isinstance(
+            request.artifact_feedback_decision,
+            ArtifactFeedbackDecisionRequest,
+        ):
+            raise ValueError(
+                "artifact_feedback_decision must be an "
+                "ArtifactFeedbackDecisionRequest."
+            )
+        if (
+            request.memory_decision is not None
+            and request.artifact_feedback_decision is not None
+        ):
+            raise ValueError("structured decisions are mutually exclusive.")
         if (
             not isinstance(observed_at, datetime)
             or observed_at.tzinfo is None
@@ -339,6 +362,12 @@ class MemoryEngine:
                 ) = (
                     self._chat_turn_effects(turn_data)
                 )
+                precompleted_feedback = (
+                    self._chat_turn_feedback_effects(
+                        turn_data,
+                        precompleted_actions,
+                    )
+                )
                 resumed_claim = ChatTurnClaim(
                     request=request,
                     ids=ids,
@@ -348,6 +377,9 @@ class MemoryEngine:
                     precompleted_actions=precompleted_actions,
                     precompleted_memory_proposals=precompleted_proposals,
                     precompleted_artifacts=precompleted_artifacts,
+                    precompleted_artifact_feedback=(
+                        precompleted_feedback
+                    ),
                 )
                 transaction.set(
                     turn_ref,
@@ -364,6 +396,7 @@ class MemoryEngine:
                 {"updated_at": firestore.SERVER_TIMESTAMP},
                 merge=True,
             )
+            feedback_decision = request.artifact_feedback_decision
             transaction.set(
                 turn_ref,
                 {
@@ -375,6 +408,15 @@ class MemoryEngine:
                         request.memory_decision.model_dump(mode="json")
                         if request.memory_decision is not None
                         else None
+                    ),
+                    **(
+                        {
+                            "artifact_feedback_decision": (
+                                feedback_decision.model_dump(mode="json")
+                            )
+                        }
+                        if feedback_decision is not None
+                        else {}
                     ),
                     "user_message_id": ids.user_message_id,
                     "model_message_id": ids.model_message_id,
@@ -597,12 +639,17 @@ class MemoryEngine:
                 stored_proposals,
                 stored_artifacts,
             ) = self._chat_turn_effects(turn_data)
+            stored_feedback = self._chat_turn_feedback_effects(
+                turn_data,
+                stored_actions,
+            )
             released_claim = replace(
                 claim,
                 lease_expires_at=min(stored_expiry, observed_at),
                 precompleted_actions=stored_actions,
                 precompleted_memory_proposals=stored_proposals,
                 precompleted_artifacts=stored_artifacts,
+                precompleted_artifact_feedback=stored_feedback,
             )
             if stored_expiry <= observed_at:
                 return released_claim
@@ -647,6 +694,13 @@ class MemoryEngine:
         ):
             raise ValueError(
                 "artifact turns cannot contain governed-memory decisions."
+            )
+        if (
+            claim.request.artifact_feedback_decision is not None
+            or claim.precompleted_artifact_feedback
+        ):
+            raise ValueError(
+                "artifact turns cannot contain artifact-feedback decisions."
             )
 
         artifact = ArtifactReference(
@@ -791,6 +845,242 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error(
                 "record_chat_turn_blueprint_effect",
+                exc,
+            )
+
+    async def record_chat_turn_artifact_feedback_effect(
+        self,
+        claim: ChatTurnClaim,
+        *,
+        target_kind: ArtifactFeedbackTargetKind,
+        observed_at: datetime,
+    ) -> ChatTurnFeedbackEffectResult:
+        """Atomically persist artifact feedback and its turn receipts."""
+        self._validate_chat_turn_claim(claim)
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        request = claim.request.artifact_feedback_decision
+        if request is None or claim.request.memory_decision is not None:
+            raise ValueError(
+                "claim must contain one artifact feedback decision."
+            )
+        feedback_id = f"feedback--{claim.ids.turn_id}"
+        action = AgentActionReceipt(
+            action_name="record_blueprint_feedback",
+            status="completed",
+        )
+        feedback = ArtifactFeedbackReference(
+            feedback_id=feedback_id,
+            artifact_id=request.artifact_id,
+            target_id=request.target_id,
+            target_kind=target_kind,
+            decision=request.decision,
+            schema_version=request.expected_schema_version,
+            created_at=observed_at,
+        )
+        session_ref = self._client.collection("sessions").document(
+            claim.request.session_id
+        )
+        turn_ref = session_ref.collection("turns").document(
+            claim.ids.turn_id
+        )
+        project_ref = self._client.collection("projects").document(
+            claim.request.project_id
+        )
+        blueprint_ref = project_ref.collection("blueprints").document(
+            request.artifact_id
+        )
+        feedback_ref = blueprint_ref.collection("feedback").document(
+            feedback_id
+        )
+        transaction = self._client.transaction()
+        feedback_document = {
+            "feedback_contract_version": "1.0",
+            "feedback_id": feedback_id,
+            "artifact_id": request.artifact_id,
+            "target_id": request.target_id,
+            "target_kind": target_kind,
+            "decision": request.decision,
+            "feedback_text": request.feedback_text,
+            "correction_text": request.correction_text,
+            "originating_session_id": claim.request.session_id,
+            "source_message_id": claim.ids.user_message_id,
+            "originating_turn_id": claim.ids.turn_id,
+            "user_id": claim.request.user_id,
+            "schema_version": request.expected_schema_version,
+            "created_at": observed_at,
+            "status": "active",
+            "supersedes_feedback_id": None,
+        }
+
+        async def record_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ChatTurnFeedbackEffectResult:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            blueprint_snapshot = await blueprint_ref.get(
+                transaction=transaction
+            )
+            feedback_snapshot = await feedback_ref.get(
+                transaction=transaction
+            )
+            turn_data = turn_snapshot.to_dict()
+            blueprint_document = blueprint_snapshot.to_dict()
+            if not turn_snapshot.exists or not isinstance(
+                turn_data,
+                Mapping,
+            ):
+                raise ChatTurnStateError("Stored chat turn is invalid.")
+            self._assert_chat_turn_claim_matches_document(claim, turn_data)
+            stored_expiry = turn_data.get("lease_expires_at")
+            if (
+                turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(stored_expiry)
+                or stored_expiry <= observed_at
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn cannot record a feedback effect."
+                )
+            if not blueprint_snapshot.exists or not isinstance(
+                blueprint_document,
+                Mapping,
+            ):
+                raise BlueprintArtifactNotFoundError(
+                    "Blueprint artifact does not exist."
+                )
+            if blueprint_document.get("user_id") != claim.request.user_id:
+                raise BlueprintArtifactNotFoundError(
+                    "Blueprint artifact does not exist."
+                )
+            if (
+                blueprint_document.get("artifact_contract_version")
+                != ARTIFACT_CONTRACT_VERSION
+                or blueprint_document.get("artifact_type")
+                != "synthesis_blueprint"
+            ):
+                raise BlueprintFeedbackStateError(
+                    "Stored blueprint feedback state is invalid."
+                )
+            if (
+                blueprint_document.get("schema_version")
+                != request.expected_schema_version
+            ):
+                raise BlueprintFeedbackConflictError(
+                    "Blueprint schema conflicts with feedback command."
+                )
+            try:
+                counts = ArtifactFeedbackCounts.model_validate(
+                    blueprint_document.get("feedback_counts", {})
+                )
+            except ValidationError as exc:
+                raise BlueprintFeedbackStateError(
+                    "Stored blueprint feedback state is invalid."
+                ) from exc
+            stored_actions, stored_proposals, stored_artifacts = (
+                self._chat_turn_effects(turn_data)
+            )
+            if stored_proposals or stored_artifacts:
+                raise ChatTurnStateError(
+                    "Stored feedback turn contains another durable effect."
+                )
+            stored_feedback = self._chat_turn_feedback_effects(
+                turn_data,
+                stored_actions,
+            )
+            if stored_feedback:
+                existing_document = feedback_snapshot.to_dict()
+                existing_created_at = (
+                    existing_document.get("created_at")
+                    if isinstance(existing_document, Mapping)
+                    else None
+                )
+                if (
+                    not feedback_snapshot.exists
+                    or not isinstance(existing_document, Mapping)
+                    or not self._is_aware_datetime(existing_created_at)
+                    or existing_created_at > observed_at
+                ):
+                    raise ChatTurnStateError(
+                        "Stored feedback turn event is invalid."
+                    )
+                stable_existing_document = dict(existing_document)
+                stable_existing_document.pop("created_at", None)
+                stable_feedback_document = dict(feedback_document)
+                stable_feedback_document.pop("created_at", None)
+                original_feedback = feedback.model_copy(
+                    update={"created_at": existing_created_at}
+                )
+                if (
+                    stable_existing_document != stable_feedback_document
+                    or stored_feedback != (original_feedback,)
+                ):
+                    raise ChatTurnStateError(
+                        "Stored feedback turn event is invalid."
+                    )
+                return ChatTurnFeedbackEffectResult(
+                    claim=replace(
+                        claim,
+                        precompleted_actions=stored_actions,
+                        precompleted_memory_proposals=stored_proposals,
+                        precompleted_artifacts=stored_artifacts,
+                        precompleted_artifact_feedback=stored_feedback,
+                    ),
+                    action=action,
+                    feedback=original_feedback,
+                )
+            if feedback_snapshot.exists:
+                raise ChatTurnStateError(
+                    "Feedback event has no stored turn effect."
+                )
+
+            actions = (*stored_actions, action)
+            updated_counts = counts.model_copy(
+                update={
+                    request.decision: getattr(counts, request.decision) + 1
+                }
+            )
+            transaction.set(
+                project_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            transaction.set(feedback_ref, feedback_document)
+            transaction.set(
+                blueprint_ref,
+                {"feedback_counts": updated_counts.model_dump()},
+                merge=True,
+            )
+            transaction.set(
+                turn_ref,
+                {
+                    "actions": [
+                        item.model_dump(mode="python") for item in actions
+                    ],
+                    "artifact_feedback": [
+                        feedback.model_dump(mode="python")
+                    ],
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return ChatTurnFeedbackEffectResult(
+                claim=replace(
+                    claim,
+                    precompleted_actions=actions,
+                    precompleted_artifact_feedback=(feedback,),
+                ),
+                action=action,
+                feedback=feedback,
+            )
+
+        run_transaction = firestore.async_transactional(
+            record_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "record_chat_turn_artifact_feedback_effect",
                 exc,
             )
 
@@ -948,10 +1238,17 @@ class MemoryEngine:
             if request.memory_decision is not None
             else None
         )
+        expected_feedback_decision = (
+            request.artifact_feedback_decision.model_dump(mode="json")
+            if request.artifact_feedback_decision is not None
+            else None
+        )
         if (
             turn_data.get("project_id") != request.project_id
             or turn_data.get("user_id") != request.user_id
             or turn_data.get("memory_decision") != expected_decision
+            or turn_data.get("artifact_feedback_decision")
+            != expected_feedback_decision
         ):
             raise ChatTurnConflictError(
                 "Idempotency key conflicts with a different chat request."
@@ -983,6 +1280,16 @@ class MemoryEngine:
             MemoryDecisionRequest,
         ):
             raise ValueError("claim memory_decision is invalid.")
+        if request.artifact_feedback_decision is not None and not isinstance(
+            request.artifact_feedback_decision,
+            ArtifactFeedbackDecisionRequest,
+        ):
+            raise ValueError("claim artifact_feedback_decision is invalid.")
+        if (
+            request.memory_decision is not None
+            and request.artifact_feedback_decision is not None
+        ):
+            raise ValueError("claim structured decisions are invalid.")
         turn_id = claim.ids.turn_id
         if not isinstance(turn_id, str) or re.fullmatch(
             r"[a-f0-9]{64}", turn_id
@@ -1000,6 +1307,7 @@ class MemoryEngine:
         actions = claim.precompleted_actions
         proposals = claim.precompleted_memory_proposals
         artifacts = claim.precompleted_artifacts
+        feedback = claim.precompleted_artifact_feedback
         if (
             not isinstance(actions, tuple)
             or not all(
@@ -1015,6 +1323,11 @@ class MemoryEngine:
                 isinstance(artifact, ArtifactReference)
                 for artifact in artifacts
             )
+            or not isinstance(feedback, tuple)
+            or not all(
+                isinstance(item, ArtifactFeedbackReference)
+                for item in feedback
+            )
         ):
             raise ValueError("claim effects are invalid.")
         proposal_actions = tuple(
@@ -1026,6 +1339,29 @@ class MemoryEngine:
             len(proposals) > 1
             or bool(proposal_actions) != bool(proposals)
             or (proposals and len(proposal_actions) != 1)
+        ):
+            raise ValueError("claim effects are invalid.")
+        feedback_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "record_blueprint_feedback"
+        )
+        feedback_decision = request.artifact_feedback_decision
+        if (
+            len(feedback) > 1
+            or bool(feedback_actions) != bool(feedback)
+            or (feedback and len(feedback_actions) != 1)
+            or (feedback and feedback_decision is None)
+            or any(
+                item.feedback_id != f"feedback--{claim.ids.turn_id}"
+                or item.artifact_id != feedback_decision.artifact_id
+                or item.target_id != feedback_decision.target_id
+                or item.decision != feedback_decision.decision
+                or item.schema_version
+                != feedback_decision.expected_schema_version
+                for item in feedback
+                if feedback_decision is not None
+            )
         ):
             raise ValueError("claim effects are invalid.")
         synthesis_actions = tuple(
@@ -1056,11 +1392,18 @@ class MemoryEngine:
             if claim.request.memory_decision is not None
             else None
         )
+        expected_feedback_decision = (
+            claim.request.artifact_feedback_decision.model_dump(mode="json")
+            if claim.request.artifact_feedback_decision is not None
+            else None
+        )
         if (
             turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
             or turn_data.get("project_id") != claim.request.project_id
             or turn_data.get("user_id") != claim.request.user_id
             or turn_data.get("memory_decision") != expected_decision
+            or turn_data.get("artifact_feedback_decision")
+            != expected_feedback_decision
             or turn_data.get("user_message_id")
             != claim.ids.user_message_id
             or turn_data.get("model_message_id")
@@ -1091,11 +1434,16 @@ class MemoryEngine:
         actions, memory_proposals, artifacts = self._chat_turn_effects(
             turn_data
         )
+        artifact_feedback = self._chat_turn_feedback_effects(
+            turn_data,
+            actions,
+        )
         try:
             response = ChatResponse(
                 response=model_message_data["text"],
                 actions=list(actions),
                 artifacts=list(artifacts),
+                artifact_feedback=list(artifact_feedback),
                 citations=turn_data.get("citations", []),
                 memory_proposals=list(memory_proposals),
                 adaptations=turn_data.get("adaptations", []),
@@ -1173,6 +1521,67 @@ class MemoryEngine:
             raise ChatTurnStateError("Stored chat turn effects are invalid.")
         return actions, proposals, artifacts
 
+    @staticmethod
+    def _chat_turn_feedback_effects(
+        turn_data: Mapping[str, object],
+        actions: tuple[AgentActionReceipt, ...],
+    ) -> tuple[ArtifactFeedbackReference, ...]:
+        stored_feedback = turn_data.get("artifact_feedback", [])
+        if not isinstance(stored_feedback, list):
+            raise ChatTurnStateError(
+                "Stored chat turn feedback effects are invalid."
+            )
+        try:
+            feedback = tuple(
+                ArtifactFeedbackReference.model_validate(item)
+                for item in stored_feedback
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn feedback effects are invalid."
+            ) from exc
+        feedback_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "record_blueprint_feedback"
+        )
+        if (
+            len(feedback) > 1
+            or bool(feedback_actions) != bool(feedback)
+            or (feedback and len(feedback_actions) != 1)
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn feedback effects are invalid."
+            )
+        if not feedback:
+            return ()
+        try:
+            decision = ArtifactFeedbackDecisionRequest.model_validate(
+                turn_data.get("artifact_feedback_decision")
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn feedback effects are invalid."
+            ) from exc
+        model_message_id = turn_data.get("model_message_id")
+        turn_id = (
+            model_message_id.removeprefix("turn--").removesuffix("--model")
+            if isinstance(model_message_id, str)
+            else None
+        )
+        receipt = feedback[0]
+        if (
+            receipt.feedback_id != f"feedback--{turn_id}"
+            or receipt.artifact_id != decision.artifact_id
+            or receipt.target_id != decision.target_id
+            or receipt.decision != decision.decision
+            or receipt.schema_version != decision.expected_schema_version
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn feedback effects are invalid."
+            )
+        return feedback
+
     @classmethod
     def _assert_chat_turn_response_preserves_effects(
         cls,
@@ -1184,9 +1593,14 @@ class MemoryEngine:
             stored_proposals,
             stored_artifacts,
         ) = cls._chat_turn_effects(turn_data)
+        stored_feedback = cls._chat_turn_feedback_effects(
+            turn_data,
+            stored_actions,
+        )
         response_actions = tuple(response.actions)
         response_proposals = tuple(response.memory_proposals)
         response_artifacts = tuple(response.artifacts)
+        response_feedback = tuple(response.artifact_feedback)
         stored_proposal_actions = tuple(
             action
             for action in stored_actions
@@ -1201,6 +1615,7 @@ class MemoryEngine:
             stored_proposal_actions != response_proposal_actions
             or stored_proposals != response_proposals
             or stored_artifacts != response_artifacts
+            or stored_feedback != response_feedback
         ):
             raise ChatTurnStateError(
                 "Completed response conflicts with stored turn effects."

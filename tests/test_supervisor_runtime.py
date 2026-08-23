@@ -176,8 +176,9 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
         "memory_source_message_text": (
             "Remember that I prefer concise responses."
         ),
-        "memory_decision_present": False,
-        "memory_turn_id": "a" * 64,
+            "memory_decision_present": False,
+            "artifact_feedback_decision_present": False,
+            "memory_turn_id": "a" * 64,
         "memory_turn_owner_token": "owner-token-1",
     }
 

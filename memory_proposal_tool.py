@@ -86,6 +86,9 @@ def _server_command(
         source_message_id = state["memory_source_message_id"]
         source_message_text = state["memory_source_message_text"]
         memory_decision_present = state["memory_decision_present"]
+        artifact_feedback_decision_present = state[
+            "artifact_feedback_decision_present"
+        ]
     except KeyError as exc:
         raise MemoryProposalToolConfigurationError(
             "Memory proposal tool context is invalid."
@@ -102,9 +105,14 @@ def _server_command(
         not isinstance(source_message_text, str)
         or not source_message_text.strip()
         or type(memory_decision_present) is not bool
+        or type(artifact_feedback_decision_present) is not bool
     ):
         raise MemoryProposalToolConfigurationError(
             "Memory proposal tool context is invalid."
+        )
+    if artifact_feedback_decision_present:
+        raise ValueError(
+            "Artifact feedback turns cannot create memory proposals."
         )
     turn_id = state.get("memory_turn_id")
     owner_token = state.get("memory_turn_owner_token")
@@ -145,12 +153,12 @@ def create_propose_memory_signal_tool(
         tool_context: ToolContext,
     ) -> dict[str, object]:
         """Create a pending user-reviewable proposal; never activate memory."""
-        command = _server_command(
-            category=category,
-            proposed_value=proposed_value,
-            tool_context=tool_context,
-        )
         try:
+            command = _server_command(
+                category=category,
+                proposed_value=proposed_value,
+                tool_context=tool_context,
+            )
             result = await memory_service.propose_memory_signal(command)
         except ValueError:
             return {

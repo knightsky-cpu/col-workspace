@@ -10,6 +10,8 @@ from schemas import (
     AgentActionReceipt,
     ArtifactFeedbackDecisionRequest,
     ArtifactFeedbackReference,
+    ArtifactFeedbackTarget,
+    ArtifactReference,
     BlueprintArtifactDetailResponse,
 )
 
@@ -57,6 +59,13 @@ class RecordBlueprintFeedbackResult:
     feedback: ArtifactFeedbackReference
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedArtifactFeedback:
+    feedback_id: str
+    artifact: ArtifactReference
+    target: ArtifactFeedbackTarget
+
+
 def derive_feedback_id(turn_id: str) -> str:
     if re.fullmatch(r"[A-Za-z0-9_-]{1,118}", turn_id) is None:
         raise ValueError("turn_id must be a valid feedback origin.")
@@ -77,37 +86,10 @@ class ArtifactFeedbackService:
         self,
         command: RecordBlueprintFeedbackCommand,
     ) -> RecordBlueprintFeedbackResult:
-        self._validate_command(command)
+        resolved = await self.resolve_feedback_target(command)
         request = command.feedback
-        detail = await self._artifact_reader.get_blueprint(
-            GetBlueprintArtifactCommand(
-                project_id=command.project_id,
-                blueprint_id=request.artifact_id,
-            )
-        )
-        reference = detail.metadata.reference
-        if (
-            reference.project_id != command.project_id
-            or reference.artifact_id != request.artifact_id
-        ):
-            raise ArtifactFeedbackStateError(
-                "Canonical artifact reference is inconsistent."
-            )
-        if reference.schema_version != request.expected_schema_version:
-            raise ArtifactFeedbackSchemaConflictError(
-                "Artifact schema conflicts with feedback command."
-            )
-        targets = tuple(
-            target
-            for target in detail.feedback_targets
-            if target.target_id == request.target_id
-        )
-        if len(targets) != 1:
-            raise ArtifactFeedbackTargetNotFoundError(
-                "Artifact feedback target was not found."
-            )
-        target = targets[0]
-        feedback_id = derive_feedback_id(command.turn_id)
+        feedback_id = resolved.feedback_id
+        target = resolved.target
         expected_reference = ArtifactFeedbackReference(
             feedback_id=feedback_id,
             artifact_id=request.artifact_id,
@@ -156,6 +138,48 @@ class ArtifactFeedbackService:
                 status="completed",
             ),
             feedback=stored_reference,
+        )
+
+    async def resolve_feedback_target(
+        self,
+        command: RecordBlueprintFeedbackCommand,
+    ) -> ResolvedArtifactFeedback:
+        """Resolve one feedback locator against canonical artifact detail."""
+        self._validate_command(command)
+        request = command.feedback
+        detail = await self._artifact_reader.get_blueprint(
+            GetBlueprintArtifactCommand(
+                project_id=command.project_id,
+                blueprint_id=request.artifact_id,
+            )
+        )
+        reference = detail.metadata.reference
+        if (
+            reference.project_id != command.project_id
+            or reference.artifact_id != request.artifact_id
+        ):
+            raise ArtifactFeedbackStateError(
+                "Canonical artifact reference is inconsistent."
+            )
+        if reference.schema_version != request.expected_schema_version:
+            raise ArtifactFeedbackSchemaConflictError(
+                "Artifact schema conflicts with feedback command."
+            )
+        targets = tuple(
+            target
+            for target in detail.feedback_targets
+            if target.target_id == request.target_id
+        )
+        if len(targets) != 1:
+            raise ArtifactFeedbackTargetNotFoundError(
+                "Artifact feedback target was not found."
+            )
+        target = targets[0]
+        feedback_id = derive_feedback_id(command.turn_id)
+        return ResolvedArtifactFeedback(
+            feedback_id=feedback_id,
+            artifact=reference,
+            target=target,
         )
 
     @staticmethod

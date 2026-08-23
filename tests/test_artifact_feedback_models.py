@@ -97,3 +97,73 @@ def test_feedback_reference_exposes_only_bounded_provenance() -> None:
         "schema_version": "2.0",
         "created_at": "2026-08-23T18:00:00Z",
     }
+
+
+def test_chat_request_accepts_one_structured_artifact_feedback_decision(
+) -> None:
+    from schemas import ChatRequest
+
+    request = ChatRequest.model_validate(
+        {
+            "project_id": "agent-col",
+            "session_id": "feedback-session",
+            "user_id": "user-1",
+            "message": "I accept this blueprint boundary.",
+            "artifact_feedback_decision": {
+                "artifact_id": "blueprint-1",
+                "target_id": "target--0123456789abcdef01234567",
+                "decision": "accepted",
+                "feedback_text": "This approval boundary is correct.",
+                "expected_schema_version": "2.0",
+            },
+        }
+    )
+
+    assert request.artifact_feedback_decision is not None
+    assert request.artifact_feedback_decision.decision == "accepted"
+
+
+def test_chat_request_rejects_memory_and_artifact_decisions_together() -> None:
+    from schemas import ChatRequest
+
+    with pytest.raises(ValidationError):
+        ChatRequest.model_validate(
+            {
+                "project_id": "agent-col",
+                "session_id": "feedback-session",
+                "user_id": "user-1",
+                "message": "Apply both structured decisions.",
+                "memory_decision": {
+                    "proposal_id": "response_length--proposal-1",
+                    "decision": "approve",
+                },
+                "artifact_feedback_decision": {
+                    "artifact_id": "blueprint-1",
+                    "target_id": "target--0123456789abcdef01234567",
+                    "decision": "accepted",
+                    "feedback_text": "This boundary is correct.",
+                    "expected_schema_version": "2.0",
+                },
+            }
+        )
+
+
+def test_chat_response_carries_bounded_feedback_reference() -> None:
+    from schemas import ArtifactFeedbackReference, ChatResponse
+
+    reference = ArtifactFeedbackReference(
+        feedback_id="feedback--0123456789abcdef01234567",
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        target_kind="whole_blueprint",
+        decision="accepted",
+        schema_version="2.0",
+        created_at=NOW,
+    )
+
+    response = ChatResponse(
+        response="Feedback recorded.",
+        artifact_feedback=[reference],
+    )
+
+    assert response.artifact_feedback == [reference]

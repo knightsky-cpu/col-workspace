@@ -8,6 +8,8 @@ import pytest
 from chat_turns import derive_chat_turn_ids
 from schemas import (
     AgentActionReceipt,
+    ArtifactFeedbackDecisionRequest,
+    ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
     MemoryProposalReceipt,
@@ -98,6 +100,29 @@ def test_resumed_chat_turn_claim_carries_typed_precompleted_effects() -> None:
         schema_version="2.0",
         display_label="Agent Col blueprint",
     )
+    feedback_request = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    feedback = ArtifactFeedbackReference(
+        feedback_id="feedback--0123456789abcdef01234567",
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        target_kind="whole_blueprint",
+        decision="accepted",
+        schema_version="2.0",
+        created_at=datetime(2026, 8, 21, 10, 0, tzinfo=UTC),
+    )
+    request = chat_turns.ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Record this artifact feedback.",
+        artifact_feedback_decision=feedback_request,
+    )
 
     claim = chat_turns.ChatTurnClaim(
         request=request,
@@ -108,11 +133,13 @@ def test_resumed_chat_turn_claim_carries_typed_precompleted_effects() -> None:
         precompleted_actions=(action,),
         precompleted_memory_proposals=(proposal,),
         precompleted_artifacts=(artifact,),
+        precompleted_artifact_feedback=(feedback,),
     )
 
     assert claim.precompleted_actions == (action,)
     assert claim.precompleted_memory_proposals == (proposal,)
     assert claim.precompleted_artifacts == (artifact,)
+    assert claim.precompleted_artifact_feedback == (feedback,)
 
 
 def test_chat_turn_replay_carries_validated_response() -> None:

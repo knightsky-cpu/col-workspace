@@ -22,6 +22,9 @@ from google import genai
 from google.genai import types
 
 from agent_col_artifact_executor import AgentColArtifactExecutor
+from agent_col_artifact_feedback_executor import (
+    AgentColArtifactFeedbackExecutor,
+)
 from agent_col_expert_executor_v3 import AgentColExpertExecutorV3
 from agent_col_responder import create_responder_app
 from agent_col_turn_service import (
@@ -38,6 +41,12 @@ from artifact_read_service import (
     GetBlueprintArtifactCommand,
     ListBlueprintArtifactsCommand,
 )
+from artifact_feedback_service import (
+    ArtifactFeedbackSchemaConflictError,
+    ArtifactFeedbackService,
+    ArtifactFeedbackStateError,
+    ArtifactFeedbackTargetNotFoundError,
+)
 from chat_turns import (
     ChatTurnClaim,
     ChatTurnConflictError,
@@ -52,6 +61,8 @@ from computational_expert_service import ComputationalExpertService
 from database import (
     BlueprintArtifactCursorNotFoundError,
     BlueprintArtifactNotFoundError,
+    BlueprintFeedbackConflictError,
+    BlueprintFeedbackStateError,
     MemoryEngine,
     MemoryEngineError,
     MemoryEventCursorNotFoundError,
@@ -254,6 +265,11 @@ def _partial_failure_response(
         if released_claim is not None
         else ()
     )
+    released_feedback = (
+        released_claim.precompleted_artifact_feedback
+        if released_claim is not None
+        else ()
+    )
     actions = _merge_receipts(
         decision_actions,
         runtime_error.actions,
@@ -267,7 +283,11 @@ def _partial_failure_response(
         runtime_error.artifacts,
         released_artifacts,
     )
-    if not actions and not artifacts:
+    artifact_feedback = _merge_receipts(
+        runtime_error.artifact_feedback,
+        released_feedback,
+    )
+    if not actions and not artifacts and not artifact_feedback:
         return None
     proposal_actions = tuple(
         action
@@ -288,12 +308,15 @@ def _partial_failure_response(
         detail=detail,
         actions=list(actions),
         artifacts=list(artifacts),
+        artifact_feedback=list(artifact_feedback),
         memory_proposals=list(proposals),
         adaptations=list(runtime_error.adaptations),
     )
     content = response.model_dump(mode="json")
     if not response.artifacts:
         content.pop("artifacts")
+    if not response.artifact_feedback:
+        content.pop("artifact_feedback")
     if not response.adaptations:
         content.pop("adaptations")
     return JSONResponse(
@@ -328,6 +351,32 @@ def _raise_governed_tool_cause_http_error(
             ) from runtime_error
         if isinstance(
             cause,
+            (ArtifactFeedbackTargetNotFoundError, BlueprintArtifactNotFoundError),
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Blueprint artifact or feedback target was not found.",
+            ) from runtime_error
+        if isinstance(
+            cause,
+            (ArtifactFeedbackSchemaConflictError, BlueprintFeedbackConflictError),
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Artifact feedback conflicts with the current artifact state."
+                ),
+            ) from runtime_error
+        if isinstance(
+            cause,
+            (ArtifactFeedbackStateError, BlueprintFeedbackStateError),
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Artifact feedback state is invalid.",
+            ) from runtime_error
+        if isinstance(
+            cause,
             (ChatTurnOwnershipError, ChatTurnStateError, MemoryEngineError),
         ):
             _raise_chat_turn_operation_http_error(
@@ -353,6 +402,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             synthesis_service=synthesis_service,
             artifact_ledger=database,
             artifact_reader=artifact_service,
+        )
+        artifact_feedback_service = ArtifactFeedbackService(
+            artifact_reader=artifact_service,
+            feedback_repository=database,
+        )
+        artifact_feedback_executor = AgentColArtifactFeedbackExecutor(
+            feedback_resolver=artifact_feedback_service,
+            feedback_ledger=database,
         )
         memory_service = TrustedMemoryService(database=database)
         source_service = SourceExpertService(client=client)
@@ -384,6 +441,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             expert_executor=expert_executor,
             responder_runtime=responder,
             artifact_executor=artifact_executor,
+            artifact_feedback_executor=artifact_feedback_executor,
         )
     except Exception:
         try:
@@ -645,6 +703,15 @@ async def chat(
     decision_actions = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
+    if (
+        payload.artifact_feedback_decision is not None
+        and idempotency_key is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Artifact feedback requires an idempotency key.",
+        )
+
     if idempotency_key is not None:
         try:
             validated_idempotency_key = validate_idempotency_key(
@@ -663,6 +730,9 @@ async def chat(
                     user_id=payload.user_id,
                     message=payload.message,
                     memory_decision=payload.memory_decision,
+                    artifact_feedback_decision=(
+                        payload.artifact_feedback_decision
+                    ),
                 ),
                 idempotency_key=validated_idempotency_key,
                 observed_at=datetime.now(UTC),
@@ -880,6 +950,9 @@ async def chat(
                 memory_decision_present=(
                     payload.memory_decision is not None
                 ),
+                artifact_feedback_decision_present=(
+                    payload.artifact_feedback_decision is not None
+                ),
                 turn_lease=(
                     ProposalTurnLease(
                         turn_id=chat_turn_claim.ids.turn_id,
@@ -895,6 +968,11 @@ async def chat(
                 ),
                 precompleted_memory_proposals=(
                     chat_turn_claim.precompleted_memory_proposals
+                    if chat_turn_claim is not None
+                    else ()
+                ),
+                precompleted_artifact_feedback=(
+                    chat_turn_claim.precompleted_artifact_feedback
                     if chat_turn_claim is not None
                     else ()
                 ),
@@ -959,6 +1037,7 @@ async def chat(
         response=result.response,
         actions=list(_merge_receipts(decision_actions, result.actions)),
         artifacts=list(result.artifacts),
+        artifact_feedback=list(result.artifact_feedback),
         citations=list(result.citations),
         memory_proposals=list(result.memory_proposals),
         adaptations=list(

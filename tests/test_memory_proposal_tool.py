@@ -49,6 +49,7 @@ def tool_context_state() -> dict[str, object]:
         "memory_source_message_id": "message-1",
         "memory_source_message_text": "I prefer concise responses.",
         "memory_decision_present": False,
+        "artifact_feedback_decision_present": False,
         "memory_turn_id": "a" * 64,
         "memory_turn_owner_token": "owner-1",
     }
@@ -148,6 +149,30 @@ async def test_proposal_tool_rejects_invalid_candidate_without_receipt() -> None
         "error_code": "invalid_memory_candidate",
     }
     assert "private" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_refuses_artifact_feedback_turn() -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    state = tool_context_state()
+    state["artifact_feedback_decision_present"] = True
+    service = RecordingMemoryService()
+    tool = create_propose_memory_signal_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "category": "response_length",
+            "proposed_value": "concise",
+        },
+        tool_context=SimpleNamespace(state=state),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": "invalid_memory_candidate",
+    }
+    assert service.commands == []
 
 
 @pytest.mark.parametrize(

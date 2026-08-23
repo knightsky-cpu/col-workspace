@@ -264,12 +264,28 @@ class ChatRequest(StrictModel):
     user_id: IdentifierStr
     message: ChatMessageText
     memory_decision: MemoryDecisionRequest | None = None
+    artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
+
+    @model_validator(mode="after")
+    def allow_only_one_structured_decision(self) -> Self:
+        if (
+            self.memory_decision is not None
+            and self.artifact_feedback_decision is not None
+        ):
+            raise ValueError(
+                "Memory and artifact feedback decisions are mutually exclusive."
+            )
+        return self
 
 
 class ChatResponse(StrictModel):
     response: NonEmptyStr
     actions: list[AgentActionReceipt] = Field(default_factory=list)
     artifacts: list[ArtifactReference] = Field(default_factory=list)
+    artifact_feedback: list[ArtifactFeedbackReference] = Field(
+        default_factory=list,
+        max_length=1,
+    )
     citations: list[CitationReference] = Field(default_factory=list)
     memory_proposals: list[MemoryProposalReceipt] = Field(
         default_factory=list,
@@ -288,6 +304,10 @@ class ChatPartialFailureResponse(StrictModel):
     ]
     actions: list[AgentActionReceipt]
     artifacts: list[ArtifactReference] = Field(default_factory=list)
+    artifact_feedback: list[ArtifactFeedbackReference] = Field(
+        default_factory=list,
+        max_length=1,
+    )
     memory_proposals: list[MemoryProposalReceipt] = Field(
         default_factory=list,
         max_length=1,

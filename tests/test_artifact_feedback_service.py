@@ -308,3 +308,23 @@ async def test_feedback_service_rejects_future_repository_timestamp() -> None:
 
     with pytest.raises(ArtifactFeedbackStateError):
         await service.record_feedback(command(request()))
+
+
+@pytest.mark.asyncio
+async def test_feedback_service_resolves_server_issued_target_without_write(
+) -> None:
+    from artifact_feedback_service import ArtifactFeedbackService
+
+    reader = FakeReader(detail())
+    repository = FakeRepository(reference())
+    service = ArtifactFeedbackService(
+        artifact_reader=reader,
+        feedback_repository=repository,
+    )
+
+    resolved = await service.resolve_feedback_target(command(request()))
+
+    assert resolved.feedback_id == f"feedback--{TURN_ID}"
+    assert resolved.artifact == detail().metadata.reference
+    assert resolved.target == detail().feedback_targets[0]
+    assert repository.calls == []
