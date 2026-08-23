@@ -535,6 +535,7 @@ class ServiceState:
     turn_service: FakeAgentColTurnService
     memory_service: FakeTrustedMemoryService
     artifact_service: FakeArtifactReadService
+    artifact_executor: object
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
     research_vertex_settings: list[VertexAISettings]
@@ -544,7 +545,12 @@ class ServiceState:
     expert_executor_dependencies: list[
         tuple[object, object, object | None, object | None]
     ]
-    turn_service_dependencies: list[tuple[object, object, object]]
+    artifact_executor_dependencies: list[
+        tuple[object, object, object]
+    ]
+    turn_service_dependencies: list[
+        tuple[object, object, object, object]
+    ]
 
 
 @pytest.fixture
@@ -670,6 +676,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             applied_feedback_ids=[],
         ),
     )
+    artifact_executor = object()
     genai_client_kwargs: list[dict[str, object]] = []
     responder_vertex_settings: list[VertexAISettings] = []
     research_vertex_settings: list[VertexAISettings] = []
@@ -679,7 +686,12 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     expert_executor_dependencies: list[
         tuple[object, object, object | None, object | None]
     ] = []
-    turn_service_dependencies: list[tuple[object, object, object]] = []
+    artifact_executor_dependencies: list[
+        tuple[object, object, object]
+    ] = []
+    turn_service_dependencies: list[
+        tuple[object, object, object, object]
+    ] = []
     state = ServiceState(
         events=events,
         database=database,
@@ -696,6 +708,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         turn_service=turn_service,
         memory_service=memory_service,
         artifact_service=artifact_service,
+        artifact_executor=artifact_executor,
         genai_client_kwargs=genai_client_kwargs,
         responder_vertex_settings=responder_vertex_settings,
         research_vertex_settings=research_vertex_settings,
@@ -705,6 +718,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         ),
         responder_memory_services=responder_memory_services,
         expert_executor_dependencies=expert_executor_dependencies,
+        artifact_executor_dependencies=artifact_executor_dependencies,
         turn_service_dependencies=turn_service_dependencies,
     )
 
@@ -830,9 +844,15 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         routing_client: object,
         expert_executor: object,
         responder_runtime: object,
+        artifact_executor: object,
     ) -> object:
         turn_service_dependencies.append(
-            (routing_client, expert_executor, responder_runtime)
+            (
+                routing_client,
+                expert_executor,
+                responder_runtime,
+                artifact_executor,
+            )
         )
         return turn_service
 
@@ -869,6 +889,24 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             if database is state.database
             else pytest.fail("Unexpected artifact service database.")
         ),
+        raising=False,
+    )
+
+    def create_artifact_executor(
+        *,
+        synthesis_service: object,
+        artifact_ledger: object,
+        artifact_reader: object,
+    ) -> object:
+        artifact_executor_dependencies.append(
+            (synthesis_service, artifact_ledger, artifact_reader)
+        )
+        return artifact_executor
+
+    monkeypatch.setattr(
+        main,
+        "AgentColArtifactExecutor",
+        create_artifact_executor,
         raising=False,
     )
     return state
@@ -1290,11 +1328,19 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 service_state.requirements_verification_service,
             )
         ]
+        assert service_state.artifact_executor_dependencies == [
+            (
+                service_state.synthesis_service,
+                service_state.database,
+                service_state.artifact_service,
+            )
+        ]
         assert service_state.turn_service_dependencies == [
             (
                 service_state.genai_client,
                 service_state.expert_executor,
                 service_state.supervisor,
+                service_state.artifact_executor,
             )
         ]
 
@@ -2366,6 +2412,146 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
     assert "Earlier question" in context_text
     assert "Earlier answer" in context_text
     assert "New question" not in context_text
+
+
+@pytest.mark.asyncio
+async def test_chat_completes_artifact_turn_with_refreshed_claim_and_receipts(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    renewed_claim = replace(
+        claim,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+    )
+    action = AgentActionReceipt(
+        action_name="synthesize_project",
+        status="completed",
+    )
+    artifact = ArtifactReference(
+        artifact_type="synthesis_blueprint",
+        project_id="project-1",
+        artifact_id=f"blueprint--{claim.ids.turn_id}",
+        schema_version="2.0",
+        display_label="Collaborative Study Workflow",
+    )
+    adaptation = AdaptationReceipt(
+        signal_id="example_usage--signal-1",
+        category="example_usage",
+        value="always_practical",
+        source_event_id="example_usage--signal-1--approved",
+        status="provided_to_model",
+    )
+    effect_claim = replace(
+        renewed_claim,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="Created the requested collaborative blueprint.",
+        actions=(action,),
+        artifacts=(artifact,),
+        adaptations=(adaptation,),
+        chat_turn_claim=effect_claim,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-cutover-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.turn_service.calls[0].chat_turn_claim is (
+        renewed_claim
+    )
+    assert response.json()["actions"] == [action.model_dump(mode="json")]
+    assert response.json()["artifacts"] == [
+        artifact.model_dump(mode="json")
+    ]
+    assert response.json()["adaptations"] == [
+        adaptation.model_dump(mode="json")
+    ]
+    assert service_state.database.complete_calls[0][0] is effect_claim
+    stored_response = service_state.database.complete_calls[0][1]
+    assert stored_response.model_dump(mode="json") == response.json()
+
+
+@pytest.mark.asyncio
+async def test_artifact_responder_failure_releases_refreshed_claim_and_receipts(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    renewed_claim = replace(
+        claim,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+    )
+    action = AgentActionReceipt(
+        action_name="synthesize_project",
+        status="completed",
+    )
+    artifact = ArtifactReference(
+        artifact_type="synthesis_blueprint",
+        project_id="project-1",
+        artifact_id=f"blueprint--{claim.ids.turn_id}",
+        schema_version="2.0",
+        display_label="Collaborative Study Workflow",
+    )
+    adaptation = AdaptationReceipt(
+        signal_id="example_usage--signal-1",
+        category="example_usage",
+        value="always_practical",
+        source_event_id="example_usage--signal-1--approved",
+        status="provided_to_model",
+    )
+    effect_claim = replace(
+        renewed_claim,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+    service_state.database.released_claim = replace(
+        effect_claim,
+        resumed=True,
+    )
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private responder failure",
+        actions=(action,),
+        artifacts=(artifact,),
+        adaptations=(adaptation,),
+        chat_turn_claim=effect_claim,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "artifact-failure-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Agent_Col response failed after a completed action.",
+        "actions": [action.model_dump(mode="json")],
+        "artifacts": [artifact.model_dump(mode="json")],
+        "memory_proposals": [],
+        "adaptations": [adaptation.model_dump(mode="json")],
+    }
+    assert service_state.database.release_calls[0][0] is effect_claim
+    assert service_state.database.complete_calls == []
 
 
 @pytest.mark.asyncio

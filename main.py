@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
 
+from agent_col_artifact_executor import AgentColArtifactExecutor
 from agent_col_expert_executor_v3 import AgentColExpertExecutorV3
 from agent_col_responder import create_responder_app
 from agent_col_turn_service import (
@@ -248,6 +249,11 @@ def _partial_failure_response(
         if released_claim is not None
         else ()
     )
+    released_artifacts = (
+        released_claim.precompleted_artifacts
+        if released_claim is not None
+        else ()
+    )
     actions = _merge_receipts(
         decision_actions,
         runtime_error.actions,
@@ -257,7 +263,11 @@ def _partial_failure_response(
         runtime_error.memory_proposals,
         released_proposals,
     )
-    if not actions:
+    artifacts = _merge_receipts(
+        runtime_error.artifacts,
+        released_artifacts,
+    )
+    if not actions and not artifacts:
         return None
     proposal_actions = tuple(
         action
@@ -277,11 +287,18 @@ def _partial_failure_response(
     response = ChatPartialFailureResponse(
         detail=detail,
         actions=list(actions),
+        artifacts=list(artifacts),
         memory_proposals=list(proposals),
+        adaptations=list(runtime_error.adaptations),
     )
+    content = response.model_dump(mode="json")
+    if not response.artifacts:
+        content.pop("artifacts")
+    if not response.adaptations:
+        content.pop("adaptations")
     return JSONResponse(
         status_code=status_code,
-        content=response.model_dump(mode="json"),
+        content=content,
     )
 
 
@@ -332,6 +349,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             database=database,
         )
         artifact_service = ArtifactReadService(database=database)
+        artifact_executor = AgentColArtifactExecutor(
+            synthesis_service=synthesis_service,
+            artifact_ledger=database,
+            artifact_reader=artifact_service,
+        )
         memory_service = TrustedMemoryService(database=database)
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
@@ -361,6 +383,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             routing_client=client,
             expert_executor=expert_executor,
             responder_runtime=responder,
+            artifact_executor=artifact_executor,
         )
     except Exception:
         try:
@@ -875,6 +898,7 @@ async def chat(
                     if chat_turn_claim is not None
                     else ()
                 ),
+                chat_turn_claim=chat_turn_claim,
             )
         )
     except (
@@ -882,10 +906,11 @@ async def chat(
         AgentColTurnTimeoutError,
     ) as exc:
         released_claim = None
-        if chat_turn_claim is not None:
+        failure_claim = exc.chat_turn_claim or chat_turn_claim
+        if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
                 database,
-                chat_turn_claim,
+                failure_claim,
             )
         _raise_governed_tool_cause_http_error(exc)
         partial_response = _partial_failure_response(
@@ -909,10 +934,11 @@ async def chat(
             type(exc).__name__,
         )
         released_claim = None
-        if chat_turn_claim is not None:
+        failure_claim = exc.chat_turn_claim or chat_turn_claim
+        if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
                 database,
-                chat_turn_claim,
+                failure_claim,
             )
         _raise_governed_tool_cause_http_error(exc)
         partial_response = _partial_failure_response(
@@ -935,7 +961,9 @@ async def chat(
         artifacts=list(result.artifacts),
         citations=list(result.citations),
         memory_proposals=list(result.memory_proposals),
-        adaptations=list(adaptations),
+        adaptations=list(
+            _merge_receipts(adaptations, result.adaptations)
+        ),
     )
     if chat_turn_claim is None:
         try:
@@ -947,9 +975,10 @@ async def chat(
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
     else:
+        completion_claim = result.chat_turn_claim or chat_turn_claim
         try:
             await database.complete_chat_turn(
-                chat_turn_claim,
+                completion_claim,
                 chat_response,
                 observed_at=datetime.now(UTC),
             )

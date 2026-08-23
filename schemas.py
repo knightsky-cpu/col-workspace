@@ -228,9 +228,14 @@ class ChatPartialFailureResponse(StrictModel):
         "Agent_Col response timed out after a completed action.",
     ]
     actions: list[AgentActionReceipt]
+    artifacts: list[ArtifactReference] = Field(default_factory=list)
     memory_proposals: list[MemoryProposalReceipt] = Field(
         default_factory=list,
         max_length=1,
+    )
+    adaptations: list[AdaptationReceipt] = Field(
+        default_factory=list,
+        max_length=10,
     )
 
 

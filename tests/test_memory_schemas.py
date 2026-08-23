@@ -328,6 +328,42 @@ def test_chat_partial_failure_exposes_only_typed_completed_receipts(
     assert len(partial.memory_proposals) == 1
 
 
+def test_chat_partial_failure_can_expose_completed_artifact_and_adaptation(
+) -> None:
+    from schemas import ChatPartialFailureResponse
+
+    partial = ChatPartialFailureResponse(
+        detail="Agent_Col response failed after a completed action.",
+        actions=[
+            {
+                "action_name": "synthesize_project",
+                "status": "completed",
+            }
+        ],
+        artifacts=[
+            {
+                "artifact_type": "synthesis_blueprint",
+                "project_id": "project-1",
+                "artifact_id": "blueprint-1",
+                "schema_version": "2.0",
+                "display_label": "Study workflow",
+            }
+        ],
+        adaptations=[
+            {
+                "signal_id": "example_usage--signal-1",
+                "category": "example_usage",
+                "value": "always_practical",
+                "source_event_id": "example_usage--signal-1--approved",
+                "status": "provided_to_model",
+            }
+        ],
+    )
+
+    assert partial.artifacts[0].artifact_id == "blueprint-1"
+    assert partial.adaptations[0].category == "example_usage"
+
+
 def test_adaptation_receipt_accepts_only_provided_to_model_status() -> None:
     from schemas import AdaptationReceipt
 
