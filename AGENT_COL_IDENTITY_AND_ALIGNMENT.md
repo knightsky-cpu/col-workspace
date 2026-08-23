@@ -208,20 +208,29 @@ The judge should be able to conclude without narration alone:
 
 > This agent grows with the user.
 
-## Current implementation gap
+## Current implementation status and gaps
 
-As of August 21, 2026, Agent_Col implements the governed memory lifecycle for
+As of August 23, 2026, Agent_Col implements the governed memory lifecycle for
 pending proposals, structured approval and rejection, provenance, correction,
 revocation, bounded inspection, hard deletion, cross-session adaptation
 context, adaptation receipts, and retry-safe chat turns. These behaviors have
 offline tests and accepted live Firestore evidence.
 
-The remaining governed-memory gap is the supervisor proposal boundary:
-Agent_Col cannot yet recognize explicit feedback during ordinary chat and call
-the bounded proposal service itself. The M7 design specifies that tool but is
-not implementation authorization. The supervisor instruction also remains
-engineering-focused, and governed memory is not yet the authoritative
-personalization input for structured synthesis.
+The responder-only Agent_Col can recognize one eligible explicit preference or
+allowed light identity detail in the current user message and call the bounded
+proposal service. The proposal is persisted as pending and cannot become
+active without a later structured user approval. The production turn service
+also gives Agent_Col access to four read-only cognitive capabilities through
+model-controlled, locally validated routing: Research, Source, Computation,
+and Requirements Verification. Agent_Col remains the sole user-facing
+responder, and no expert has persistence authority.
+
+The remaining collaboration-loop gap is the judge-facing artifact workflow.
+Synthesis is still a separate synchronous HTTP service rather than a
+chat-routed capability, and its legacy profile allowlist is not yet backed by
+the governed collaboration-memory projection. Artifact retrieval, feedback,
+version comparison, and a later artifact visibly changed by approved feedback
+also remain unfinished.
 
 The chat path persists raw user messages without automatic sensitive-data
 detection or redaction. Collaboration-history retention and deletion controls,

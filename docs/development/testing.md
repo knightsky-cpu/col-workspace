@@ -75,6 +75,64 @@ The first group protects structured generation, strict local validation, and
 persistence orchestration. The second protects bounded quality scenarios. A
 live quality check remains probabilistic and can consume Gemini quota.
 
+## Complete core tool-belt evaluation
+
+The M7 core-expert evaluation is intentionally layered. One green command does
+not substitute for the other boundaries.
+
+### Decision-only live routing
+
+Run one named production routing-v3 scenario with its fixture-declared attempt
+count:
+
+```bash
+python3 tool_belt_routing_check.py --scenario computation-series-precision --mode declared
+```
+
+This calls the configured Vertex routing provider but does not execute an
+expert, generate the final response, or access Firestore. Exit `0` means every
+planned decision matched the versioned route and candidate-provenance
+contract. Exit `1` means a semantic contract mismatch. Exit `2` means the run
+was inconclusive or invalid, including provider or schema-output failure.
+
+### Deterministic orchestration
+
+```bash
+python3 tool_belt_orchestration_check.py
+```
+
+This executes the production turn service, expert executor, responder-context
+construction, failures, timeouts, trust probes, replay, and conflict behavior
+with controlled collaborators. It makes no provider, network, or Firestore
+calls. Exit `0` is the authoritative offline gate for deterministic
+orchestration invariants.
+
+### Bounded live end-to-end evaluation
+
+Start Uvicorn and then run, from a second activated terminal, with a new
+lowercase synthetic identifier:
+
+```bash
+python3 tool_belt_live_e2e_check.py --run-id m7exp7b4-review-01
+```
+
+The runner makes exactly eight HTTP requests and performs no automatic retry.
+It exercises Direct, Clarify, all four cognitive experts, exact replay, and a
+changed-request conflict. Passing output reports zero automatable failures,
+zero inconclusive failures, and exit `0`. The replay must return HTTP 200; the
+changed request must return HTTP 409. That 409 is required success evidence,
+not a failed probe.
+
+The generated JSON report is written under `/tmp` unless `--report-path` is
+provided. Review every case marked `manual_review_required`; the aggregate exit
+code proves only automatable public-contract invariants. The live run consumes
+Vertex quota and writes fixed synthetic chat state to the configured Firestore
+database.
+
+See the
+[M7 core tool-belt evaluation closure](../superpowers/specs/2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md)
+for accepted evidence, limitations, and correction history.
+
 ## Static checks for Python scripts
 
 ```bash

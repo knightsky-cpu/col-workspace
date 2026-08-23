@@ -19,17 +19,26 @@ Implemented today:
 - optional retry-safe chat turns with durable claim, replay, conflict, lease,
   and atomic-completion behavior;
 - project-owned, atomically persisted structured synthesis blueprints;
-- a hybrid ADK supervisor runtime controlling project-aware chat;
+- a hybrid ADK runtime with model-controlled, locally validated routing and a
+  responder-only Agent_Col boundary;
 - strict local schema and semantic validation for blueprint version 2.0;
 - governed memory proposals, approval/rejection, provenance, correction,
   revocation, bounded inspection, and hard deletion;
+- ordinary-chat creation of one bounded, pending memory proposal when the user
+  states an eligible reusable preference or allowed light identity detail;
 - cross-session chat use of approved memory with explicit adaptation receipts;
+- four bounded cognitive experts: Research with Google Search, Source with URL
+  Context, Computation with code execution, and Requirements Verification with
+  deterministic local validation;
+- zero-or-one cognitive expert execution per turn, delegation depth one,
+  application-derived receipts, and responder-owned final answers;
+- layered decision-only, deterministic orchestration, and bounded live
+  end-to-end tool-belt evaluations;
 - offline API, orchestration, schema, database, and smoke-runner tests.
 
 Not implemented yet:
 
-- supervisor tool invocation;
-- supervisor extraction and creation of memory proposals from ordinary chat;
+- chat-routed synthesis, artifact retrieval, and artifact feedback workflows;
 - governed-memory personalization for structured synthesis;
 - durable background jobs;
 - the browser workspace;
@@ -122,7 +131,7 @@ pytest
 ```
 
 See [Testing](docs/development/testing.md) for focused commands, test-layer
-boundaries, and live smoke checks.
+boundaries, live smoke checks, and the complete core tool-belt evaluation.
 
 ## Security status
 
@@ -136,6 +145,7 @@ a public Cloud Run service.
 - [Chat turn idempotency](docs/design/turn-idempotency.md)
 - [Local development setup](docs/development/local-setup.md)
 - [Testing](docs/development/testing.md)
+- [Core tool-belt evaluation closure](docs/superpowers/specs/2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md)
 - [Troubleshooting](docs/development/troubleshooting.md)
 - [Submission checklist](docs/submission-checklist.md)
 - [Phase 3 design](docs/superpowers/specs/2026-08-19-phase-3-synthesis-engine-design.md)

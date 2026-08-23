@@ -11,7 +11,11 @@ are temporary and are deleted after each supervisor invocation.
 flowchart TD
     client[Local client]
     api[FastAPI application]
-    supervisor[Agent_Col ADK supervisor]
+    turn[Agent_Col turn service]
+    router[Vertex structured router]
+    executor[Deterministic expert executor]
+    experts[Research / Source / Computation / Requirements Verification]
+    responder[Responder-only Agent_Col ADK runtime]
     synthesis[Synthesis application service]
     memory_service[Trusted memory service]
     genai[Vertex AI / Gemini 3.6 Flash]
@@ -19,8 +23,15 @@ flowchart TD
     firestore[(Cloud Firestore)]
 
     client -->|health, chat, synthesize, memory APIs| api
-    api -->|bounded chat turn| supervisor
-    supervisor --> genai
+    api -->|bounded chat turn| turn
+    turn --> router
+    router --> genai
+    turn --> executor
+    executor -->|zero or one expert| experts
+    experts --> genai
+    turn --> responder
+    responder --> genai
+    responder -->|pending proposal only| memory_service
     api --> synthesis
     synthesis --> genai
     api --> memory_service
@@ -31,9 +42,18 @@ flowchart TD
     firestore -->|approved memory and bounded history| api
 ```
 
-The supervisor currently has no tools. It remains responsible for one final
-chat response and defaults to no tool invocation. Synthesis is exposed as a
-separate deterministic application service rather than an ADK tool.
+The production chat path separates Agent_Col's routing judgment from its final
+response. The structured router receives server-projected URL, numerical, and
+text-block candidates. Strict local validation accepts one of six routes:
+`direct`, `clarify`, `source`, `research`, `computation`, or
+`requirements_verification`. Deterministic application code then executes zero
+or one matching expert and derives validated results and receipts. A separate
+responder-only Agent_Col instance integrates that context into one final
+answer. It has no model-visible cognitive expert tools; its only optional tool
+is the governed creation of one pending memory proposal.
+
+Synthesis remains exposed as a separate deterministic application service
+rather than a chat-routed cognitive capability.
 
 ## Current request flows
 
@@ -57,11 +77,19 @@ This path is retained for compatibility but does not provide durable replay.
    new supervisor call.
 3. A changed request or active owner returns HTTP 409.
 4. A new/resumed owner loads context, applies any memory decision, and renews
-   its lease before the supervisor call.
-5. Firestore transactionally writes the deterministic model message and marks
-   the turn completed.
-6. Provider failures and timeouts expire the owned lease so the same request
-   can be retried.
+   its lease before cognitive work.
+5. The turn service projects bounded URL, numeric, and text-block candidates.
+6. Vertex returns one structured routing directive, which local code validates.
+7. Deterministic execution runs zero or one selected expert under a bounded
+   deadline and derives action, citation, and execution receipts.
+8. Responder-only Agent_Col integrates the validated route and result. It may
+   create one governed pending-memory proposal from an eligible statement in
+   the current message, but it cannot invoke a cognitive expert.
+9. Firestore transactionally writes the deterministic model message and marks
+   the turn completed with the public `ChatResponse`.
+10. Provider failures and timeouts expire the owned lease so the same request
+    can be retried. A completed identical request replays without repeating
+    routing, expert execution, response generation, or persistence effects.
 
 See [Chat turn idempotency](design/turn-idempotency.md) for exact guarantees
 and limitations.
@@ -91,8 +119,10 @@ target signal's governed value-bearing artifacts. Inspection returns a bounded
 profile, unresolved proposals, and up to 50 events per page.
 
 The current public API supports inspection, revocation, hard deletion, and a
-chat-carried decision for an existing proposal. The supervisor does not yet
-extract or create proposals from ordinary conversation.
+chat-carried decision for an existing proposal. Responder-only Agent_Col can
+also submit one allowlisted pending proposal from an eligible explicit
+statement in the current user message. The deterministic service, not the
+model, owns identifiers, policy validation, provenance, and persistence.
 
 ## Responsibility boundaries
 
@@ -109,9 +139,23 @@ extract or create proposals from ordinary conversation.
 
 - maintains the user-facing conversation and one final response;
 - receives only server-rendered approved memory and bounded untrusted history;
-- asks clarifying questions when consequential information is missing;
-- defaults to no tool and currently has no registered tools;
-- uses an in-memory ADK invocation session that is deleted after each turn.
+- makes one structured, locally validated route selection from a bounded
+  production capability catalog;
+- asks a clarifying question when consequential information is missing or one
+  expert cannot safely satisfy a multi-capability request;
+- defaults to direct response when no expert materially improves the answer;
+- integrates only validated expert results and application-derived receipts;
+- can propose one pending governed-memory signal but cannot activate it;
+- uses an in-memory ADK invocation session that is deleted after each responder
+  turn.
+
+### Cognitive expert executor
+
+- executes zero or one route-matching expert under an explicit deadline;
+- prevents expert chaining and fallback routing;
+- maps validated results into responder context and authoritative receipts;
+- treats expert output as untrusted evidence rather than instructions;
+- grants experts no generic Firestore or durable mutation authority.
 
 ### Synthesizer
 
@@ -252,10 +296,12 @@ boundaries.
 
 ### Phase 3B: supervisor and trusted continuity
 
-In progress: the hybrid supervisor, governed memory lifecycle, cross-session
-adaptation, and retry-safe chat turns are implemented. Governed supervisor
-tools, automatic proposal creation from ordinary feedback, and governed-memory
-synthesis personalization remain pending.
+In progress: the hybrid responder, structured production routing, four-expert
+core tool belt, governed memory lifecycle, ordinary-chat pending proposals,
+cross-session adaptation, retry-safe chat turns, and layered tool-belt
+evaluation are implemented and have accepted live evidence. Chat-routed
+synthesis, artifact feedback, and governed-memory synthesis personalization
+remain pending.
 
 ### Phase 3C: durable background execution
 
