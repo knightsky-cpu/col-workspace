@@ -7,6 +7,7 @@ from google.api_core.exceptions import ServiceUnavailable
 from google.cloud import firestore
 
 from database import MemoryEngine, MemoryEngineError
+from schemas import AdaptationReceipt
 
 
 @pytest.mark.asyncio
@@ -116,6 +117,140 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
         ),
     ]
     batch.commit.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_save_blueprint_persists_validated_adaptation_receipt() -> None:
+    client = MagicMock()
+    project = MagicMock()
+    blueprint_ref = MagicMock(id="blueprint-1")
+    batch = MagicMock()
+    batch.commit = AsyncMock(return_value=[])
+    client.collection.return_value.document.return_value = project
+    project.collection.return_value.document.return_value = blueprint_ref
+    client.batch.return_value = batch
+    receipt = AdaptationReceipt(
+        signal_id="planning-granularity-signal-1",
+        category="planning_granularity",
+        value="micro_steps",
+        source_event_id="planning-granularity-signal-1--approved",
+        status="provided_to_model",
+    )
+
+    blueprint_id = await MemoryEngine(client).save_blueprint(
+        "project-1",
+        "session-1",
+        "user-1",
+        "gemini-3.6-flash",
+        "2.0",
+        {"synthesized_conceptual_model": {"project_name": "Agent Col"}},
+        adaptations=(receipt,),
+    )
+
+    assert blueprint_id == "blueprint-1"
+    stored_document = batch.set.call_args_list[1].args[1]
+    assert stored_document["adaptation_receipts"] == [
+        {
+            "signal_id": "planning-granularity-signal-1",
+            "category": "planning_granularity",
+            "value": "micro_steps",
+            "source_event_id": (
+                "planning-granularity-signal-1--approved"
+            ),
+            "status": "provided_to_model",
+        }
+    ]
+    batch.commit.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_save_blueprint_rejects_duplicate_adaptation_categories() -> None:
+    client = MagicMock()
+    receipt = AdaptationReceipt(
+        signal_id="planning-granularity-signal-1",
+        category="planning_granularity",
+        value="tasks",
+        source_event_id="planning-granularity-signal-1--approved",
+        status="provided_to_model",
+    )
+
+    with pytest.raises(ValueError, match="categories must be unique"):
+        await MemoryEngine(client).save_blueprint(
+            "project-1",
+            "session-1",
+            "user-1",
+            "gemini-3.6-flash",
+            "2.0",
+            {"synthesized_conceptual_model": {"project_name": "Agent Col"}},
+            adaptations=(receipt, receipt),
+        )
+
+    client.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_save_blueprint_rejects_unvalidated_adaptation_mapping() -> None:
+    client = MagicMock()
+
+    with pytest.raises(ValueError, match="valid adaptation receipts"):
+        await MemoryEngine(client).save_blueprint(
+            "project-1",
+            "session-1",
+            "user-1",
+            "gemini-3.6-flash",
+            "2.0",
+            {"synthesized_conceptual_model": {"project_name": "Agent Col"}},
+            adaptations=(
+                {
+                    "signal_id": "unvalidated-signal",
+                    "category": "planning_granularity",
+                    "value": "tasks",
+                },
+            ),
+        )
+
+    client.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_save_blueprint_rejects_more_than_eight_adaptations() -> None:
+    client = MagicMock()
+    category_values = (
+        ("preferred_name", "Avery"),
+        ("broad_roles", ["student"]),
+        ("response_length", "concise"),
+        ("explanation_structure", "step_by_step"),
+        ("example_usage", "when_helpful"),
+        ("question_style", "minimal_follow_up"),
+        ("planning_granularity", "tasks"),
+        ("progress_check_ins", "at_milestones"),
+        ("tool_use_style", "use_when_needed"),
+    )
+    receipts = tuple(
+        AdaptationReceipt.model_validate(
+            {
+                "signal_id": f"signal-{index}",
+                "category": category,
+                "value": value,
+                "source_event_id": f"signal-{index}--approved",
+                "status": "provided_to_model",
+            }
+        )
+        for index, (category, value) in enumerate(category_values, start=1)
+    )
+
+    with pytest.raises(ValueError, match="valid adaptation receipts"):
+        await MemoryEngine(client).save_blueprint(
+            "project-1",
+            "session-1",
+            "user-1",
+            "gemini-3.6-flash",
+            "2.0",
+            {"synthesized_conceptual_model": {"project_name": "Agent Col"}},
+            adaptations=receipts,
+        )
+
+    client.collection.assert_not_called()
 
 
 @pytest.mark.asyncio

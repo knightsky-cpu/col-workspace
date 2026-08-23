@@ -48,6 +48,7 @@ from memory_proposals import (
 from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     ActiveMemorySignal,
+    AdaptationReceipt,
     AgentActionReceipt,
     ArtifactFeedbackCounts,
     ArtifactFeedbackDecisionRequest,
@@ -701,12 +702,16 @@ class MemoryEngine:
         blueprint: dict[str, object],
         display_label: str,
         observed_at: datetime,
+        adaptations: tuple[AdaptationReceipt, ...] = (),
     ) -> ChatTurnArtifactEffectResult:
         """Atomically persist one blueprint and its owned turn receipts."""
         self._validate_chat_turn_claim(claim)
         self._validate_string(model_name, "model_name")
         self._validate_string(schema_version, "schema_version")
         self._validate_blueprint(blueprint)
+        adaptation_documents = self._adaptation_receipt_documents(
+            adaptations
+        )
         if not self._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
         if (
@@ -792,6 +797,7 @@ class MemoryEngine:
                     claim,
                     stored_artifact,
                     blueprint_snapshot.to_dict(),
+                    adaptation_documents,
                 )
                 return ChatTurnArtifactEffectResult(
                     claim=replace(
@@ -831,7 +837,7 @@ class MemoryEngine:
                         "rejected": 0,
                         "edited": 0,
                     },
-                    "adaptation_receipts": [],
+                    "adaptation_receipts": adaptation_documents,
                     "applied_feedback_ids": [],
                     "blueprint": blueprint,
                 },
@@ -1232,6 +1238,7 @@ class MemoryEngine:
         claim: ChatTurnClaim,
         artifact: ArtifactReference,
         document: object,
+        adaptation_documents: list[dict[str, object]],
     ) -> None:
         if not isinstance(document, Mapping):
             raise ChatTurnStateError(
@@ -1255,6 +1262,11 @@ class MemoryEngine:
         ):
             raise ChatTurnStateError(
                 "Stored blueprint document does not match its turn effect."
+            )
+        if document.get("adaptation_receipts") != adaptation_documents:
+            raise ChatTurnStateError(
+                "Stored blueprint adaptation receipts conflict with this "
+                "turn effect."
             )
 
     async def complete_chat_turn(
@@ -1788,6 +1800,8 @@ class MemoryEngine:
         model_name: str,
         schema_version: str,
         blueprint: dict[str, object],
+        *,
+        adaptations: tuple[AdaptationReceipt, ...] = (),
     ) -> str:
         """Atomically persist a project update and generated blueprint."""
         self._validate_string(project_id, "project_id")
@@ -1796,6 +1810,9 @@ class MemoryEngine:
         self._validate_string(model_name, "model_name")
         self._validate_string(schema_version, "schema_version")
         self._validate_blueprint(blueprint)
+        adaptation_documents = self._adaptation_receipt_documents(
+            adaptations
+        )
 
         try:
             project_ref = self._client.collection("projects").document(
@@ -1825,7 +1842,7 @@ class MemoryEngine:
                         "rejected": 0,
                         "edited": 0,
                     },
-                    "adaptation_receipts": [],
+                    "adaptation_receipts": adaptation_documents,
                     "applied_feedback_ids": [],
                     "blueprint": blueprint,
                 },
@@ -4194,6 +4211,26 @@ class MemoryEngine:
     def _validate_blueprint(blueprint: object) -> None:
         if not isinstance(blueprint, dict) or not blueprint:
             raise ValueError("blueprint must be a non-empty dictionary.")
+
+    @staticmethod
+    def _adaptation_receipt_documents(
+        adaptations: object,
+    ) -> list[dict[str, object]]:
+        if (
+            not isinstance(adaptations, tuple)
+            or len(adaptations) > 8
+            or not all(
+                isinstance(receipt, AdaptationReceipt)
+                for receipt in adaptations
+            )
+        ):
+            raise ValueError("adaptations must be valid adaptation receipts.")
+        categories = [receipt.category for receipt in adaptations]
+        if len(categories) != len(set(categories)):
+            raise ValueError("adaptation receipt categories must be unique.")
+        return [
+            receipt.model_dump(mode="python") for receipt in adaptations
+        ]
 
     @staticmethod
     def _raise_firestore_error(

@@ -22,6 +22,7 @@ from chat_turns import (
 )
 from database import MemoryEngine, MemoryEngineError
 from schemas import (
+    AdaptationReceipt,
     AgentActionReceipt,
     ArtifactFeedbackDecisionRequest,
     ArtifactFeedbackReference,
@@ -230,6 +231,19 @@ def blueprint_reference_document(
         "artifact_id": f"blueprint--{ids.turn_id}",
         "schema_version": "2.0",
         "display_label": "Agent Col blueprint",
+    }
+
+
+def adaptation_receipt_document(
+    *,
+    value: str = "micro_steps",
+) -> dict[str, str]:
+    return {
+        "signal_id": "planning-granularity-signal-1",
+        "category": "planning_granularity",
+        "value": value,
+        "source_event_id": "planning-granularity-signal-1--approved",
+        "status": "provided_to_model",
     }
 
 
@@ -1601,6 +1615,9 @@ async def test_record_chat_turn_blueprint_effect_writes_artifact_and_ledger_atom
             "project_name": "Bounded Collaboration",
         }
     }
+    adaptation = AdaptationReceipt.model_validate(
+        adaptation_receipt_document()
+    )
 
     result = await MemoryEngine(
         store.client
@@ -1610,6 +1627,7 @@ async def test_record_chat_turn_blueprint_effect_writes_artifact_and_ledger_atom
         schema_version="2.0",
         blueprint=blueprint,
         display_label="Bounded Collaboration",
+        adaptations=(adaptation,),
         observed_at=NOW,
     )
 
@@ -1651,7 +1669,9 @@ async def test_record_chat_turn_blueprint_effect_writes_artifact_and_ledger_atom
                     "rejected": 0,
                     "edited": 0,
                 },
-                "adaptation_receipts": [],
+                "adaptation_receipts": [
+                    adaptation.model_dump(mode="python")
+                ],
                 "applied_feedback_ids": [],
                 "blueprint": blueprint,
             },
@@ -1820,11 +1840,18 @@ async def test_record_chat_turn_blueprint_effect_reuses_owned_effect_without_wri
     store.turn_ref.get = AsyncMock(
         return_value=snapshot(exists=True, data=stored_turn)
     )
+    stored_document = stored_blueprint_effect_document(ids)
+    stored_document["adaptation_receipts"] = [
+        adaptation_receipt_document()
+    ]
     store.blueprint_ref.get = AsyncMock(
         return_value=snapshot(
             exists=True,
-            data=stored_blueprint_effect_document(ids),
+            data=stored_document,
         )
+    )
+    adaptation = AdaptationReceipt.model_validate(
+        adaptation_receipt_document()
     )
 
     result = await MemoryEngine(
@@ -1836,11 +1863,74 @@ async def test_record_chat_turn_blueprint_effect_reuses_owned_effect_without_wri
         blueprint={"retry_payload": "must not overwrite durable work"},
         display_label="Regenerated label must not replace the receipt",
         observed_at=NOW,
+        adaptations=(adaptation,),
     )
 
     assert result.artifact == artifact
     assert result.claim.precompleted_actions == (action,)
     assert result.claim.precompleted_artifacts == (artifact,)
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_blueprint_effect_rejects_receipt_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-receipt-conflict")
+    store = ArtifactEffectStore(ids)
+    artifact = ArtifactReference.model_validate(
+        blueprint_reference_document(ids)
+    )
+    action = AgentActionReceipt.model_validate(blueprint_action_document())
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a bounded collaboration blueprint.",
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=True,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    stored_turn = turn_document(
+        ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["actions"] = [blueprint_action_document()]
+    stored_turn["artifacts"] = [blueprint_reference_document(ids)]
+    stored_document = stored_blueprint_effect_document(ids)
+    stored_document["adaptation_receipts"] = [
+        adaptation_receipt_document(value="micro_steps")
+    ]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.blueprint_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_document)
+    )
+    conflicting_receipt = AdaptationReceipt.model_validate(
+        adaptation_receipt_document(value="tasks")
+    )
+
+    with pytest.raises(ChatTurnStateError, match="receipt"):
+        await MemoryEngine(
+            store.client
+        ).record_chat_turn_blueprint_effect(
+            claim,
+            model_name="gemini-3.6-flash",
+            schema_version="2.0",
+            blueprint={"retry_payload": "must not replace durable work"},
+            display_label="Regenerated label",
+            observed_at=NOW,
+            adaptations=(conflicting_receipt,),
+        )
+
     store.transaction.set.assert_not_called()
 
 
