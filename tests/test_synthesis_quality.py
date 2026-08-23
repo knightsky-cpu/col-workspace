@@ -431,7 +431,7 @@ def test_load_quality_scenarios_rejects_malformed_definition(
         load_quality_scenarios(fixture_path)
 
 
-def test_default_quality_fixture_contains_eight_approved_scenarios() -> None:
+def test_default_quality_fixture_contains_nine_approved_scenarios() -> None:
     from synthesis_quality import load_quality_scenarios
 
     scenarios = load_quality_scenarios()
@@ -445,4 +445,5 @@ def test_default_quality_fixture_contains_eight_approved_scenarios() -> None:
         "agent-col-architecture",
         "ambiguous-requirements",
         "repetitive-input",
+        "named-technology-fidelity",
     )

@@ -191,6 +191,36 @@
       "max_roadmap_milestones": 4,
       "min_diagnostic_warnings": 0,
       "max_diagnostic_warnings": 4
+    },
+    {
+      "scenario_id": "named-technology-fidelity",
+      "source_text": "Create a structured blueprint for a collaborative study workflow. Required technologies are FastAPI for the application API, Firestore for all application persistence, and Google Cloud Run for deployment. Firestore is mandatory; do not substitute PostgreSQL, MySQL, SQLite, or another datastore. If a required technology appears infeasible or conflicts with another requirement, preserve it as the selected solution and expose the concern in a clarifying question or diagnostic warning instead of silently replacing it.",
+      "profile": {},
+      "required_concepts": [
+        {"concept_id": "fastapi-api", "phrases": ["fastapi"]},
+        {"concept_id": "firestore-datastore", "phrases": ["firestore"]},
+        {"concept_id": "cloud-run-deployment", "phrases": ["cloud run"]}
+      ],
+      "forbidden_claims": [
+        "use postgresql",
+        "postgresql-backed",
+        "postgresql migration",
+        "use mysql",
+        "mysql-backed",
+        "mysql migration",
+        "use sqlite",
+        "sqlite-backed",
+        "sqlite migration"
+      ],
+      "expected_adaptation_keys": [],
+      "min_architectural_decisions": 1,
+      "max_architectural_decisions": 5,
+      "min_clarifying_questions": 0,
+      "max_clarifying_questions": 4,
+      "min_roadmap_milestones": 1,
+      "max_roadmap_milestones": 5,
+      "min_diagnostic_warnings": 0,
+      "max_diagnostic_warnings": 6
     }
   ]
 }

@@ -244,6 +244,26 @@ def test_synthesis_prompt_preserves_requirements_without_obeying_directives(
     assert "clarifying question or diagnostic warning" in prompt
 
 
+def test_synthesis_prompt_preserves_explicit_named_technology_choices() -> None:
+    from synthesis import (
+        SYNTHESIS_SYSTEM_INSTRUCTION,
+        build_synthesis_contents,
+    )
+
+    contents = build_synthesis_contents(
+        {},
+        [],
+        "Required datastore: Firestore. Do not substitute another database.",
+    )
+    prompt = contents[0].parts[0].text
+    provider_contract = f"{SYNTHESIS_SYSTEM_INSTRUCTION}\n{prompt}".casefold()
+
+    assert "explicitly named technologies" in provider_contract
+    assert "do not replace" in provider_contract
+    assert "selected solution" in provider_contract
+    assert "clarifying question or diagnostic warning" in provider_contract
+
+
 @pytest.mark.asyncio
 async def test_generate_blueprint_uses_structured_untrusted_context(
     valid_blueprint_payload: dict[str, object],
