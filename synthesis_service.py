@@ -50,10 +50,11 @@ class SynthesisApplicationService:
         self._database = database
         self._blueprint_generator = blueprint_generator
 
-    async def synthesize(
+    async def generate_blueprint(
         self,
         command: SynthesisCommand,
-    ) -> SynthesisResult:
+    ) -> SynthesisBlueprint:
+        """Generate one strict blueprint without choosing persistence."""
         profile, history = await asyncio.gather(
             self._database.get_user_profile(command.user_id),
             self._database.get_chat_history(
@@ -61,12 +62,18 @@ class SynthesisApplicationService:
                 limit=SYNTHESIS_HISTORY_LIMIT,
             ),
         )
-        blueprint = await self._blueprint_generator(
+        return await self._blueprint_generator(
             self._client,
             profile,
             history,
             command.source_text,
         )
+
+    async def synthesize(
+        self,
+        command: SynthesisCommand,
+    ) -> SynthesisResult:
+        blueprint = await self.generate_blueprint(command)
         blueprint_id = await self._database.save_blueprint(
             command.project_id,
             command.session_id,

@@ -175,6 +175,52 @@ class FailingBlueprintGenerator:
 
 
 @pytest.mark.asyncio
+async def test_generate_blueprint_builds_context_without_persisting(
+    blueprint: SynthesisBlueprint,
+) -> None:
+    from synthesis_service import (
+        SynthesisApplicationService,
+        SynthesisCommand,
+    )
+
+    events: list[tuple[object, ...]] = []
+    client = object()
+    database = FakeDatabase(events)
+    generator = FakeBlueprintGenerator(events, blueprint)
+    service = SynthesisApplicationService(
+        client=client,
+        database=database,
+        blueprint_generator=generator,
+    )
+    command = SynthesisCommand(
+        project_id="project-1",
+        session_id="session-1",
+        user_id="user-1",
+        source_text="Build a study partner.",
+    )
+
+    generated = await service.generate_blueprint(command)
+
+    assert generated is blueprint
+    assert set(events[:2]) == {
+        ("profile", "user-1"),
+        ("history", "session-1", 20),
+    }
+    assert events[2:] == [("generate",)]
+    assert generator.calls == [
+        (
+            client,
+            {"experience_level": "student"},
+            [
+                {"role": "user", "text": "Earlier question"},
+                {"role": "model", "text": "Earlier answer"},
+            ],
+            "Build a study partner.",
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_service_generates_and_persists_project_blueprint(
     blueprint: SynthesisBlueprint,
 ) -> None:
