@@ -2,7 +2,6 @@ import importlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -79,28 +78,7 @@ def passing_bodies() -> dict[str, tuple[int, dict[str, object]]]:
                 action="verify_requirements",
             ),
         ),
-        "failed-source": (
-            200,
-            chat_body(
-                "I could not retrieve the supplied page, so I cannot make "
-                "a source-grounded claim."
-            ),
-        ),
     }
-
-
-def valid_live_cases(module):
-    cases = list(module.LIVE_E2E_CASES)
-    cases[-1] = module.LiveE2ECase(
-        probe_id="failed-source",
-        message=(
-            "Analyze https://example.com/unavailable-evaluation-page using "
-            "only that page, and explain clearly if retrieval fails."
-        ),
-        expected_action=None,
-        required_projection="url",
-    )
-    return tuple(cases)
 
 
 class PassingRequester:
@@ -142,9 +120,8 @@ def test_catalog_is_fixed_bounded_and_synthetic() -> None:
         "research",
         "computation",
         "requirements-verification",
-        "failed-source",
     )
-    assert len(module.LIVE_E2E_CASES) == 7
+    assert len(module.LIVE_E2E_CASES) == 6
     assert all(case.manual_review_required for case in module.LIVE_E2E_CASES)
     assert tuple(case.required_projection for case in module.LIVE_E2E_CASES) == (
         "none",
@@ -153,67 +130,14 @@ def test_catalog_is_fixed_bounded_and_synthetic() -> None:
         "none",
         "numeric",
         "text",
-        "url",
     )
-    assert "example.invalid" in module.LIVE_E2E_CASES[-1].message
     assert all("wifiknight" not in case.message for case in module.LIVE_E2E_CASES)
 
 
-def test_default_catalog_preflight_rejects_unprojectable_failed_source() -> None:
+def test_default_catalog_preflight_uses_all_required_projections() -> None:
     module = load_check_module()
 
-    with pytest.raises(module.LiveE2EConfigurationError) as captured:
-        module.preflight_live_cases(module.LIVE_E2E_CASES)
-
-    assert captured.value.probe_id == "failed-source"
-    assert captured.value.reason == "missing_url_candidate"
-    assert "example.invalid" not in str(captured.value)
-
-
-def test_valid_catalog_preflight_uses_all_required_projections() -> None:
-    module = load_check_module()
-
-    assert module.preflight_live_cases(valid_live_cases(module)) is None
-
-
-@pytest.mark.asyncio
-async def test_live_preflight_rejects_before_http_client_construction(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    module = load_check_module()
-    output: list[str] = []
-
-    monkeypatch.setattr(
-        module,
-        "load_vertex_ai_settings",
-        lambda _environment: SimpleNamespace(
-            project="synthetic-project",
-            location="global",
-        ),
-    )
-    monkeypatch.setattr(module, "resolve_repository_commit", lambda: "a" * 40)
-    monkeypatch.setattr(module, "is_repository_dirty", lambda: False)
-
-    class ForbiddenHttpClient:
-        def __init__(self, *args, **kwargs) -> None:
-            raise AssertionError("HTTP client must not be constructed")
-
-    monkeypatch.setattr(module.httpx, "AsyncClient", ForbiddenHttpClient)
-
-    exit_code = await module.run_live(
-        run_id="preflight-only",
-        base_url="http://127.0.0.1:8000",
-        report_path=tmp_path / "unused.json",
-        output=output.append,
-        environment={},
-    )
-
-    assert exit_code == 2
-    assert output == [
-        "tool-belt-live-e2e-check configuration_error "
-        "probe=failed-source reason=missing_url_candidate"
-    ]
+    assert module.preflight_live_cases(module.LIVE_E2E_CASES) is None
 
 
 def test_identifiers_are_bounded_unique_and_firestore_traceable() -> None:
@@ -253,7 +177,7 @@ def test_run_id_validation_rejects_unsafe_values(run_id: str) -> None:
 
 
 @pytest.mark.asyncio
-async def test_bounded_runner_executes_exactly_nine_requests_and_writes_report(
+async def test_bounded_runner_executes_exactly_eight_requests_and_writes_report(
     tmp_path: Path,
 ) -> None:
     module = load_check_module()
@@ -272,7 +196,6 @@ async def test_bounded_runner_executes_exactly_nine_requests_and_writes_report(
         configured_location="global",
         now=lambda: datetime(2026, 8, 23, 12, 0, tzinfo=UTC),
         monotonic_values=iter((10.0, 10.5)),
-        cases=valid_live_cases(module),
     )
 
     assert exit_code == 0
@@ -283,13 +206,12 @@ async def test_bounded_runner_executes_exactly_nine_requests_and_writes_report(
         "research",
         "computation",
         "requirements-verification",
-        "failed-source",
         "source-replay",
         "source-conflict",
     ]
     source_call = requester.calls[2]
-    replay_call = requester.calls[7]
-    conflict_call = requester.calls[8]
+    replay_call = requester.calls[6]
+    conflict_call = requester.calls[7]
     assert replay_call[1:] == source_call[1:]
     assert conflict_call[2] == source_call[2]
     assert conflict_call[1]["message"] != source_call[1]["message"]
@@ -309,34 +231,67 @@ async def test_bounded_runner_executes_exactly_nine_requests_and_writes_report(
         "provider_calls": "not_observable_at_http_boundary",
     }
     assert report["summary"] == {
-        "http_requests": 9,
+        "http_requests": 8,
         "automatable_failures": 0,
         "inconclusive_failures": 0,
-        "manual_review_cases": 7,
+        "manual_review_cases": 6,
         "elapsed_ms": 500,
         "exit_code": 0,
     }
-    assert len(report["probes"]) == 9
+    assert len(report["probes"]) == 8
     assert report["probes"][0]["response"]["response"].startswith(
         "Tools are unnecessary"
     )
     assert report["probes"][0]["manual_review_required"] is True
-    failed_source = next(
-        probe
-        for probe in report["probes"]
-        if probe["probe_id"] == "failed-source"
-    )
-    assert failed_source["classification"] == (
-        "pass_public_failure_contract"
-    )
     assert report["probes"][-1]["http_status"] == 409
+    assert all(
+        probe["probe_id"] != "failed-source" for probe in report["probes"]
+    )
+    assert any("7B.3" in note for note in report["notes"])
+    assert all("failed-source" not in note for note in report["notes"])
 
     terminal = "\n".join(output)
     assert "Tools are unnecessary" not in terminal
     assert "Which two values" not in terminal
     assert "19.5000" not in terminal
     assert str(report_path) in terminal
-    assert "manual_review_cases=7" in terminal
+    assert "planned_http_requests=8" in terminal
+    assert "manual_review_cases=6" in terminal
+
+
+@pytest.mark.asyncio
+async def test_request_count_is_derived_from_validated_catalog(
+    tmp_path: Path,
+) -> None:
+    module = load_check_module()
+    requester = PassingRequester()
+    output: list[str] = []
+    selected_cases = tuple(
+        case
+        for case in module.LIVE_E2E_CASES
+        if case.probe_id in {"direct-restraint", "source"}
+    )
+
+    exit_code = await module.run_bounded_live_e2e(
+        run_id="derived-count",
+        request_chat=requester,
+        report_path=tmp_path / "derived-count.json",
+        output=output.append,
+        repository_commit="f" * 40,
+        repository_dirty=False,
+        configured_project="synthetic-project",
+        configured_location="global",
+        cases=selected_cases,
+    )
+
+    assert exit_code == 0
+    assert len(requester.calls) == 4
+    assert output[0].endswith("planned_http_requests=4")
+    report = json.loads(
+        (tmp_path / "derived-count.json").read_text(encoding="utf-8")
+    )
+    assert report["summary"]["http_requests"] == 4
+    assert report["summary"]["manual_review_cases"] == 2
 
 
 @pytest.mark.asyncio
@@ -360,11 +315,10 @@ async def test_unobservable_expert_outcome_returns_two_and_continues_sample(
         repository_dirty=True,
         configured_project="synthetic-project",
         configured_location="global",
-        cases=valid_live_cases(module),
     )
 
     assert exit_code == 2
-    assert len(requester.calls) == 9
+    assert len(requester.calls) == 8
     assert any(
         line == "computation http=200 expert_outcome_unobservable"
         for line in output
@@ -394,18 +348,17 @@ async def test_provider_failure_returns_two_and_preserves_semantic_findings(
         repository_dirty=False,
         configured_project="synthetic-project",
         configured_location="global",
-        cases=valid_live_cases(module),
     )
 
     assert exit_code == 2
-    assert len(requester.calls) == 9
+    assert len(requester.calls) == 8
     assert "research http=502 provider_error" in output
     assert "computation http=200 expert_outcome_unobservable" in output
     assert all("private provider error" not in line for line in output)
 
 
 @pytest.mark.asyncio
-async def test_citation_must_be_attached_to_response_text(
+async def test_source_accepts_exact_citation_receipt_without_literal_uri_in_text(
     tmp_path: Path,
 ) -> None:
     module = load_check_module()
@@ -420,7 +373,7 @@ async def test_citation_must_be_attached_to_response_text(
     )
 
     exit_code = await module.run_bounded_live_e2e(
-        run_id="citation-failure",
+        run_id="citation-receipt",
         request_chat=requester,
         report_path=tmp_path / "report.json",
         output=lambda _line: None,
@@ -428,10 +381,57 @@ async def test_citation_must_be_attached_to_response_text(
         repository_dirty=False,
         configured_project="synthetic-project",
         configured_location="global",
-        cases=valid_live_cases(module),
     )
 
-    assert exit_code == 1
+    assert exit_code == 0
+
+
+def test_source_rejects_citation_receipt_for_unselected_url() -> None:
+    module = load_check_module()
+    case = next(
+        case for case in module.LIVE_E2E_CASES if case.probe_id == "source"
+    )
+
+    result = module.evaluate_case(
+        case,
+        module.LiveHttpObservation(
+            status_code=200,
+            body=chat_body(
+                "An unrelated page says something else: "
+                "https://unrelated.example/.",
+                action="url_context",
+                citations=(("https://unrelated.example/", "Unrelated"),),
+            ),
+        ),
+    )
+
+    assert result.outcome == "semantic_failure"
+    assert result.classification == "citation_mismatch"
+
+
+def test_research_accepts_authoritative_citation_receipt_without_uri_in_text(
+) -> None:
+    module = load_check_module()
+    case = next(
+        case for case in module.LIVE_E2E_CASES if case.probe_id == "research"
+    )
+
+    result = module.evaluate_case(
+        case,
+        module.LiveHttpObservation(
+            status_code=200,
+            body=chat_body(
+                "According to python.org, the current release is supported.",
+                action="google_search",
+                citations=(
+                    ("https://www.python.org/downloads/", "python.org"),
+                ),
+            ),
+        ),
+    )
+
+    assert result.outcome == "pass"
+    assert result.classification == "pass"
 
 
 def test_live_http_adapter_classifies_transport_without_retry() -> None:
@@ -483,7 +483,6 @@ async def test_existing_report_is_rejected_before_any_live_request(
             repository_dirty=False,
             configured_project="synthetic-project",
             configured_location="global",
-            cases=valid_live_cases(module),
         )
 
     assert requester.calls == []

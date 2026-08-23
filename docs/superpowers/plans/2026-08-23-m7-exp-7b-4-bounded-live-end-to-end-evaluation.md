@@ -4,6 +4,27 @@
 
 Approved for implementation on 2026-08-23.
 
+## R2 reconciliation notice
+
+The original nine-request catalog below is historical. R2 supersedes its
+`failed-source` live probe because the public HTTP response cannot prove that a
+receipt-free response came from a failed expert, and a public URL expected to
+fail is not reproducible. The reconciled implementation uses six primary cases
+plus Source replay and conflict for eight derived requests. Deterministic 7B.3
+remains the authoritative failed-expert and timeout gate. See
+`docs/superpowers/specs/2026-08-23-m7-exp-7b-4-r2-controlled-failure-contract-reconciliation.md`.
+
+## R3A citation-receipt reconciliation notice
+
+The original citation heuristic below is historical. R3A treats the public
+`ChatResponse.citations` array as the authoritative automated receipt rather
+than requiring raw citation URIs to be repeated inside model-authored prose.
+The fixed Source probe must contain the selected URL receipt, and the fixed
+Research probe must contain validated citations with its expected
+authoritative source label. Claim-to-citation clarity remains a qualitative
+manual-review target. See
+`docs/superpowers/specs/2026-08-23-m7-exp-7b-4-r3a-public-citation-receipt-evaluation-correction.md`.
+
 ## Goal
 
 Add one bounded live HTTP evaluation that exercises Agent_Col's complete core
@@ -52,7 +73,7 @@ silently retried or relabeled as successful.
 - Validate only public, observable invariants at this layer:
   - no expert receipts for direct and clarification turns;
   - exact completed action names for each successful expert;
-  - Source and Research citations are present and attached to response text;
+  - Source and Research expose their required authoritative citation receipts;
   - Computation exposes no citations and contains the locally known results
     `19.5000` and `5.1235`;
   - Requirements Verification exposes no external citations and has its

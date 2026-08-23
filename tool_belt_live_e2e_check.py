@@ -44,14 +44,6 @@ ROUTING_SCHEMA_VERSION = "3.0"
 _RUN_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 _COMMIT_PATTERN = re.compile(r"^[0-9a-f]{7,40}$")
 _CONFLICT_DETAIL = "Idempotency key conflicts with a different chat request."
-_FAILURE_LANGUAGE = (
-    "unable",
-    "unavailable",
-    "could not",
-    "cannot",
-    "failed",
-    "not retrieve",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,16 +111,6 @@ LIVE_E2E_CASES = (
         ),
         expected_action="verify_requirements",
         required_projection="text",
-    ),
-    LiveE2ECase(
-        probe_id="failed-source",
-        message=(
-            "Analyze this supplied public URL using only evidence from the "
-            "page, and explain clearly if it cannot be retrieved: "
-            "https://agent-col-evaluation.example.invalid/"
-        ),
-        expected_action=None,
-        required_projection="url",
     ),
 )
 
@@ -282,11 +264,16 @@ def _expected_action_matches(case: LiveE2ECase, response: ChatResponse) -> bool:
     )
 
 
-def _citations_attached(response: ChatResponse) -> bool:
-    return bool(response.citations) and all(
-        str(citation.uri) in response.response
-        for citation in response.citations
-    )
+def _source_citation_receipt_matches(
+    case: LiveE2ECase,
+    response: ChatResponse,
+) -> bool:
+    expected_urls = {
+        str(candidate.url)
+        for candidate in project_routing_url_candidates(case.message, ())
+    }
+    citation_urls = {str(citation.uri) for citation in response.citations}
+    return bool(expected_urls) and expected_urls <= citation_urls
 
 
 def evaluate_case(
@@ -333,12 +320,12 @@ def evaluate_case(
                 "semantic_failure", "unexpected_citation", response
             )
     elif case.probe_id == "source":
-        if not _citations_attached(response):
+        if not _source_citation_receipt_matches(case, response):
             return ProbeEvaluation(
                 "semantic_failure", "citation_mismatch", response
             )
     elif case.probe_id == "research":
-        if not _citations_attached(response) or not any(
+        if not response.citations or not any(
             "python.org" in citation.label.lower()
             for citation in response.citations
         ):
@@ -361,23 +348,8 @@ def evaluate_case(
             return ProbeEvaluation(
                 "semantic_failure", "unexpected_citation", response
             )
-    elif case.probe_id == "failed-source":
-        if response.citations:
-            return ProbeEvaluation(
-                "semantic_failure", "unexpected_citation", response
-            )
-        normalized = response.response.lower()
-        if not any(marker in normalized for marker in _FAILURE_LANGUAGE):
-            return ProbeEvaluation(
-                "semantic_failure", "missing_failure_limitation", response
-            )
 
-    classification = (
-        "pass_public_failure_contract"
-        if case.probe_id == "failed-source"
-        else "pass"
-    )
-    return ProbeEvaluation("pass", classification, response)
+    return ProbeEvaluation("pass", "pass", response)
 
 
 def evaluate_replay(
@@ -473,6 +445,7 @@ async def run_bounded_live_e2e(
     if report_path.exists():
         raise ValueError("report_path must not already exist.")
     preflight_live_cases(cases)
+    planned_http_requests = len(cases) + 2
     current_time = now or (lambda: datetime.now(UTC))
     times = monotonic_values
     started = next(times) if times is not None else time.monotonic()
@@ -487,7 +460,7 @@ async def run_bounded_live_e2e(
                 f"worktree={'dirty' if repository_dirty else 'clean'}",
                 "provider=vertex_ai",
                 f"model={AGENT_COL_ROUTING_V3_MODEL_NAME}",
-                "planned_http_requests=9",
+                f"planned_http_requests={planned_http_requests}",
             )
         )
     )
@@ -668,7 +641,7 @@ async def run_bounded_live_e2e(
         "base_url": base_url,
         "probes": probes,
         "summary": {
-            "http_requests": 9,
+            "http_requests": planned_http_requests,
             "automatable_failures": semantic_failures,
             "inconclusive_failures": inconclusive_failures,
             "manual_review_cases": manual_review_cases,
@@ -687,9 +660,9 @@ async def run_bounded_live_e2e(
             ),
             (
                 "A noncompleted expert has no success receipt by design. The "
-                "failed-source public response proves restraint and honest "
-                "limitation handling, but the public HTTP contract cannot "
-                "prove that the live expert route executed."
+                "live HTTP contract therefore classifies a missing expected "
+                "expert receipt as unobservable, while M7-EXP.7B.3 remains "
+                "the deterministic failed-expert gate."
             ),
             "The runner never deletes synthetic Firestore evidence.",
         ],
@@ -702,7 +675,7 @@ async def run_bounded_live_e2e(
         " ".join(
             (
                 "tool-belt-live-e2e-check summary",
-                "http_requests=9",
+                f"http_requests={planned_http_requests}",
                 f"automatable_failures={semantic_failures}",
                 f"inconclusive_failures={inconclusive_failures}",
                 f"manual_review_cases={manual_review_cases}",
