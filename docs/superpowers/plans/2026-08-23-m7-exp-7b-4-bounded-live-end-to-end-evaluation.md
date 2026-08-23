@@ -25,6 +25,15 @@ authoritative source label. Claim-to-citation clarity remains a qualitative
 manual-review target. See
 `docs/superpowers/specs/2026-08-23-m7-exp-7b-4-r3a-public-citation-receipt-evaluation-correction.md`.
 
+## R3B computation-routing reconciliation notice
+
+R3B preserves the strict local numeric-provenance validator and strengthens
+the Vertex routing instruction plus provider-safe field descriptions. A new
+versioned `computation-series-precision` scenario exercises the exact live E2E
+request and requires six operand IDs plus a separate precision ID. No retry,
+route forcing, or validator relaxation is introduced. See
+`docs/superpowers/specs/2026-08-23-m7-exp-7b-4-r3b-computation-routing-numeric-provenance-hardening.md`.
+
 ## Goal
 
 Add one bounded live HTTP evaluation that exercises Agent_Col's complete core

@@ -802,6 +802,7 @@ def test_default_v3_fixture_covers_complete_tool_belt_and_boundaries() -> None:
         "current-authoritative-evidence",
         "broad-research-with-example-url",
         "computation-series",
+        "computation-series-precision",
         "computation-percent-currency",
         "computation-named-scalars",
         "verification-assignment-rubric",
@@ -823,6 +824,20 @@ def test_default_v3_fixture_covers_complete_tool_belt_and_boundaries() -> None:
         for scenario in scenarios
     )
     assert all(scenario.rationale for scenario in scenarios)
+
+    computation_precision = by_id["computation-series-precision"]
+    assert computation_precision.expected_series_numeric_ids == (
+        (
+            "number-1",
+            "number-2",
+            "number-3",
+            "number-4",
+            "number-5",
+            "number-6",
+        ),
+    )
+    assert computation_precision.expected_precision_numeric_id == "number-7"
+    assert computation_precision.expected_precision_mode == "decimal_places"
 
     hard_invariant_ids = {
         "explicit-no-tools-with-url",

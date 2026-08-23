@@ -222,6 +222,18 @@
       "rationale": "The exact supplied series requires nontrivial verified statistical computation."
     },
     {
+      "scenario_id": "computation-series-precision",
+      "message": "Calculate the arithmetic mean and population standard deviation of these exact values: 12, 15, 18, 21, 24, 27. Use the Computational Expert and report both results to 4 decimal places.",
+      "expected_route": "computation",
+      "expected_series_numeric_ids": [["number-1", "number-2", "number-3", "number-4", "number-5", "number-6"]],
+      "expected_precision_numeric_id": "number-7",
+      "expected_precision_mode": "decimal_places",
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The exact live computation request requires the operand series and precision to remain separate numeric-ID selections."
+    },
+    {
       "scenario_id": "computation-percent-currency",
       "message": "Calculate 15% of $200. Report the result using 2 decimal places.",
       "expected_route": "computation",

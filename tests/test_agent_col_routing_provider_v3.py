@@ -130,6 +130,21 @@ def test_v3_provider_schema_relaxes_only_provider_unsupported_constraints() -> N
     assert not {"minLength", "maxLength", "pattern", "maxItems"} & provider_keys
 
 
+def test_v3_provider_schema_marks_computation_task_text_numeric_free() -> None:
+    provider = load_routing_provider_v3()
+
+    schema = provider.build_agent_col_routing_v3_response_schema()
+    computation = schema["$defs"]["ComputationRoutingIntent"]["properties"]
+    objective_description = computation["objective"]["description"].lower()
+    constraint_description = computation["constraints"]["items"][
+        "description"
+    ].lower()
+
+    for description in (objective_description, constraint_description):
+        assert "no digits" in description
+        assert "numeric candidate id" in description
+
+
 @pytest.mark.asyncio
 async def test_v3_request_uses_tool_free_structured_vertex_contract() -> None:
     provider = load_routing_provider_v3()
@@ -168,6 +183,33 @@ async def test_v3_request_uses_tool_free_structured_vertex_contract() -> None:
         thinking_level=types.ThinkingLevel.MINIMAL,
     )
     assert not config.tools
+
+
+@pytest.mark.asyncio
+async def test_v3_request_sends_numeric_free_computation_task_text_contract(
+) -> None:
+    provider = load_routing_provider_v3()
+    models = FakeRoutingModels()
+
+    await provider.request_agent_col_routing_v3_directive(
+        fake_client(models),
+        requirements_routing_input(),
+    )
+
+    config = models.calls[0]["config"]
+    instruction = " ".join(config.system_instruction.split())
+    assert (
+        "Computation objective and constraints must contain no digits or "
+        "numeric-like syntax."
+    ) in instruction
+    assert (
+        "Select every operand and precision value only through numeric "
+        "candidate ID fields."
+    ) in instruction
+    assert "Computation shape example only" in instruction
+    assert '"objective":"Calculate the requested statistic."' in instruction
+    assert '"digits_numeric_id":"number-3"' in instruction
+    assert '"constraints":[]' in instruction
 
 
 def test_v3_instruction_preserves_restraint_and_selection_rules() -> None:
