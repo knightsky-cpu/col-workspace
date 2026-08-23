@@ -6,6 +6,7 @@ import pytest
 from database import MemoryEngineError
 from schemas import (
     ActiveMemorySignal,
+    AdaptationReceipt,
     CollaborationProfile,
     SynthesisBlueprint,
 )
@@ -86,6 +87,16 @@ class FakeDatabase:
         self.events.append(("profile", user_id))
         return self.profile
 
+    async def get_collaboration_profile(
+        self,
+        user_id: str,
+    ) -> CollaborationProfile:
+        if self.fail_on == "profile":
+            assert self.error is not None
+            raise self.error
+        self.events.append(("collaboration_profile", user_id))
+        return CollaborationProfile()
+
     async def get_chat_history(
         self,
         session_id: str,
@@ -105,6 +116,8 @@ class FakeDatabase:
         model_name: str,
         schema_version: str,
         blueprint: dict[str, object],
+        *,
+        adaptations: tuple[AdaptationReceipt, ...] = (),
     ) -> str:
         if self.fail_on == "save":
             assert self.error is not None
@@ -118,6 +131,7 @@ class FakeDatabase:
                 model_name,
                 schema_version,
                 blueprint,
+                adaptations,
             )
         )
         return "blueprint-1"
@@ -166,6 +180,15 @@ class BlockingDatabase(FakeDatabase):
         self.profile_started.set()
         await self.release_reads.wait()
         return self.profile
+
+    async def get_collaboration_profile(
+        self,
+        user_id: str,
+    ) -> CollaborationProfile:
+        self.events.append(("collaboration_profile", user_id))
+        self.profile_started.set()
+        await self.release_reads.wait()
+        return CollaborationProfile()
 
     async def get_chat_history(
         self,
@@ -437,9 +460,9 @@ async def test_governed_generation_rejects_duplicate_trace_category(
     )
 
     with pytest.raises(
-        SynthesisPersonalizationError,
-        match="duplicate",
-    ):
+        SynthesisEngineError,
+        match="personalization validation failed",
+    ) as error_info:
         await service.generate_governed_blueprint(
             SynthesisCommand(
                 project_id="project-1",
@@ -449,6 +472,7 @@ async def test_governed_generation_rejects_duplicate_trace_category(
             )
         )
 
+    assert isinstance(error_info.value.__cause__, SynthesisPersonalizationError)
     assert not any(event[0] == "save" for event in events)
 
 
@@ -468,7 +492,7 @@ async def test_service_generates_and_persists_project_blueprint(
     service = SynthesisApplicationService(
         client=client,
         database=database,
-        blueprint_generator=generator,
+        governed_blueprint_generator=generator,
     )
 
     result = await service.synthesize(
@@ -483,7 +507,7 @@ async def test_service_generates_and_persists_project_blueprint(
     assert result.blueprint_id == "blueprint-1"
     assert result.blueprint is blueprint
     assert set(events[:2]) == {
-        ("profile", "user-1"),
+        ("collaboration_profile", "user-1"),
         ("history", "session-1", 20),
     }
     assert events[2:] == [
@@ -496,12 +520,13 @@ async def test_service_generates_and_persists_project_blueprint(
             "gemini-3.6-flash",
             "2.0",
             blueprint.model_dump(mode="json"),
+            (),
         ),
     ]
     assert generator.calls == [
         (
             client,
-            {"experience_level": "student"},
+            {},
             [
                 {"role": "user", "text": "Earlier question"},
                 {"role": "model", "text": "Earlier answer"},
@@ -509,6 +534,85 @@ async def test_service_generates_and_persists_project_blueprint(
             "Build a study partner.",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_service_persists_only_governed_adaptation_receipts(
+    blueprint: SynthesisBlueprint,
+) -> None:
+    from synthesis_service import (
+        SynthesisApplicationService,
+        SynthesisCommand,
+    )
+
+    signal = ActiveMemorySignal.model_validate(
+        {
+            "signal_id": "planning-granularity-signal-1",
+            "category": "planning_granularity",
+            "value": "micro_steps",
+            "policy_version": "1.0",
+            "source_event_id": "planning-granularity-signal-1--approved",
+            "approved_at": "2026-08-23T21:00:00Z",
+        }
+    )
+    payload = blueprint.model_dump(mode="json")
+    payload["personalization_trace"] = {
+        "adaptations": [
+            {
+                "profile_key": "planning_granularity",
+                "architecture_change": "The roadmap uses micro-steps.",
+                "reason": "The approved preference requests micro-steps.",
+            }
+        ]
+    }
+    governed_blueprint = SynthesisBlueprint.model_validate(payload)
+    events: list[tuple[object, ...]] = []
+    database = FakeGovernedDatabase(
+        events,
+        collaboration_profile=CollaborationProfile(
+            active_preferences={"planning_granularity": signal}
+        ),
+    )
+    legacy_generator = FakeBlueprintGenerator(events, blueprint)
+    governed_generator = FakeBlueprintGenerator(events, governed_blueprint)
+    service = SynthesisApplicationService(
+        client=object(),
+        database=database,
+        blueprint_generator=legacy_generator,
+        governed_blueprint_generator=governed_generator,
+    )
+
+    result = await service.synthesize(
+        SynthesisCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            source_text="Build a study partner.",
+        )
+    )
+
+    assert result.blueprint is governed_blueprint
+    assert result.adaptations == (
+        AdaptationReceipt(
+            signal_id="planning-granularity-signal-1",
+            category="planning_granularity",
+            value="micro_steps",
+            source_event_id="planning-granularity-signal-1--approved",
+            status="provided_to_model",
+        ),
+    )
+    assert legacy_generator.calls == []
+    assert len(governed_generator.calls) == 1
+    assert events[-1] == (
+        "save",
+        "project-1",
+        "session-1",
+        "user-1",
+        "gemini-3.6-flash",
+        "2.0",
+        governed_blueprint.model_dump(mode="json"),
+        result.adaptations,
+    )
 
 
 @pytest.mark.asyncio
@@ -525,7 +629,10 @@ async def test_service_loads_profile_and_history_concurrently(
     service = SynthesisApplicationService(
         client=object(),
         database=database,
-        blueprint_generator=FakeBlueprintGenerator(events, blueprint),
+        governed_blueprint_generator=FakeBlueprintGenerator(
+            events,
+            blueprint,
+        ),
     )
 
     task = asyncio.create_task(
@@ -573,7 +680,7 @@ async def test_service_preserves_synthesis_errors_without_persisting(
     service = SynthesisApplicationService(
         client=object(),
         database=FakeDatabase(events),
-        blueprint_generator=FailingBlueprintGenerator(error),
+        governed_blueprint_generator=FailingBlueprintGenerator(error),
     )
 
     with pytest.raises(SynthesisEngineError) as error_info:
@@ -611,7 +718,7 @@ async def test_service_preserves_database_errors(
     service = SynthesisApplicationService(
         client=object(),
         database=database,
-        blueprint_generator=FakeBlueprintGenerator(events, blueprint),
+        governed_blueprint_generator=FakeBlueprintGenerator(events, blueprint),
     )
 
     with pytest.raises(MemoryEngineError) as error_info:

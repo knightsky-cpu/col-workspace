@@ -139,11 +139,17 @@ def artifact_detail(
 @dataclass
 class FakeSynthesisService:
     generated: SynthesisBlueprint
+    adaptations: tuple[AdaptationReceipt, ...] = ()
     commands: list[object] = field(default_factory=list)
 
-    async def generate_blueprint(self, command: object) -> SynthesisBlueprint:
+    async def generate_governed_blueprint(self, command: object) -> object:
+        from synthesis_service import GovernedSynthesisGenerationResult
+
         self.commands.append(command)
-        return self.generated
+        return GovernedSynthesisGenerationResult(
+            blueprint=self.generated,
+            adaptations=self.adaptations,
+        )
 
 
 @dataclass
@@ -195,16 +201,26 @@ async def test_artifact_executor_generates_once_and_projects_canonical_receipts(
         precompleted_actions=(action,),
         precompleted_artifacts=(artifact,),
     )
-    synthesis_service = FakeSynthesisService(generated)
+    adaptation = AdaptationReceipt(
+        signal_id="planning_granularity--signal-1",
+        category="planning_granularity",
+        value="micro_steps",
+        source_event_id="planning_granularity--signal-1--approved",
+        status="provided_to_model",
+    )
+    synthesis_service = FakeSynthesisService(generated, (adaptation,))
     ledger = FakeArtifactLedger(
         ChatTurnArtifactEffectResult(
             claim=effect_claim,
             artifact=artifact,
         )
     )
-    reader = FakeArtifactReader(
-        artifact_detail(effect_claim, artifact, generated)
-    )
+    detail = artifact_detail(
+        effect_claim,
+        artifact,
+        generated,
+    ).model_copy(update={"adaptations": [adaptation]})
+    reader = FakeArtifactReader(detail)
     executor = AgentColArtifactExecutor(
         synthesis_service=synthesis_service,
         artifact_ledger=ledger,
@@ -236,6 +252,7 @@ async def test_artifact_executor_generates_once_and_projects_canonical_receipts(
         "blueprint": generated.model_dump(mode="json"),
         "display_label": "Collaborative Study Partner",
         "observed_at": NOW,
+        "adaptations": (adaptation,),
     }
     assert reader.commands == [
         GetBlueprintArtifactCommand(
@@ -254,7 +271,8 @@ async def test_artifact_executor_generates_once_and_projects_canonical_receipts(
     assert result.projection.socratic_questions == (
         "Which learning goal comes first?",
     )
-    assert result.projection.adaptations == ()
+    assert result.adaptations == (adaptation,)
+    assert result.projection.adaptations == (adaptation,)
     assert result.projection.limitations == ()
 
 

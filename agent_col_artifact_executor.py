@@ -18,10 +18,12 @@ from schemas import (
     AgentActionReceipt,
     ArtifactReference,
     BlueprintArtifactDetailResponse,
-    SynthesisBlueprint,
 )
 from synthesis import SYNTHESIS_MODEL_NAME
-from synthesis_service import SynthesisCommand
+from synthesis_service import (
+    GovernedSynthesisGenerationResult,
+    SynthesisCommand,
+)
 
 
 _CONTEXT_START = "[SERVER_VALIDATED_ARTIFACT_RESULT]"
@@ -29,10 +31,10 @@ _CONTEXT_END = "[/SERVER_VALIDATED_ARTIFACT_RESULT]"
 
 
 class ArtifactSynthesisService(Protocol):
-    async def generate_blueprint(
+    async def generate_governed_blueprint(
         self,
         command: SynthesisCommand,
-    ) -> SynthesisBlueprint: ...
+    ) -> GovernedSynthesisGenerationResult: ...
 
 
 class ArtifactEffectLedger(Protocol):
@@ -45,6 +47,7 @@ class ArtifactEffectLedger(Protocol):
         blueprint: dict[str, object],
         display_label: str,
         observed_at: datetime,
+        adaptations: tuple[AdaptationReceipt, ...],
     ) -> ChatTurnArtifactEffectResult: ...
 
 
@@ -113,14 +116,17 @@ class AgentColArtifactExecutor:
         self._validate_command(command)
         artifact = self._precompleted_artifact(claim)
         if artifact is None:
-            blueprint = await self._synthesis_service.generate_blueprint(
-                SynthesisCommand(
-                    project_id=claim.request.project_id,
-                    session_id=claim.request.session_id,
-                    user_id=claim.request.user_id,
-                    source_text=claim.request.message,
+            generated = await (
+                self._synthesis_service.generate_governed_blueprint(
+                    SynthesisCommand(
+                        project_id=claim.request.project_id,
+                        session_id=claim.request.session_id,
+                        user_id=claim.request.user_id,
+                        source_text=claim.request.message,
+                    )
                 )
             )
+            blueprint = generated.blueprint
             effect = (
                 await self._artifact_ledger.record_chat_turn_blueprint_effect(
                     claim,
@@ -131,6 +137,7 @@ class AgentColArtifactExecutor:
                         blueprint.synthesized_conceptual_model.project_name
                     ),
                     observed_at=command.observed_at,
+                    adaptations=generated.adaptations,
                 )
             )
             claim = effect.claim

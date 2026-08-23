@@ -12,10 +12,14 @@ from schemas import (
 )
 from synthesis import (
     SYNTHESIS_MODEL_NAME,
+    SynthesisEngineError,
     generate_blueprint,
     generate_governed_blueprint as generate_governed_blueprint_from_provider,
 )
-from synthesis_personalization import SynthesisPersonalizationAdapter
+from synthesis_personalization import (
+    SynthesisPersonalizationAdapter,
+    SynthesisPersonalizationError,
+)
 
 SYNTHESIS_HISTORY_LIMIT = 20
 
@@ -43,6 +47,7 @@ class SynthesisCommand:
 class SynthesisResult:
     blueprint_id: str
     blueprint: SynthesisBlueprint
+    adaptations: tuple[AdaptationReceipt, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +95,8 @@ class SynthesisApplicationService:
         self,
         command: SynthesisCommand,
     ) -> SynthesisResult:
-        blueprint = await self.generate_blueprint(command)
+        generated = await self.generate_governed_blueprint(command)
+        blueprint = generated.blueprint
         blueprint_id = await self._database.save_blueprint(
             command.project_id,
             command.session_id,
@@ -98,10 +104,12 @@ class SynthesisApplicationService:
             SYNTHESIS_MODEL_NAME,
             SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
             blueprint.model_dump(mode="json"),
+            adaptations=generated.adaptations,
         )
         return SynthesisResult(
             blueprint_id=blueprint_id,
             blueprint=blueprint,
+            adaptations=generated.adaptations,
         )
 
     async def generate_governed_blueprint(
@@ -123,12 +131,17 @@ class SynthesisApplicationService:
             history,
             command.source_text,
         )
-        adaptations = (
-            SynthesisPersonalizationAdapter.validate_and_derive_receipts(
-                projection,
-                blueprint,
+        try:
+            adaptations = (
+                SynthesisPersonalizationAdapter.validate_and_derive_receipts(
+                    projection,
+                    blueprint,
+                )
             )
-        )
+        except SynthesisPersonalizationError as exc:
+            raise SynthesisEngineError(
+                "Blueprint personalization validation failed."
+            ) from exc
         return GovernedSynthesisGenerationResult(
             blueprint=blueprint,
             adaptations=adaptations,
