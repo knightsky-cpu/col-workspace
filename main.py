@@ -5,6 +5,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, NoReturn, TypeVar
 
 from dotenv import load_dotenv
@@ -17,7 +18,8 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
 
@@ -119,6 +121,7 @@ from vertex_config import load_vertex_ai_settings
 
 logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
+FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 
 load_dotenv()
 
@@ -478,6 +481,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
+app.mount(
+    "/static/agent-col",
+    StaticFiles(directory=FRONTEND_DIR),
+    name="agent_col_static",
+)
+
+
+@app.get("/workspace", response_class=HTMLResponse)
+async def workspace() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/")

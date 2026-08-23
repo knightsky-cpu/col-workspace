@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Agent_Col Workspace</title>
+    <link rel="stylesheet" href="/static/agent-col/styles.css">
+    <script type="module" src="/static/agent-col/app.mjs"></script>
+  </head>
+  <body>
+    <div class="workspace-shell" data-app-root>
+      <header class="top-bar" aria-label="Workspace">
+        <div>
+          <p class="eyebrow">Local development mode</p>
+          <h1>Agent_Col</h1>
+        </div>
+        <button type="button" data-new-conversation disabled>
+          New conversation
+        </button>
+      </header>
+
+      <section class="context-gate" aria-labelledby="context-title">
+        <h2 id="context-title">Development context</h2>
+        <p>
+          These values are local request locators only. They are not
+          authentication or ownership.
+        </p>
+        <form data-context-form>
+          <label>
+            User ID
+            <input name="user_id" autocomplete="off" required>
+          </label>
+          <label>
+            Project ID
+            <input name="project_id" autocomplete="off" value="agent-col" required>
+          </label>
+          <button type="submit">Enter workspace</button>
+          <p class="form-error" role="alert" data-context-error hidden></p>
+        </form>
+      </section>
+
+      <div class="workspace-grid" data-workspace hidden>
+        <aside class="supporting-panel" aria-label="Supporting context">
+          <section aria-labelledby="work-list-title">
+            <h2 id="work-list-title">Work</h2>
+            <p data-work-empty>No Work loaded yet.</p>
+          </section>
+          <section aria-labelledby="memory-title">
+            <h2 id="memory-title">Memory</h2>
+            <p data-memory-empty>No memory loaded yet.</p>
+          </section>
+          <section aria-labelledby="activity-title">
+            <h2 id="activity-title">Activity</h2>
+            <p data-activity-empty>No activity yet.</p>
+          </section>
+        </aside>
+
+        <main id="conversation-workspace" class="conversation" tabindex="-1">
+          <section aria-labelledby="empty-conversation-title">
+            <h2 id="empty-conversation-title">Start a conversation</h2>
+            <p>
+              Ask Agent_Col for help, or ask it to create a structured
+              blueprint from source text in your message.
+            </p>
+          </section>
+        </main>
+
+        <aside class="work-panel" aria-label="Work review" hidden>
+          <h2>Work review</h2>
+          <p>Select a Work item to inspect its canonical backend detail.</p>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>
