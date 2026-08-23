@@ -49,6 +49,9 @@ from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     ActiveMemorySignal,
     AgentActionReceipt,
+    ArtifactFeedbackCounts,
+    ArtifactFeedbackDecisionRequest,
+    ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
     CollaborationProfile,
@@ -108,6 +111,14 @@ class BlueprintArtifactNotFoundError(RuntimeError):
 
 class BlueprintArtifactCursorNotFoundError(RuntimeError):
     """Raised when a blueprint pagination cursor cannot be resolved."""
+
+
+class BlueprintFeedbackConflictError(RuntimeError):
+    """Raised when a feedback identifier owns a different immutable event."""
+
+
+class BlueprintFeedbackStateError(RuntimeError):
+    """Raised when stored artifact feedback state is internally invalid."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1265,6 +1276,189 @@ class MemoryEngine:
             return blueprint_ref.id
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_blueprint", exc)
+
+    async def record_blueprint_feedback(
+        self,
+        *,
+        project_id: str,
+        blueprint_id: str,
+        feedback_id: str,
+        target_id: str,
+        target_kind: str,
+        decision: str,
+        feedback_text: str,
+        correction_text: str | None,
+        expected_schema_version: str,
+        session_id: str,
+        user_id: str,
+        source_message_id: str,
+        turn_id: str,
+        observed_at: datetime,
+    ) -> ArtifactFeedbackReference:
+        """Create one immutable feedback event and update bounded counts."""
+        for value, field_name in (
+            (project_id, "project_id"),
+            (blueprint_id, "blueprint_id"),
+            (feedback_id, "feedback_id"),
+            (target_id, "target_id"),
+            (session_id, "session_id"),
+            (user_id, "user_id"),
+            (source_message_id, "source_message_id"),
+            (turn_id, "turn_id"),
+        ):
+            self._validate_memory_identifier(value, field_name)
+        if feedback_id != f"feedback--{turn_id}":
+            raise ValueError("feedback_id must match its originating turn.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        request = ArtifactFeedbackDecisionRequest(
+            artifact_id=blueprint_id,
+            target_id=target_id,
+            decision=decision,
+            feedback_text=feedback_text,
+            correction_text=correction_text,
+            expected_schema_version=expected_schema_version,
+        )
+        reference = ArtifactFeedbackReference(
+            feedback_id=feedback_id,
+            artifact_id=blueprint_id,
+            target_id=target_id,
+            target_kind=target_kind,
+            decision=request.decision,
+            schema_version=request.expected_schema_version,
+            created_at=observed_at,
+        )
+        project_ref = self._client.collection("projects").document(project_id)
+        blueprint_ref = project_ref.collection("blueprints").document(
+            blueprint_id
+        )
+        feedback_ref = blueprint_ref.collection("feedback").document(
+            feedback_id
+        )
+        transaction = self._client.transaction()
+        feedback_document = {
+            "feedback_contract_version": "1.0",
+            "feedback_id": feedback_id,
+            "artifact_id": blueprint_id,
+            "target_id": target_id,
+            "target_kind": reference.target_kind,
+            "decision": request.decision,
+            "feedback_text": request.feedback_text,
+            "correction_text": request.correction_text,
+            "originating_session_id": session_id,
+            "source_message_id": source_message_id,
+            "originating_turn_id": turn_id,
+            "user_id": user_id,
+            "schema_version": request.expected_schema_version,
+            "created_at": observed_at,
+            "status": "active",
+            "supersedes_feedback_id": None,
+        }
+
+        async def record_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ArtifactFeedbackReference:
+            blueprint_snapshot = await blueprint_ref.get(
+                transaction=transaction
+            )
+            if not blueprint_snapshot.exists:
+                raise BlueprintArtifactNotFoundError(
+                    "Blueprint artifact does not exist."
+                )
+            blueprint_document = blueprint_snapshot.to_dict()
+            if not isinstance(blueprint_document, Mapping):
+                raise BlueprintFeedbackStateError(
+                    "Stored blueprint feedback state is invalid."
+                )
+            if blueprint_document.get("user_id") != user_id:
+                raise BlueprintArtifactNotFoundError(
+                    "Blueprint artifact does not exist."
+                )
+            if (
+                blueprint_document.get("artifact_contract_version")
+                != ARTIFACT_CONTRACT_VERSION
+                or blueprint_document.get("artifact_type")
+                != "synthesis_blueprint"
+            ):
+                raise BlueprintFeedbackStateError(
+                    "Stored blueprint feedback state is invalid."
+                )
+            if (
+                blueprint_document.get("schema_version")
+                != request.expected_schema_version
+            ):
+                raise BlueprintFeedbackConflictError(
+                    "Blueprint schema conflicts with feedback command."
+                )
+            try:
+                counts = ArtifactFeedbackCounts.model_validate(
+                    blueprint_document.get("feedback_counts", {})
+                )
+            except ValidationError as exc:
+                raise BlueprintFeedbackStateError(
+                    "Stored blueprint feedback state is invalid."
+                ) from exc
+
+            existing_snapshot = await feedback_ref.get(
+                transaction=transaction
+            )
+            if existing_snapshot.exists:
+                existing_document = existing_snapshot.to_dict()
+                if not isinstance(existing_document, Mapping):
+                    raise BlueprintFeedbackStateError(
+                        "Stored artifact feedback event is invalid."
+                    )
+                existing_created_at = existing_document.get("created_at")
+                if (
+                    not self._is_aware_datetime(existing_created_at)
+                    or existing_created_at > observed_at
+                ):
+                    raise BlueprintFeedbackStateError(
+                        "Stored artifact feedback event is invalid."
+                    )
+                stable_existing_document = dict(existing_document)
+                stable_existing_document.pop("created_at", None)
+                stable_feedback_document = dict(feedback_document)
+                stable_feedback_document.pop("created_at", None)
+                if stable_existing_document != stable_feedback_document:
+                    raise BlueprintFeedbackConflictError(
+                        "Feedback identifier conflicts with existing event."
+                    )
+                return reference.model_copy(
+                    update={"created_at": existing_created_at}
+                )
+
+            updated_counts = counts.model_copy(
+                update={
+                    request.decision: getattr(counts, request.decision) + 1
+                }
+            )
+            transaction.set(
+                project_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            transaction.set(feedback_ref, feedback_document)
+            transaction.set(
+                blueprint_ref,
+                {"feedback_counts": updated_counts.model_dump()},
+                merge=True,
+            )
+            return reference
+
+        run_transaction = firestore.async_transactional(
+            record_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (
+            BlueprintArtifactNotFoundError,
+            BlueprintFeedbackConflictError,
+            BlueprintFeedbackStateError,
+        ):
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("record_blueprint_feedback", exc)
 
     async def list_blueprint_documents(
         self,

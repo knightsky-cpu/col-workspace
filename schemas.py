@@ -8,6 +8,7 @@ from pydantic import (
     Field,
     HttpUrl,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -74,6 +75,10 @@ GeneratedTextStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=1_500),
 ]
+ArtifactFeedbackText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=1_500),
+]
 VerificationStepStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
@@ -115,16 +120,70 @@ class ArtifactFeedbackCounts(StrictModel):
     edited: int = Field(default=0, ge=0)
 
 
+ArtifactFeedbackDecision = Literal["accepted", "rejected", "edited"]
+ArtifactFeedbackTargetKind = Literal[
+    "whole_blueprint",
+    "architectural_decision",
+    "socratic_question",
+    "roadmap_milestone",
+    "diagnostic_warning",
+]
+
+
 class ArtifactFeedbackTarget(StrictModel):
     target_id: IdentifierStr
-    target_kind: Literal[
-        "whole_blueprint",
-        "architectural_decision",
-        "socratic_question",
-        "roadmap_milestone",
-        "diagnostic_warning",
-    ]
+    target_kind: ArtifactFeedbackTargetKind
     display_label: DisplayLabelStr
+
+
+class ArtifactFeedbackDecisionRequest(StrictModel):
+    artifact_id: IdentifierStr
+    target_id: IdentifierStr
+    decision: ArtifactFeedbackDecision
+    feedback_text: ArtifactFeedbackText
+    correction_text: ArtifactFeedbackText | None = None
+    expected_schema_version: Literal["2.0"]
+
+    @field_validator("feedback_text", "correction_text")
+    @classmethod
+    def reject_unsafe_control_characters(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is not None and any(
+            (ord(character) < 32 and character not in "\t\n\r")
+            or ord(character) == 127
+            for character in value
+        ):
+            raise ValueError("Feedback text contains control characters.")
+        return value
+
+    @model_validator(mode="after")
+    def require_decision_specific_correction(self) -> Self:
+        if self.decision == "edited" and self.correction_text is None:
+            raise ValueError("Edited feedback requires correction text.")
+        if self.decision != "edited" and self.correction_text is not None:
+            raise ValueError(
+                "Correction text is allowed only for edited feedback."
+            )
+        return self
+
+
+class ArtifactFeedbackReference(StrictModel):
+    feedback_id: IdentifierStr
+    artifact_id: IdentifierStr
+    target_id: IdentifierStr
+    target_kind: ArtifactFeedbackTargetKind
+    decision: ArtifactFeedbackDecision
+    schema_version: Literal["2.0"]
+    created_at: datetime
+
+    @field_validator("created_at")
+    @classmethod
+    def require_aware_created_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("created_at must be timezone aware.")
+        return value
 
 
 class BlueprintArtifactMetadata(StrictModel):
