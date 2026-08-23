@@ -151,8 +151,38 @@ async def generate_blueprint(
     history: list[dict[str, object]],
     source_text: str,
 ) -> SynthesisBlueprint:
-    """Generate and locally validate a structured project blueprint."""
+    """Generate from the legacy allowlisted profile projection."""
     profile_context = select_profile_context(profile)
+    return await _generate_blueprint_from_context(
+        client,
+        profile_context,
+        history,
+        source_text,
+    )
+
+
+async def generate_governed_blueprint(
+    client: genai.Client,
+    personalization_context: dict[str, object],
+    history: list[dict[str, object]],
+    source_text: str,
+) -> SynthesisBlueprint:
+    """Generate from server-projected governed personalization context."""
+    return await _generate_blueprint_from_context(
+        client,
+        personalization_context,
+        history,
+        source_text,
+    )
+
+
+async def _generate_blueprint_from_context(
+    client: genai.Client,
+    profile_context: dict[str, object],
+    history: list[dict[str, object]],
+    source_text: str,
+) -> SynthesisBlueprint:
+    """Generate and locally validate a structured project blueprint."""
     bounded_history = budget_chat_history(history)
     contents = build_synthesis_contents(
         profile_context,

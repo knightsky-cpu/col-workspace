@@ -7,9 +7,15 @@ from google import genai
 from database import MemoryEngine
 from schemas import (
     SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
+    AdaptationReceipt,
     SynthesisBlueprint,
 )
-from synthesis import SYNTHESIS_MODEL_NAME, generate_blueprint
+from synthesis import (
+    SYNTHESIS_MODEL_NAME,
+    generate_blueprint,
+    generate_governed_blueprint as generate_governed_blueprint_from_provider,
+)
+from synthesis_personalization import SynthesisPersonalizationAdapter
 
 SYNTHESIS_HISTORY_LIMIT = 20
 
@@ -22,6 +28,7 @@ BlueprintGenerator = Callable[
     ],
     Awaitable[SynthesisBlueprint],
 ]
+GovernedBlueprintGenerator = BlueprintGenerator
 
 
 @dataclass(frozen=True)
@@ -38,6 +45,12 @@ class SynthesisResult:
     blueprint: SynthesisBlueprint
 
 
+@dataclass(frozen=True, slots=True)
+class GovernedSynthesisGenerationResult:
+    blueprint: SynthesisBlueprint
+    adaptations: tuple[AdaptationReceipt, ...]
+
+
 class SynthesisApplicationService:
     def __init__(
         self,
@@ -45,10 +58,14 @@ class SynthesisApplicationService:
         client: genai.Client,
         database: MemoryEngine,
         blueprint_generator: BlueprintGenerator = generate_blueprint,
+        governed_blueprint_generator: GovernedBlueprintGenerator = (
+            generate_governed_blueprint_from_provider
+        ),
     ) -> None:
         self._client = client
         self._database = database
         self._blueprint_generator = blueprint_generator
+        self._governed_blueprint_generator = governed_blueprint_generator
 
     async def generate_blueprint(
         self,
@@ -85,4 +102,34 @@ class SynthesisApplicationService:
         return SynthesisResult(
             blueprint_id=blueprint_id,
             blueprint=blueprint,
+        )
+
+    async def generate_governed_blueprint(
+        self,
+        command: SynthesisCommand,
+    ) -> GovernedSynthesisGenerationResult:
+        """Generate from governed memory without choosing persistence."""
+        profile, history = await asyncio.gather(
+            self._database.get_collaboration_profile(command.user_id),
+            self._database.get_chat_history(
+                command.session_id,
+                limit=SYNTHESIS_HISTORY_LIMIT,
+            ),
+        )
+        projection = SynthesisPersonalizationAdapter.project(profile)
+        blueprint = await self._governed_blueprint_generator(
+            self._client,
+            projection.model_context,
+            history,
+            command.source_text,
+        )
+        adaptations = (
+            SynthesisPersonalizationAdapter.validate_and_derive_receipts(
+                projection,
+                blueprint,
+            )
+        )
+        return GovernedSynthesisGenerationResult(
+            blueprint=blueprint,
+            adaptations=adaptations,
         )

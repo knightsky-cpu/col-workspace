@@ -319,6 +319,50 @@ async def test_generate_blueprint_uses_structured_untrusted_context(
 
 
 @pytest.mark.asyncio
+async def test_governed_blueprint_uses_exact_personalization_context(
+    valid_blueprint_payload: dict[str, object],
+) -> None:
+    from synthesis import generate_governed_blueprint
+
+    trace = valid_blueprint_payload["personalization_trace"]
+    assert isinstance(trace, dict)
+    trace["adaptations"] = [
+        {
+            "profile_key": "planning_granularity",
+            "architecture_change": (
+                "The roadmap uses small sequential actions."
+            ),
+            "reason": "The approved preference requests micro-steps.",
+        }
+    ]
+    client = fake_genai_client(json.dumps(valid_blueprint_payload))
+    personalization_context = {
+        "planning_granularity": {
+            "value": "micro_steps",
+            "instruction": (
+                "Break complex plans into small sequential actions with "
+                "explicit verification."
+            ),
+        }
+    }
+
+    blueprint = await generate_governed_blueprint(
+        client,
+        personalization_context,
+        [{"role": "user", "text": "Keep the plan verifiable."}],
+        "Build a study partner.",
+    )
+
+    assert isinstance(blueprint, SynthesisBlueprint)
+    arguments = client.captured_models.arguments
+    contents = arguments["contents"]
+    prompt = contents[0].parts[0].text
+    assert '"planning_granularity"' in prompt
+    assert '"value": "micro_steps"' in prompt
+    assert "explicit verification" in prompt
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("response_text", ("", "{", "{}"))
 async def test_generate_blueprint_rejects_invalid_response(
     response_text: str,
