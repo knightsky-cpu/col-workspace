@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 import pytest
 
 from chat_turns import derive_chat_turn_ids
-from schemas import AgentActionReceipt, ChatResponse, MemoryProposalReceipt
+from schemas import (
+    AgentActionReceipt,
+    ArtifactReference,
+    ChatResponse,
+    MemoryProposalReceipt,
+)
 
 
 def test_derive_chat_turn_ids_hashes_key_and_bounds_message_ids() -> None:
@@ -86,6 +91,13 @@ def test_resumed_chat_turn_claim_carries_typed_precompleted_effects() -> None:
         proposed_value="concise",
         expires_at=datetime(2026, 8, 21, 12, 0, tzinfo=UTC),
     )
+    artifact = ArtifactReference(
+        artifact_type="synthesis_blueprint",
+        project_id="agent-col",
+        artifact_id="blueprint--artifact-1",
+        schema_version="2.0",
+        display_label="Agent Col blueprint",
+    )
 
     claim = chat_turns.ChatTurnClaim(
         request=request,
@@ -95,10 +107,12 @@ def test_resumed_chat_turn_claim_carries_typed_precompleted_effects() -> None:
         resumed=True,
         precompleted_actions=(action,),
         precompleted_memory_proposals=(proposal,),
+        precompleted_artifacts=(artifact,),
     )
 
     assert claim.precompleted_actions == (action,)
     assert claim.precompleted_memory_proposals == (proposal,)
+    assert claim.precompleted_artifacts == (artifact,)
 
 
 def test_chat_turn_replay_carries_validated_response() -> None:

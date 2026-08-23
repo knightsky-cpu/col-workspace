@@ -23,6 +23,7 @@ from chat_turns import (
 from database import MemoryEngine, MemoryEngineError
 from schemas import (
     AgentActionReceipt,
+    ArtifactReference,
     ChatResponse,
     MemoryDecisionRequest,
     MemoryProposalReceipt,
@@ -86,6 +87,27 @@ class ChatTurnStore:
         self.client.transaction.return_value = self.transaction
 
 
+class ArtifactEffectStore(ChatTurnStore):
+    def __init__(self, ids: ChatTurnIds) -> None:
+        super().__init__(ids)
+        self.projects = MagicMock()
+        self.project_ref = MagicMock()
+        self.blueprints = MagicMock()
+        self.blueprint_ref = MagicMock()
+
+        def root_collection(name: str) -> MagicMock:
+            if name == "sessions":
+                return self.sessions
+            if name == "projects":
+                return self.projects
+            raise AssertionError(f"Unexpected root collection: {name}")
+
+        self.client.collection.side_effect = root_collection
+        self.projects.document.return_value = self.project_ref
+        self.project_ref.collection.return_value = self.blueprints
+        self.blueprints.document.return_value = self.blueprint_ref
+
+
 def turn_document(
     ids: ChatTurnIds,
     *,
@@ -142,6 +164,55 @@ def proposal_receipt_document() -> dict[str, object]:
         "category": "response_length",
         "proposed_value": "concise",
         "expires_at": NOW + timedelta(hours=24),
+    }
+
+
+def blueprint_action_document() -> dict[str, str]:
+    return {
+        "action_name": "synthesize_project",
+        "status": "completed",
+    }
+
+
+def blueprint_reference_document(
+    ids: ChatTurnIds,
+) -> dict[str, str]:
+    return {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": f"blueprint--{ids.turn_id}",
+        "schema_version": "2.0",
+        "display_label": "Agent Col blueprint",
+    }
+
+
+def stored_blueprint_effect_document(
+    ids: ChatTurnIds,
+    *,
+    originating_turn_id: str | None = None,
+) -> dict[str, object]:
+    return {
+        "artifact_contract_version": "1.0",
+        "artifact_type": "synthesis_blueprint",
+        "created_at": NOW,
+        "originating_session_id": "session-1",
+        "originating_turn_id": originating_turn_id or ids.turn_id,
+        "user_id": "user-1",
+        "model_name": "gemini-3.6-flash",
+        "schema_version": "2.0",
+        "parent_artifact_id": None,
+        "feedback_counts": {
+            "accepted": 0,
+            "rejected": 0,
+            "edited": 0,
+        },
+        "adaptation_receipts": [],
+        "applied_feedback_ids": [],
+        "blueprint": {
+            "synthesized_conceptual_model": {
+                "project_name": "Bounded Collaboration",
+            }
+        },
     }
 
 
@@ -404,6 +475,46 @@ async def test_reclaimed_chat_turn_recovers_precompleted_proposal_effect(
 
 
 @pytest.mark.asyncio
+async def test_reclaimed_chat_turn_recovers_precompleted_artifact_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(
+        ids,
+        lease_expires_at=NOW - timedelta(seconds=1),
+    )
+    stored_turn["actions"] = [blueprint_action_document()]
+    stored_turn["artifacts"] = [blueprint_reference_document(ids)]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    monkeypatch.setattr(database.secrets, "token_hex", lambda _: "new-owner")
+
+    claim = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert claim.precompleted_actions == (
+        AgentActionReceipt.model_validate(blueprint_action_document()),
+    )
+    assert claim.precompleted_artifacts == (
+        ArtifactReference.model_validate(blueprint_reference_document(ids)),
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_replays_completed_response_without_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -616,7 +727,12 @@ async def test_claim_chat_turn_preserves_firestore_failure_as_cause(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "invalid_effect",
-    ("invalid_action", "proposal_without_action"),
+    (
+        "invalid_action",
+        "proposal_without_action",
+        "artifact_without_action",
+        "synthesis_without_artifact",
+    ),
 )
 async def test_chat_turn_operations_reject_invalid_claim_effects_before_firestore(
     monkeypatch: pytest.MonkeyPatch,
@@ -629,12 +745,30 @@ async def test_chat_turn_operations_reject_invalid_claim_effects_before_firestor
             claim,
             precompleted_actions=(cast(AgentActionReceipt, object()),),
         )
-    else:
+    elif invalid_effect == "proposal_without_action":
         invalid_claim = replace(
             claim,
             precompleted_memory_proposals=(
                 MemoryProposalReceipt.model_validate(
                     proposal_receipt_document()
+                ),
+            ),
+        )
+    elif invalid_effect == "artifact_without_action":
+        invalid_claim = replace(
+            claim,
+            precompleted_artifacts=(
+                ArtifactReference.model_validate(
+                    blueprint_reference_document(claim.ids)
+                ),
+            ),
+        )
+    else:
+        invalid_claim = replace(
+            claim,
+            precompleted_actions=(
+                AgentActionReceipt.model_validate(
+                    blueprint_action_document()
                 ),
             ),
         )
@@ -767,6 +901,271 @@ async def test_release_chat_turn_rejects_reclaimed_owner_without_write(
     with pytest.raises(ChatTurnOwnershipError):
         await MemoryEngine(store.client).release_chat_turn(
             claim,
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_blueprint_effect_writes_artifact_and_ledger_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ArtifactEffectStore(ids)
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a bounded collaboration blueprint.",
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=turn_document(
+                ids,
+                owner=claim.owner_token,
+                lease_expires_at=claim.lease_expires_at,
+            ),
+        )
+    )
+    store.blueprint_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    blueprint = {
+        "synthesized_conceptual_model": {
+            "project_name": "Bounded Collaboration",
+        }
+    }
+
+    result = await MemoryEngine(
+        store.client
+    ).record_chat_turn_blueprint_effect(
+        claim,
+        model_name="gemini-3.6-flash",
+        schema_version="2.0",
+        blueprint=blueprint,
+        display_label="Bounded Collaboration",
+        observed_at=NOW,
+    )
+
+    artifact = ArtifactReference(
+        artifact_type="synthesis_blueprint",
+        project_id="agent-col",
+        artifact_id=f"blueprint--{ids.turn_id}",
+        schema_version="2.0",
+        display_label="Bounded Collaboration",
+    )
+    action = AgentActionReceipt(
+        action_name="synthesize_project",
+        status="completed",
+    )
+    assert result.artifact == artifact
+    assert result.claim.precompleted_actions == (action,)
+    assert result.claim.precompleted_artifacts == (artifact,)
+    store.blueprints.document.assert_called_once_with(artifact.artifact_id)
+    assert store.transaction.set.call_args_list == [
+        call(
+            store.project_ref,
+            {"updated_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        ),
+        call(
+            store.blueprint_ref,
+            {
+                "artifact_contract_version": "1.0",
+                "artifact_type": "synthesis_blueprint",
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "originating_session_id": "session-1",
+                "originating_turn_id": ids.turn_id,
+                "user_id": "user-1",
+                "model_name": "gemini-3.6-flash",
+                "schema_version": "2.0",
+                "parent_artifact_id": None,
+                "feedback_counts": {
+                    "accepted": 0,
+                    "rejected": 0,
+                    "edited": 0,
+                },
+                "adaptation_receipts": [],
+                "applied_feedback_ids": [],
+                "blueprint": blueprint,
+            },
+        ),
+        call(
+            store.turn_ref,
+            {
+                "actions": [action.model_dump(mode="python")],
+                "artifacts": [artifact.model_dump(mode="python")],
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_blueprint_effect_rejects_mismatched_stored_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ArtifactEffectStore(ids)
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a bounded collaboration blueprint.",
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=True,
+        precompleted_actions=(
+            AgentActionReceipt.model_validate(blueprint_action_document()),
+        ),
+        precompleted_artifacts=(
+            ArtifactReference.model_validate(
+                blueprint_reference_document(ids)
+            ),
+        ),
+    )
+    stored_turn = turn_document(
+        ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["actions"] = [blueprint_action_document()]
+    stored_turn["artifacts"] = [blueprint_reference_document(ids)]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.blueprint_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=stored_blueprint_effect_document(
+                ids,
+                originating_turn_id="different-turn",
+            ),
+        )
+    )
+
+    with pytest.raises(ChatTurnStateError, match="blueprint document"):
+        await MemoryEngine(store.client).record_chat_turn_blueprint_effect(
+            claim,
+            model_name="gemini-3.6-flash",
+            schema_version="2.0",
+            blueprint={
+                "synthesized_conceptual_model": {
+                    "project_name": "Bounded Collaboration",
+                }
+            },
+            display_label="Bounded Collaboration",
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_blueprint_effect_reuses_owned_effect_without_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ArtifactEffectStore(ids)
+    artifact = ArtifactReference.model_validate(
+        blueprint_reference_document(ids)
+    )
+    action = AgentActionReceipt.model_validate(blueprint_action_document())
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a bounded collaboration blueprint.",
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=True,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    stored_turn = turn_document(
+        ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["actions"] = [blueprint_action_document()]
+    stored_turn["artifacts"] = [blueprint_reference_document(ids)]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.blueprint_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=stored_blueprint_effect_document(ids),
+        )
+    )
+
+    result = await MemoryEngine(
+        store.client
+    ).record_chat_turn_blueprint_effect(
+        claim,
+        model_name="gemini-3.6-flash",
+        schema_version="2.0",
+        blueprint={"retry_payload": "must not overwrite durable work"},
+        display_label="Regenerated label must not replace the receipt",
+        observed_at=NOW,
+    )
+
+    assert result.artifact == artifact
+    assert result.claim.precompleted_actions == (action,)
+    assert result.claim.precompleted_artifacts == (artifact,)
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_complete_chat_turn_rejects_omitted_precompleted_artifact_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store, claim = claimed_store()
+    artifact = ArtifactReference.model_validate(
+        blueprint_reference_document(claim.ids)
+    )
+    action = AgentActionReceipt.model_validate(blueprint_action_document())
+    stored_turn = turn_document(
+        claim.ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["actions"] = [blueprint_action_document()]
+    stored_turn["artifacts"] = [artifact.model_dump(mode="python")]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+
+    with pytest.raises(ChatTurnStateError, match="stored turn effects"):
+        await MemoryEngine(store.client).complete_chat_turn(
+            replace(
+                claim,
+                precompleted_actions=(action,),
+                precompleted_artifacts=(artifact,),
+            ),
+            ChatResponse(response="Unsafe omission."),
             observed_at=NOW,
         )
 

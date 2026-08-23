@@ -49,6 +49,7 @@ from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     ActiveMemorySignal,
     AgentActionReceipt,
+    ArtifactReference,
     ChatResponse,
     CollaborationProfile,
     MemoryEvent,
@@ -166,6 +167,14 @@ class BlueprintDocumentPage:
 
     records: tuple[BlueprintDocumentRecord, ...]
     next_before: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ChatTurnArtifactEffectResult:
+    """Return one atomically persisted chat-owned artifact effect."""
+
+    claim: ChatTurnClaim
+    artifact: ArtifactReference
 
 
 class MemoryEngine:
@@ -312,7 +321,11 @@ class MemoryEngine:
                         ),
                     )
                     raise ChatTurnInProgressError(retry_seconds)
-                precompleted_actions, precompleted_proposals = (
+                (
+                    precompleted_actions,
+                    precompleted_proposals,
+                    precompleted_artifacts,
+                ) = (
                     self._chat_turn_effects(turn_data)
                 )
                 resumed_claim = ChatTurnClaim(
@@ -323,6 +336,7 @@ class MemoryEngine:
                     resumed=True,
                     precompleted_actions=precompleted_actions,
                     precompleted_memory_proposals=precompleted_proposals,
+                    precompleted_artifacts=precompleted_artifacts,
                 )
                 transaction.set(
                     turn_ref,
@@ -484,9 +498,11 @@ class MemoryEngine:
                 raise ChatTurnOwnershipError(
                     "Stored chat turn cannot record a decision action."
                 )
-            stored_actions, stored_proposals = self._chat_turn_effects(
-                turn_data
-            )
+            (
+                stored_actions,
+                stored_proposals,
+                stored_artifacts,
+            ) = self._chat_turn_effects(turn_data)
             decision_actions = tuple(
                 item
                 for item in stored_actions
@@ -515,6 +531,7 @@ class MemoryEngine:
                 claim,
                 precompleted_actions=actions,
                 precompleted_memory_proposals=stored_proposals,
+                precompleted_artifacts=stored_artifacts,
             )
 
         run_transaction = firestore.async_transactional(record_in_transaction)
@@ -564,14 +581,17 @@ class MemoryEngine:
                 raise ChatTurnOwnershipError(
                     "Stored chat turn lease cannot be released."
                 )
-            stored_actions, stored_proposals = self._chat_turn_effects(
-                turn_data
-            )
+            (
+                stored_actions,
+                stored_proposals,
+                stored_artifacts,
+            ) = self._chat_turn_effects(turn_data)
             released_claim = replace(
                 claim,
                 lease_expires_at=min(stored_expiry, observed_at),
                 precompleted_actions=stored_actions,
                 precompleted_memory_proposals=stored_proposals,
+                precompleted_artifacts=stored_artifacts,
             )
             if stored_expiry <= observed_at:
                 return released_claim
@@ -592,6 +612,206 @@ class MemoryEngine:
             return await run_transaction(transaction)
         except GoogleAPIError as exc:
             self._raise_firestore_error("release_chat_turn", exc)
+
+    async def record_chat_turn_blueprint_effect(
+        self,
+        claim: ChatTurnClaim,
+        *,
+        model_name: str,
+        schema_version: str,
+        blueprint: dict[str, object],
+        display_label: str,
+        observed_at: datetime,
+    ) -> ChatTurnArtifactEffectResult:
+        """Atomically persist one blueprint and its owned turn receipts."""
+        self._validate_chat_turn_claim(claim)
+        self._validate_string(model_name, "model_name")
+        self._validate_string(schema_version, "schema_version")
+        self._validate_blueprint(blueprint)
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        if (
+            claim.request.memory_decision is not None
+            or claim.precompleted_memory_proposals
+        ):
+            raise ValueError(
+                "artifact turns cannot contain governed-memory decisions."
+            )
+
+        artifact = ArtifactReference(
+            artifact_type="synthesis_blueprint",
+            project_id=claim.request.project_id,
+            artifact_id=f"blueprint--{claim.ids.turn_id}",
+            schema_version=schema_version,
+            display_label=display_label,
+        )
+        action = AgentActionReceipt(
+            action_name="synthesize_project",
+            status="completed",
+        )
+        session_ref = self._client.collection("sessions").document(
+            claim.request.session_id
+        )
+        turn_ref = session_ref.collection("turns").document(
+            claim.ids.turn_id
+        )
+        project_ref = self._client.collection("projects").document(
+            claim.request.project_id
+        )
+        blueprint_ref = project_ref.collection("blueprints").document(
+            artifact.artifact_id
+        )
+        transaction = self._client.transaction()
+
+        async def record_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ChatTurnArtifactEffectResult:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            blueprint_snapshot = await blueprint_ref.get(
+                transaction=transaction
+            )
+            turn_data = turn_snapshot.to_dict()
+            if not turn_snapshot.exists or not isinstance(
+                turn_data,
+                Mapping,
+            ):
+                raise ChatTurnStateError("Stored chat turn is invalid.")
+            self._assert_chat_turn_claim_matches_document(claim, turn_data)
+            stored_expiry = turn_data.get("lease_expires_at")
+            if (
+                turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(stored_expiry)
+                or stored_expiry <= observed_at
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn cannot record an artifact effect."
+                )
+            (
+                stored_actions,
+                stored_proposals,
+                stored_artifacts,
+            ) = self._chat_turn_effects(turn_data)
+            if stored_proposals:
+                raise ChatTurnStateError(
+                    "Stored artifact turn contains a memory proposal."
+                )
+            if stored_artifacts:
+                if not blueprint_snapshot.exists:
+                    raise ChatTurnStateError(
+                        "Stored artifact effect has no blueprint document."
+                    )
+                stored_artifact = stored_artifacts[0]
+                self._assert_chat_turn_blueprint_document_matches(
+                    claim,
+                    stored_artifact,
+                    blueprint_snapshot.to_dict(),
+                )
+                return ChatTurnArtifactEffectResult(
+                    claim=replace(
+                        claim,
+                        precompleted_actions=stored_actions,
+                        precompleted_memory_proposals=stored_proposals,
+                        precompleted_artifacts=stored_artifacts,
+                    ),
+                    artifact=stored_artifact,
+                )
+            if blueprint_snapshot.exists:
+                raise ChatTurnStateError(
+                    "Blueprint document has no stored turn effect."
+                )
+
+            actions = (*stored_actions, action)
+            artifacts = (artifact,)
+            transaction.set(
+                project_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            transaction.set(
+                blueprint_ref,
+                {
+                    "artifact_contract_version": ARTIFACT_CONTRACT_VERSION,
+                    "artifact_type": "synthesis_blueprint",
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "originating_session_id": claim.request.session_id,
+                    "originating_turn_id": claim.ids.turn_id,
+                    "user_id": claim.request.user_id,
+                    "model_name": model_name,
+                    "schema_version": schema_version,
+                    "parent_artifact_id": None,
+                    "feedback_counts": {
+                        "accepted": 0,
+                        "rejected": 0,
+                        "edited": 0,
+                    },
+                    "adaptation_receipts": [],
+                    "applied_feedback_ids": [],
+                    "blueprint": blueprint,
+                },
+            )
+            transaction.set(
+                turn_ref,
+                {
+                    "actions": [
+                        item.model_dump(mode="python") for item in actions
+                    ],
+                    "artifacts": [
+                        item.model_dump(mode="python") for item in artifacts
+                    ],
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return ChatTurnArtifactEffectResult(
+                claim=replace(
+                    claim,
+                    precompleted_actions=actions,
+                    precompleted_artifacts=artifacts,
+                ),
+                artifact=artifact,
+            )
+
+        run_transaction = firestore.async_transactional(
+            record_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "record_chat_turn_blueprint_effect",
+                exc,
+            )
+
+    def _assert_chat_turn_blueprint_document_matches(
+        self,
+        claim: ChatTurnClaim,
+        artifact: ArtifactReference,
+        document: object,
+    ) -> None:
+        if not isinstance(document, Mapping):
+            raise ChatTurnStateError(
+                "Stored blueprint document is invalid."
+            )
+        blueprint = document.get("blueprint")
+        if (
+            document.get("artifact_contract_version")
+            != ARTIFACT_CONTRACT_VERSION
+            or document.get("artifact_type") != artifact.artifact_type
+            or document.get("originating_session_id")
+            != claim.request.session_id
+            or document.get("originating_turn_id") != claim.ids.turn_id
+            or document.get("user_id") != claim.request.user_id
+            or document.get("schema_version") != artifact.schema_version
+            or not self._is_aware_datetime(document.get("created_at"))
+            or not isinstance(document.get("model_name"), str)
+            or not document.get("model_name")
+            or not isinstance(blueprint, Mapping)
+            or not blueprint
+        ):
+            raise ChatTurnStateError(
+                "Stored blueprint document does not match its turn effect."
+            )
 
     async def complete_chat_turn(
         self,
@@ -768,6 +988,7 @@ class MemoryEngine:
             raise ValueError("claim metadata is invalid.")
         actions = claim.precompleted_actions
         proposals = claim.precompleted_memory_proposals
+        artifacts = claim.precompleted_artifacts
         if (
             not isinstance(actions, tuple)
             or not all(
@@ -777,6 +998,11 @@ class MemoryEngine:
             or not all(
                 isinstance(proposal, MemoryProposalReceipt)
                 for proposal in proposals
+            )
+            or not isinstance(artifacts, tuple)
+            or not all(
+                isinstance(artifact, ArtifactReference)
+                for artifact in artifacts
             )
         ):
             raise ValueError("claim effects are invalid.")
@@ -789,6 +1015,23 @@ class MemoryEngine:
             len(proposals) > 1
             or bool(proposal_actions) != bool(proposals)
             or (proposals and len(proposal_actions) != 1)
+        ):
+            raise ValueError("claim effects are invalid.")
+        synthesis_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "synthesize_project"
+        )
+        if (
+            len(artifacts) > 1
+            or bool(synthesis_actions) != bool(artifacts)
+            or (artifacts and len(synthesis_actions) != 1)
+            or any(
+                artifact.project_id != request.project_id
+                or artifact.artifact_id
+                != f"blueprint--{claim.ids.turn_id}"
+                for artifact in artifacts
+            )
         ):
             raise ValueError("claim effects are invalid.")
 
@@ -834,12 +1077,14 @@ class MemoryEngine:
             raise ChatTurnStateError("Stored model message is invalid.")
         if not self._is_aware_datetime(turn_data.get("completed_at")):
             raise ChatTurnStateError("Completed chat turn is invalid.")
-        actions, memory_proposals = self._chat_turn_effects(turn_data)
+        actions, memory_proposals, artifacts = self._chat_turn_effects(
+            turn_data
+        )
         try:
             response = ChatResponse(
                 response=model_message_data["text"],
                 actions=list(actions),
-                artifacts=turn_data.get("artifacts", []),
+                artifacts=list(artifacts),
                 citations=turn_data.get("citations", []),
                 memory_proposals=list(memory_proposals),
                 adaptations=turn_data.get("adaptations", []),
@@ -856,13 +1101,15 @@ class MemoryEngine:
     ) -> tuple[
         tuple[AgentActionReceipt, ...],
         tuple[MemoryProposalReceipt, ...],
+        tuple[ArtifactReference, ...],
     ]:
         stored_actions = turn_data.get("actions", [])
         stored_proposals = turn_data.get("memory_proposals", [])
+        stored_artifacts = turn_data.get("artifacts", [])
         if not isinstance(stored_actions, list) or not isinstance(
             stored_proposals,
             list,
-        ):
+        ) or not isinstance(stored_artifacts, list):
             raise ChatTurnStateError("Stored chat turn effects are invalid.")
         try:
             actions = tuple(
@@ -872,6 +1119,10 @@ class MemoryEngine:
             proposals = tuple(
                 MemoryProposalReceipt.model_validate(item)
                 for item in stored_proposals
+            )
+            artifacts = tuple(
+                ArtifactReference.model_validate(item)
+                for item in stored_artifacts
             )
         except (ValidationError, TypeError, ValueError) as exc:
             raise ChatTurnStateError(
@@ -886,7 +1137,30 @@ class MemoryEngine:
             raise ChatTurnStateError("Stored chat turn effects are invalid.")
         if proposals and len(proposal_actions) != 1:
             raise ChatTurnStateError("Stored chat turn effects are invalid.")
-        return actions, proposals
+        synthesis_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "synthesize_project"
+        )
+        model_message_id = turn_data.get("model_message_id")
+        turn_id = (
+            model_message_id.removeprefix("turn--").removesuffix("--model")
+            if isinstance(model_message_id, str)
+            else None
+        )
+        project_id = turn_data.get("project_id")
+        if (
+            len(artifacts) > 1
+            or bool(synthesis_actions) != bool(artifacts)
+            or (artifacts and len(synthesis_actions) != 1)
+            or any(
+                artifact.project_id != project_id
+                or artifact.artifact_id != f"blueprint--{turn_id}"
+                for artifact in artifacts
+            )
+        ):
+            raise ChatTurnStateError("Stored chat turn effects are invalid.")
+        return actions, proposals, artifacts
 
     @classmethod
     def _assert_chat_turn_response_preserves_effects(
@@ -894,9 +1168,14 @@ class MemoryEngine:
         turn_data: Mapping[str, object],
         response: ChatResponse,
     ) -> None:
-        stored_actions, stored_proposals = cls._chat_turn_effects(turn_data)
+        (
+            stored_actions,
+            stored_proposals,
+            stored_artifacts,
+        ) = cls._chat_turn_effects(turn_data)
         response_actions = tuple(response.actions)
         response_proposals = tuple(response.memory_proposals)
+        response_artifacts = tuple(response.artifacts)
         stored_proposal_actions = tuple(
             action
             for action in stored_actions
@@ -910,6 +1189,7 @@ class MemoryEngine:
         if (
             stored_proposal_actions != response_proposal_actions
             or stored_proposals != response_proposals
+            or stored_artifacts != response_artifacts
         ):
             raise ChatTurnStateError(
                 "Completed response conflicts with stored turn effects."
