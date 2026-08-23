@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildArtifactFeedbackChatRequest,
   buildChatRequest,
   buildExactRetryRequest,
   buildOrdinaryChatRequest,
@@ -114,4 +115,80 @@ test("ordinary chat request uses context locators and one idempotency key", () =
     user_id: "wifiknight",
     message: "Explain receipt authority.",
   });
+});
+
+test("artifact feedback chat request includes the structured feedback decision", () => {
+  const request = buildArtifactFeedbackChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    "I accept this blueprint.",
+    {
+      artifact_id: "blueprint--abc",
+      target_id: "target--whole",
+      decision: "accepted",
+      feedback_text: "This is useful.",
+      expected_schema_version: "2.0",
+    },
+    cryptoStub,
+  );
+
+  assert.equal(request.key, "chat--123e4567-e89b-12d3-a456-426614174000");
+  assert.deepEqual(request.body.artifact_feedback_decision, {
+    artifact_id: "blueprint--abc",
+    target_id: "target--whole",
+    decision: "accepted",
+    feedback_text: "This is useful.",
+    expected_schema_version: "2.0",
+  });
+  assert.equal(request.body.message, "I accept this blueprint.");
+});
+
+test("edited artifact feedback requires correction text", () => {
+  assert.throws(
+    () => buildArtifactFeedbackChatRequest(
+      {
+        project_id: "agent-col",
+        session_id: "session-1",
+        user_id: "wifiknight",
+      },
+      "I want to edit this target.",
+      {
+        artifact_id: "blueprint--abc",
+        target_id: "target--whole",
+        decision: "edited",
+        feedback_text: "Needs a correction.",
+        expected_schema_version: "2.0",
+      },
+      cryptoStub,
+    ),
+    /Correction text is required/,
+  );
+});
+
+test("artifact feedback can supersede a previous feedback event", () => {
+  const request = buildArtifactFeedbackChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    "I am reversing my earlier artifact feedback.",
+    {
+      artifact_id: "blueprint--abc",
+      target_id: "target--whole",
+      decision: "rejected",
+      feedback_text: "I am reversing the acceptance.",
+      expected_schema_version: "2.0",
+      supersedes_feedback_id: "feedback--old",
+    },
+    cryptoStub,
+  );
+
+  assert.equal(
+    request.body.artifact_feedback_decision.supersedes_feedback_id,
+    "feedback--old",
+  );
 });

@@ -1,5 +1,5 @@
 export function setText(element, value) {
-  element.textContent = value;
+  element.textContent = value === undefined || value === null ? "" : String(value);
   return element;
 }
 
@@ -16,5 +16,11 @@ export function element(tagName, className, text) {
   if (text !== undefined) {
     created.textContent = String(text);
   }
+  return created;
+}
+
+export function appendTextElement(parent, tagName, className, value) {
+  const created = element(tagName, className, value);
+  parent.append(created);
   return created;
 }

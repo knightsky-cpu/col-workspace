@@ -15,6 +15,10 @@ async def test_workspace_route_serves_html_shell() -> None:
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+    assert "<h1>Agent Col</h1>" in response.text
+    assert "Ask Agent Col for help" in response.text
+    assert ">Agent_Col<" not in response.text
+    assert "Ask Agent_Col" not in response.text
     assert '<main id="conversation-workspace"' in response.text
     assert 'src="/static/agent-col/app.mjs"' in response.text
     assert 'href="/static/agent-col/styles.css"' in response.text
@@ -23,6 +27,10 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert "data-chat-transcript" in response.text
     assert "data-chat-status" in response.text
     assert "data-retry-turn" in response.text
+    assert "data-work-list" in response.text
+    assert "data-work-detail" in response.text
+    assert "data-work-error" in response.text
+    assert "data-work-refresh" in response.text
     assert "https://" not in response.text
     assert "http://" not in response.text
 

@@ -67,7 +67,10 @@ class ArtifactReadService:
         )
         artifacts: list[BlueprintArtifactMetadata] = []
         for record in page.records:
-            if self._uses_legacy_schema(record):
+            if (
+                self._uses_legacy_schema(record)
+                or not self._uses_current_artifact_contract(record)
+            ):
                 continue
             artifacts.append(
                 self._project_record(command.project_id, record).metadata
@@ -107,6 +110,19 @@ class ArtifactReadService:
         return (
             isinstance(document, dict)
             and document.get("schema_version") == "1.0"
+        )
+
+    @staticmethod
+    def _uses_current_artifact_contract(
+        record: BlueprintDocumentRecord,
+    ) -> bool:
+        document = record.document
+        return (
+            isinstance(document, dict)
+            and document.get("artifact_contract_version")
+            == ARTIFACT_CONTRACT_VERSION
+            and document.get("artifact_type") == "synthesis_blueprint"
+            and document.get("schema_version") == "2.0"
         )
 
     @classmethod

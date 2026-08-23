@@ -3,12 +3,20 @@ import assert from "node:assert/strict";
 
 import {
   acceptContext,
+  beginWorkDetailLoad,
+  beginWorkListLoad,
   beginPendingTurn,
+  completeWorkDetailLoad,
+  completeWorkListLoad,
   completePendingTurn,
   createInitialState,
+  failWorkDetailLoad,
+  failWorkListLoad,
   failPendingTurn,
   selectCanSubmit,
+  selectFirstSupportedArtifact,
   selectNeedsReceiptRefresh,
+  selectWorkRefreshPlan,
   startNewConversation,
 } from "../../frontend/state.mjs";
 
@@ -127,4 +135,164 @@ test("receipt refresh selector is driven by structured fields", () => {
       memory: false,
     },
   );
+});
+
+test("work list lifecycle stores newest-first metadata and cursor", () => {
+  const loading = beginWorkListLoad(createInitialState());
+  assert.equal(loading.work.list.status, "loading");
+
+  const completed = completeWorkListLoad(loading, {
+    artifacts: [
+      {
+        reference: {
+          artifact_type: "synthesis_blueprint",
+          artifact_id: "blueprint--abc",
+          schema_version: "2.0",
+          display_label: "Blueprint",
+        },
+        created_at: "2026-08-23T00:00:00Z",
+        feedback_counts: { accepted: 0, rejected: 0, edited: 0 },
+      },
+    ],
+    next_before: "cursor--1",
+  });
+
+  assert.equal(completed.work.list.status, "ready");
+  assert.equal(
+    completed.work.list.items[0].reference.artifact_id,
+    "blueprint--abc",
+  );
+  assert.equal(completed.work.list.next_before, "cursor--1");
+});
+
+test("work detail lifecycle stores canonical detail and feedback history", () => {
+  const loading = beginWorkDetailLoad(createInitialState(), "blueprint--abc");
+  assert.equal(loading.work.detail.status, "loading");
+  assert.equal(loading.work.selectedArtifactId, "blueprint--abc");
+
+  const completed = completeWorkDetailLoad(
+    loading,
+    {
+      metadata: {
+        reference: {
+          artifact_id: "blueprint--abc",
+          schema_version: "2.0",
+          display_label: "Blueprint",
+        },
+      },
+      blueprint: {
+        synthesized_conceptual_model: { project_name: "Blueprint" },
+      },
+      feedback_targets: [{ target_id: "target--whole" }],
+      adaptations: [],
+      applied_feedback_ids: [],
+    },
+    {
+      events: [{ reference: { feedback_id: "feedback--1" }, status: "active" }],
+      next_before: null,
+    },
+  );
+
+  assert.equal(completed.work.detail.status, "ready");
+  assert.equal(
+    completed.work.detail.item.metadata.reference.artifact_id,
+    "blueprint--abc",
+  );
+  assert.equal(
+    completed.work.feedback.events[0].reference.feedback_id,
+    "feedback--1",
+  );
+});
+
+test("work load failures store safe error messages", () => {
+  assert.equal(
+    failWorkListLoad(
+      beginWorkListLoad(createInitialState()),
+      { message: "boom" },
+    ).work.list.error,
+    "boom",
+  );
+  assert.equal(
+    failWorkDetailLoad(
+      beginWorkDetailLoad(createInitialState(), "blueprint--abc"),
+      { message: "missing" },
+    ).work.detail.error,
+    "missing",
+  );
+});
+
+test("receipt refresh plan follows artifact and feedback response fields", () => {
+  assert.deepEqual(
+    selectFirstSupportedArtifact({
+      artifacts: [
+        {
+          artifact_type: "synthesis_blueprint",
+          artifact_id: "blueprint--abc",
+          schema_version: "2.0",
+        },
+      ],
+    }),
+    {
+      artifact_type: "synthesis_blueprint",
+      artifact_id: "blueprint--abc",
+      schema_version: "2.0",
+    },
+  );
+
+  assert.deepEqual(
+    selectWorkRefreshPlan({
+      artifacts: [
+        {
+          artifact_type: "synthesis_blueprint",
+          artifact_id: "blueprint--abc",
+          schema_version: "2.0",
+        },
+      ],
+      artifact_feedback: [],
+    }),
+    {
+      reloadList: true,
+      selectArtifactId: "blueprint--abc",
+      reloadSelectedFeedback: false,
+    },
+  );
+
+  assert.deepEqual(
+    selectWorkRefreshPlan({
+      artifact_feedback: [
+        {
+          artifact_id: "blueprint--abc",
+          feedback_id: "feedback--1",
+        },
+      ],
+    }),
+    {
+      reloadList: true,
+      selectArtifactId: "blueprint--abc",
+      reloadSelectedFeedback: true,
+    },
+  );
+});
+
+test("new conversation preserves loaded work because artifacts are project scoped", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const withWork = completeWorkListLoad(beginWorkListLoad(accepted), {
+    artifacts: [{
+      reference: {
+        artifact_id: "blueprint--abc",
+        artifact_type: "synthesis_blueprint",
+        schema_version: "2.0",
+        display_label: "Blueprint",
+      },
+    }],
+    next_before: null,
+  });
+
+  const next = startNewConversation(withWork, cryptoStub);
+
+  assert.equal(next.transcript.length, 0);
+  assert.equal(next.work.list.items[0].reference.artifact_id, "blueprint--abc");
 });

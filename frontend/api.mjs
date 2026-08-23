@@ -1,3 +1,5 @@
+import { isValidIdentifier } from "./requests.mjs";
+
 export class ApiError extends Error {
   constructor({ status, message, detail, retryAfterSeconds }) {
     super(message);
@@ -83,4 +85,64 @@ export async function apiFetchJson(
     throw normalizeApiError(response, body);
   }
   return body;
+}
+
+function assertIdentifier(name, value) {
+  if (!isValidIdentifier(value)) {
+    throw new Error(`${name} is invalid.`);
+  }
+}
+
+function buildQuery(options = {}) {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.before !== undefined && options.before !== null) {
+    params.set("before", String(options.before));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+export function listBlueprints(
+  projectId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("project_id", projectId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/blueprints${buildQuery(options)}`,
+    { method: "GET" },
+    fetchLike,
+  );
+}
+
+export function getBlueprint(
+  projectId,
+  artifactId,
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/blueprints/${encodeURIComponent(artifactId)}`,
+    { method: "GET" },
+    fetchLike,
+  );
+}
+
+export function listBlueprintFeedback(
+  projectId,
+  artifactId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/blueprints/${encodeURIComponent(artifactId)}/feedback${buildQuery(options)}`,
+    { method: "GET" },
+    fetchLike,
+  );
 }

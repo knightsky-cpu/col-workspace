@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { apiFetchJson } from "../../frontend/api.mjs";
+import {
+  apiFetchJson,
+  getBlueprint,
+  listBlueprintFeedback,
+  listBlueprints,
+} from "../../frontend/api.mjs";
 
 function jsonResponse(status, body, headers = {}) {
   return new Response(JSON.stringify(body), {
@@ -75,5 +80,69 @@ test("apiFetchJson includes retry-after seconds when supplied", async () => {
       assert.equal(error.message, "Chat turn is still in progress.");
       return true;
     },
+  );
+});
+
+test("listBlueprints calls the canonical project blueprint list path", async () => {
+  const calls = [];
+  const result = await listBlueprints(
+    "agent-col",
+    { limit: 5, before: "cursor--1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifacts: [], next_before: null });
+    },
+  );
+
+  assert.deepEqual(result, { artifacts: [], next_before: null });
+  assert.equal(
+    calls[0][0],
+    "/api/projects/agent-col/blueprints?limit=5&before=cursor--1",
+  );
+  assert.equal(calls[0][1].method, "GET");
+});
+
+test("getBlueprint calls the canonical blueprint detail path", async () => {
+  const calls = [];
+  await getBlueprint("agent-col", "blueprint--abc", async (path, init) => {
+    calls.push([path, init]);
+    return jsonResponse(200, { artifact_contract_version: "1.0" });
+  });
+
+  assert.equal(calls[0][0], "/api/projects/agent-col/blueprints/blueprint--abc");
+  assert.equal(calls[0][1].method, "GET");
+});
+
+test("listBlueprintFeedback calls the canonical feedback history path", async () => {
+  const calls = [];
+  await listBlueprintFeedback(
+    "agent-col",
+    "blueprint--abc",
+    { limit: 20 },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { events: [], next_before: null });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/projects/agent-col/blueprints/blueprint--abc/feedback?limit=20",
+  );
+  assert.equal(calls[0][1].method, "GET");
+});
+
+test("artifact API wrappers reject invalid project and artifact identifiers", async () => {
+  assert.throws(
+    () => listBlueprints("bad/slash", {}, async () => jsonResponse(200, {})),
+    /invalid/i,
+  );
+  assert.throws(
+    () => getBlueprint(
+      "agent-col",
+      "bad/slash",
+      async () => jsonResponse(200, {}),
+    ),
+    /invalid/i,
   );
 });

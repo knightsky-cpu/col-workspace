@@ -7,6 +7,26 @@ export function createInitialState() {
     transcript: [],
     pendingTurn: null,
     lastFailure: null,
+    work: {
+      list: {
+        status: "idle",
+        items: [],
+        next_before: null,
+        error: null,
+      },
+      selectedArtifactId: null,
+      detail: {
+        status: "idle",
+        item: null,
+        error: null,
+      },
+      feedback: {
+        status: "idle",
+        events: [],
+        next_before: null,
+        error: null,
+      },
+    },
   };
 }
 
@@ -104,5 +124,126 @@ export function selectNeedsReceiptRefresh(response) {
         action.action_name.includes("memory_signal")
       ))
     ),
+  };
+}
+
+function errorMessage(error) {
+  return error && typeof error.message === "string"
+    ? error.message
+    : "Request failed.";
+}
+
+export function beginWorkListLoad(state) {
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      list: { ...state.work.list, status: "loading", error: null },
+    },
+  };
+}
+
+export function completeWorkListLoad(state, response) {
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      list: {
+        status: "ready",
+        items: Array.isArray(response.artifacts) ? response.artifacts : [],
+        next_before: response.next_before ?? null,
+        error: null,
+      },
+    },
+  };
+}
+
+export function failWorkListLoad(state, error) {
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      list: {
+        ...state.work.list,
+        status: "error",
+        error: errorMessage(error),
+      },
+    },
+  };
+}
+
+export function beginWorkDetailLoad(state, artifactId) {
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      selectedArtifactId: artifactId,
+      detail: { status: "loading", item: null, error: null },
+      feedback: {
+        status: "loading",
+        events: [],
+        next_before: null,
+        error: null,
+      },
+    },
+  };
+}
+
+export function completeWorkDetailLoad(state, detail, feedback) {
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      detail: { status: "ready", item: detail, error: null },
+      feedback: {
+        status: "ready",
+        events: Array.isArray(feedback.events) ? feedback.events : [],
+        next_before: feedback.next_before ?? null,
+        error: null,
+      },
+    },
+  };
+}
+
+export function failWorkDetailLoad(state, error) {
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      detail: {
+        ...state.work.detail,
+        status: "error",
+        error: errorMessage(error),
+      },
+      feedback: {
+        ...state.work.feedback,
+        status: "error",
+        error: errorMessage(error),
+      },
+    },
+  };
+}
+
+export function selectFirstSupportedArtifact(response) {
+  const artifacts = Array.isArray(response.artifacts) ? response.artifacts : [];
+  return artifacts.find((artifact) => (
+    artifact.artifact_type === "synthesis_blueprint"
+    && artifact.schema_version === "2.0"
+    && typeof artifact.artifact_id === "string"
+  )) ?? null;
+}
+
+export function selectWorkRefreshPlan(response) {
+  const artifact = selectFirstSupportedArtifact(response);
+  const feedback = (
+    Array.isArray(response.artifact_feedback)
+    && response.artifact_feedback.length > 0
+  )
+    ? response.artifact_feedback[0]
+    : null;
+  return {
+    reloadList: artifact !== null || feedback !== null,
+    selectArtifactId: artifact?.artifact_id ?? feedback?.artifact_id ?? null,
+    reloadSelectedFeedback: feedback !== null,
   };
 }

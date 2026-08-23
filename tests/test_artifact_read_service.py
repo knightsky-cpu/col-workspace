@@ -85,6 +85,26 @@ def legacy_document() -> dict[str, object]:
     }
 
 
+def current_contract_document() -> dict[str, object]:
+    document = legacy_document()
+    document.update(
+        {
+            "artifact_contract_version": "1.0",
+            "artifact_type": "synthesis_blueprint",
+            "originating_turn_id": "turn-1",
+            "parent_artifact_id": None,
+            "feedback_counts": {
+                "accepted": 0,
+                "rejected": 0,
+                "edited": 0,
+            },
+            "adaptation_receipts": [],
+            "applied_feedback_ids": [],
+        }
+    )
+    return document
+
+
 def schema_v1_document() -> dict[str, object]:
     document = legacy_document()
     document["schema_version"] = "1.0"
@@ -123,7 +143,8 @@ class FakeArtifactDatabase:
 
 
 @pytest.mark.asyncio
-async def test_service_reads_legacy_artifact_without_inferred_receipts() -> None:
+async def test_service_excludes_partial_contract_artifact_from_list_but_detail_remains_readable(
+) -> None:
     from artifact_read_service import (
         ArtifactReadService,
         GetBlueprintArtifactCommand,
@@ -156,8 +177,7 @@ async def test_service_reads_legacy_artifact_without_inferred_receipts() -> None
     )
 
     assert listing.next_before is None
-    assert listing.artifacts[0].reference.display_label == "Study Partner"
-    assert listing.artifacts[0].adaptation_categories == []
+    assert listing.artifacts == []
     assert detail.adaptations == []
     assert detail.applied_feedback_ids == []
     assert [target.target_kind for target in detail.feedback_targets] == [
@@ -275,7 +295,7 @@ async def test_service_omits_schema_v1_artifacts_and_preserves_cursor() -> None:
 
     current_record = BlueprintDocumentRecord(
         artifact_id="blueprint-2",
-        document=legacy_document(),
+        document=current_contract_document(),
     )
     legacy_record = BlueprintDocumentRecord(
         artifact_id="blueprint-1",

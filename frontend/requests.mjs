@@ -1,4 +1,9 @@
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const ARTIFACT_FEEDBACK_DECISIONS = new Set([
+  "accepted",
+  "rejected",
+  "edited",
+]);
 
 function deepFreeze(value) {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -92,6 +97,73 @@ export function buildOrdinaryChatRequest(
     session_id: context.session_id,
     user_id: context.user_id,
     message,
+    crypto: cryptoLike,
+  });
+}
+
+function normalizeOptionalText(value) {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const text = String(value).trim();
+  return text ? text : undefined;
+}
+
+export function buildArtifactFeedbackChatRequest(
+  context,
+  message,
+  decision,
+  cryptoLike = globalThis.crypto,
+) {
+  const artifactDecision = {
+    artifact_id: String(decision.artifact_id ?? "").trim(),
+    target_id: String(decision.target_id ?? "").trim(),
+    decision: String(decision.decision ?? "").trim(),
+    feedback_text: String(decision.feedback_text ?? "").trim(),
+    expected_schema_version: String(
+      decision.expected_schema_version ?? "2.0",
+    ).trim(),
+  };
+
+  const correctionText = normalizeOptionalText(decision.correction_text);
+  const supersedesFeedbackId = normalizeOptionalText(
+    decision.supersedes_feedback_id,
+  );
+
+  if (!isValidIdentifier(artifactDecision.artifact_id)) {
+    throw new Error("artifact_id is invalid.");
+  }
+  if (!isValidIdentifier(artifactDecision.target_id)) {
+    throw new Error("target_id is invalid.");
+  }
+  if (!ARTIFACT_FEEDBACK_DECISIONS.has(artifactDecision.decision)) {
+    throw new Error("Artifact feedback decision is invalid.");
+  }
+  if (!artifactDecision.feedback_text) {
+    throw new Error("Feedback text is required.");
+  }
+  if (
+    artifactDecision.decision === "edited"
+    && correctionText === undefined
+  ) {
+    throw new Error("Correction text is required for edited feedback.");
+  }
+  if (correctionText !== undefined) {
+    artifactDecision.correction_text = correctionText;
+  }
+  if (supersedesFeedbackId !== undefined) {
+    if (!isValidIdentifier(supersedesFeedbackId)) {
+      throw new Error("supersedes_feedback_id is invalid.");
+    }
+    artifactDecision.supersedes_feedback_id = supersedesFeedbackId;
+  }
+
+  return buildChatRequest({
+    project_id: context.project_id,
+    session_id: context.session_id,
+    user_id: context.user_id,
+    message,
+    artifact_feedback_decision: artifactDecision,
     crypto: cryptoLike,
   });
 }
