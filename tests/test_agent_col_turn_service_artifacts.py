@@ -1,0 +1,423 @@
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from agent_col_artifact_executor import (
+    AgentColArtifactExecutionResult,
+    AgentColArtifactResponderProjection,
+)
+from agent_col_responder_context_v3 import AgentColResponderContextV3
+from agent_col_routing_v4 import AgentColRoutingDirective
+from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+from schemas import (
+    AdaptationReceipt,
+    AgentActionReceipt,
+    ArtifactReference,
+)
+from supervisor_runtime import SupervisorRuntimeError, SupervisorTurnResult
+
+
+NOW = datetime(2026, 8, 23, 16, 0, tzinfo=UTC)
+SOURCE_TEXT = (
+    "Create a structured blueprint for a collaborative study workflow with "
+    "explicit approval and verifiable milestones."
+)
+
+
+def artifact_directive() -> AgentColRoutingDirective:
+    return AgentColRoutingDirective.model_validate(
+        {
+            "schema_version": "4.0",
+            "route": "artifact",
+            "artifact_intent": {
+                "operation": "create_blueprint",
+                "objective": "Create the requested structured blueprint.",
+            },
+        }
+    )
+
+
+def initial_claim() -> ChatTurnClaim:
+    return ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="artifact-session",
+            user_id="artifact-user",
+            message=SOURCE_TEXT,
+        ),
+        ids=derive_chat_turn_ids("m8-col-4b-artifact-turn"),
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=120),
+        resumed=False,
+    )
+
+
+def artifact_receipts(
+    claim: ChatTurnClaim,
+) -> tuple[
+    ChatTurnClaim,
+    AgentActionReceipt,
+    ArtifactReference,
+    AdaptationReceipt,
+]:
+    action = AgentActionReceipt(
+        action_name="synthesize_project",
+        status="completed",
+    )
+    artifact = ArtifactReference(
+        artifact_type="synthesis_blueprint",
+        project_id=claim.request.project_id,
+        artifact_id=f"blueprint--{claim.ids.turn_id}",
+        schema_version="2.0",
+        display_label="Collaborative Study Workflow",
+    )
+    adaptation = AdaptationReceipt(
+        signal_id="example_usage--signal-1",
+        category="example_usage",
+        value="always_practical",
+        source_event_id="example_usage--signal-1--approved",
+        status="provided_to_model",
+    )
+    return (
+        replace(
+            claim,
+            precompleted_actions=(action,),
+            precompleted_artifacts=(artifact,),
+        ),
+        action,
+        artifact,
+        adaptation,
+    )
+
+
+class RecordingV4RoutingRequest:
+    def __init__(self, directive: AgentColRoutingDirective) -> None:
+        self.directive = directive
+        self.calls: list[tuple[object, object, float]] = []
+
+    async def __call__(
+        self,
+        client: object,
+        routing_input: object,
+        *,
+        timeout_seconds: float,
+    ) -> AgentColRoutingDirective:
+        self.calls.append((client, routing_input, timeout_seconds))
+        return self.directive
+
+
+class RecordingExpertExecutor:
+    available_capabilities = (
+        "source",
+        "research",
+        "computation",
+        "requirements_verification",
+    )
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, object]] = []
+
+    async def execute(self, directive, routing_input):
+        self.calls.append((directive, routing_input))
+        return AgentColResponderContextV3(routing_directive=directive)
+
+
+class RecordingArtifactExecutor:
+    def __init__(self, result: AgentColArtifactExecutionResult) -> None:
+        self.result = result
+        self.commands: list[object] = []
+
+    async def execute(self, command):
+        self.commands.append(command)
+        return self.result
+
+
+class RecordingResponder:
+    def __init__(
+        self,
+        result: SupervisorTurnResult | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        self.result = result or SupervisorTurnResult(response="Created.")
+        self.error = error
+        self.contexts: list[object] = []
+
+    async def run_turn(self, context):
+        self.contexts.append(context)
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def artifact_execution_result(
+    claim: ChatTurnClaim,
+) -> AgentColArtifactExecutionResult:
+    effect_claim, action, artifact, adaptation = artifact_receipts(claim)
+    projection = AgentColArtifactResponderProjection(
+        artifact=artifact,
+        project_name="Collaborative Study Workflow",
+        core_value_proposition=(
+            "Creates approved learning plans with verifiable milestones."
+        ),
+        socratic_questions=("Which learning goal comes first?",),
+        adaptations=(adaptation,),
+    )
+    return AgentColArtifactExecutionResult(
+        claim=effect_claim,
+        actions=(action,),
+        artifacts=(artifact,),
+        adaptations=(adaptation,),
+        projection=projection,
+    )
+
+
+@pytest.mark.asyncio
+async def test_turn_service_routes_artifact_through_application_executor(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    claim = initial_claim()
+    execution = artifact_execution_result(claim)
+    routing = RecordingV4RoutingRequest(artifact_directive())
+    expert = RecordingExpertExecutor()
+    artifact_executor = RecordingArtifactExecutor(execution)
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=expert,
+        responder_runtime=responder,
+        artifact_executor=artifact_executor,
+        artifact_routing_request=routing,
+        wall_clock=lambda: NOW,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id=claim.request.project_id,
+            session_id=claim.request.session_id,
+            user_id=claim.request.user_id,
+            message=claim.request.message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert len(routing.calls) == 1
+    routing_input = routing.calls[0][1]
+    assert routing_input.artifact_creation_available is True
+    assert routing_input.structured_decision_present is False
+    assert len(artifact_executor.commands) == 1
+    artifact_command = artifact_executor.commands[0]
+    assert artifact_command.claim is claim
+    assert artifact_command.routing_directive == artifact_directive()
+    assert artifact_command.observed_at == NOW
+    assert expert.calls == []
+    assert len(responder.contexts) == 1
+    responder_context = responder.contexts[0]
+    assert responder_context.precompleted_actions == execution.actions
+    assert len(responder_context.model_input_context) == 1
+    context_text = responder_context.model_input_context[0].parts[0].text
+    assert context_text is not None
+    assert "[SERVER_VALIDATED_ARTIFACT_RESULT]" in context_text
+    assert SOURCE_TEXT not in context_text
+    assert result.actions == execution.actions
+    assert result.artifacts == execution.artifacts
+    assert result.adaptations == execution.adaptations
+    assert result.chat_turn_claim is execution.claim
+
+
+@pytest.mark.asyncio
+async def test_turn_service_forwards_resumed_claim_to_artifact_executor(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    initial = initial_claim()
+    execution = artifact_execution_result(initial)
+    resumed = replace(execution.claim, resumed=True)
+    resumed_execution = replace(execution, claim=resumed)
+    artifact_executor = RecordingArtifactExecutor(resumed_execution)
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=RecordingResponder(),
+        artifact_executor=artifact_executor,
+        artifact_routing_request=RecordingV4RoutingRequest(
+            artifact_directive()
+        ),
+        wall_clock=lambda: NOW,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id=resumed.request.project_id,
+            session_id=resumed.request.session_id,
+            user_id=resumed.request.user_id,
+            message=resumed.request.message,
+            precompleted_actions=resumed.precompleted_actions,
+            chat_turn_claim=resumed,
+        )
+    )
+
+    assert artifact_executor.commands[0].claim is resumed
+    assert result.chat_turn_claim is resumed
+    assert result.artifacts == resumed.precompleted_artifacts
+
+
+@pytest.mark.asyncio
+async def test_artifact_responder_failure_preserves_authoritative_effects(
+) -> None:
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnResponderError,
+        AgentColTurnService,
+    )
+
+    claim = initial_claim()
+    execution = artifact_execution_result(claim)
+    runtime_error = SupervisorRuntimeError("private-responder-output")
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=RecordingResponder(error=runtime_error),
+        artifact_executor=RecordingArtifactExecutor(execution),
+        artifact_routing_request=RecordingV4RoutingRequest(
+            artifact_directive()
+        ),
+        wall_clock=lambda: NOW,
+    )
+
+    with pytest.raises(AgentColTurnResponderError) as captured:
+        await service.run_turn(
+            AgentColTurnCommand(
+                project_id=claim.request.project_id,
+                session_id=claim.request.session_id,
+                user_id=claim.request.user_id,
+                message=claim.request.message,
+                chat_turn_claim=claim,
+            )
+        )
+
+    assert captured.value.__cause__ is runtime_error
+    assert captured.value.actions == execution.actions
+    assert captured.value.artifacts == execution.artifacts
+    assert captured.value.adaptations == execution.adaptations
+    assert captured.value.chat_turn_claim is execution.claim
+    assert "private-responder-output" not in str(captured.value)
+
+
+@pytest.mark.asyncio
+async def test_v4_nonartifact_route_uses_existing_v3_executor_path() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    claim = initial_claim()
+    routing = RecordingV4RoutingRequest(
+        AgentColRoutingDirective(schema_version="4.0", route="direct")
+    )
+    expert = RecordingExpertExecutor()
+    artifact_executor = RecordingArtifactExecutor(
+        artifact_execution_result(claim)
+    )
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=expert,
+        responder_runtime=RecordingResponder(),
+        artifact_executor=artifact_executor,
+        artifact_routing_request=routing,
+        wall_clock=lambda: NOW,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id=claim.request.project_id,
+            session_id=claim.request.session_id,
+            user_id=claim.request.user_id,
+            message="Explain why artifact receipts matter.",
+            chat_turn_claim=replace(
+                claim,
+                request=replace(
+                    claim.request,
+                    message="Explain why artifact receipts matter.",
+                ),
+            ),
+        )
+    )
+
+    assert result.response == "Created."
+    assert artifact_executor.commands == []
+    assert len(expert.calls) == 1
+    directive, routing_input = expert.calls[0]
+    assert directive.schema_version == "3.0"
+    assert directive.route == "direct"
+    assert not hasattr(routing_input, "artifact_creation_available")
+
+
+@pytest.mark.asyncio
+async def test_existing_v3_service_path_does_not_require_artifact_authority(
+) -> None:
+    from agent_col_routing_v3 import AgentColRoutingDirective as V3Directive
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    routing = RecordingV4RoutingRequest(V3Directive(route="direct"))
+    expert = RecordingExpertExecutor()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=expert,
+        responder_runtime=RecordingResponder(),
+        routing_request=routing,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="agent-col",
+            session_id="legacy-v3-session",
+            user_id="legacy-v3-user",
+            message="Explain one stable concept.",
+        )
+    )
+
+    assert result.response == "Created."
+    assert len(expert.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_artifact_path_rejects_claim_that_does_not_match_command(
+) -> None:
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnService,
+        AgentColTurnServiceError,
+    )
+
+    claim = initial_claim()
+    routing = RecordingV4RoutingRequest(artifact_directive())
+    artifact_executor = RecordingArtifactExecutor(
+        artifact_execution_result(claim)
+    )
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=responder,
+        artifact_executor=artifact_executor,
+        artifact_routing_request=routing,
+        wall_clock=lambda: NOW,
+    )
+
+    with pytest.raises(
+        AgentColTurnServiceError,
+        match="artifact claim is inconsistent",
+    ):
+        await service.run_turn(
+            AgentColTurnCommand(
+                project_id=claim.request.project_id,
+                session_id=claim.request.session_id,
+                user_id=claim.request.user_id,
+                message="Different message content.",
+                chat_turn_claim=claim,
+            )
+        )
+
+    assert routing.calls == []
+    assert artifact_executor.commands == []
+    assert responder.contexts == []
