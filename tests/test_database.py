@@ -95,11 +95,22 @@ async def test_save_blueprint_commits_parent_and_blueprint_atomically() -> None:
         call(
             blueprint_ref,
             {
+                "artifact_contract_version": "1.0",
+                "artifact_type": "synthesis_blueprint",
                 "created_at": firestore.SERVER_TIMESTAMP,
                 "originating_session_id": "session-1",
+                "originating_turn_id": None,
                 "user_id": "user-1",
                 "model_name": "gemini-3.6-flash",
                 "schema_version": "2.0",
+                "parent_artifact_id": None,
+                "feedback_counts": {
+                    "accepted": 0,
+                    "rejected": 0,
+                    "edited": 0,
+                },
+                "adaptation_receipts": [],
+                "applied_feedback_ids": [],
                 "blueprint": payload,
             },
         ),

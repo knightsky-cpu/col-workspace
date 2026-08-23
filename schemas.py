@@ -26,6 +26,7 @@ from memory_policy import (
 
 
 SYNTHESIS_BLUEPRINT_SCHEMA_VERSION = "2.0"
+ARTIFACT_CONTRACT_VERSION = "1.0"
 
 
 NonEmptyStr = Annotated[
@@ -106,6 +107,45 @@ class ArtifactReference(StrictModel):
     artifact_id: IdentifierStr
     schema_version: Literal["2.0"]
     display_label: DisplayLabelStr
+
+
+class ArtifactFeedbackCounts(StrictModel):
+    accepted: int = Field(default=0, ge=0)
+    rejected: int = Field(default=0, ge=0)
+    edited: int = Field(default=0, ge=0)
+
+
+class ArtifactFeedbackTarget(StrictModel):
+    target_id: IdentifierStr
+    target_kind: Literal[
+        "whole_blueprint",
+        "architectural_decision",
+        "socratic_question",
+        "roadmap_milestone",
+        "diagnostic_warning",
+    ]
+    display_label: DisplayLabelStr
+
+
+class BlueprintArtifactMetadata(StrictModel):
+    reference: ArtifactReference
+    created_at: datetime
+    originating_session_id: IdentifierStr
+    originating_turn_id: IdentifierStr | None = None
+    parent_artifact_id: IdentifierStr | None = None
+    feedback_counts: ArtifactFeedbackCounts = Field(
+        default_factory=ArtifactFeedbackCounts
+    )
+    adaptation_categories: list[PreferenceCategory] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+
+
+class BlueprintArtifactListResponse(StrictModel):
+    artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
+    artifacts: list[BlueprintArtifactMetadata] = Field(max_length=50)
+    next_before: IdentifierStr | None = None
 
 
 class CitationReference(StrictModel):
@@ -482,6 +522,21 @@ class SynthesisBlueprint(StrictModel):
         default_factory=list,
         max_length=10,
         description="Material risks and concrete preventative guidance.",
+    )
+
+
+class BlueprintArtifactDetailResponse(StrictModel):
+    artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
+    metadata: BlueprintArtifactMetadata
+    blueprint: SynthesisBlueprint
+    feedback_targets: list[ArtifactFeedbackTarget] = Field(max_length=32)
+    adaptations: list[AdaptationReceipt] = Field(
+        default_factory=list,
+        max_length=8,
+    )
+    applied_feedback_ids: list[IdentifierStr] = Field(
+        default_factory=list,
+        max_length=50,
     )
 
 

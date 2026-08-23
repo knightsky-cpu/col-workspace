@@ -46,6 +46,7 @@ from memory_proposals import (
     proposal_origin_id_from_signal_id,
 )
 from schemas import (
+    ARTIFACT_CONTRACT_VERSION,
     ActiveMemorySignal,
     AgentActionReceipt,
     ChatResponse,
@@ -100,6 +101,14 @@ class MemoryEventCursorNotFoundError(RuntimeError):
     """Raised when a memory-event pagination cursor cannot be resolved."""
 
 
+class BlueprintArtifactNotFoundError(RuntimeError):
+    """Raised when a project-owned blueprint artifact does not exist."""
+
+
+class BlueprintArtifactCursorNotFoundError(RuntimeError):
+    """Raised when a blueprint pagination cursor cannot be resolved."""
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryApprovalResult:
     """Return the governed state created by a memory approval."""
@@ -141,6 +150,22 @@ class MemoryInspectionPage:
     unresolved_proposals: tuple[MemoryProposal, ...]
     events: tuple[MemoryEvent, ...]
     next_event_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class BlueprintDocumentRecord:
+    """One project-owned Firestore blueprint document."""
+
+    artifact_id: str
+    document: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class BlueprintDocumentPage:
+    """One bounded newest-first page of blueprint documents."""
+
+    records: tuple[BlueprintDocumentRecord, ...]
+    next_before: str | None
 
 
 class MemoryEngine:
@@ -937,11 +962,22 @@ class MemoryEngine:
             batch.set(
                 blueprint_ref,
                 {
+                    "artifact_contract_version": ARTIFACT_CONTRACT_VERSION,
+                    "artifact_type": "synthesis_blueprint",
                     "created_at": firestore.SERVER_TIMESTAMP,
                     "originating_session_id": session_id,
+                    "originating_turn_id": None,
                     "user_id": user_id,
                     "model_name": model_name,
                     "schema_version": schema_version,
+                    "parent_artifact_id": None,
+                    "feedback_counts": {
+                        "accepted": 0,
+                        "rejected": 0,
+                        "edited": 0,
+                    },
+                    "adaptation_receipts": [],
+                    "applied_feedback_ids": [],
                     "blueprint": blueprint,
                 },
             )
@@ -949,6 +985,111 @@ class MemoryEngine:
             return blueprint_ref.id
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_blueprint", exc)
+
+    async def list_blueprint_documents(
+        self,
+        project_id: str,
+        *,
+        limit: int,
+        before: str | None,
+    ) -> BlueprintDocumentPage:
+        """Return one bounded newest-first page of project blueprints."""
+        self._validate_memory_identifier(project_id, "project_id")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 50
+        ):
+            raise ValueError("limit must be an integer between 1 and 50.")
+        if before is not None:
+            self._validate_memory_identifier(before, "before")
+
+        try:
+            blueprints_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("blueprints")
+            )
+            query = blueprints_ref.order_by(
+                "created_at",
+                direction=firestore.Query.DESCENDING,
+            ).order_by(
+                FieldPath.document_id(),
+                direction=firestore.Query.DESCENDING,
+            )
+            if before is not None:
+                cursor_snapshot = await blueprints_ref.document(before).get()
+                if not cursor_snapshot.exists:
+                    raise BlueprintArtifactCursorNotFoundError(
+                        "Blueprint artifact cursor does not exist."
+                    )
+                query = query.start_after(cursor_snapshot)
+            query = query.limit(limit + 1)
+
+            records: list[BlueprintDocumentRecord] = []
+            async for snapshot in query.stream():
+                document = snapshot.to_dict()
+                if not isinstance(document, dict):
+                    raise ValueError("Stored blueprint document is invalid.")
+                records.append(
+                    BlueprintDocumentRecord(
+                        artifact_id=snapshot.id,
+                        document=document,
+                    )
+                )
+
+            has_more = len(records) > limit
+            bounded_records = tuple(records[:limit])
+            next_before = (
+                bounded_records[-1].artifact_id
+                if has_more and bounded_records
+                else None
+            )
+            return BlueprintDocumentPage(
+                records=bounded_records,
+                next_before=next_before,
+            )
+        except BlueprintArtifactCursorNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_blueprint_documents", exc)
+        except ValueError as exc:
+            self._raise_firestore_error("read_blueprint_documents", exc)
+
+    async def get_blueprint_document(
+        self,
+        project_id: str,
+        blueprint_id: str,
+    ) -> BlueprintDocumentRecord:
+        """Return one project-owned blueprint document by identifier."""
+        self._validate_memory_identifier(project_id, "project_id")
+        self._validate_memory_identifier(blueprint_id, "blueprint_id")
+
+        try:
+            blueprint_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("blueprints")
+                .document(blueprint_id)
+            )
+            snapshot = await blueprint_ref.get()
+            if not snapshot.exists:
+                raise BlueprintArtifactNotFoundError(
+                    "Blueprint artifact does not exist."
+                )
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored blueprint document is invalid.")
+            return BlueprintDocumentRecord(
+                artifact_id=blueprint_id,
+                document=document,
+            )
+        except BlueprintArtifactNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("get_blueprint_document", exc)
+        except ValueError as exc:
+            self._raise_firestore_error("read_blueprint_document", exc)
 
     async def get_chat_history(
         self,

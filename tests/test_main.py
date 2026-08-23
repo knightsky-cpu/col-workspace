@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -9,6 +10,12 @@ import pytest
 import pytest_asyncio
 
 import main
+from artifact_read_service import (
+    ArtifactReadService,
+    ArtifactReadStateError,
+    GetBlueprintArtifactCommand,
+    ListBlueprintArtifactsCommand,
+)
 from agent_col_turn_service import (
     AgentColTurnCommand,
     AgentColTurnResponderError,
@@ -29,6 +36,9 @@ from chat_turns import (
     ChatTurnStateError,
 )
 from database import (
+    BlueprintArtifactCursorNotFoundError,
+    BlueprintArtifactNotFoundError,
+    BlueprintDocumentRecord,
     MemoryEventCursorNotFoundError,
     MemoryProposalConflictError,
     MemoryProposalExpiredError,
@@ -43,6 +53,11 @@ from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
     ArtifactReference,
+    ArtifactFeedbackCounts,
+    ArtifactFeedbackTarget,
+    BlueprintArtifactDetailResponse,
+    BlueprintArtifactListResponse,
+    BlueprintArtifactMetadata,
     ChatResponse,
     CitationReference,
     CollaborationProfile,
@@ -475,6 +490,37 @@ class FakeTrustedMemoryService:
 
 
 @dataclass
+class FakeArtifactReadService:
+    events: list[tuple[Any, ...]]
+    list_result: BlueprintArtifactListResponse
+    detail_result: BlueprintArtifactDetailResponse
+    list_error: Exception | None = None
+    detail_error: Exception | None = None
+    list_calls: list[ListBlueprintArtifactsCommand] = field(default_factory=list)
+    detail_calls: list[GetBlueprintArtifactCommand] = field(default_factory=list)
+
+    async def list_blueprints(
+        self,
+        command: ListBlueprintArtifactsCommand,
+    ) -> BlueprintArtifactListResponse:
+        self.list_calls.append(command)
+        self.events.append(("artifact_list",))
+        if self.list_error is not None:
+            raise self.list_error
+        return self.list_result
+
+    async def get_blueprint(
+        self,
+        command: GetBlueprintArtifactCommand,
+    ) -> BlueprintArtifactDetailResponse:
+        self.detail_calls.append(command)
+        self.events.append(("artifact_detail",))
+        if self.detail_error is not None:
+            raise self.detail_error
+        return self.detail_result
+
+
+@dataclass
 class ServiceState:
     events: list[tuple[Any, ...]]
     database: FakeMemoryEngine
@@ -488,6 +534,7 @@ class ServiceState:
     supervisor: FakeSupervisorRuntime
     turn_service: FakeAgentColTurnService
     memory_service: FakeTrustedMemoryService
+    artifact_service: FakeArtifactReadService
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
     research_vertex_settings: list[VertexAISettings]
@@ -588,6 +635,41 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             profile=approved_profile,
         ),
     )
+    artifact_metadata = BlueprintArtifactMetadata(
+        reference=ArtifactReference(
+            artifact_type="synthesis_blueprint",
+            project_id="project-1",
+            artifact_id="blueprint-1",
+            schema_version="2.0",
+            display_label="Study Partner",
+        ),
+        created_at=MEMORY_NOW,
+        originating_session_id="session-1",
+        originating_turn_id=None,
+        parent_artifact_id=None,
+        feedback_counts=ArtifactFeedbackCounts(),
+        adaptation_categories=[],
+    )
+    artifact_service = FakeArtifactReadService(
+        events=events,
+        list_result=BlueprintArtifactListResponse(
+            artifacts=[artifact_metadata],
+            next_before=None,
+        ),
+        detail_result=BlueprintArtifactDetailResponse(
+            metadata=artifact_metadata,
+            blueprint=blueprint,
+            feedback_targets=[
+                ArtifactFeedbackTarget(
+                    target_id="target--0123456789abcdef01234567",
+                    target_kind="whole_blueprint",
+                    display_label="Study Partner",
+                )
+            ],
+            adaptations=[],
+            applied_feedback_ids=[],
+        ),
+    )
     genai_client_kwargs: list[dict[str, object]] = []
     responder_vertex_settings: list[VertexAISettings] = []
     research_vertex_settings: list[VertexAISettings] = []
@@ -613,6 +695,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         supervisor=supervisor,
         turn_service=turn_service,
         memory_service=memory_service,
+        artifact_service=artifact_service,
         genai_client_kwargs=genai_client_kwargs,
         responder_vertex_settings=responder_vertex_settings,
         research_vertex_settings=research_vertex_settings,
@@ -775,6 +858,16 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             memory_service
             if database is state.database
             else pytest.fail("Unexpected memory service database.")
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "ArtifactReadService",
+        lambda *, database: (
+            artifact_service
+            if database is state.database
+            else pytest.fail("Unexpected artifact service database.")
         ),
         raising=False,
     )
@@ -1218,6 +1311,14 @@ async def test_lifespan_exposes_synthesis_application_service(
 
 
 @pytest.mark.asyncio
+async def test_lifespan_exposes_artifact_read_service(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        assert main.app.state.artifact_service is service_state.artifact_service
+
+
+@pytest.mark.asyncio
 async def test_lifespan_closes_resources_if_supervisor_construction_fails(
     service_state: ServiceState,
     monkeypatch: pytest.MonkeyPatch,
@@ -1276,6 +1377,157 @@ async def test_synthesize_returns_and_persists_blueprint(
             source_text="Build a study partner.",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_blueprint_artifacts_returns_bounded_public_metadata(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/projects/project-1/blueprints",
+        params={"limit": 10, "before": "blueprint-cursor"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == service_state.artifact_service.list_result.model_dump(
+        mode="json"
+    )
+    assert service_state.artifact_service.list_calls == [
+        ListBlueprintArtifactsCommand(
+            project_id="project-1",
+            limit=10,
+            before="blueprint-cursor",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_blueprint_artifact_returns_canonical_detail(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/projects/project-1/blueprints/blueprint-1"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == service_state.artifact_service.detail_result.model_dump(
+        mode="json"
+    )
+    assert service_state.artifact_service.detail_calls == [
+        GetBlueprintArtifactCommand(
+            project_id="project-1",
+            blueprint_id="blueprint-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_detail"),
+    (
+        (
+            BlueprintArtifactCursorNotFoundError("missing"),
+            "Blueprint artifact cursor was not found.",
+        ),
+        (
+            ArtifactReadStateError("invalid"),
+            "Stored blueprint artifact is invalid.",
+        ),
+    ),
+)
+async def test_list_blueprint_artifacts_translates_safe_errors(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    error: Exception,
+    expected_detail: str,
+) -> None:
+    service_state.artifact_service.list_error = error
+
+    response = await client.get("/api/projects/project-1/blueprints")
+
+    assert response.status_code == (
+        404
+        if isinstance(error, BlueprintArtifactCursorNotFoundError)
+        else 500
+    )
+    assert response.json() == {"detail": expected_detail}
+
+
+@pytest.mark.asyncio
+async def test_get_blueprint_artifact_translates_missing_artifact(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.artifact_service.detail_error = BlueprintArtifactNotFoundError(
+        "private artifact locator"
+    )
+
+    response = await client.get(
+        "/api/projects/project-1/blueprints/missing-blueprint"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Blueprint artifact was not found."}
+
+
+@pytest.mark.asyncio
+async def test_get_blueprint_artifact_rejects_schema_v1_explicitly(
+    client: httpx.AsyncClient,
+) -> None:
+    blueprint = deepcopy(VALID_BLUEPRINT_PAYLOAD)
+    blueprint["architectural_decisions_and_feedback"] = blueprint.pop(
+        "architectural_decisions"
+    )
+    record = BlueprintDocumentRecord(
+        artifact_id="blueprint-v1",
+        document={
+            "created_at": MEMORY_NOW,
+            "originating_session_id": "session-1",
+            "user_id": "user-1",
+            "model_name": "gemini-3.6-flash",
+            "schema_version": "1.0",
+            "blueprint": blueprint,
+        },
+    )
+
+    class SchemaV1ArtifactDatabase:
+        async def get_blueprint_document(
+            self,
+            project_id: str,
+            blueprint_id: str,
+        ) -> BlueprintDocumentRecord:
+            assert project_id == "project-1"
+            assert blueprint_id == "blueprint-v1"
+            return record
+
+    main.app.state.artifact_service = ArtifactReadService(
+        database=SchemaV1ArtifactDatabase()
+    )
+
+    response = await client.get(
+        "/api/projects/project-1/blueprints/blueprint-v1"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Blueprint artifact uses an unsupported schema version."
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_blueprint_artifacts_rejects_unbounded_limit(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/projects/project-1/blueprints",
+        params={"limit": 51},
+    )
+
+    assert response.status_code == 422
+    assert service_state.artifact_service.list_calls == []
 
 
 @pytest.mark.asyncio

@@ -8,7 +8,15 @@ from datetime import UTC, datetime
 from typing import Annotated, NoReturn, TypeVar
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import (
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 from google import genai
 from google.genai import types
@@ -22,6 +30,13 @@ from agent_col_turn_service import (
     AgentColTurnServiceError,
     AgentColTurnTimeoutError,
 )
+from artifact_read_service import (
+    ArtifactReadService,
+    ArtifactReadStateError,
+    ArtifactReadUnsupportedSchemaError,
+    GetBlueprintArtifactCommand,
+    ListBlueprintArtifactsCommand,
+)
 from chat_turns import (
     ChatTurnClaim,
     ChatTurnConflictError,
@@ -34,6 +49,8 @@ from chat_turns import (
 )
 from computational_expert_service import ComputationalExpertService
 from database import (
+    BlueprintArtifactCursorNotFoundError,
+    BlueprintArtifactNotFoundError,
     MemoryEngine,
     MemoryEngineError,
     MemoryEventCursorNotFoundError,
@@ -52,6 +69,8 @@ from requirements_verification_service import RequirementsVerificationService
 from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
+    BlueprintArtifactDetailResponse,
+    BlueprintArtifactListResponse,
     ChatPartialFailureResponse,
     ChatRequest,
     ChatResponse,
@@ -312,6 +331,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             client=client,
             database=database,
         )
+        artifact_service = ArtifactReadService(database=database)
         memory_service = TrustedMemoryService(database=database)
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
@@ -356,6 +376,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.genai_client = client
     app.state.db = database
     app.state.synthesis_service = synthesis_service
+    app.state.artifact_service = artifact_service
     app.state.memory_service = memory_service
     app.state.turn_service = turn_service
 
@@ -507,6 +528,83 @@ async def synthesize(
         blueprint_id=result.blueprint_id,
         blueprint=result.blueprint,
     )
+
+
+@app.get(
+    "/api/projects/{project_id}/blueprints",
+    response_model=BlueprintArtifactListResponse,
+)
+async def list_blueprint_artifacts(
+    project_id: IdentifierStr,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    before: IdentifierStr | None = None,
+) -> BlueprintArtifactListResponse:
+    try:
+        return await request.app.state.artifact_service.list_blueprints(
+            ListBlueprintArtifactsCommand(
+                project_id=project_id,
+                limit=limit,
+                before=before,
+            )
+        )
+    except BlueprintArtifactCursorNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blueprint artifact cursor was not found.",
+        ) from exc
+    except ArtifactReadStateError as exc:
+        logger.error(
+            "Stored blueprint artifact list is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored blueprint artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.get(
+    "/api/projects/{project_id}/blueprints/{blueprint_id}",
+    response_model=BlueprintArtifactDetailResponse,
+)
+async def get_blueprint_artifact(
+    project_id: IdentifierStr,
+    blueprint_id: IdentifierStr,
+    request: Request,
+) -> BlueprintArtifactDetailResponse:
+    try:
+        return await request.app.state.artifact_service.get_blueprint(
+            GetBlueprintArtifactCommand(
+                project_id=project_id,
+                blueprint_id=blueprint_id,
+            )
+        )
+    except BlueprintArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blueprint artifact was not found.",
+        ) from exc
+    except ArtifactReadUnsupportedSchemaError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Blueprint artifact uses an unsupported schema version."
+            ),
+        ) from exc
+    except ArtifactReadStateError as exc:
+        logger.error(
+            "Stored blueprint artifact detail is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored blueprint artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
 
 
 @app.post("/api/chat", response_model=ChatResponse)
