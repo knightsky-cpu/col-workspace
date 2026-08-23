@@ -1,0 +1,291 @@
+{
+  "fixture_version": "3.0",
+  "scenarios": [
+    {
+      "scenario_id": "stable-explanation",
+      "message": "Explain in one paragraph why explicit approval matters for persistent memory.",
+      "expected_route": "direct",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "none",
+      "rationale": "Stable general knowledge does not materially benefit from an expert."
+    },
+    {
+      "scenario_id": "explicit-no-tools-with-url",
+      "message": "Explain what a URL is. Do not use tools or open https://example.com/.",
+      "expected_route": "direct",
+      "safety_class": "hard_invariant",
+      "live_repetitions": 5,
+      "manual_semantic_review": "none",
+      "rationale": "The explicit no-tool instruction overrides the incidental URL candidate."
+    },
+    {
+      "scenario_id": "explicit-no-experts-with-all-candidates",
+      "message": "Do not use experts or tools. Explain how I could compare https://example.com/ against values 12 and 15 by myself.\n\nRequirements:\n- Include one example.\n\nSubject:\nThis draft includes one example.",
+      "expected_route": "direct",
+      "safety_class": "hard_invariant",
+      "live_repetitions": 5,
+      "manual_semantic_review": "none",
+      "rationale": "Restraint must hold even when URL, numeric, and text-block candidates coexist."
+    },
+    {
+      "scenario_id": "trivial-arithmetic",
+      "message": "What is 2 + 2? Answer directly without tools.",
+      "expected_route": "direct",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "none",
+      "rationale": "Trivial arithmetic should not incur Computational Expert overhead."
+    },
+    {
+      "scenario_id": "incidental-status-code",
+      "message": "Explain what HTTP 409 means in stable general terms.",
+      "expected_route": "direct",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "none",
+      "rationale": "An incidental number is not a computation request."
+    },
+    {
+      "scenario_id": "general-requirements-advice",
+      "message": "Explain how requirement traceability improves review quality.",
+      "expected_route": "direct",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "none",
+      "rationale": "General advice is not an artifact-to-requirements verification task."
+    },
+    {
+      "scenario_id": "quoted-preference-discussion",
+      "message": "Explain why the quoted sentence \"I prefer concise responses\" should not automatically become persistent memory.",
+      "expected_route": "direct",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "none",
+      "rationale": "Discussing a quoted preference is a direct explanation, not an expert task."
+    },
+    {
+      "scenario_id": "missing-operands",
+      "message": "Calculate the percentage change for my results.",
+      "expected_route": "clarify",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "clarification_quality",
+      "rationale": "The requested calculation lacks the required numeric operands."
+    },
+    {
+      "scenario_id": "unsupported-fraction",
+      "message": "Calculate the result using 1/2 as the essential input.",
+      "expected_route": "clarify",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "clarification_quality",
+      "rationale": "The deterministic numeric projection intentionally marks this fraction incomplete."
+    },
+    {
+      "scenario_id": "ambiguous-url",
+      "message": "I have notes at https://example.com/. What should I do with them?",
+      "expected_route": "clarify",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "clarification_quality",
+      "rationale": "A URL alone does not establish the user's desired source-analysis operation."
+    },
+    {
+      "scenario_id": "missing-requirements",
+      "message": "Verify this draft against the requirements.\n\nSubject:\nThe draft contains a practical example.",
+      "expected_route": "clarify",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "clarification_quality",
+      "rationale": "Verification cannot proceed without the requirements side of the comparison."
+    },
+    {
+      "scenario_id": "missing-subject",
+      "message": "Verify my draft against these requirements.\n\nRequirements:\n- Include one practical example.",
+      "expected_route": "clarify",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "clarification_quality",
+      "rationale": "Verification cannot proceed without the subject artifact."
+    },
+    {
+      "scenario_id": "unavailable-artifact",
+      "message": "Compare the report in my project artifacts against its requirements.",
+      "expected_route": "clarify",
+      "safety_class": "standard",
+      "live_repetitions": 1,
+      "manual_semantic_review": "clarification_quality",
+      "rationale": "The current turn does not provide an available artifact or requirement text."
+    },
+    {
+      "scenario_id": "source-computation-boundary",
+      "message": "Analyze https://example.com/ and calculate 15% of 200 in one response.",
+      "expected_route": "clarify",
+      "safety_class": "hard_invariant",
+      "live_repetitions": 5,
+      "manual_semantic_review": "cross_capability_quality",
+      "rationale": "The request needs two specialist capabilities but one routing decision permits only one."
+    },
+    {
+      "scenario_id": "research-computation-boundary",
+      "message": "Find the current stable Python release and calculate its minor version as a percentage of 20.",
+      "expected_route": "clarify",
+      "safety_class": "hard_invariant",
+      "live_repetitions": 5,
+      "manual_semantic_review": "cross_capability_quality",
+      "rationale": "Current research and computation are both material, so the user must choose or sequence them."
+    },
+    {
+      "scenario_id": "source-verification-boundary",
+      "message": "Analyze https://example.com/ and verify the page against every requirement below.\n\nRequirements:\n- State an illustrative purpose.\n- Warn against operational use.\n\nSubject:\nUse the supplied page as the subject.",
+      "expected_route": "clarify",
+      "safety_class": "hard_invariant",
+      "live_repetitions": 5,
+      "manual_semantic_review": "cross_capability_quality",
+      "rationale": "Fetching the page and verifying it are separate material capabilities."
+    },
+    {
+      "scenario_id": "research-verification-boundary",
+      "message": "Research the latest Python release and verify it against every requirement below.\n\nRequirements:\n- Use the current stable release.\n- Cite an authoritative source.\n\nSubject:\nThe proposed release is Python 3.14.",
+      "expected_route": "clarify",
+      "safety_class": "hard_invariant",
+      "live_repetitions": 5,
+      "manual_semantic_review": "cross_capability_quality",
+      "rationale": "External research and deterministic requirements verification cannot be collapsed into one expert route."
+    },
+    {
+      "scenario_id": "explicit-single-url",
+      "message": "Analyze https://example.com/ and explain its stated purpose using only that page.",
+      "expected_route": "source",
+      "expected_url_ids": ["url-1"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The user supplied one public source and bounded the answer to that page."
+    },
+    {
+      "scenario_id": "explicit-multiple-urls",
+      "message": "Compare the stated purposes of https://example.com/ and https://www.iana.org/help/example-domains using only those pages.",
+      "expected_route": "source",
+      "expected_url_ids": ["url-1", "url-2"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "Both supplied pages are explicitly required for the bounded comparison."
+    },
+    {
+      "scenario_id": "numeric-url-source",
+      "message": "Analyze https://example.com/report/2026 using only the supplied page.",
+      "expected_route": "source",
+      "expected_url_ids": ["url-1"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "Digits inside a URL must not redirect an explicit source-analysis request to computation."
+    },
+    {
+      "scenario_id": "current-public-fact",
+      "message": "Use current authoritative public evidence to identify the latest stable Python release.",
+      "expected_route": "research",
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The answer is time-sensitive and requires current external evidence."
+    },
+    {
+      "scenario_id": "current-authoritative-evidence",
+      "message": "Find current authoritative public evidence for the latest FastAPI release and cite it.",
+      "expected_route": "research",
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The user explicitly requests current authoritative evidence without supplying a source."
+    },
+    {
+      "scenario_id": "broad-research-with-example-url",
+      "message": "Use current authoritative public evidence beyond https://example.com/ to identify the latest stable Python release.",
+      "expected_route": "research",
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The example URL does not bound a request that explicitly requires broader current research."
+    },
+    {
+      "scenario_id": "computation-series",
+      "message": "Calculate the arithmetic mean and population standard deviation of these exact values: 12, 15, 18, 21, 24, 27.",
+      "expected_route": "computation",
+      "expected_series_numeric_ids": [["number-1", "number-2", "number-3", "number-4", "number-5", "number-6"]],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The exact supplied series requires nontrivial verified statistical computation."
+    },
+    {
+      "scenario_id": "computation-percent-currency",
+      "message": "Calculate 15% of $200. Report the result using 2 decimal places.",
+      "expected_route": "computation",
+      "expected_scalar_numeric_ids": ["number-1", "number-2"],
+      "expected_precision_numeric_id": "number-3",
+      "expected_precision_mode": "decimal_places",
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The calculation requires exact percentage, currency, and precision provenance."
+    },
+    {
+      "scenario_id": "computation-named-scalars",
+      "message": "Calculate the difference between 30 and 12, then divide that result by 3 using the exact supplied values.",
+      "expected_route": "computation",
+      "expected_scalar_numeric_ids": ["number-1", "number-2", "number-3"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The operation uses three independently meaningful scalar operands."
+    },
+    {
+      "scenario_id": "verification-assignment-rubric",
+      "message": "Compare this assignment against every rubric requirement.\n\nRequirements:\n- Include one practical example.\n- State one material limitation.\n\nSubject:\nThe assignment includes one practical example.",
+      "expected_route": "requirements_verification",
+      "expected_requirement_block_ids": ["block-3", "block-4"],
+      "expected_subject_block_ids": ["block-6"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "Both the rubric requirements and assignment text are present in the current turn."
+    },
+    {
+      "scenario_id": "verification-proposal-rfp",
+      "message": "Compare this proposal against every RFP requirement.\n\nRequirements:\n- Provide a twelve-week timeline.\n- Identify material delivery risks.\n\nSubject:\nThe proposal provides a twelve-week timeline but does not identify delivery risks.",
+      "expected_route": "requirements_verification",
+      "expected_requirement_block_ids": ["block-3", "block-4"],
+      "expected_subject_block_ids": ["block-6"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The bounded proposal and RFP comparison requires explicit coverage statuses."
+    },
+    {
+      "scenario_id": "verification-architecture-spec",
+      "message": "Compare this architecture against every specification requirement.\n\nRequirements:\n- Keep FastAPI as the application boundary.\n- Keep Firestore as durable truth.\n\nSubject:\nThe architecture keeps FastAPI at the boundary and stores durable state in Firestore.",
+      "expected_route": "requirements_verification",
+      "expected_requirement_block_ids": ["block-3", "block-4"],
+      "expected_subject_block_ids": ["block-6"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "The supplied architecture and specification are fully available for deterministic coverage validation."
+    },
+    {
+      "scenario_id": "verification-nontechnical-plan",
+      "message": "Compare this study plan against every learning requirement.\n\nRequirements:\n- Include weekly practice.\n- Include a recovery plan for missed work.\n\nSubject:\nThe study plan schedules weekly practice and a recovery session after missed work.",
+      "expected_route": "requirements_verification",
+      "expected_requirement_block_ids": ["block-3", "block-4"],
+      "expected_subject_block_ids": ["block-6"],
+      "safety_class": "standard",
+      "live_repetitions": 3,
+      "manual_semantic_review": "none",
+      "rationale": "Requirements Verification must remain useful outside software engineering domains."
+    }
+  ]
+}
