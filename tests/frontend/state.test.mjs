@@ -7,6 +7,8 @@ import {
   completePendingTurn,
   createInitialState,
   failPendingTurn,
+  selectCanSubmit,
+  selectNeedsReceiptRefresh,
   startNewConversation,
 } from "../../frontend/state.mjs";
 
@@ -86,4 +88,43 @@ test("new conversation keeps user and project but replaces session and clears pa
   assert.equal(next.context.project_id, "agent-col");
   assert.equal(next.transcript.length, 0);
   assert.equal(next.lastFailure, null);
+});
+
+test("selectCanSubmit requires workspace context and no pending turn", () => {
+  assert.equal(selectCanSubmit(createInitialState()), false);
+  const accepted = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  assert.equal(selectCanSubmit(accepted), true);
+  assert.equal(
+    selectCanSubmit(beginPendingTurn(accepted, {
+      key: "chat--1",
+      body: { message: "hello" },
+    })),
+    false,
+  );
+});
+
+test("receipt refresh selector is driven by structured fields", () => {
+  assert.deepEqual(
+    selectNeedsReceiptRefresh({
+      response: "Created.",
+      actions: [{ action_name: "synthesize_project", status: "completed" }],
+      artifacts: [{ artifact_id: "blueprint--1" }],
+      memory_proposals: [{ proposal_id: "response_length--1" }],
+      adaptations: [{ signal_id: "planning_granularity--1" }],
+    }),
+    {
+      work: true,
+      memory: true,
+    },
+  );
+  assert.deepEqual(
+    selectNeedsReceiptRefresh({ response: "I created a blueprint in prose." }),
+    {
+      work: false,
+      memory: false,
+    },
+  );
 });

@@ -81,3 +81,17 @@ export function buildExactRetryRequest(turn) {
     body: turn.body,
   };
 }
+
+export function buildOrdinaryChatRequest(
+  context,
+  message,
+  cryptoLike = globalThis.crypto,
+) {
+  return buildChatRequest({
+    project_id: context.project_id,
+    session_id: context.session_id,
+    user_id: context.user_id,
+    message,
+    crypto: cryptoLike,
+  });
+}

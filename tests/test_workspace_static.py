@@ -18,6 +18,11 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert '<main id="conversation-workspace"' in response.text
     assert 'src="/static/agent-col/app.mjs"' in response.text
     assert 'href="/static/agent-col/styles.css"' in response.text
+    assert "data-chat-form" in response.text
+    assert 'name="message"' in response.text
+    assert "data-chat-transcript" in response.text
+    assert "data-chat-status" in response.text
+    assert "data-retry-turn" in response.text
     assert "https://" not in response.text
     assert "http://" not in response.text
 

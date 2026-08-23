@@ -63,6 +63,25 @@
               blueprint from source text in your message.
             </p>
           </section>
+          <div class="chat-transcript" data-chat-transcript aria-live="polite"></div>
+          <p class="chat-status" data-chat-status role="status"></p>
+          <p class="chat-error" data-chat-error role="alert" hidden></p>
+          <button type="button" data-retry-turn hidden>Retry exact request</button>
+          <form class="composer" data-chat-form>
+            <label for="chat-message">Message</label>
+            <textarea
+              id="chat-message"
+              name="message"
+              data-chat-input
+              rows="4"
+              maxlength="10000"
+              required
+            ></textarea>
+            <div class="composer-actions">
+              <span data-character-count>0 / 10000</span>
+              <button type="submit" data-chat-submit>Send</button>
+            </div>
+          </form>
         </main>
 
         <aside class="work-panel" aria-label="Work review" hidden>

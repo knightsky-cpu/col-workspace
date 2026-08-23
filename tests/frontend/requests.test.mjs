@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildChatRequest,
   buildExactRetryRequest,
+  buildOrdinaryChatRequest,
   generateIdempotencyKey,
   generateSessionId,
   isValidIdentifier,
@@ -93,4 +94,24 @@ test("structured memory and artifact decisions are mutually exclusive", () => {
     }),
     /mutually exclusive/,
   );
+});
+
+test("ordinary chat request uses context locators and one idempotency key", () => {
+  const request = buildOrdinaryChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    "Explain receipt authority.",
+    cryptoStub,
+  );
+
+  assert.equal(request.key, "chat--123e4567-e89b-12d3-a456-426614174000");
+  assert.deepEqual(request.body, {
+    project_id: "agent-col",
+    session_id: "session-1",
+    user_id: "wifiknight",
+    message: "Explain receipt authority.",
+  });
 });

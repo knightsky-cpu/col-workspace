@@ -78,3 +78,31 @@ export function startNewConversation(state, cryptoLike = globalThis.crypto) {
     lastFailure: null,
   };
 }
+
+export function selectCanSubmit(state) {
+  return (
+    state.mode === "workspace"
+    && state.context !== null
+    && state.pendingTurn === null
+  );
+}
+
+export function selectNeedsReceiptRefresh(response) {
+  const actions = Array.isArray(response.actions) ? response.actions : [];
+  return {
+    work: Array.isArray(response.artifacts) && response.artifacts.length > 0,
+    memory: (
+      (
+        Array.isArray(response.memory_proposals)
+        && response.memory_proposals.length > 0
+      )
+      || (
+        Array.isArray(response.adaptations)
+        && response.adaptations.length > 0
+      )
+      || actions.some((action) => (
+        action.action_name.includes("memory_signal")
+      ))
+    ),
+  };
+}
