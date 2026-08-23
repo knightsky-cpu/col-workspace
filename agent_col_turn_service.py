@@ -257,9 +257,14 @@ class AgentColTurnService:
             AgentColRoutingV3ProviderError,
             RoutingDirectiveInputError,
         ) as exc:
+            failure_classification = type(exc).__name__
+            if isinstance(exc, RoutingDirectiveInputError):
+                failure_classification = (
+                    f"routing_directive_input:{exc.reason.value}"
+                )
             logger.error(
                 "Agent_Col routing failed (%s).",
-                type(exc).__name__,
+                failure_classification,
             )
             raise AgentColTurnRoutingError(
                 "Agent_Col routing failed.",

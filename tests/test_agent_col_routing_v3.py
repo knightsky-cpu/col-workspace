@@ -657,21 +657,24 @@ def test_v3_existing_expert_routes_reject_incompatible_input(case: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "case",
+    ("case", "expected_reason"),
     (
-        "capability_absent",
-        "projection_incomplete",
-        "unknown_id",
-        "reordered_series",
-        "mixed_series_units",
-        "non_integer_precision",
-        "zero_significant_figures",
-        "numeric_objective",
-        "numeric_constraint",
-        "unsafe_objective",
+        ("capability_absent", "capability_unavailable"),
+        ("projection_incomplete", "incomplete_numeric_projection"),
+        ("unknown_id", "unknown_numeric_candidate"),
+        ("reordered_series", "series_order_mismatch"),
+        ("mixed_series_units", "series_unit_mismatch"),
+        ("non_integer_precision", "invalid_precision"),
+        ("zero_significant_figures", "invalid_precision"),
+        ("numeric_objective", "numeric_task_text"),
+        ("numeric_constraint", "numeric_task_text"),
+        ("unsafe_objective", "unsafe_task_text"),
     ),
 )
-def test_v3_computation_rejects_incompatible_input(case: str) -> None:
+def test_v3_computation_rejects_incompatible_input(
+    case: str,
+    expected_reason: str,
+) -> None:
     routing = load_routing_v3()
     routing_input = computation_routing_input(routing)
     directive_changes: dict[str, object] = {}
@@ -749,4 +752,5 @@ def test_v3_computation_rejects_incompatible_input(case: str) -> None:
         routing.validate_routing_directive_for_input(directive, routing_input)
 
     assert str(error.value) == "Routing directive is incompatible with its input."
+    assert error.value.reason == expected_reason
     assert "private.example" not in str(error.value)

@@ -628,6 +628,45 @@ async def test_turn_service_classifies_invalid_routing_without_downstream_access
 
 
 @pytest.mark.asyncio
+async def test_turn_service_logs_allowlisted_routing_input_reason_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from agent_col_routing_v3 import (
+        RoutingDirectiveInputError,
+        RoutingDirectiveInputReason,
+    )
+    from agent_col_turn_service import (
+        AgentColTurnRoutingError,
+        AgentColTurnService,
+    )
+
+    error = RoutingDirectiveInputError(
+        RoutingDirectiveInputReason.UNKNOWN_NUMERIC_CANDIDATE
+    )
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(error=error),
+    )
+
+    with pytest.raises(AgentColTurnRoutingError):
+        await service.run_turn(command_with_precompleted_effects())
+
+    assert (
+        "routing_directive_input:unknown_numeric_candidate" in caplog.text
+    )
+    for secret in (
+        "secret-message-content",
+        "secret-project",
+        "secret-session",
+        "secret-user",
+        "number-33",
+    ):
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("directive", "responder_context"),
     (

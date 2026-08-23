@@ -55,8 +55,36 @@ class AgentColRoute(StrEnum):
     REQUIREMENTS_VERIFICATION = "requirements_verification"
 
 
+class RoutingDirectiveInputReason(StrEnum):
+    """Allowlisted, content-free routing/input incompatibility classes."""
+
+    UNKNOWN_INPUT_MISMATCH = "unknown_input_mismatch"
+    CAPABILITY_UNAVAILABLE = "capability_unavailable"
+    MISSING_REQUIRED_INPUT = "missing_required_input"
+    INCOMPLETE_NUMERIC_PROJECTION = "incomplete_numeric_projection"
+    UNKNOWN_NUMERIC_CANDIDATE = "unknown_numeric_candidate"
+    NUMERIC_TASK_TEXT = "numeric_task_text"
+    UNSAFE_TASK_TEXT = "unsafe_task_text"
+    SERIES_ORDER_MISMATCH = "series_order_mismatch"
+    SERIES_UNIT_MISMATCH = "series_unit_mismatch"
+    INVALID_PRECISION = "invalid_precision"
+
+
 class RoutingDirectiveInputError(RuntimeError):
     """Raised when a valid v3 directive cannot execute against its input."""
+
+    def __init__(
+        self,
+        reason: RoutingDirectiveInputReason | str = (
+            RoutingDirectiveInputReason.UNKNOWN_INPUT_MISMATCH
+        ),
+    ) -> None:
+        self.reason = (
+            reason
+            if isinstance(reason, RoutingDirectiveInputReason)
+            else RoutingDirectiveInputReason.UNKNOWN_INPUT_MISMATCH
+        )
+        super().__init__("Routing directive is incompatible with its input.")
 
 
 class StrictRoutingModel(BaseModel):
@@ -226,54 +254,48 @@ def validate_routing_directive_for_input(
     routing_input: AgentColRoutingInput,
 ) -> AgentColRoutingDirective:
     """Validate one v3 directive against its exact bounded routing input."""
-    incompatible = "Routing directive is incompatible with its input."
     if directive.route is AgentColRoute.SOURCE:
         if ExpertCapability.SOURCE not in routing_input.available_capabilities:
-            raise RoutingDirectiveInputError(incompatible)
+            raise RoutingDirectiveInputError()
         if directive.source_intent is None or not routing_input.candidate_urls:
-            raise RoutingDirectiveInputError(incompatible)
+            raise RoutingDirectiveInputError()
         available_url_ids = {
             candidate.candidate_id for candidate in routing_input.candidate_urls
         }
         if not set(directive.source_intent.selected_url_ids) <= available_url_ids:
-            raise RoutingDirectiveInputError(incompatible)
+            raise RoutingDirectiveInputError()
 
     if (
         directive.route is AgentColRoute.RESEARCH
         and ExpertCapability.RESEARCH not in routing_input.available_capabilities
     ):
-        raise RoutingDirectiveInputError(incompatible)
+        raise RoutingDirectiveInputError()
 
     if directive.route is AgentColRoute.COMPUTATION:
-        _validate_computation_directive(
-            directive,
-            routing_input,
-            incompatible=incompatible,
-        )
+        _validate_computation_directive(directive, routing_input)
 
     if directive.route is AgentColRoute.REQUIREMENTS_VERIFICATION:
-        _validate_requirements_directive(
-            directive,
-            routing_input,
-            incompatible=incompatible,
-        )
+        _validate_requirements_directive(directive, routing_input)
     return directive
 
 
 def _validate_computation_directive(
     directive: AgentColRoutingDirective,
     routing_input: AgentColRoutingInput,
-    *,
-    incompatible: str,
 ) -> None:
     intent = directive.computation_intent
-    if (
-        ExpertCapability.COMPUTATION
-        not in routing_input.available_capabilities
-        or routing_input.numeric_projection_incomplete
-        or intent is None
-    ):
-        raise RoutingDirectiveInputError(incompatible)
+    if ExpertCapability.COMPUTATION not in routing_input.available_capabilities:
+        raise RoutingDirectiveInputError(
+            RoutingDirectiveInputReason.CAPABILITY_UNAVAILABLE
+        )
+    if routing_input.numeric_projection_incomplete:
+        raise RoutingDirectiveInputError(
+            RoutingDirectiveInputReason.INCOMPLETE_NUMERIC_PROJECTION
+        )
+    if intent is None:
+        raise RoutingDirectiveInputError(
+            RoutingDirectiveInputReason.MISSING_REQUIRED_INPUT
+        )
 
     candidates_by_id = {
         candidate.candidate_id: candidate
@@ -293,50 +315,71 @@ def _validate_computation_directive(
     if intent.precision is not None:
         selected_ids += (intent.precision.digits_numeric_id,)
     if not set(selected_ids) <= set(candidates_by_id):
-        raise RoutingDirectiveInputError(incompatible)
+        raise RoutingDirectiveInputError(
+            RoutingDirectiveInputReason.UNKNOWN_NUMERIC_CANDIDATE
+        )
 
     try:
         validate_computation_task_text(intent.objective)
         for constraint in intent.constraints:
             validate_computation_task_text(constraint)
-        if contains_numeric_like_text(intent.objective) or any(
-            contains_numeric_like_text(value) for value in intent.constraints
-        ):
-            raise ValueError("Computation task text contains numeric data.")
+    except ValueError as exc:
+        raise RoutingDirectiveInputError(
+            RoutingDirectiveInputReason.UNSAFE_TASK_TEXT
+        ) from exc
 
-        for series in intent.series_inputs:
+    if contains_numeric_like_text(intent.objective) or any(
+        contains_numeric_like_text(value) for value in intent.constraints
+    ):
+        raise RoutingDirectiveInputError(
+            RoutingDirectiveInputReason.NUMERIC_TASK_TEXT
+        )
+
+    for series in intent.series_inputs:
+        try:
             order = tuple(candidate_order[value] for value in series.numeric_ids)
-            if order != tuple(sorted(order)):
-                raise ValueError("Computation series is out of source order.")
-            units = {
-                (
-                    candidates_by_id[value].notation,
-                    candidates_by_id[value].unit_symbol,
-                )
-                for value in series.numeric_ids
-            }
-            if len(units) != 1:
-                raise ValueError("Computation series units are incompatible.")
+        except KeyError as exc:
+            raise RoutingDirectiveInputError(
+                RoutingDirectiveInputReason.UNKNOWN_NUMERIC_CANDIDATE
+            ) from exc
+        if order != tuple(sorted(order)):
+            raise RoutingDirectiveInputError(
+                RoutingDirectiveInputReason.SERIES_ORDER_MISMATCH
+            )
+        units = {
+            (
+                candidates_by_id[value].notation,
+                candidates_by_id[value].unit_symbol,
+            )
+            for value in series.numeric_ids
+        }
+        if len(units) != 1:
+            raise RoutingDirectiveInputError(
+                RoutingDirectiveInputReason.SERIES_UNIT_MISMATCH
+            )
 
-        if intent.precision is not None:
-            precision_value = candidates_by_id[
-                intent.precision.digits_numeric_id
-            ].value
-            if not precision_value.is_integer():
-                raise ValueError("Computation precision must be an integer.")
+    if intent.precision is not None:
+        precision_value = candidates_by_id[
+            intent.precision.digits_numeric_id
+        ].value
+        if not precision_value.is_integer():
+            raise RoutingDirectiveInputError(
+                RoutingDirectiveInputReason.INVALID_PRECISION
+            )
+        try:
             PrecisionRule(
                 mode=intent.precision.mode,
                 digits=int(precision_value),
             )
-    except (KeyError, TypeError, ValueError, ValidationError) as exc:
-        raise RoutingDirectiveInputError(incompatible) from exc
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise RoutingDirectiveInputError(
+                RoutingDirectiveInputReason.INVALID_PRECISION
+            ) from exc
 
 
 def _validate_requirements_directive(
     directive: AgentColRoutingDirective,
     routing_input: AgentColRoutingInput,
-    *,
-    incompatible: str,
 ) -> None:
     intent = directive.requirements_verification_intent
     if (
@@ -345,7 +388,7 @@ def _validate_requirements_directive(
         or routing_input.text_projection_incomplete
         or intent is None
     ):
-        raise RoutingDirectiveInputError(incompatible)
+        raise RoutingDirectiveInputError()
 
     candidates_by_id = {
         candidate.candidate_id: candidate
@@ -360,7 +403,7 @@ def _validate_requirements_directive(
         *intent.subject_block_ids,
     )
     if not set(selected_ids) <= set(candidates_by_id):
-        raise RoutingDirectiveInputError(incompatible)
+        raise RoutingDirectiveInputError()
 
     try:
         requirement_candidates = tuple(
@@ -416,4 +459,4 @@ def _validate_requirements_directive(
         ):
             raise ValueError("Selected text exceeds routing bounds.")
     except (KeyError, TypeError, ValueError) as exc:
-        raise RoutingDirectiveInputError(incompatible) from exc
+        raise RoutingDirectiveInputError() from exc
