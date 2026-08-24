@@ -65,6 +65,9 @@ from schemas import (
     MemoryDecisionRequest,
     MemoryProposal,
     MemoryProposalReceipt,
+    WorkspaceCreateRequest,
+    WorkspaceListResponse,
+    WorkspaceSummary,
 )
 
 
@@ -346,6 +349,124 @@ class MemoryEngine:
             raise ValueError("Stored chat session metadata is invalid.") from exc
         except GoogleAPIError as exc:
             self._raise_firestore_error("list_chat_sessions", exc)
+
+    async def list_workspaces(
+        self,
+        *,
+        user_id: str,
+        default_workspace_id: str,
+        default_display_name: str,
+        limit: int,
+    ) -> WorkspaceListResponse:
+        """Return bounded workspace containers visible to one user."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(default_workspace_id, "default_workspace_id")
+        self._validate_string(default_display_name, "default_display_name")
+        self._validate_limit(limit, "limit", maximum=50)
+
+        try:
+            workspaces_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+            )
+            workspaces: list[WorkspaceSummary] = []
+            async for snapshot in workspaces_ref.limit(200).stream():
+                data = snapshot.to_dict()
+                if not isinstance(data, Mapping):
+                    continue
+                workspace_id = data.get("workspace_id")
+                display_name = data.get("display_name")
+                if (
+                    workspace_id != snapshot.id
+                    or not isinstance(display_name, str)
+                ):
+                    continue
+                workspaces.append(
+                    WorkspaceSummary(
+                        workspace_id=snapshot.id,
+                        display_name=display_name,
+                        created_at=(
+                            data.get("created_at")
+                            if isinstance(data.get("created_at"), datetime)
+                            else None
+                        ),
+                        updated_at=(
+                            data.get("updated_at")
+                            if isinstance(data.get("updated_at"), datetime)
+                            else None
+                        ),
+                        is_default=bool(data.get("is_default", False)),
+                    )
+                )
+            if not any(
+                workspace.workspace_id == default_workspace_id
+                for workspace in workspaces
+            ):
+                workspaces.append(
+                    WorkspaceSummary(
+                        workspace_id=default_workspace_id,
+                        display_name=default_display_name,
+                        is_default=True,
+                    )
+                )
+            workspaces.sort(
+                key=lambda item: (
+                    not item.is_default,
+                    item.display_name.casefold(),
+                    item.workspace_id,
+                )
+            )
+            return WorkspaceListResponse(workspaces=workspaces[:limit])
+        except ValidationError as exc:
+            raise ValueError("Stored workspace metadata is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_workspaces", exc)
+
+    async def create_workspace(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        request: WorkspaceCreateRequest,
+    ) -> WorkspaceSummary:
+        """Persist one user-owned workspace container."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(workspace_id, "workspace_id")
+        if not isinstance(request, WorkspaceCreateRequest):
+            raise ValueError("request must be a WorkspaceCreateRequest.")
+
+        try:
+            user_ref = self._client.collection("users").document(user_id)
+            workspace_ref = user_ref.collection("workspaces").document(
+                workspace_id
+            )
+            batch = self._client.batch()
+            batch.set(
+                user_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            batch.set(
+                workspace_ref,
+                {
+                    "workspace_contract_version": "1.0",
+                    "workspace_id": workspace_id,
+                    "display_name": request.display_name,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "is_default": False,
+                },
+                merge=False,
+            )
+            await batch.commit()
+            return WorkspaceSummary(
+                workspace_id=workspace_id,
+                display_name=request.display_name,
+                is_default=False,
+            )
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("create_workspace", exc)
 
     async def get_chat_session_detail(
         self,

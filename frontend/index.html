@@ -65,6 +65,18 @@
             </button>
           </div>
           <div class="supporting-panel__body">
+            <section class="drawer-section" aria-labelledby="workspace-title" data-section="workspace">
+              <div class="section-heading">
+                <h2 id="workspace-title">Workspace</h2>
+                <button type="button" class="drawer-toggle" data-section-toggle="workspace" aria-expanded="false">
+                  Expand
+                </button>
+              </div>
+              <div data-section-content="workspace" hidden>
+                <p class="form-error" role="alert" data-workspace-error hidden></p>
+                <div data-workspace-list></div>
+              </div>
+            </section>
             <section class="drawer-section" aria-labelledby="work-list-title" data-section="work">
               <div class="section-heading">
                 <h2 id="work-list-title">Artifacts</h2>

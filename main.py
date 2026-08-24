@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -107,6 +108,9 @@ from schemas import (
     MemoryProposalReceipt,
     SynthesisRequest,
     SynthesisResponse,
+    WorkspaceCreateRequest,
+    WorkspaceCreateResponse,
+    WorkspaceListResponse,
 )
 from source_expert_service import SourceExpertService
 from supervisor_runtime import SupervisorRuntime
@@ -256,6 +260,37 @@ def _resolve_effective_project_id(
         )
     except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
         _raise_auth_http_error(exc)
+
+
+def _workspace_defaults_for_request(
+    *,
+    request: Request,
+    authorization_header: str | None,
+) -> tuple[str, str]:
+    authenticator = _get_authenticator(request)
+    if authenticator.settings.mode == "local_dev":
+        return ("agent-col", "Agent Col")
+    try:
+        principal = authenticator.session(authorization_header)
+    except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
+        _raise_auth_http_error(exc)
+    if principal.workspace_project_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user does not own this request.",
+        )
+    return (principal.workspace_project_id, "Private Google workspace")
+
+
+def _derive_workspace_id(
+    *,
+    default_workspace_id: str,
+    display_name: str,
+) -> str:
+    normalized = display_name.strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized).strip("-") or "workspace"
+    slug = slug[:40].strip("-") or "workspace"
+    return f"{default_workspace_id}--{slug}"
 
 
 def _require_authenticated_request(
@@ -680,6 +715,86 @@ async def inspect_memory(
         events=list(result.events),
         next_event_id=result.next_event_id,
     )
+
+
+@app.get(
+    "/api/users/{user_id}/workspaces",
+    response_model=WorkspaceListResponse,
+)
+async def list_user_workspaces(
+    user_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> WorkspaceListResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    default_workspace_id, default_display_name = _workspace_defaults_for_request(
+        request=request,
+        authorization_header=authorization,
+    )
+    try:
+        return await request.app.state.db.list_workspaces(
+            user_id=effective_user_id,
+            default_workspace_id=default_workspace_id,
+            default_display_name=default_display_name,
+            limit=limit,
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Workspace request is invalid.",
+        ) from exc
+
+
+@app.post(
+    "/api/users/{user_id}/workspaces",
+    response_model=WorkspaceCreateResponse,
+)
+async def create_user_workspace(
+    user_id: IdentifierStr,
+    payload: WorkspaceCreateRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> WorkspaceCreateResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    default_workspace_id, _ = _workspace_defaults_for_request(
+        request=request,
+        authorization_header=authorization,
+    )
+    workspace_id = _derive_workspace_id(
+        default_workspace_id=default_workspace_id,
+        display_name=payload.display_name,
+    )
+    try:
+        workspace = await request.app.state.db.create_workspace(
+            user_id=effective_user_id,
+            workspace_id=workspace_id,
+            request=payload,
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Workspace request is invalid.",
+        ) from exc
+    return WorkspaceCreateResponse(workspace=workspace)
 
 
 @app.get(

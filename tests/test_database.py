@@ -8,7 +8,7 @@ from google.api_core.exceptions import ServiceUnavailable
 from google.cloud import firestore
 
 from database import MemoryEngine, MemoryEngineError
-from schemas import AdaptationReceipt
+from schemas import AdaptationReceipt, WorkspaceCreateRequest
 
 
 @pytest.mark.asyncio
@@ -60,6 +60,57 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
                 "text": "hello",
                 "timestamp": firestore.SERVER_TIMESTAMP,
             },
+        ),
+    ]
+    batch.commit.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_create_workspace_persists_user_workspace_container() -> None:
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    workspaces = MagicMock()
+    workspace = MagicMock()
+    batch = MagicMock()
+    batch.commit = AsyncMock(return_value=[])
+
+    client.collection.return_value = users
+    users.document.return_value = user
+    user.collection.return_value = workspaces
+    workspaces.document.return_value = workspace
+    client.batch.return_value = batch
+
+    result = await MemoryEngine(client).create_workspace(
+        user_id="user-1",
+        workspace_id="project--abc--study-plans",
+        request=WorkspaceCreateRequest(display_name="Study Plans"),
+    )
+
+    assert result.workspace_id == "project--abc--study-plans"
+    assert result.display_name == "Study Plans"
+    assert result.is_default is False
+    client.collection.assert_called_once_with("users")
+    users.document.assert_called_once_with("user-1")
+    user.collection.assert_called_once_with("workspaces")
+    workspaces.document.assert_called_once_with("project--abc--study-plans")
+    assert batch.set.call_args_list == [
+        call(
+            user,
+            {"updated_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        ),
+        call(
+            workspace,
+            {
+                "workspace_contract_version": "1.0",
+                "workspace_id": "project--abc--study-plans",
+                "display_name": "Study Plans",
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "is_default": False,
+            },
+            merge=False,
         ),
     ]
     batch.commit.assert_awaited_once_with()

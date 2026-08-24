@@ -7,6 +7,12 @@ export function createInitialState() {
     transcript: [],
     pendingTurn: null,
     lastFailure: null,
+    workspaces: {
+      status: "idle",
+      items: [],
+      selectedWorkspaceId: null,
+      error: null,
+    },
     work: {
       list: {
         status: "idle",
@@ -57,6 +63,142 @@ export function acceptContext(state, context) {
       project_id: context.project_id,
       auth_token: context.auth_token ?? null,
       session_id: generateSessionId(context.crypto),
+    },
+    workspaces: {
+      ...state.workspaces,
+      selectedWorkspaceId: context.project_id,
+    },
+  };
+}
+
+function emptyWorkState() {
+  return {
+    list: {
+      status: "idle",
+      items: [],
+      next_before: null,
+      error: null,
+    },
+    selectedArtifactId: null,
+    detail: {
+      status: "idle",
+      item: null,
+      error: null,
+    },
+    feedback: {
+      status: "idle",
+      events: [],
+      next_before: null,
+      error: null,
+    },
+  };
+}
+
+function emptyChatSessionState() {
+  return {
+    status: "idle",
+    sessions: [],
+    selectedSessionId: null,
+    detailStatus: "idle",
+    error: null,
+  };
+}
+
+export function beginWorkspaceListLoad(state) {
+  return {
+    ...state,
+    workspaces: {
+      ...state.workspaces,
+      status: "loading",
+      error: null,
+    },
+  };
+}
+
+export function completeWorkspaceListLoad(state, response) {
+  const items = Array.isArray(response.workspaces) ? response.workspaces : [];
+  return {
+    ...state,
+    workspaces: {
+      ...state.workspaces,
+      status: "ready",
+      items,
+      selectedWorkspaceId: (
+        state.workspaces.selectedWorkspaceId
+        ?? state.context?.project_id
+        ?? items[0]?.workspace_id
+        ?? null
+      ),
+      error: null,
+    },
+  };
+}
+
+export function failWorkspaceListLoad(state, error) {
+  return {
+    ...state,
+    workspaces: {
+      ...state.workspaces,
+      status: "error",
+      error: errorMessage(error),
+    },
+  };
+}
+
+export function selectWorkspace(
+  state,
+  workspace,
+  cryptoLike = globalThis.crypto,
+) {
+  if (!state.context) {
+    throw new Error("Context is required before selecting a workspace.");
+  }
+  return {
+    ...state,
+    context: {
+      ...state.context,
+      project_id: workspace.workspace_id,
+      session_id: generateSessionId(cryptoLike),
+    },
+    transcript: [],
+    pendingTurn: null,
+    lastFailure: null,
+    work: emptyWorkState(),
+    chats: emptyChatSessionState(),
+    workspaces: {
+      ...state.workspaces,
+      selectedWorkspaceId: workspace.workspace_id,
+      error: null,
+    },
+  };
+}
+
+export function completeWorkspaceCreate(
+  state,
+  response,
+  cryptoLike = globalThis.crypto,
+) {
+  const workspace = response.workspace;
+  const withoutDuplicate = state.workspaces.items.filter(
+    (item) => item.workspace_id !== workspace.workspace_id,
+  );
+  const selected = selectWorkspace(
+    {
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        status: "ready",
+        items: [workspace, ...withoutDuplicate],
+      },
+    },
+    workspace,
+    cryptoLike,
+  );
+  return {
+    ...selected,
+    workspaces: {
+      ...selected.workspaces,
+      items: [workspace, ...withoutDuplicate],
     },
   };
 }

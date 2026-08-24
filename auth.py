@@ -112,6 +112,17 @@ def google_subject_to_workspace_project_id(subject: str) -> str:
     return f"project--{digest}"
 
 
+def google_subject_owns_workspace_project_id(
+    subject: str,
+    project_id: str,
+) -> bool:
+    default_project_id = google_subject_to_workspace_project_id(subject)
+    return (
+        project_id == default_project_id
+        or project_id.startswith(f"{default_project_id}--")
+    )
+
+
 class Authenticator:
     def __init__(
         self,
@@ -205,7 +216,10 @@ class Authenticator:
         if self._settings.mode == "local_dev":
             return supplied_project_id
         principal = self.authenticate(authorization_header)
-        if principal.workspace_project_id != supplied_project_id:
+        if principal.subject is None or not google_subject_owns_workspace_project_id(
+            principal.subject,
+            supplied_project_id,
+        ):
             raise AuthForbiddenError(
                 "Authenticated user does not own this request."
             )

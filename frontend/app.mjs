@@ -1,5 +1,6 @@
 import {
   apiFetchJson,
+  createWorkspace,
   deleteMemorySignal,
   getAuthConfig,
   getAuthSession,
@@ -7,6 +8,7 @@ import {
   getBlueprint,
   inspectMemory,
   listChatSessions,
+  listWorkspaces,
   listBlueprintFeedback,
   listBlueprints,
   revokeMemorySignal,
@@ -23,6 +25,7 @@ import { createChatsView } from "./chats-view.mjs";
 import { createChatView } from "./chat-view.mjs";
 import { createMemoryView } from "./memory-view.mjs";
 import { createWorkView } from "./work-view.mjs";
+import { createWorkspaceView } from "./workspace-view.mjs";
 import {
   buildArtifactFeedbackChatRequest,
   buildExactRetryRequest,
@@ -40,6 +43,7 @@ import {
 } from "./workspace-layout.mjs";
 import {
   acceptContext,
+  beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
   beginMemoryLoad,
@@ -49,6 +53,8 @@ import {
   completeMemoryLoad,
   completeChatSessionDetailLoad,
   completeChatSessionListLoad,
+  completeWorkspaceCreate,
+  completeWorkspaceListLoad,
   completeWorkDetailLoad,
   completeWorkListLoad,
   completePendingTurn,
@@ -56,11 +62,13 @@ import {
   failMemoryLoad,
   failChatSessionDetailLoad,
   failChatSessionListLoad,
+  failWorkspaceListLoad,
   failPendingTurn,
   failWorkDetailLoad,
   failWorkListLoad,
   selectCanSubmit,
   selectNeedsReceiptRefresh,
+  selectWorkspace,
   selectWorkRefreshPlan,
   startNewConversation,
 } from "./state.mjs";
@@ -71,6 +79,7 @@ let chatView = null;
 let workView = null;
 let memoryView = null;
 let chatsView = null;
+let workspaceView = null;
 let layoutState = createInitialLayoutState();
 let authConfig = null;
 let verifiedGoogleContext = null;
@@ -125,6 +134,18 @@ function showMemoryError(message) {
   const error = document.querySelector("[data-memory-error]");
   setText(error, message);
   error.hidden = false;
+}
+
+function showWorkspaceError(message) {
+  const error = document.querySelector("[data-workspace-error]");
+  setText(error, message);
+  error.hidden = false;
+}
+
+function clearWorkspaceError() {
+  const error = document.querySelector("[data-workspace-error]");
+  setText(error, "");
+  error.hidden = true;
 }
 
 function clearMemoryError() {
@@ -234,6 +255,7 @@ async function bootstrapAuth() {
 }
 
 function renderWorkspace() {
+  ensureWorkspaceView().render(state);
   ensureChatView().render(state);
   ensureWorkView().render(state);
   ensureMemoryView().render(state);
@@ -275,7 +297,7 @@ function renderLayout() {
   );
   artifactExpandButton.setAttribute("aria-expanded", String(artifactsExpanded));
 
-  for (const section of ["work", "memory", "chats"]) {
+  for (const section of ["workspace", "work", "memory", "chats"]) {
     const expanded = isSectionExpanded(layoutState, section);
     const content = document.querySelector(`[data-section-content="${section}"]`);
     const toggle = document.querySelector(`[data-section-toggle="${section}"]`);
@@ -283,6 +305,26 @@ function renderLayout() {
     toggle.setAttribute("aria-expanded", String(expanded));
     setText(toggle, expanded ? "Collapse" : "Expand");
   }
+}
+
+async function loadWorkspaces() {
+  if (!state.context) {
+    return;
+  }
+  clearWorkspaceError();
+  state = beginWorkspaceListLoad(state);
+  ensureWorkspaceView().render(state);
+  try {
+    const response = await listWorkspaces(
+      state.context.user_id,
+      authOptions({ limit: 20 }),
+    );
+    state = completeWorkspaceListLoad(state, response);
+  } catch (error) {
+    state = failWorkspaceListLoad(state, error);
+    showWorkspaceError(error.message);
+  }
+  ensureWorkspaceView().render(state);
 }
 
 async function loadWorkList() {
@@ -456,6 +498,51 @@ function ensureChatView() {
   return chatView;
 }
 
+function ensureWorkspaceView() {
+  if (workspaceView !== null) {
+    return workspaceView;
+  }
+  workspaceView = createWorkspaceView(
+    {
+      panel: document.querySelector("[data-workspace-list]"),
+    },
+    {
+      async onSelectWorkspace(workspace) {
+        if (!state.context || state.pendingTurn !== null) {
+          return;
+        }
+        state = selectWorkspace(state, workspace);
+        renderWorkspace();
+        await loadWorkList();
+        await loadMemory();
+        await loadChatSessions();
+      },
+      async onCreateWorkspace(displayName) {
+        if (!state.context || state.pendingTurn !== null) {
+          return;
+        }
+        clearWorkspaceError();
+        try {
+          const response = await createWorkspace(
+            state.context.user_id,
+            { display_name: displayName },
+            authOptions(),
+          );
+          state = completeWorkspaceCreate(state, response);
+          renderWorkspace();
+          await loadWorkspaces();
+          await loadWorkList();
+          await loadMemory();
+          await loadChatSessions();
+        } catch (error) {
+          showWorkspaceError(error.message);
+        }
+      },
+    },
+  );
+  return workspaceView;
+}
+
 function ensureWorkView() {
   if (workView !== null) {
     return workView;
@@ -591,7 +678,9 @@ document.querySelector("[data-context-form]").addEventListener("submit", (event)
     ensureWorkView();
     ensureMemoryView();
     ensureChatsView();
+    ensureWorkspaceView();
     showWorkspace();
+    loadWorkspaces();
     loadWorkList();
     loadMemory();
     loadChatSessions();
@@ -653,6 +742,7 @@ document.querySelector("[data-artifacts-expand]").addEventListener("click", () =
 });
 
 document.querySelector("[data-left-refresh]").addEventListener("click", () => {
+  loadWorkspaces();
   loadWorkList();
   loadMemory();
   loadChatSessions();

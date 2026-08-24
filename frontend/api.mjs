@@ -240,6 +240,39 @@ export function inspectMemory(
   );
 }
 
+export function listWorkspaces(
+  userId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/workspaces${buildQuery(options)}`,
+    { method: "GET", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function createWorkspace(
+  userId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/workspaces`,
+    {
+      method: "POST",
+      authToken: options.authToken,
+      body: request,
+    },
+    fetchLike,
+  );
+}
+
 export function revokeMemorySignal(
   userId,
   signalId,

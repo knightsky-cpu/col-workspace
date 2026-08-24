@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   acceptContext,
+  beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
   beginWorkDetailLoad,
@@ -10,6 +11,8 @@ import {
   beginMemoryLoad,
   beginPendingTurn,
   completeWorkDetailLoad,
+  completeWorkspaceCreate,
+  completeWorkspaceListLoad,
   completeWorkListLoad,
   completeMemoryLoad,
   completePendingTurn,
@@ -17,6 +20,7 @@ import {
   completeChatSessionListLoad,
   createInitialState,
   failWorkDetailLoad,
+  failWorkspaceListLoad,
   failWorkListLoad,
   failMemoryLoad,
   failPendingTurn,
@@ -26,6 +30,7 @@ import {
   selectFirstSupportedArtifact,
   selectNeedsReceiptRefresh,
   selectWorkRefreshPlan,
+  selectWorkspace,
   startNewConversation,
 } from "../../frontend/state.mjs";
 
@@ -63,6 +68,89 @@ test("acceptContext stores verified auth token separately from request locators"
 
   assert.equal(state.context.user_id, "google--109876543210");
   assert.equal(state.context.auth_token, "google-id-token");
+});
+
+test("workspace list lifecycle stores selectable user containers", () => {
+  const loading = beginWorkspaceListLoad(createInitialState());
+  assert.equal(loading.workspaces.status, "loading");
+
+  const loaded = completeWorkspaceListLoad(loading, {
+    workspace_contract_version: "1.0",
+    workspaces: [{
+      workspace_id: "agent-col",
+      display_name: "Agent Col",
+      is_default: true,
+    }],
+  });
+
+  assert.equal(loaded.workspaces.status, "ready");
+  assert.equal(loaded.workspaces.items[0].display_name, "Agent Col");
+  assert.equal(
+    failWorkspaceListLoad(loading, { message: "workspace unavailable" })
+      .workspaces.error,
+    "workspace unavailable",
+  );
+});
+
+test("workspace selection updates context and clears workspace-scoped panels", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const populated = {
+    ...state,
+    transcript: [{ request: {}, response: {} }],
+    work: {
+      ...state.work,
+      list: {
+        status: "ready",
+        items: [{ reference: { artifact_id: "blueprint--1" } }],
+        next_before: null,
+        error: null,
+      },
+    },
+    chats: {
+      ...state.chats,
+      sessions: [{ session_id: "session-1" }],
+    },
+  };
+
+  const selected = selectWorkspace(
+    populated,
+    { workspace_id: "project--abc--study-plans", display_name: "Study Plans" },
+    cryptoStub,
+  );
+
+  assert.equal(selected.context.project_id, "project--abc--study-plans");
+  assert.equal(
+    selected.workspaces.selectedWorkspaceId,
+    "project--abc--study-plans",
+  );
+  assert.equal(selected.transcript.length, 0);
+  assert.equal(selected.work.list.items.length, 0);
+  assert.equal(selected.chats.sessions.length, 0);
+});
+
+test("created workspace is selected without exposing project id as the label", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const selected = completeWorkspaceCreate(
+    state,
+    {
+      workspace_contract_version: "1.0",
+      workspace: {
+        workspace_id: "project--abc--study-plans",
+        display_name: "Study Plans",
+        is_default: false,
+      },
+    },
+    cryptoStub,
+  );
+
+  assert.equal(selected.context.project_id, "project--abc--study-plans");
+  assert.equal(selected.workspaces.items[0].display_name, "Study Plans");
 });
 
 test("pending turn lifecycle preserves exact retry envelope on failure", () => {

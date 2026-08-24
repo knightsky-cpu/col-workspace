@@ -1,5 +1,5 @@
 const DRAWERS = new Set(["left", "right"]);
-const SECTIONS = new Set(["work", "memory", "chats"]);
+const SECTIONS = new Set(["workspace", "work", "memory", "chats"]);
 const ARTIFACT_DRAWER_MODES = new Set(["hidden", "normal", "expanded"]);
 
 export function createInitialLayoutState() {
@@ -10,6 +10,7 @@ export function createInitialLayoutState() {
       right: true,
     },
     sections: {
+      workspace: false,
       work: false,
       memory: false,
       chats: false,

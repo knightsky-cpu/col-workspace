@@ -11,6 +11,8 @@ import {
   listChatSessions,
   listBlueprintFeedback,
   listBlueprints,
+  createWorkspace,
+  listWorkspaces,
   deleteMemorySignal,
   revokeMemorySignal,
 } from "../../frontend/api.mjs";
@@ -369,4 +371,47 @@ test("getChatSession calls the bounded chat transcript path", async () => {
     "/api/users/wifiknight/projects/agent-col/chat-sessions/session--123?limit=50",
   );
   assert.equal(calls[0][1].method, "GET");
+});
+
+test("workspace wrappers list and create user workspace containers", async () => {
+  const calls = [];
+  await listWorkspaces(
+    "wifiknight",
+    { limit: 20, authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [],
+      });
+    },
+  );
+  await createWorkspace(
+    "wifiknight",
+    { display_name: "Study Plans" },
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspace: {
+          workspace_id: "project--abc--study-plans",
+          display_name: "Study Plans",
+          is_default: false,
+        },
+      });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/workspaces?limit=20",
+  );
+  assert.equal(calls[0][1].method, "GET");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer token-1");
+  assert.equal(calls[1][0], "/api/users/wifiknight/workspaces");
+  assert.equal(calls[1][1].method, "POST");
+  assert.equal(calls[1][1].body, JSON.stringify({
+    display_name: "Study Plans",
+  }));
 });

@@ -12,6 +12,7 @@ import {
 test("drawer sections are collapsed by default", () => {
   const initial = createInitialLayoutState();
 
+  assert.equal(initial.sections.workspace, false);
   assert.equal(initial.sections.work, false);
   assert.equal(initial.sections.memory, false);
   assert.equal(initial.sections.chats, false);

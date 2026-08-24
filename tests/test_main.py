@@ -85,6 +85,9 @@ from schemas import (
     MemoryProposal,
     MemoryProposalReceipt,
     SynthesisBlueprint,
+    WorkspaceCreateRequest,
+    WorkspaceListResponse,
+    WorkspaceSummary,
 )
 from supervisor_runtime import (
     SupervisorRuntimeError,
@@ -264,6 +267,23 @@ class FakeMemoryEngine:
     chat_session_detail_calls: list[
         tuple[str, str, str, int]
     ] = field(default_factory=list)
+    workspace_list_result: WorkspaceListResponse = field(
+        default_factory=lambda: WorkspaceListResponse(workspaces=[])
+    )
+    workspace_create_result: WorkspaceSummary = field(
+        default_factory=lambda: WorkspaceSummary(
+            workspace_id="agent-col",
+            display_name="Agent Col",
+            is_default=True,
+        )
+    )
+    workspace_error: Exception | None = None
+    workspace_list_calls: list[
+        tuple[str, str, str, int]
+    ] = field(default_factory=list)
+    workspace_create_calls: list[
+        tuple[str, str, WorkspaceCreateRequest]
+    ] = field(default_factory=list)
     decision_action_calls: list[
         tuple[ChatTurnClaim, AgentActionReceipt, datetime]
     ] = field(default_factory=list)
@@ -344,6 +364,43 @@ class FakeMemoryEngine:
         if self.chat_session_error is not None:
             raise self.chat_session_error
         return self.chat_session_detail_result
+
+    async def list_workspaces(
+        self,
+        *,
+        user_id: str,
+        default_workspace_id: str,
+        default_display_name: str,
+        limit: int,
+    ) -> WorkspaceListResponse:
+        self.workspace_list_calls.append(
+            (user_id, default_workspace_id, default_display_name, limit)
+        )
+        self.events.append(
+            (
+                "workspace_list",
+                user_id,
+                default_workspace_id,
+                default_display_name,
+                limit,
+            )
+        )
+        if self.workspace_error is not None:
+            raise self.workspace_error
+        return self.workspace_list_result
+
+    async def create_workspace(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        request: WorkspaceCreateRequest,
+    ) -> WorkspaceSummary:
+        self.workspace_create_calls.append((user_id, workspace_id, request))
+        self.events.append(("workspace_create", user_id, workspace_id))
+        if self.workspace_error is not None:
+            raise self.workspace_error
+        return self.workspace_create_result
 
     async def claim_chat_turn(
         self,
@@ -1176,6 +1233,78 @@ async def test_google_mode_rejects_project_artifact_mismatch_before_service(
         "detail": "Authenticated user does not own this request."
     }
     assert service_state.artifact_service.list_calls == []
+
+
+@pytest.mark.asyncio
+async def test_workspace_list_returns_owned_containers(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.workspace_list_result = WorkspaceListResponse(
+        workspaces=[
+            WorkspaceSummary(
+                workspace_id="agent-col",
+                display_name="Agent Col",
+                is_default=True,
+            )
+        ]
+    )
+
+    response = await client.get(
+        "/api/users/wifiknight/workspaces",
+        params={"limit": 10},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == (
+        service_state.database.workspace_list_result.model_dump(mode="json")
+    )
+    assert service_state.database.workspace_list_calls == [
+        ("wifiknight", "agent-col", "Agent Col", 10)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_workspace_create_uses_subject_owned_workspace_prefix(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+    default_workspace_id = google_subject_to_workspace_project_id(
+        "109876543210"
+    )
+    workspace_id = f"{default_workspace_id}--study-plans"
+    service_state.database.workspace_create_result = WorkspaceSummary(
+        workspace_id=workspace_id,
+        display_name="Study Plans",
+        is_default=False,
+    )
+
+    response = await client.post(
+        "/api/users/google--109876543210/workspaces",
+        json={"display_name": "Study Plans"},
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "workspace_contract_version": "1.0",
+        "workspace": (
+            service_state.database.workspace_create_result.model_dump(
+                mode="json"
+            )
+        ),
+    }
+    assert service_state.database.workspace_create_calls == [
+        (
+            "google--109876543210",
+            workspace_id,
+            WorkspaceCreateRequest(display_name="Study Plans"),
+        )
+    ]
 
 
 @pytest.mark.asyncio

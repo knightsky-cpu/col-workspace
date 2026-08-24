@@ -372,6 +372,28 @@ class ChatSessionDetailResponse(StrictModel):
     messages: list[ChatMessageRecord] = Field(max_length=100)
 
 
+class WorkspaceSummary(StrictModel):
+    workspace_id: IdentifierStr
+    display_name: ProjectDisplayNameStr
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    is_default: bool = False
+
+
+class WorkspaceListResponse(StrictModel):
+    workspace_contract_version: Literal["1.0"] = "1.0"
+    workspaces: list[WorkspaceSummary] = Field(max_length=50)
+
+
+class WorkspaceCreateRequest(StrictModel):
+    display_name: ProjectDisplayNameStr
+
+
+class WorkspaceCreateResponse(StrictModel):
+    workspace_contract_version: Literal["1.0"] = "1.0"
+    workspace: WorkspaceSummary
+
+
 class ChatPartialFailureResponse(StrictModel):
     detail: Literal[
         "Agent_Col response failed after a completed action.",
