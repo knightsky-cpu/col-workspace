@@ -201,6 +201,34 @@ export function inspectMemory(
   );
 }
 
+export function revokeMemorySignal(
+  userId,
+  signalId,
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("user_id", userId);
+  assertIdentifier("signal_id", signalId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/memory/signals/${encodeURIComponent(signalId)}/revoke`,
+    { method: "POST" },
+    fetchLike,
+  );
+}
+
+export function deleteMemorySignal(
+  userId,
+  signalId,
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("user_id", userId);
+  assertIdentifier("signal_id", signalId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/memory/signals/${encodeURIComponent(signalId)}`,
+    { method: "DELETE" },
+    fetchLike,
+  );
+}
+
 export function listChatSessions(
   userId,
   projectId,

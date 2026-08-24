@@ -1,11 +1,13 @@
 import {
   apiFetchJson,
+  deleteMemorySignal,
   getChatSession,
   getBlueprint,
   inspectMemory,
   listChatSessions,
   listBlueprintFeedback,
   listBlueprints,
+  revokeMemorySignal,
 } from "./api.mjs";
 import { createChatsView } from "./chats-view.mjs";
 import { createChatView } from "./chat-view.mjs";
@@ -355,6 +357,12 @@ function ensureMemoryView() {
       onSubmitDecision(decision) {
         submitMemoryDecision(decision);
       },
+      onRevokeSignal(signal) {
+        revokeActiveMemorySignal(signal);
+      },
+      onDeleteSignal(signal) {
+        deleteActiveMemorySignal(signal);
+      },
     },
   );
   return memoryView;
@@ -399,6 +407,34 @@ async function submitMemoryDecision(decision) {
     decision,
   );
   await submitRequest(request);
+}
+
+async function revokeActiveMemorySignal(signal) {
+  if (!state.context || !selectCanSubmit(state)) {
+    return;
+  }
+  clearMemoryError();
+  try {
+    await revokeMemorySignal(state.context.user_id, signal.signal_id);
+    await loadMemory();
+  } catch (error) {
+    showMemoryError(error.message);
+  }
+  renderWorkspace();
+}
+
+async function deleteActiveMemorySignal(signal) {
+  if (!state.context || !selectCanSubmit(state)) {
+    return;
+  }
+  clearMemoryError();
+  try {
+    await deleteMemorySignal(state.context.user_id, signal.signal_id);
+    await loadMemory();
+  } catch (error) {
+    showMemoryError(error.message);
+  }
+  renderWorkspace();
 }
 
 document.querySelector("[data-context-form]").addEventListener("submit", (event) => {

@@ -33,19 +33,40 @@ function activePreferences(profile) {
     }));
 }
 
-function renderActivePreferences(container, preferences) {
+function renderActivePreferences(container, preferences, handlers) {
   appendTextElement(container, "h3", "work-heading contain-text", "Active preferences");
   if (preferences.length === 0) {
     appendTextElement(container, "p", "muted contain-text", "No active preferences.");
     return;
   }
   for (const preference of preferences) {
-    appendTextElement(container, "p", "memory-card contain-text", compactText([
+    const card = element("div", "memory-card contain-text");
+    card.setAttribute("data-memory-signal", preference.signal_id);
+    appendTextElement(card, "p", "work-heading contain-text", compactText([
       preference.category,
       stringValue(preference.value),
+    ]));
+    appendTextElement(card, "p", "muted contain-text", compactText([
+      "saved preference",
       preference.signal_id,
       preference.source_event_id,
     ]));
+    const actions = element("div", "memory-actions contain-text");
+    const revoke = element("button", "", "Revoke");
+    revoke.setAttribute("type", "button");
+    revoke.setAttribute("data-memory-signal-action", "revoke");
+    revoke.addEventListener("click", () => {
+      handlers.onRevokeSignal(preference);
+    });
+    const deleteButton = element("button", "", "Delete");
+    deleteButton.setAttribute("type", "button");
+    deleteButton.setAttribute("data-memory-signal-action", "delete");
+    deleteButton.addEventListener("click", () => {
+      handlers.onDeleteSignal(preference);
+    });
+    actions.append(revoke, deleteButton);
+    card.append(actions);
+    container.append(card);
   }
 }
 
@@ -135,7 +156,7 @@ export function renderMemoryPanel(container, memory, handlers) {
   }
 
   renderProposals(container, memory.unresolvedProposals ?? [], handlers);
-  renderActivePreferences(container, activePreferences(memory.profile));
+  renderActivePreferences(container, activePreferences(memory.profile), handlers);
   renderEvents(container, memory.events ?? []);
 }
 

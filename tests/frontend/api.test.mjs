@@ -9,6 +9,8 @@ import {
   listChatSessions,
   listBlueprintFeedback,
   listBlueprints,
+  deleteMemorySignal,
+  revokeMemorySignal,
 } from "../../frontend/api.mjs";
 
 function jsonResponse(status, body, headers = {}) {
@@ -201,6 +203,69 @@ test("inspectMemory rejects invalid user and event cursors", async () => {
       "wifiknight",
       { after_event_id: "bad/slash" },
       async () => jsonResponse(200, {}),
+    ),
+    /invalid/i,
+  );
+});
+
+test("revokeMemorySignal calls the canonical active memory revoke path", async () => {
+  const calls = [];
+  const result = await revokeMemorySignal(
+    "wifiknight",
+    "response_length--signal-1",
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        action: { action_name: "revoke_memory_signal", status: "completed" },
+        profile: { active_preferences: {} },
+      });
+    },
+  );
+
+  assert.deepEqual(result.action, {
+    action_name: "revoke_memory_signal",
+    status: "completed",
+  });
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/memory/signals/response_length--signal-1/revoke",
+  );
+  assert.equal(calls[0][1].method, "POST");
+});
+
+test("deleteMemorySignal calls the canonical active memory delete path", async () => {
+  const calls = [];
+  const result = await deleteMemorySignal(
+    "wifiknight",
+    "response_length--signal-1",
+    async (path, init) => {
+      calls.push([path, init]);
+      return new Response(null, { status: 204 });
+    },
+  );
+
+  assert.equal(result, null);
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/memory/signals/response_length--signal-1",
+  );
+  assert.equal(calls[0][1].method, "DELETE");
+});
+
+test("memory mutation wrappers reject invalid identifiers", async () => {
+  assert.throws(
+    () => revokeMemorySignal(
+      "bad/slash",
+      "response_length--signal-1",
+      async () => jsonResponse(200, {}),
+    ),
+    /invalid/i,
+  );
+  assert.throws(
+    () => deleteMemorySignal(
+      "wifiknight",
+      "bad/slash",
+      async () => new Response(null, { status: 204 }),
     ),
     /invalid/i,
   );

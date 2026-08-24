@@ -147,6 +147,63 @@ test("renderMemoryPanel orders pending proposals before active preferences and e
   assert.equal(activeIndex < recentIndex, true);
 });
 
+test("renderMemoryPanel exposes revoke and delete controls for active preferences", () => {
+  const revoked = [];
+  const deleted = [];
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+    onRevokeSignal: (signal) => revoked.push(signal),
+    onDeleteSignal: (signal) => deleted.push(signal),
+  });
+
+  const signalCard = findTree(container, (child) => (
+    child.attributes["data-memory-signal"] === "response_length--signal-1"
+  ));
+  assert.notEqual(signalCard, null);
+
+  const revokeButton = findTree(signalCard, (child) => (
+    child.attributes["data-memory-signal-action"] === "revoke"
+  ));
+  const deleteButton = findTree(signalCard, (child) => (
+    child.attributes["data-memory-signal-action"] === "delete"
+  ));
+  assert.notEqual(revokeButton, null);
+  assert.notEqual(deleteButton, null);
+
+  revokeButton.onclick();
+  deleteButton.onclick();
+
+  assert.deepEqual(revoked, [{
+    category: "response_length",
+    signal_id: "response_length--signal-1",
+    value: "concise",
+    source_event_id: "response_length--signal-1--approved",
+  }]);
+  assert.deepEqual(deleted, [{
+    category: "response_length",
+    signal_id: "response_length--signal-1",
+    value: "concise",
+    source_event_id: "response_length--signal-1--approved",
+  }]);
+});
+
+test("renderMemoryPanel keeps active preference IDs secondary to human labels", () => {
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+    onRevokeSignal: () => {},
+    onDeleteSignal: () => {},
+  });
+
+  const signalCard = findTree(container, (child) => (
+    child.attributes["data-memory-signal"] === "response_length--signal-1"
+  ));
+  assert.equal(signalCard.children[0].textContent, "response_length · concise");
+});
+
 test("renderMemoryPanel exposes useful empty, loading, and error states", () => {
   const container = node();
 
