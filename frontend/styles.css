@@ -305,7 +305,8 @@ p {
 }
 
 .memory-card,
-.memory-event {
+.memory-event,
+.activity-event {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   margin-block: 0.5rem;

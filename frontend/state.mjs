@@ -35,6 +35,9 @@ export function createInitialState() {
       next_event_id: null,
       error: null,
     },
+    activity: {
+      entries: [],
+    },
   };
 }
 
@@ -70,6 +73,11 @@ export function failPendingTurn(state, error) {
       status: error.status ?? null,
       retryAfterSeconds: error.retryAfterSeconds ?? null,
     },
+    activity: appendActivityEntries(state.activity, [{
+      kind: "error",
+      label: "Request failed",
+      detail: errorMessage(error),
+    }]),
     pendingTurn: null,
   };
 }
@@ -84,6 +92,10 @@ export function completePendingTurn(state, response) {
         response,
       },
     ],
+    activity: appendActivityEntries(
+      state.activity,
+      activityEntriesFromResponse(response),
+    ),
     pendingTurn: null,
     lastFailure: null,
   };
@@ -142,6 +154,86 @@ function errorMessage(error) {
   return error && typeof error.message === "string"
     ? error.message
     : "Request failed.";
+}
+
+function compactText(parts) {
+  return parts.filter((part) => (
+    part !== undefined
+    && part !== null
+    && part !== ""
+  )).map((part) => String(part)).join(" · ");
+}
+
+function appendActivityEntries(activity, entries) {
+  const existing = Array.isArray(activity?.entries) ? activity.entries : [];
+  return {
+    entries: [...existing, ...entries].slice(-50),
+  };
+}
+
+function objectOrEmpty(value) {
+  return value !== null && typeof value === "object" ? value : {};
+}
+
+function activityEntriesFromResponse(response) {
+  const entries = [];
+  for (const rawAction of Array.isArray(response.actions) ? response.actions : []) {
+    const action = objectOrEmpty(rawAction);
+    entries.push({
+      kind: "action",
+      label: action.action_name ?? "Action",
+      detail: action.status ?? "",
+    });
+  }
+  for (const rawCitation of Array.isArray(response.citations) ? response.citations : []) {
+    const citation = objectOrEmpty(rawCitation);
+    entries.push({
+      kind: "citation",
+      label: citation.label ?? "Citation",
+      detail: citation.uri ?? "",
+    });
+  }
+  for (const rawArtifact of Array.isArray(response.artifacts) ? response.artifacts : []) {
+    const artifact = objectOrEmpty(rawArtifact);
+    entries.push({
+      kind: "work",
+      label: artifact.display_label ?? "Work",
+      detail: artifact.artifact_id ?? "",
+    });
+  }
+  for (
+    const rawFeedback of Array.isArray(response.artifact_feedback)
+      ? response.artifact_feedback
+      : []
+  ) {
+    const feedback = objectOrEmpty(rawFeedback);
+    entries.push({
+      kind: "feedback",
+      label: compactText(["Feedback", feedback.decision]),
+      detail: feedback.feedback_id ?? "",
+    });
+  }
+  for (
+    const rawProposal of Array.isArray(response.memory_proposals)
+      ? response.memory_proposals
+      : []
+  ) {
+    const proposal = objectOrEmpty(rawProposal);
+    entries.push({
+      kind: "memory",
+      label: proposal.category ?? "Memory proposal",
+      detail: proposal.proposal_id ?? "",
+    });
+  }
+  for (const rawAdaptation of Array.isArray(response.adaptations) ? response.adaptations : []) {
+    const adaptation = objectOrEmpty(rawAdaptation);
+    entries.push({
+      kind: "adaptation",
+      label: adaptation.category ?? "Adaptation",
+      detail: adaptation.signal_id ?? "",
+    });
+  }
+  return entries;
 }
 
 export function beginWorkListLoad(state) {

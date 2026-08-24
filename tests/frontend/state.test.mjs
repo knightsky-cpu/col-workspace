@@ -80,6 +80,116 @@ test("completed turn records response and clears pending failure", () => {
   );
 });
 
+test("completed turn projects authoritative receipts into activity", () => {
+  const request = Object.freeze({
+    key: "chat--1",
+    body: Object.freeze({ message: "create and remember" }),
+  });
+  const pending = beginPendingTurn(createInitialState(), request);
+  const completed = completePendingTurn(
+    pending,
+    {
+      response: "ok",
+      actions: [{ action_name: "synthesize_project", status: "completed" }],
+      citations: [{ label: "Example Domain", uri: "https://example.com/" }],
+      artifacts: [{
+        artifact_id: "blueprint--1",
+        display_label: "Blueprint",
+      }],
+      artifact_feedback: [{
+        feedback_id: "feedback--1",
+        decision: "accepted",
+      }],
+      memory_proposals: [{
+        proposal_id: "preferred_name--proposal-1",
+        category: "preferred_name",
+      }],
+      adaptations: [{
+        signal_id: "preferred_name--signal-1",
+        category: "preferred_name",
+      }],
+    },
+  );
+
+  assert.deepEqual(
+    completed.activity.entries.map((entry) => entry.kind),
+    ["action", "citation", "work", "feedback", "memory", "adaptation"],
+  );
+  assert.equal(completed.activity.entries[0].label, "synthesize_project");
+  assert.equal(completed.activity.entries[2].detail, "blueprint--1");
+  assert.equal(completed.activity.entries[5].detail, "preferred_name--signal-1");
+});
+
+test("failed turns add a bounded error activity entry", () => {
+  const request = Object.freeze({
+    key: "chat--1",
+    body: Object.freeze({ message: "hello" }),
+  });
+  const failed = failPendingTurn(
+    beginPendingTurn(createInitialState(), request),
+    { message: "network failed", status: 0 },
+  );
+
+  assert.equal(failed.activity.entries.length, 1);
+  assert.equal(failed.activity.entries[0].kind, "error");
+  assert.equal(failed.activity.entries[0].label, "Request failed");
+  assert.equal(failed.activity.entries[0].detail, "network failed");
+});
+
+test("activity projection tolerates malformed receipt entries", () => {
+  const request = Object.freeze({
+    key: "chat--1",
+    body: Object.freeze({ message: "hello" }),
+  });
+
+  const completed = completePendingTurn(
+    beginPendingTurn(createInitialState(), request),
+    {
+      response: "ok",
+      actions: [null],
+      citations: [null],
+      artifacts: [null],
+      artifact_feedback: [null],
+      memory_proposals: [null],
+      adaptations: [null],
+    },
+  );
+
+  assert.deepEqual(
+    completed.activity.entries.map((entry) => entry.label),
+    [
+      "Action",
+      "Citation",
+      "Work",
+      "Feedback",
+      "Memory proposal",
+      "Adaptation",
+    ],
+  );
+});
+
+test("new conversation preserves activity because it is workspace scoped", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const withActivity = completePendingTurn(
+    beginPendingTurn(accepted, {
+      key: "chat--1",
+      body: { message: "hello" },
+    }),
+    {
+      response: "ok",
+      actions: [{ action_name: "propose_memory_signal", status: "completed" }],
+    },
+  );
+
+  const next = startNewConversation(withActivity, cryptoStub);
+
+  assert.equal(next.transcript.length, 0);
+  assert.equal(next.activity.entries[0].label, "propose_memory_signal");
+});
+
 test("new conversation keeps user and project but replaces session and clears page state", () => {
   const accepted = acceptContext(
     createInitialState(),

@@ -5,6 +5,7 @@ import {
   listBlueprintFeedback,
   listBlueprints,
 } from "./api.mjs";
+import { createActivityView } from "./activity-view.mjs";
 import { createChatView } from "./chat-view.mjs";
 import { createMemoryView } from "./memory-view.mjs";
 import { createWorkView } from "./work-view.mjs";
@@ -41,6 +42,7 @@ let state = createInitialState();
 let chatView = null;
 let workView = null;
 let memoryView = null;
+let activityView = null;
 
 function showWorkspace() {
   document.querySelector("[data-context-error]").hidden = true;
@@ -84,6 +86,7 @@ function renderWorkspace() {
   ensureChatView().render(state);
   ensureWorkView().render(state);
   ensureMemoryView().render(state);
+  ensureActivityView().render(state);
 }
 
 async function loadWorkList() {
@@ -241,6 +244,16 @@ function ensureMemoryView() {
   return memoryView;
 }
 
+function ensureActivityView() {
+  if (activityView !== null) {
+    return activityView;
+  }
+  activityView = createActivityView({
+    list: document.querySelector("[data-activity-list]"),
+  });
+  return activityView;
+}
+
 async function submitArtifactFeedback(decision) {
   if (!selectCanSubmit(state)) {
     return;
@@ -275,6 +288,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", (event)
     ensureChatView();
     ensureWorkView();
     ensureMemoryView();
+    ensureActivityView();
     showWorkspace();
     loadWorkList();
     loadMemory();

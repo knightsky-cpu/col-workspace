@@ -34,6 +34,7 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert "data-memory-panel" in response.text
     assert "data-memory-refresh" in response.text
     assert "data-memory-error" in response.text
+    assert "data-activity-list" in response.text
     assert "https://" not in response.text
     assert "http://" not in response.text
 

@@ -44,6 +44,15 @@ For every source-changing request, use this lifecycle:
 
 Automated tests, builds, or agent-observed behavior do not replace the user's acceptance. A pass is not accepted until the user confirms that its required manual verification succeeded.
 
+## GitHub checkpoint workflow
+
+When the user requests a GitHub checkpoint in this repository, commit and push
+directly to `origin/main` with no pull request. Use explicit path staging for
+the accepted pass, not broad staging such as `git add -A`. Because the managed
+workspace may block writes to `.git`, perform the explicit staging and commit
+with elevated Git access when needed, then push the resulting commit to
+`origin/main`. Do not checkpoint unaccepted work.
+
 ## Source-changing implementation workflow
 
 ### 1. Request and investigation
