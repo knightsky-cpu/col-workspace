@@ -136,6 +136,34 @@ test("failed turns add a bounded error activity entry", () => {
   assert.equal(failed.activity.entries[0].detail, "network failed");
 });
 
+test("timeout failures preserve retry envelope and add timeout activity", () => {
+  const request = Object.freeze({
+    key: "chat--timeout",
+    body: Object.freeze({
+      message: "can you write me a python secrets password script?",
+    }),
+  });
+  const error = Object.freeze({
+    message: "Agent Col timed out before completing this response. No completed action was recorded.",
+    status: 504,
+    retryAfterSeconds: null,
+  });
+
+  const failed = failPendingTurn(
+    beginPendingTurn(createInitialState(), request),
+    error,
+  );
+
+  assert.equal(failed.pendingTurn, null);
+  assert.equal(failed.lastFailure.request, request);
+  assert.equal(failed.lastFailure.status, 504);
+  assert.equal(failed.lastFailure.message, error.message);
+  assert.equal(failed.activity.entries.length, 1);
+  assert.equal(failed.activity.entries[0].kind, "error");
+  assert.equal(failed.activity.entries[0].label, "Timed out");
+  assert.equal(failed.activity.entries[0].detail, error.message);
+});
+
 test("activity projection tolerates malformed receipt entries", () => {
   const request = Object.freeze({
     key: "chat--1",

@@ -75,7 +75,7 @@ export function failPendingTurn(state, error) {
     },
     activity: appendActivityEntries(state.activity, [{
       kind: "error",
-      label: "Request failed",
+      label: errorActivityLabel(error),
       detail: errorMessage(error),
     }]),
     pendingTurn: null,
@@ -154,6 +154,10 @@ function errorMessage(error) {
   return error && typeof error.message === "string"
     ? error.message
     : "Request failed.";
+}
+
+function errorActivityLabel(error) {
+  return error?.status === 504 ? "Timed out" : "Request failed";
 }
 
 function compactText(parts) {

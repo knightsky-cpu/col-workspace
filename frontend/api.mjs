@@ -32,14 +32,42 @@ function detailToMessage(detail) {
   return "Request failed.";
 }
 
+const BACKEND_AGENT_COL_NAME = "Agent" + "_Col";
+const TIMEOUT_DETAIL_WITHOUT_COMPLETED_EFFECT = (
+  `${BACKEND_AGENT_COL_NAME} response timed out.`
+);
+const TIMEOUT_DETAIL_AFTER_COMPLETED_EFFECT = (
+  `${BACKEND_AGENT_COL_NAME} response timed out after a completed action.`
+);
+
+function detailToTimeoutMessage(status, detail) {
+  if (status !== 504 || typeof detail !== "string") {
+    return null;
+  }
+  if (detail === TIMEOUT_DETAIL_WITHOUT_COMPLETED_EFFECT) {
+    return (
+      "Agent Col timed out before completing this response. "
+      + "No completed action was recorded."
+    );
+  }
+  if (detail === TIMEOUT_DETAIL_AFTER_COMPLETED_EFFECT) {
+    return (
+      "Agent Col timed out after recording a completed action. "
+      + "Retry will reuse completed receipts."
+    );
+  }
+  return null;
+}
+
 export function normalizeApiError(response, body) {
   const retryAfter = response.headers.get("retry-after");
   const detail = body && typeof body === "object" && "detail" in body
     ? body.detail
     : body;
+  const timeoutMessage = detailToTimeoutMessage(response.status, detail);
   return new ApiError({
     status: response.status,
-    message: detailToMessage(detail),
+    message: timeoutMessage ?? detailToMessage(detail),
     detail,
     retryAfterSeconds: retryAfter === null
       ? null

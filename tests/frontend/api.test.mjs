@@ -84,6 +84,24 @@ test("apiFetchJson includes retry-after seconds when supplied", async () => {
   );
 });
 
+test("apiFetchJson maps Agent Col turn timeouts to user-facing copy", async () => {
+  await assert.rejects(
+    () => apiFetchJson("/api/chat", {}, async () => jsonResponse(
+      504,
+      { detail: "Agent_Col response timed out." },
+    )),
+    (error) => {
+      assert.equal(error.status, 504);
+      assert.equal(error.detail, "Agent_Col response timed out.");
+      assert.equal(
+        error.message,
+        "Agent Col timed out before completing this response. No completed action was recorded.",
+      );
+      return true;
+    },
+  );
+});
+
 test("listBlueprints calls the canonical project blueprint list path", async () => {
   const calls = [];
   const result = await listBlueprints(

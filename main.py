@@ -331,6 +331,29 @@ def _partial_failure_response(
     )
 
 
+def _timeout_stage(exc: AgentColTurnServiceError) -> str:
+    if isinstance(exc, AgentColTurnRoutingTimeoutError):
+        return "routing"
+    return "turn"
+
+
+def _log_chat_turn_timeout(exc: AgentColTurnServiceError) -> None:
+    logger.warning(
+        (
+            "Agent_Col chat turn timed out "
+            "(stage=%s completed_actions=%d completed_artifacts=%d "
+            "completed_feedback=%d completed_memory_proposals=%d "
+            "completed_adaptations=%d)."
+        ),
+        _timeout_stage(exc),
+        len(exc.actions),
+        len(exc.artifacts),
+        len(exc.artifact_feedback),
+        len(exc.memory_proposals),
+        len(exc.adaptations),
+    )
+
+
 def _raise_governed_tool_cause_http_error(
     runtime_error: AgentColTurnServiceError,
 ) -> None:
@@ -1043,6 +1066,7 @@ async def chat(
         AgentColTurnRoutingTimeoutError,
         AgentColTurnTimeoutError,
     ) as exc:
+        _log_chat_turn_timeout(exc)
         released_claim = None
         failure_claim = exc.chat_turn_claim or chat_turn_claim
         if failure_claim is not None:

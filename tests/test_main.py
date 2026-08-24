@@ -4021,6 +4021,40 @@ async def test_chat_translates_turn_timeout_without_model_write(
 
 
 @pytest.mark.asyncio
+async def test_chat_logs_timeout_classification_without_private_content(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service_state.turn_service.error = AgentColTurnTimeoutError(
+        "private-provider-timeout-marker"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "private-project",
+            "session_id": "private-session",
+            "user_id": "private-user",
+            "message": "private prompt marker",
+        },
+    )
+
+    assert response.status_code == 504
+    assert "Agent_Col chat turn timed out" in caplog.text
+    assert "stage=turn" in caplog.text
+    assert "completed_actions=0" in caplog.text
+    for private_marker in (
+        "private-provider-timeout-marker",
+        "private-project",
+        "private-session",
+        "private-user",
+        "private prompt marker",
+    ):
+        assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_chat_starts_context_reads_concurrently(
     client: httpx.AsyncClient,
     service_state: ServiceState,
