@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   apiFetchJson,
+  getAuthSession,
   getBlueprint,
   getChatSession,
   inspectMemory,
@@ -40,6 +41,43 @@ test("apiFetchJson sends same-origin JSON with idempotency key", async () => {
   assert.equal(calls[0][1].headers["Content-Type"], "application/json");
   assert.equal(calls[0][1].headers["Idempotency-Key"], "chat--123");
   assert.equal(calls[0][1].body, JSON.stringify({ message: "hello" }));
+});
+
+test("apiFetchJson attaches bearer token when supplied", async () => {
+  const calls = [];
+  await apiFetchJson(
+    "/api/chat",
+    {
+      method: "POST",
+      authToken: "google-id-token",
+      body: { message: "hello" },
+    },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { response: "ok", actions: [] });
+    },
+  );
+
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+});
+
+test("getAuthSession calls the canonical auth session path", async () => {
+  const calls = [];
+  const result = await getAuthSession("google-id-token", async (path, init) => {
+    calls.push([path, init]);
+    return jsonResponse(200, {
+      auth_contract_version: "1.0",
+      auth_mode: "google_oidc",
+      authenticated: true,
+      local_development: false,
+      user_id: "google--123",
+    });
+  });
+
+  assert.equal(result.user_id, "google--123");
+  assert.equal(calls[0][0], "/api/auth/session");
+  assert.equal(calls[0][1].method, "GET");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
 });
 
 test("apiFetchJson rejects remote URLs", async () => {

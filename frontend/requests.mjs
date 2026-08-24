@@ -34,6 +34,7 @@ export function generateIdempotencyKey(prefix, cryptoLike = globalThis.crypto) {
 export function readContextForm(formData) {
   const user_id = String(formData.get("user_id") ?? "").trim();
   const project_id = String(formData.get("project_id") ?? "").trim();
+  const auth_token = String(formData.get("auth_token") ?? "").trim();
   if (!isValidIdentifier(user_id)) {
     throw new Error(
       "User ID must use letters, numbers, underscores, or hyphens.",
@@ -44,7 +45,9 @@ export function readContextForm(formData) {
       "Project ID must use letters, numbers, underscores, or hyphens.",
     );
   }
-  return { user_id, project_id };
+  return auth_token
+    ? { user_id, project_id, auth_token }
+    : { user_id, project_id };
 }
 
 export function buildChatRequest(input) {

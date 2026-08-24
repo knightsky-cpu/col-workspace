@@ -98,3 +98,9 @@ the implementation boundary.
   field names and storage identifiers can confuse users and may leak useful
   implementation detail to attackers. If identifiers are needed, expose them
   only as secondary metadata or explicit copy/debug controls.
+- Authentication work should separate the verified identity boundary from the
+  polished sign-in surface. The first foundation may accept a Google ID token
+  through the development gate and send it as a bearer token, but the finished
+  product still needs a real Google sign-in/Identity Platform UI and server-side
+  project/session/artifact ownership records. A verified user token alone does
+  not prove ownership of an arbitrary `project_id`.

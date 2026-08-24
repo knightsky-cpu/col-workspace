@@ -109,6 +109,13 @@ function clearMemoryError() {
   error.hidden = true;
 }
 
+function authOptions(options = {}) {
+  return {
+    ...options,
+    authToken: state.context?.auth_token ?? null,
+  };
+}
+
 function renderWorkspace() {
   ensureChatView().render(state);
   ensureWorkView().render(state);
@@ -169,7 +176,10 @@ async function loadWorkList() {
   state = beginWorkListLoad(state);
   ensureWorkView().render(state);
   try {
-    const response = await listBlueprints(state.context.project_id, { limit: 20 });
+    const response = await listBlueprints(
+      state.context.project_id,
+      authOptions({ limit: 20 }),
+    );
     state = completeWorkListLoad(state, response);
   } catch (error) {
     state = failWorkListLoad(state, error);
@@ -187,8 +197,12 @@ async function loadWorkDetail(artifactId) {
   ensureWorkView().render(state);
   try {
     const [detail, feedback] = await Promise.all([
-      getBlueprint(state.context.project_id, artifactId),
-      listBlueprintFeedback(state.context.project_id, artifactId, { limit: 20 }),
+      getBlueprint(state.context.project_id, artifactId, authOptions()),
+      listBlueprintFeedback(
+        state.context.project_id,
+        artifactId,
+        authOptions({ limit: 20 }),
+      ),
     ]);
     state = completeWorkDetailLoad(state, detail, feedback);
   } catch (error) {
@@ -206,7 +220,10 @@ async function loadMemory() {
   state = beginMemoryLoad(state);
   ensureMemoryView().render(state);
   try {
-    const response = await inspectMemory(state.context.user_id);
+    const response = await inspectMemory(
+      state.context.user_id,
+      authOptions(),
+    );
     state = completeMemoryLoad(state, response);
   } catch (error) {
     state = failMemoryLoad(state, error);
@@ -225,7 +242,7 @@ async function loadChatSessions() {
     const response = await listChatSessions(
       state.context.user_id,
       state.context.project_id,
-      { limit: 20 },
+      authOptions({ limit: 20 }),
     );
     state = completeChatSessionListLoad(state, response);
   } catch (error) {
@@ -245,7 +262,7 @@ async function loadChatSession(sessionId) {
       state.context.user_id,
       state.context.project_id,
       sessionId,
-      { limit: 100 },
+      authOptions({ limit: 100 }),
     );
     state = completeChatSessionDetailLoad(state, response);
     document.querySelector("[data-chat-error]").hidden = true;
@@ -265,6 +282,7 @@ async function submitRequest(request) {
     const response = await apiFetchJson("/api/chat", {
       method: "POST",
       idempotencyKey: request.key,
+      authToken: state.context?.auth_token ?? null,
       body: request.body,
     });
     state = completePendingTurn(state, response);
@@ -415,7 +433,11 @@ async function revokeActiveMemorySignal(signal) {
   }
   clearMemoryError();
   try {
-    await revokeMemorySignal(state.context.user_id, signal.signal_id);
+    await revokeMemorySignal(
+      state.context.user_id,
+      signal.signal_id,
+      authOptions(),
+    );
     await loadMemory();
   } catch (error) {
     showMemoryError(error.message);
@@ -429,7 +451,11 @@ async function deleteActiveMemorySignal(signal) {
   }
   clearMemoryError();
   try {
-    await deleteMemorySignal(state.context.user_id, signal.signal_id);
+    await deleteMemorySignal(
+      state.context.user_id,
+      signal.signal_id,
+      authOptions(),
+    );
     await loadMemory();
   } catch (error) {
     showMemoryError(error.message);

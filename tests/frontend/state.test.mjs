@@ -50,6 +50,21 @@ test("acceptContext stores local locators and creates a session", () => {
   assert.equal(state.mode, "workspace");
 });
 
+test("acceptContext stores optional auth token separately from request locators", () => {
+  const state = acceptContext(
+    createInitialState(),
+    {
+      user_id: "google--109876543210",
+      project_id: "agent-col",
+      auth_token: "google-id-token",
+      crypto: cryptoStub,
+    },
+  );
+
+  assert.equal(state.context.user_id, "google--109876543210");
+  assert.equal(state.context.auth_token, "google-id-token");
+});
+
 test("pending turn lifecycle preserves exact retry envelope on failure", () => {
   const request = Object.freeze({
     key: "chat--1",

@@ -55,6 +55,7 @@ export function acceptContext(state, context) {
     context: {
       user_id: context.user_id,
       project_id: context.project_id,
+      auth_token: context.auth_token ?? null,
       session_id: generateSessionId(context.crypto),
     },
   };

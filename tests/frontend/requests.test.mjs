@@ -10,6 +10,7 @@ import {
   generateIdempotencyKey,
   generateSessionId,
   isValidIdentifier,
+  readContextForm,
 } from "../../frontend/requests.mjs";
 
 const cryptoStub = {
@@ -25,6 +26,27 @@ test("identifier validation mirrors the backend locator shape", () => {
   assert.equal(isValidIdentifier("bad id"), false);
   assert.equal(isValidIdentifier("bad/slash"), false);
   assert.equal(isValidIdentifier("x".repeat(129)), false);
+});
+
+test("context form preserves optional auth token without adding it to chat bodies", () => {
+  const formData = new FormData();
+  formData.set("user_id", "google--109876543210");
+  formData.set("project_id", "agent-col");
+  formData.set("auth_token", "  google-id-token  ");
+
+  const context = readContextForm(formData);
+  const request = buildOrdinaryChatRequest(
+    { ...context, session_id: "session-1" },
+    "hello",
+    cryptoStub,
+  );
+
+  assert.deepEqual(context, {
+    user_id: "google--109876543210",
+    project_id: "agent-col",
+    auth_token: "google-id-token",
+  });
+  assert.equal("auth_token" in request.body, false);
 });
 
 test("session and idempotency identifiers are generated locally", () => {

@@ -31,6 +31,7 @@ from agent_col_turn_service import (
     AgentColTurnServiceError,
     AgentColTurnTimeoutError,
 )
+from auth import AuthSettings, Authenticator
 from chat_turns import (
     ChatTurnClaim,
     ChatTurnConflictError,
@@ -1080,6 +1081,54 @@ async def test_health_check(client: httpx.AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "online"}
+
+
+@pytest.mark.asyncio
+async def test_auth_session_requires_bearer_in_google_mode(
+    client: httpx.AsyncClient,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    response = await client.get("/api/auth/session")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Authorization bearer token is required."
+    }
+
+
+@pytest.mark.asyncio
+async def test_auth_session_returns_google_principal(
+    client: httpx.AsyncClient,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {
+            "sub": "109876543210",
+            "email": "user@example.com",
+            "name": "WiFi Knight",
+        },
+    )
+
+    response = await client.get(
+        "/api/auth/session",
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "auth_contract_version": "1.0",
+        "auth_mode": "google_oidc",
+        "authenticated": True,
+        "local_development": False,
+        "user_id": "google--109876543210",
+        "subject": "109876543210",
+        "email": "user@example.com",
+        "display_name": "WiFi Knight",
+    }
 
 
 @pytest.mark.asyncio

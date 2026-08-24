@@ -36,6 +36,13 @@ from agent_col_turn_service import (
     AgentColTurnServiceError,
     AgentColTurnTimeoutError,
 )
+from auth import (
+    AuthConfigurationError,
+    AuthForbiddenError,
+    AuthRequiredError,
+    Authenticator,
+    load_auth_settings,
+)
 from artifact_read_service import (
     ArtifactReadService,
     ArtifactReadStateError,
@@ -190,6 +197,61 @@ def _raise_database_http_error(exc: MemoryEngineError) -> NoReturn:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Database operation failed.",
     ) from exc
+
+
+def _get_authenticator(request: Request) -> Authenticator:
+    authenticator = getattr(request.app.state, "authenticator", None)
+    if isinstance(authenticator, Authenticator):
+        return authenticator
+    authenticator = Authenticator(load_auth_settings())
+    request.app.state.authenticator = authenticator
+    return authenticator
+
+
+def _raise_auth_http_error(exc: Exception) -> NoReturn:
+    if isinstance(exc, AuthRequiredError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization bearer token is required.",
+        ) from exc
+    if isinstance(exc, AuthForbiddenError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user does not own this request.",
+        ) from exc
+    if isinstance(exc, AuthConfigurationError):
+        logger.error("Authentication configuration failed.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication is not configured.",
+        ) from exc
+    raise exc
+
+
+def _resolve_effective_user_id(
+    *,
+    request: Request,
+    supplied_user_id: str,
+    authorization_header: str | None,
+) -> str:
+    try:
+        return _get_authenticator(request).resolve_user_id(
+            supplied_user_id=supplied_user_id,
+            authorization_header=authorization_header,
+        )
+    except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
+        _raise_auth_http_error(exc)
+
+
+def _require_authenticated_request(
+    *,
+    request: Request,
+    authorization_header: str | None,
+) -> None:
+    try:
+        _get_authenticator(request).session(authorization_header)
+    except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
+        _raise_auth_http_error(exc)
 
 
 def _raise_chat_turn_operation_http_error(
@@ -492,6 +554,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.turn_service = turn_service
+    app.state.authenticator = Authenticator(load_auth_settings())
 
     try:
         yield
@@ -537,6 +600,21 @@ async def health_check() -> dict[str, str]:
     return {"status": "online"}
 
 
+@app.get("/api/auth/session")
+async def auth_session(
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> dict[str, object]:
+    try:
+        principal = _get_authenticator(request).session(authorization)
+    except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
+        _raise_auth_http_error(exc)
+    return principal.public_dict()
+
+
 @app.get(
     "/api/users/{user_id}/memory",
     response_model=MemoryInspectionResponse,
@@ -544,12 +622,21 @@ async def health_check() -> dict[str, str]:
 async def inspect_memory(
     user_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
     after_event_id: IdentifierStr | None = None,
 ) -> MemoryInspectionResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
     try:
         result = await request.app.state.memory_service.inspect_memory(
             InspectMemoryCommand(
-                user_id=user_id,
+                user_id=effective_user_id,
                 after_event_id=after_event_id,
             )
         )
@@ -576,11 +663,20 @@ async def list_chat_sessions(
     user_id: IdentifierStr,
     project_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> ChatSessionListResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
     try:
         return await request.app.state.db.list_chat_sessions(
-            user_id=user_id,
+            user_id=effective_user_id,
             project_id=project_id,
             limit=limit,
         )
@@ -602,11 +698,20 @@ async def get_chat_session(
     project_id: IdentifierStr,
     session_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
 ) -> ChatSessionDetailResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
     try:
         return await request.app.state.db.get_chat_session_detail(
-            user_id=user_id,
+            user_id=effective_user_id,
             project_id=project_id,
             session_id=session_id,
             limit=limit,
@@ -628,11 +733,20 @@ async def revoke_memory_signal(
     user_id: IdentifierStr,
     signal_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
 ) -> MemoryMutationResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
     try:
         result = await request.app.state.memory_service.revoke_memory_signal(
             RevokeMemorySignalCommand(
-                user_id=user_id,
+                user_id=effective_user_id,
                 signal_id=signal_id,
             )
         )
@@ -667,11 +781,20 @@ async def delete_memory_signal(
     user_id: IdentifierStr,
     signal_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
 ) -> Response:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
     try:
         await request.app.state.memory_service.delete_memory_signal(
             DeleteMemorySignalCommand(
-                user_id=user_id,
+                user_id=effective_user_id,
                 signal_id=signal_id,
             )
         )
@@ -689,15 +812,24 @@ async def delete_memory_signal(
 async def synthesize(
     payload: SynthesisRequest,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
 ) -> SynthesisResponse:
     synthesis_service = request.app.state.synthesis_service
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=payload.user_id,
+        authorization_header=authorization,
+    )
 
     try:
         result = await synthesis_service.synthesize(
             SynthesisCommand(
                 project_id=payload.project_id,
                 session_id=payload.session_id,
-                user_id=payload.user_id,
+                user_id=effective_user_id,
                 source_text=payload.source_text,
             )
         )
@@ -726,9 +858,17 @@ async def synthesize(
 async def list_blueprint_artifacts(
     project_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     before: IdentifierStr | None = None,
 ) -> BlueprintArtifactListResponse:
+    _require_authenticated_request(
+        request=request,
+        authorization_header=authorization,
+    )
     try:
         return await request.app.state.artifact_service.list_blueprints(
             ListBlueprintArtifactsCommand(
@@ -763,7 +903,15 @@ async def get_blueprint_artifact(
     project_id: IdentifierStr,
     blueprint_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
 ) -> BlueprintArtifactDetailResponse:
+    _require_authenticated_request(
+        request=request,
+        authorization_header=authorization,
+    )
     try:
         return await request.app.state.artifact_service.get_blueprint(
             GetBlueprintArtifactCommand(
@@ -804,9 +952,17 @@ async def list_blueprint_feedback(
     project_id: IdentifierStr,
     blueprint_id: IdentifierStr,
     request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     before: IdentifierStr | None = None,
 ) -> BlueprintArtifactFeedbackListResponse:
+    _require_authenticated_request(
+        request=request,
+        authorization_header=authorization,
+    )
     try:
         return await request.app.state.artifact_feedback_service.list_feedback(
             ListArtifactFeedbackCommand(
@@ -847,12 +1003,21 @@ async def chat(
         str | None,
         Header(alias="Idempotency-Key"),
     ] = None,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
 ) -> ChatResponse:
     database = request.app.state.db
     memory_service = request.app.state.memory_service
     turn_service = request.app.state.turn_service
     decision_actions = ()
     chat_turn_claim: ChatTurnClaim | None = None
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=payload.user_id,
+        authorization_header=authorization,
+    )
 
     if (
         payload.artifact_feedback_decision is not None
@@ -878,7 +1043,7 @@ async def chat(
                 ChatTurnRequest(
                     project_id=payload.project_id,
                     session_id=payload.session_id,
-                    user_id=payload.user_id,
+                    user_id=effective_user_id,
                     message=payload.message,
                     memory_decision=payload.memory_decision,
                     artifact_feedback_decision=(
@@ -935,7 +1100,7 @@ async def chat(
                     ),
                 )
             profile, history = await asyncio.gather(
-                database.get_collaboration_profile(payload.user_id),
+                database.get_collaboration_profile(effective_user_id),
                 history_operation,
             )
         except MemoryEngineError as exc:
@@ -993,7 +1158,7 @@ async def chat(
                 "user",
                 payload.message,
                 project_id=payload.project_id,
-                user_id=payload.user_id,
+                user_id=effective_user_id,
             )
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
@@ -1004,7 +1169,7 @@ async def chat(
         try:
             decision_result = await memory_service.decide_memory_proposal(
                 MemoryDecisionCommand(
-                    user_id=payload.user_id,
+                    user_id=effective_user_id,
                     proposal_id=payload.memory_decision.proposal_id,
                     decision=payload.memory_decision.decision,
                     confirmation_channel="chat_decision",
@@ -1091,7 +1256,7 @@ async def chat(
             AgentColTurnCommand(
                 project_id=payload.project_id,
                 session_id=payload.session_id,
-                user_id=payload.user_id,
+                user_id=effective_user_id,
                 message=payload.message,
                 recent_user_messages=tuple(
                     message["text"]
@@ -1205,7 +1370,7 @@ async def chat(
                 "model",
                 result.response,
                 project_id=payload.project_id,
-                user_id=payload.user_id,
+                user_id=effective_user_id,
             )
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)

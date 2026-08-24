@@ -114,6 +114,7 @@ responses.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Health check |
+| `GET` | `/api/auth/session` | Inspect local-dev or Google OIDC session state |
 | `GET` | `/api/users/{user_id}/memory` | Inspect governed memory |
 | `POST` | `/api/users/{user_id}/memory/signals/{signal_id}/revoke` | Revoke an active memory signal |
 | `DELETE` | `/api/users/{user_id}/memory/signals/{signal_id}` | Hard-delete bounded memory artifacts |
@@ -141,6 +142,43 @@ Limitations:
 - does not prove Vertex AI availability;
 - does not exercise any expert;
 - is a liveness response, not a full readiness check.
+
+### `GET /api/auth/session`
+
+Purpose: expose the current authentication mode and, when Google OIDC mode is
+enabled, return the server-verified application principal derived from a Google
+ID token.
+
+Request:
+
+- optional `Authorization: Bearer <Google ID token>` header in local
+  development mode;
+- required `Authorization: Bearer <Google ID token>` header when
+  `AGENT_COL_AUTH_MODE=google_oidc`.
+
+Response fields:
+
+- `auth_contract_version`;
+- `auth_mode`;
+- `authenticated`;
+- `local_development`;
+- `user_id`;
+- `subject`;
+- `email`;
+- `display_name`.
+
+Validation and failures:
+
+- missing or malformed bearer token in Google OIDC mode returns HTTP 401;
+- invalid Google token returns HTTP 403;
+- missing server Google client ID in Google OIDC mode returns HTTP 500.
+
+Limitations:
+
+- this is an authentication-principal boundary, not a full sign-in UI;
+- local development mode still accepts request-provided locators;
+- project, session, artifact, and feedback ownership records are not yet
+  enforced for every resource.
 
 ### `GET /api/users/{user_id}/memory`
 
@@ -694,7 +732,8 @@ The following were previously documented as pending but are implemented:
 - feedback supersession;
 - chat-routed artifact synthesis;
 - governed synthesis personalization;
-- verified adaptation receipts.
+- verified adaptation receipts;
+- authentication session inspection and bearer-token transport.
 
 A dedicated feedback `POST` endpoint is not required by the accepted design.
 Structured `/api/chat` is the current write authority.
@@ -703,22 +742,26 @@ Structured `/api/chat` is the current write authority.
 
 ### Current development identity
 
-There is no end-user authentication.
+The repository now has an authentication-principal foundation with two modes:
 
-The backend trusts:
+- `local_dev` is the default local mode and preserves the existing development
+  locator workflow;
+- `google_oidc` verifies a Google ID token from the `Authorization` header and
+  derives the application `user_id` from the token `sub` claim.
+
+In `local_dev`, the backend still trusts:
 
 - `user_id` from JSON or the URL path;
 - `project_id` from JSON or the URL path;
 - `session_id` from JSON.
 
+In `google_oidc`, user-scoped routes reject a request when the supplied
+`user_id` does not match the server-derived `google--{sub}` principal.
+
 There are no:
 
-- bearer-token dependencies;
-- verified ID tokens;
 - authenticated cookies;
-- OAuth/OIDC middleware;
 - ownership lookups;
-- route-level authorization dependencies;
 - Firestore-backed access checks tied to an authenticated subject.
 
 Google Application Default Credentials authenticate the backend to Vertex AI
@@ -728,20 +771,24 @@ and Firestore. ADC does not authenticate application users.
 
 The current model provides locator consistency, not security:
 
-- identifiers select Firestore paths;
+- in local mode, identifiers select Firestore paths;
+- in Google OIDC mode, the user identity is checked before user-scoped route
+  service access;
 - turn records retain supplied user/project identity;
 - feedback writes verify that supplied `user_id` matches the blueprint's stored
   supplied `user_id`;
-- artifact and memory reads trust the requested path;
-- a caller that knows or guesses an identifier can present that identifier.
+- artifact routes can require an authenticated session in Google OIDC mode, but
+  do not yet enforce project-owner membership because project ownership records
+  do not exist;
+- a caller that knows or guesses a `project_id` can still request project-scoped
+  artifacts until project ownership is implemented.
 
 The backend must not be exposed publicly in this state.
 
 ### Required before public deployment
 
-- Google-backed OIDC authentication;
-- server-side identity-token verification;
-- authenticated subject replacing request-provided `user_id`;
+- real Google sign-in or Identity Platform browser flow;
+- project, session, artifact, feedback, and memory ownership records;
 - project, session, artifact, feedback, and memory ownership checks;
 - safe unavailable-resource behavior for unauthorized resources;
 - logout and authenticated-session lifecycle;

@@ -103,6 +103,9 @@ export async function apiFetchJson(
   if (options.idempotencyKey) {
     headers["Idempotency-Key"] = options.idempotencyKey;
   }
+  if (options.authToken) {
+    headers.Authorization = `Bearer ${options.authToken}`;
+  }
   const response = await fetchLike(path, {
     method: options.method ?? "GET",
     headers,
@@ -113,6 +116,20 @@ export async function apiFetchJson(
     throw normalizeApiError(response, body);
   }
   return body;
+}
+
+export function getAuthSession(
+  authToken = null,
+  fetchLike = globalThis.fetch,
+) {
+  return apiFetchJson(
+    "/api/auth/session",
+    {
+      method: "GET",
+      authToken,
+    },
+    fetchLike,
+  );
 }
 
 function assertIdentifier(name, value) {
@@ -146,15 +163,23 @@ function buildMemoryQuery(options = {}) {
   return query ? `?${query}` : "";
 }
 
+function normalizeOptionsAndFetch(options, fetchLike) {
+  if (typeof options === "function") {
+    return [{}, options];
+  }
+  return [options ?? {}, fetchLike];
+}
+
 export function listBlueprints(
   projectId,
   options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("project_id", projectId);
   return apiFetchJson(
     `/api/projects/${encodeURIComponent(projectId)}/blueprints${buildQuery(options)}`,
-    { method: "GET" },
+    { method: "GET", authToken: options.authToken },
     fetchLike,
   );
 }
@@ -162,13 +187,15 @@ export function listBlueprints(
 export function getBlueprint(
   projectId,
   artifactId,
+  options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("project_id", projectId);
   assertIdentifier("artifact_id", artifactId);
   return apiFetchJson(
     `/api/projects/${encodeURIComponent(projectId)}/blueprints/${encodeURIComponent(artifactId)}`,
-    { method: "GET" },
+    { method: "GET", authToken: options.authToken },
     fetchLike,
   );
 }
@@ -179,11 +206,12 @@ export function listBlueprintFeedback(
   options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("project_id", projectId);
   assertIdentifier("artifact_id", artifactId);
   return apiFetchJson(
     `/api/projects/${encodeURIComponent(projectId)}/blueprints/${encodeURIComponent(artifactId)}/feedback${buildQuery(options)}`,
-    { method: "GET" },
+    { method: "GET", authToken: options.authToken },
     fetchLike,
   );
 }
@@ -193,10 +221,11 @@ export function inspectMemory(
   options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("user_id", userId);
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/memory${buildMemoryQuery(options)}`,
-    { method: "GET" },
+    { method: "GET", authToken: options.authToken },
     fetchLike,
   );
 }
@@ -204,13 +233,15 @@ export function inspectMemory(
 export function revokeMemorySignal(
   userId,
   signalId,
+  options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("user_id", userId);
   assertIdentifier("signal_id", signalId);
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/memory/signals/${encodeURIComponent(signalId)}/revoke`,
-    { method: "POST" },
+    { method: "POST", authToken: options.authToken },
     fetchLike,
   );
 }
@@ -218,13 +249,15 @@ export function revokeMemorySignal(
 export function deleteMemorySignal(
   userId,
   signalId,
+  options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("user_id", userId);
   assertIdentifier("signal_id", signalId);
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/memory/signals/${encodeURIComponent(signalId)}`,
-    { method: "DELETE" },
+    { method: "DELETE", authToken: options.authToken },
     fetchLike,
   );
 }
@@ -235,11 +268,12 @@ export function listChatSessions(
   options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("user_id", userId);
   assertIdentifier("project_id", projectId);
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/chat-sessions${buildQuery(options)}`,
-    { method: "GET" },
+    { method: "GET", authToken: options.authToken },
     fetchLike,
   );
 }
@@ -251,12 +285,13 @@ export function getChatSession(
   options = {},
   fetchLike = globalThis.fetch,
 ) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
   assertIdentifier("user_id", userId);
   assertIdentifier("project_id", projectId);
   assertIdentifier("session_id", sessionId);
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/chat-sessions/${encodeURIComponent(sessionId)}${buildQuery(options)}`,
-    { method: "GET" },
+    { method: "GET", authToken: options.authToken },
     fetchLike,
   );
 }
