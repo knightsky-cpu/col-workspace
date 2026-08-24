@@ -53,6 +53,19 @@ function textTree(item) {
   ].join(" ");
 }
 
+function findTree(item, predicate) {
+  if (predicate(item)) {
+    return item;
+  }
+  for (const child of item.children) {
+    const found = findTree(child, predicate);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
 const detail = {
   metadata: {
     reference: {
@@ -260,6 +273,35 @@ test("renderWorkList renders single-file artifact metadata and selection control
   assert.deepEqual(selected, ["artifact--script"]);
 });
 
+test("renderWorkList labels generic artifact versions without exposing parent ids", () => {
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        items: [{
+          reference: {
+            ...genericDetail.metadata.reference,
+            artifact_id: "artifact--script-v2",
+          },
+          filename: "password_generator_v2.py",
+          artifact_family: "code",
+          format: "python",
+          parent_artifact_id: "artifact--script",
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    { onSelectArtifact: () => {} },
+  );
+
+  assert.equal(container.children[0].textContent.includes("Revised version"), true);
+  assert.equal(container.children[0].textContent.includes("artifact--script"), false);
+});
+
 test("renderWorkList marks the selected artifact and avoids Work terminology", () => {
   const container = node();
 
@@ -461,6 +503,46 @@ test("renderWorkDetail restores archived single-file artifacts", () => {
   assert.equal(restoreButton.textContent, "Restore");
   restoreButton.onclick();
   assert.deepEqual(restored, ["artifact--script"]);
+});
+
+test("renderWorkDetail shows generic artifact lineage and opens the original", () => {
+  const container = node();
+  const opened = [];
+  const versionDetail = {
+    ...genericDetail,
+    metadata: {
+      ...genericDetail.metadata,
+      reference: {
+        ...genericDetail.metadata.reference,
+        artifact_id: "artifact--script-v2",
+      },
+      parent_artifact_id: "artifact--script",
+    },
+  };
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: versionDetail, error: null },
+      feedback: { status: "idle", events: [], error: null },
+    },
+    {
+      onSubmitFeedback: () => {},
+      onSelectArtifact: (artifactId) => opened.push(artifactId),
+    },
+  );
+
+  const text = textTree(container);
+  assert.equal(text.includes("Revised version"), true);
+  assert.equal(text.includes("Original artifact"), true);
+  assert.equal(text.includes("artifact--script"), false);
+  const openOriginal = findTree(container, (child) => (
+    child.attributes["data-open-parent-artifact"] === ""
+  ));
+  assert.ok(openOriginal);
+  assert.equal(openOriginal.textContent, "Open original artifact");
+  openOriginal.onclick();
+  assert.deepEqual(opened, ["artifact--script"]);
 });
 
 test("renderWorkDetail submits single-file artifact metadata rename", () => {

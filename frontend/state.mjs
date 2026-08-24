@@ -692,12 +692,19 @@ export function completeWorkVersionCreate(state, response) {
   if (!reference?.artifact_id || !artifact) {
     return state;
   }
+  const parentArtifactId = (
+    state.work.selectedArtifactId
+    ?? state.work.detail.item?.metadata?.reference?.artifact_id
+    ?? state.work.detail.item?.reference?.artifact_id
+    ?? null
+  );
   const metadata = {
     reference,
     filename: artifact.filename,
     artifact_family: artifact.artifact_family,
     format: artifact.format,
     byte_size: new TextEncoder().encode(artifact.content ?? "").length,
+    parent_artifact_id: parentArtifactId,
     lifecycle_status: "active",
   };
   return {

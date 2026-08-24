@@ -388,7 +388,10 @@ export function renderWorkList(container, work, handlers) {
       button.setAttribute("aria-current", "true");
     }
     const secondary = reference.artifact_type === "single_file_artifact"
-      ? artifactTypeLabel(item)
+      ? compactText([
+          artifactTypeLabel(item),
+          item.parent_artifact_id ? "Revised version" : "",
+        ])
       : feedbackCounts(item);
     setText(button, compactText([
       reference.display_label,
@@ -485,6 +488,33 @@ function renderSingleFileArtifact(parent, detail) {
   setText(code, artifact.content ?? "");
   content.append(code);
   parent.append(content);
+}
+
+function renderSingleFileArtifactLineage(parent, detail, handlers) {
+  const parentArtifactId = detail.metadata?.parent_artifact_id ?? null;
+  if (!parentArtifactId) {
+    return;
+  }
+  const section = document.createElement("section");
+  section.classList.add("feedback-form", "contain-text");
+  section.setAttribute("data-artifact-lineage", "");
+  appendTextElement(section, "h4", "", "Revised version");
+  appendTextElement(
+    section,
+    "p",
+    "muted",
+    "This artifact is a newer version. Original artifact is preserved.",
+  );
+  const button = document.createElement("button");
+  button.classList.add("control-compact");
+  button.type = "button";
+  button.setAttribute("data-open-parent-artifact", "");
+  setText(button, "Open original artifact");
+  button.addEventListener("click", () => {
+    handlers.onSelectArtifact?.(parentArtifactId);
+  });
+  section.append(button);
+  parent.append(section);
 }
 
 function renderSingleFileArtifactLifecycle(parent, detail, handlers) {
@@ -711,6 +741,7 @@ export function renderWorkDetail(container, work, handlers) {
 
   if (isSingleFileArtifactDetail(detail)) {
     renderSingleFileArtifact(container, detail);
+    renderSingleFileArtifactLineage(container, detail, handlers);
     renderSingleFileArtifactMetadataForm(container, detail, handlers);
     renderSingleFileArtifactVersionForm(container, detail, handlers);
     renderSingleFileArtifactLifecycle(container, detail, handlers);

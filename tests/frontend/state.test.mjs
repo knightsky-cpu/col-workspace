@@ -950,6 +950,7 @@ test("work version creation prepends and selects replacement artifact", () => {
     "Updated Script",
   );
   assert.equal(updated.work.list.items[0].filename, "updated.py");
+  assert.equal(updated.work.list.items[0].parent_artifact_id, "artifact--abc");
   assert.equal(
     updated.work.list.items[1].reference.display_label,
     "Old Script",
@@ -957,5 +958,9 @@ test("work version creation prepends and selects replacement artifact", () => {
   assert.equal(
     updated.work.detail.item.artifact.content,
     "print('updated')\n",
+  );
+  assert.equal(
+    updated.work.detail.item.metadata.parent_artifact_id,
+    "artifact--abc",
   );
 });
