@@ -54,6 +54,7 @@ from artifact_read_service import (
 from generic_artifact_service import (
     ArchiveGenericArtifactCommand,
     ArtifactReadStateError as GenericArtifactReadStateError,
+    CreateGenericArtifactVersionCommand,
     GenericArtifactReadService,
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
@@ -132,6 +133,7 @@ from schemas import (
     SingleFileArtifactCreateRequest,
     SingleFileArtifactCreateResponse,
     SingleFileArtifactDetailResponse,
+    SingleFileArtifactEditRequest,
     SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
     SingleFileArtifactMetadataUpdateRequest,
@@ -1428,6 +1430,65 @@ async def update_generic_artifact_metadata(
     except GenericArtifactReadStateError as exc:
         logger.error(
             "Stored generic artifact metadata update state is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.post(
+    "/api/projects/{project_id}/artifacts/{artifact_id}/versions",
+    response_model=SingleFileArtifactCreateResponse,
+)
+async def create_generic_artifact_version(
+    project_id: IdentifierStr,
+    artifact_id: IdentifierStr,
+    payload: SingleFileArtifactEditRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> SingleFileArtifactCreateResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=payload.user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        return (
+            await request.app.state.generic_artifact_service
+            .create_artifact_version(
+                CreateGenericArtifactVersionCommand(
+                    project_id=effective_project_id,
+                    artifact_id=artifact_id,
+                    session_id=payload.session_id,
+                    user_id=effective_user_id,
+                    content=payload.content,
+                    filename=payload.filename,
+                    display_label=payload.display_label,
+                    summary=payload.summary,
+                    originating_turn_id=payload.originating_turn_id,
+                )
+            )
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact was not found.",
+        ) from exc
+    except GenericArtifactReadStateError as exc:
+        logger.error(
+            "Stored generic artifact version state is invalid (%s).",
             type(exc).__name__,
         )
         raise HTTPException(

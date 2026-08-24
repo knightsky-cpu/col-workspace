@@ -25,6 +25,7 @@ from artifact_read_service import (
 from generic_artifact_service import (
     ArchiveGenericArtifactCommand,
     ArtifactReadStateError as GenericArtifactReadStateError,
+    CreateGenericArtifactVersionCommand,
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
     RestoreGenericArtifactCommand,
@@ -106,7 +107,9 @@ from schemas import (
     MemoryProposal,
     MemoryProposalReceipt,
     SingleFileArtifact,
+    SingleFileArtifactCreateResponse,
     SingleFileArtifactDetailResponse,
+    SingleFileArtifactEditRequest,
     SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
     SingleFileArtifactMetadataUpdateRequest,
@@ -706,6 +709,7 @@ class FakeGenericArtifactReadService:
     archive_error: Exception | None = None
     restore_error: Exception | None = None
     update_metadata_error: Exception | None = None
+    create_version_error: Exception | None = None
     list_calls: list[ListGenericArtifactsCommand] = field(default_factory=list)
     detail_calls: list[GetGenericArtifactCommand] = field(default_factory=list)
     archive_calls: list[ArchiveGenericArtifactCommand] = (
@@ -716,6 +720,9 @@ class FakeGenericArtifactReadService:
     )
     update_metadata_calls: list[
         UpdateGenericArtifactMetadataCommand
+    ] = field(default_factory=list)
+    create_version_calls: list[
+        CreateGenericArtifactVersionCommand
     ] = field(default_factory=list)
 
     async def list_artifacts(
@@ -786,6 +793,40 @@ class FakeGenericArtifactReadService:
                     or self.detail_result.metadata.filename,
                 }
             )
+        )
+
+    async def create_artifact_version(
+        self,
+        command: CreateGenericArtifactVersionCommand,
+    ) -> SingleFileArtifactCreateResponse:
+        self.create_version_calls.append(command)
+        self.events.append(("generic_artifact_create_version",))
+        if self.create_version_error is not None:
+            raise self.create_version_error
+        artifact = self.detail_result.artifact.model_copy(
+            update={
+                "content": command.content,
+                "filename": (
+                    command.filename or self.detail_result.artifact.filename
+                ),
+                "summary": (
+                    command.summary or self.detail_result.artifact.summary
+                ),
+            }
+        )
+        reference = self.detail_result.metadata.reference.model_copy(
+            update={
+                "artifact_id": "artifact-version-1",
+                "display_label": (
+                    command.display_label
+                    or command.summary
+                    or self.detail_result.metadata.reference.display_label
+                ),
+            }
+        )
+        return SingleFileArtifactCreateResponse(
+            reference=reference,
+            artifact=artifact,
         )
 
 
@@ -2329,6 +2370,63 @@ async def test_update_generic_artifact_metadata_rejects_empty_payload(
 
     assert response.status_code == 422
     assert service_state.generic_artifact_service.update_metadata_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_generic_artifact_version_returns_new_artifact(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/projects/project-1/artifacts/artifact-1/versions",
+        json={
+            "session_id": "session-2",
+            "user_id": "user-1",
+            "content": "print('updated')\n",
+            "filename": "updated_generator.py",
+            "display_label": "Updated Generator",
+            "summary": "Updated password generator.",
+            "originating_turn_id": "turn-2",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reference"]["artifact_id"] == "artifact-version-1"
+    assert body["reference"]["display_label"] == "Updated Generator"
+    assert body["artifact"]["filename"] == "updated_generator.py"
+    assert body["artifact"]["content"] == "print('updated')\n"
+    assert service_state.generic_artifact_service.create_version_calls == [
+        CreateGenericArtifactVersionCommand(
+            project_id="project-1",
+            artifact_id="artifact-1",
+            session_id="session-2",
+            user_id="user-1",
+            content="print('updated')\n",
+            filename="updated_generator.py",
+            display_label="Updated Generator",
+            summary="Updated password generator.",
+            originating_turn_id="turn-2",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_generic_artifact_version_rejects_empty_content(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/projects/project-1/artifacts/artifact-1/versions",
+        json={
+            "session_id": "session-2",
+            "user_id": "user-1",
+            "content": "",
+        },
+    )
+
+    assert response.status_code == 422
+    assert service_state.generic_artifact_service.create_version_calls == []
 
 
 @pytest.mark.asyncio

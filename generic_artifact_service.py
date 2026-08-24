@@ -11,6 +11,7 @@ from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     ArtifactReference,
     SingleFileArtifact,
+    SingleFileArtifactCreateResponse,
     SingleFileArtifactDetailResponse,
     SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
@@ -19,6 +20,7 @@ from schemas import (
 
 
 logger = logging.getLogger(__name__)
+GENERIC_ARTIFACT_VERSION_MODEL_NAME = "agent-col-generic-artifact-version"
 
 
 class ArtifactReadStateError(RuntimeError):
@@ -59,6 +61,19 @@ class UpdateGenericArtifactMetadataCommand:
     filename: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class CreateGenericArtifactVersionCommand:
+    project_id: str
+    artifact_id: str
+    session_id: str
+    user_id: str
+    content: str
+    filename: str | None = None
+    display_label: str | None = None
+    summary: str | None = None
+    originating_turn_id: str | None = None
+
+
 class GenericArtifactDatabase(Protocol):
     async def list_artifact_documents(
         self,
@@ -94,6 +109,19 @@ class GenericArtifactDatabase(Protocol):
         display_label: str | None,
         filename: str | None,
     ) -> ArtifactDocumentRecord: ...
+
+    async def save_single_file_artifact(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        user_id: str,
+        model_name: str,
+        artifact: dict[str, object],
+        display_label: str,
+        originating_turn_id: str | None = None,
+        parent_artifact_id: str | None = None,
+    ) -> str: ...
 
 
 class GenericArtifactReadService:
@@ -182,6 +210,51 @@ class GenericArtifactReadService:
             metadata=self._project_metadata(command.project_id, record)
         )
 
+    async def create_artifact_version(
+        self,
+        command: CreateGenericArtifactVersionCommand,
+    ) -> SingleFileArtifactCreateResponse:
+        parent_record = await self._database.get_artifact_document(
+            command.project_id,
+            command.artifact_id,
+        )
+        parent_artifact = self._project_artifact(parent_record)
+        artifact = SingleFileArtifact.model_validate(
+            {
+                "artifact_family": parent_artifact.artifact_family,
+                "format": parent_artifact.format,
+                "filename": command.filename or parent_artifact.filename,
+                "content": command.content,
+                "summary": command.summary or parent_artifact.summary,
+            }
+        )
+        display_label = (
+            command.display_label
+            or artifact.summary
+            or parent_record.document.get("display_label")
+            or artifact.filename
+        )
+        artifact_id = await self._database.save_single_file_artifact(
+            project_id=command.project_id,
+            session_id=command.session_id,
+            user_id=command.user_id,
+            model_name=GENERIC_ARTIFACT_VERSION_MODEL_NAME,
+            artifact=artifact.model_dump(mode="json"),
+            display_label=display_label,
+            originating_turn_id=command.originating_turn_id,
+            parent_artifact_id=command.artifact_id,
+        )
+        return SingleFileArtifactCreateResponse(
+            reference=ArtifactReference(
+                artifact_type="single_file_artifact",
+                project_id=command.project_id,
+                artifact_id=artifact_id,
+                schema_version="1.0",
+                display_label=display_label,
+            ),
+            artifact=artifact,
+        )
+
     @staticmethod
     def _uses_single_file_contract(record: ArtifactDocumentRecord) -> bool:
         document = record.document
@@ -259,6 +332,9 @@ class GenericArtifactReadService:
                     ),
                     "originating_turn_id": document.get(
                         "originating_turn_id"
+                    ),
+                    "parent_artifact_id": document.get(
+                        "parent_artifact_id"
                     ),
                     "filename": artifact.filename,
                     "artifact_family": artifact.artifact_family,

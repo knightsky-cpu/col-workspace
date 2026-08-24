@@ -250,6 +250,7 @@ class SingleFileArtifactMetadata(StrictModel):
     created_at: datetime
     originating_session_id: IdentifierStr
     originating_turn_id: IdentifierStr | None = None
+    parent_artifact_id: IdentifierStr | None = None
     filename: ArtifactFilenameStr
     artifact_family: SingleFileArtifactFamily
     format: SingleFileArtifactFormat
@@ -318,6 +319,16 @@ class SingleFileArtifactMetadataUpdateRequest(StrictModel):
         if self.display_label is None and self.filename is None:
             raise ValueError("At least one metadata field is required.")
         return self
+
+
+class SingleFileArtifactEditRequest(StrictModel):
+    session_id: IdentifierStr
+    user_id: IdentifierStr
+    content: ArtifactContentStr
+    filename: ArtifactFilenameStr | None = None
+    display_label: DisplayLabelStr | None = None
+    summary: DisplayLabelStr | None = None
+    originating_turn_id: IdentifierStr | None = None
 
 
 class ArtifactFeedbackCounts(StrictModel):

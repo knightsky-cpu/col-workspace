@@ -331,6 +331,27 @@ export function updateArtifactMetadata(
   );
 }
 
+export function createArtifactVersion(
+  projectId,
+  artifactId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/versions`,
+    {
+      method: "POST",
+      authToken: options.authToken,
+      body: request,
+    },
+    fetchLike,
+  );
+}
+
 export function inspectMemory(
   userId,
   options = {},

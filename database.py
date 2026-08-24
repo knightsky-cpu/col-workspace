@@ -2451,6 +2451,7 @@ class MemoryEngine:
         artifact: dict[str, object],
         display_label: str,
         originating_turn_id: str | None = None,
+        parent_artifact_id: str | None = None,
     ) -> str:
         """Atomically persist one generic project-owned single-file artifact."""
         self._validate_memory_identifier(project_id, "project_id")
@@ -2463,6 +2464,11 @@ class MemoryEngine:
             self._validate_memory_identifier(
                 originating_turn_id,
                 "originating_turn_id",
+            )
+        if parent_artifact_id is not None:
+            self._validate_memory_identifier(
+                parent_artifact_id,
+                "parent_artifact_id",
             )
 
         try:
@@ -2488,6 +2494,7 @@ class MemoryEngine:
                     "model_name": model_name,
                     "schema_version": "1.0",
                     "display_label": display_label,
+                    "parent_artifact_id": parent_artifact_id,
                     "lifecycle_status": "active",
                     "filename": validated_artifact.filename,
                     "artifact_family": validated_artifact.artifact_family,

@@ -322,6 +322,7 @@ async def test_save_single_file_artifact_commits_parent_and_artifact_atomically(
         },
         display_label="Password Generator",
         originating_turn_id="turn-1",
+        parent_artifact_id="artifact-parent",
     )
 
     assert artifact_id == "artifact-1"
@@ -347,6 +348,7 @@ async def test_save_single_file_artifact_commits_parent_and_artifact_atomically(
                 "model_name": "gemini-3.6-flash",
                 "schema_version": "1.0",
                 "display_label": "Password Generator",
+                "parent_artifact_id": "artifact-parent",
                 "lifecycle_status": "active",
                 "filename": "password_generator.py",
                 "artifact_family": "code",

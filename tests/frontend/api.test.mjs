@@ -5,6 +5,7 @@ import {
   apiFetchJson,
   archiveArtifact,
   createArtifact,
+  createArtifactVersion,
   getAuthConfig,
   getAuthSession,
   getArtifact,
@@ -286,6 +287,22 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
       return jsonResponse(200, { artifact_contract_version: "1.0" });
     },
   );
+  await createArtifactVersion(
+    "agent-col",
+    "artifact--abc",
+    {
+      session_id: "session--2",
+      user_id: "wifiknight",
+      content: "print('updated')\n",
+      filename: "script_v2.py",
+      display_label: "Script v2",
+    },
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_contract_version: "1.0" });
+    },
+  );
   await listArtifacts(
     "agent-col",
     { lifecycle_status: "archived", authToken: "token-1" },
@@ -329,9 +346,25 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
   );
   assert.equal(
     calls[6][0],
+    "/api/projects/agent-col/artifacts/artifact--abc/versions",
+  );
+  assert.equal(calls[6][1].method, "POST");
+  assert.equal(calls[6][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[6][1].body,
+    JSON.stringify({
+      session_id: "session--2",
+      user_id: "wifiknight",
+      content: "print('updated')\n",
+      filename: "script_v2.py",
+      display_label: "Script v2",
+    }),
+  );
+  assert.equal(
+    calls[7][0],
     "/api/projects/agent-col/artifacts?lifecycle_status=archived",
   );
-  assert.equal(calls[6][1].method, "GET");
+  assert.equal(calls[7][1].method, "GET");
   assert.equal(
     calls[2][1].body,
     JSON.stringify({

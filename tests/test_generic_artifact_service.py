@@ -11,6 +11,7 @@ class FakeArtifactDatabase:
         self.records = records
         self.archive_calls: list[tuple[str, str]] = []
         self.update_calls: list[tuple[str, str, str | None, str | None]] = []
+        self.save_calls: list[dict[str, object]] = []
 
     async def list_artifact_documents(
         self,
@@ -58,6 +59,32 @@ class FakeArtifactDatabase:
             (project_id, artifact_id, display_label, filename)
         )
         return self.records[0]
+
+    async def save_single_file_artifact(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        user_id: str,
+        model_name: str,
+        artifact: dict[str, object],
+        display_label: str,
+        originating_turn_id: str | None = None,
+        parent_artifact_id: str | None = None,
+    ) -> str:
+        self.save_calls.append(
+            {
+                "project_id": project_id,
+                "session_id": session_id,
+                "user_id": user_id,
+                "model_name": model_name,
+                "artifact": artifact,
+                "display_label": display_label,
+                "originating_turn_id": originating_turn_id,
+                "parent_artifact_id": parent_artifact_id,
+            }
+        )
+        return "artifact--replacement"
 
 
 def stored_single_file_document() -> dict[str, object]:
@@ -343,6 +370,65 @@ async def test_generic_artifact_service_updates_single_file_artifact_metadata(
     ]
     assert result.metadata.reference.display_label == "Renamed Generator"
     assert result.metadata.filename == "renamed_generator.py"
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_creates_linked_content_replacement(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        CreateGenericArtifactVersionCommand,
+        GENERIC_ARTIFACT_VERSION_MODEL_NAME,
+        GenericArtifactReadService,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--abc",
+                document=stored_single_file_document(),
+            ),
+        )
+    )
+
+    result = await GenericArtifactReadService(
+        database=database
+    ).create_artifact_version(
+        CreateGenericArtifactVersionCommand(
+            project_id="project-1",
+            artifact_id="artifact--abc",
+            session_id="session-2",
+            user_id="user-1",
+            content="import secrets\nprint('replacement')\n",
+            filename="password_generator_v2.py",
+            display_label="Password Generator v2",
+            originating_turn_id="turn-2",
+        )
+    )
+
+    assert result.reference.artifact_id == "artifact--replacement"
+    assert result.reference.display_label == "Password Generator v2"
+    assert result.artifact.filename == "password_generator_v2.py"
+    assert result.artifact.artifact_family == "code"
+    assert result.artifact.format == "python"
+    assert database.save_calls == [
+        {
+            "project_id": "project-1",
+            "session_id": "session-2",
+            "user_id": "user-1",
+            "model_name": GENERIC_ARTIFACT_VERSION_MODEL_NAME,
+            "artifact": {
+                "artifact_family": "code",
+                "format": "python",
+                "filename": "password_generator_v2.py",
+                "content": "import secrets\nprint('replacement')\n",
+                "summary": "Secure password generator.",
+            },
+            "display_label": "Password Generator v2",
+            "originating_turn_id": "turn-2",
+            "parent_artifact_id": "artifact--abc",
+        }
+    ]
 
 
 @pytest.mark.asyncio

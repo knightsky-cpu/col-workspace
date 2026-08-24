@@ -36,6 +36,7 @@ class GenericArtifactWriter(Protocol):
         artifact: dict[str, object],
         display_label: str,
         originating_turn_id: str | None = None,
+        parent_artifact_id: str | None = None,
     ) -> str: ...
 
 
@@ -64,6 +65,7 @@ class GenericArtifactCreationService:
             artifact=artifact_document,
             display_label=display_label,
             originating_turn_id=command.originating_turn_id,
+            parent_artifact_id=None,
         )
         return GenericArtifactCreationResult(
             reference=ArtifactReference(

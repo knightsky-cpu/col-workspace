@@ -12,6 +12,7 @@ import {
   beginPendingTurn,
   completeWorkDetailLoad,
   completeWorkMetadataUpdate,
+  completeWorkVersionCreate,
   completeWorkArchive,
   completeWorkRestore,
   completeWorkspaceCreate,
@@ -887,5 +888,74 @@ test("work metadata update refreshes list and selected generic detail labels", (
   assert.equal(
     updated.work.detail.item.artifact.content,
     "print('unchanged')\n",
+  );
+});
+
+test("work version creation prepends and selects replacement artifact", () => {
+  const loaded = completeWorkDetailLoad(
+    completeWorkListLoad(
+      beginWorkListLoad(createInitialState()),
+      {
+        artifacts: [{
+          reference: {
+            artifact_id: "artifact--abc",
+            artifact_type: "single_file_artifact",
+            schema_version: "1.0",
+            display_label: "Old Script",
+          },
+          filename: "old.py",
+        }],
+        next_before: null,
+      },
+    ),
+    {
+      metadata: {
+        reference: {
+          artifact_id: "artifact--abc",
+          artifact_type: "single_file_artifact",
+          schema_version: "1.0",
+          display_label: "Old Script",
+        },
+        filename: "old.py",
+      },
+      artifact: {
+        artifact_family: "code",
+        format: "python",
+        filename: "old.py",
+        content: "print('old')\n",
+      },
+    },
+    { events: [], next_before: null },
+  );
+
+  const updated = completeWorkVersionCreate(loaded, {
+    reference: {
+      artifact_id: "artifact--v2",
+      artifact_type: "single_file_artifact",
+      schema_version: "1.0",
+      display_label: "Updated Script",
+    },
+    artifact: {
+      artifact_family: "code",
+      format: "python",
+      filename: "updated.py",
+      content: "print('updated')\n",
+      summary: "Updated script.",
+    },
+  });
+
+  assert.equal(updated.work.selectedArtifactId, "artifact--v2");
+  assert.equal(
+    updated.work.list.items[0].reference.display_label,
+    "Updated Script",
+  );
+  assert.equal(updated.work.list.items[0].filename, "updated.py");
+  assert.equal(
+    updated.work.list.items[1].reference.display_label,
+    "Old Script",
+  );
+  assert.equal(
+    updated.work.detail.item.artifact.content,
+    "print('updated')\n",
   );
 });

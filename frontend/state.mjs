@@ -686,6 +686,49 @@ export function completeWorkMetadataUpdate(state, metadata) {
   };
 }
 
+export function completeWorkVersionCreate(state, response) {
+  const reference = response?.reference ?? null;
+  const artifact = response?.artifact ?? null;
+  if (!reference?.artifact_id || !artifact) {
+    return state;
+  }
+  const metadata = {
+    reference,
+    filename: artifact.filename,
+    artifact_family: artifact.artifact_family,
+    format: artifact.format,
+    byte_size: new TextEncoder().encode(artifact.content ?? "").length,
+    lifecycle_status: "active",
+  };
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      selectedArtifactId: reference.artifact_id,
+      list: {
+        ...state.work.list,
+        items: [
+          metadata,
+          ...state.work.list.items.filter((item) => (
+            item.reference?.artifact_id !== reference.artifact_id
+          )),
+        ],
+      },
+      detail: {
+        status: "ready",
+        item: { metadata, artifact },
+        error: null,
+      },
+      feedback: {
+        status: "idle",
+        events: [],
+        next_before: null,
+        error: null,
+      },
+    },
+  };
+}
+
 function removeWorkArtifactFromCurrentView(state, artifactId) {
   const remainingItems = state.work.list.items.filter((item) => (
     item.reference?.artifact_id !== artifactId

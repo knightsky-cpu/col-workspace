@@ -549,6 +549,53 @@ function renderSingleFileArtifactMetadataForm(parent, detail, handlers) {
   parent.append(form);
 }
 
+function renderSingleFileArtifactVersionForm(parent, detail, handlers) {
+  const artifact = detail.artifact ?? {};
+  const reference = artifactReference(detail);
+  const form = document.createElement("form");
+  form.classList.add("feedback-form");
+  form.setAttribute("data-artifact-version-form", "");
+
+  appendTextElement(form, "h4", "", "Edit artifact content");
+
+  const content = document.createElement("textarea");
+  content.name = "content";
+  content.placeholder = "Updated artifact content";
+  content.value = artifact.content ?? "";
+  content.required = true;
+
+  const filename = document.createElement("input");
+  filename.name = "filename";
+  filename.placeholder = "Filename";
+  filename.value = artifact.filename ?? "";
+
+  const displayLabel = document.createElement("input");
+  displayLabel.name = "display_label";
+  displayLabel.placeholder = "Display name";
+  displayLabel.value = reference.display_label ?? "";
+
+  const summary = document.createElement("input");
+  summary.name = "summary";
+  summary.placeholder = "Summary";
+  summary.value = artifact.summary ?? "";
+
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  setText(submit, "Save new version");
+
+  form.append(content, filename, displayLabel, summary, submit);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handlers.onCreateArtifactVersion?.(reference.artifact_id, {
+      content: content.value,
+      filename: filename.value,
+      display_label: displayLabel.value,
+      summary: summary.value,
+    });
+  });
+  parent.append(form);
+}
+
 function renderFeedbackTargets(parent, detail, handlers) {
   appendTextElement(parent, "h4", "", "Feedback targets");
   for (const target of detail.feedback_targets ?? []) {
@@ -665,6 +712,7 @@ export function renderWorkDetail(container, work, handlers) {
   if (isSingleFileArtifactDetail(detail)) {
     renderSingleFileArtifact(container, detail);
     renderSingleFileArtifactMetadataForm(container, detail, handlers);
+    renderSingleFileArtifactVersionForm(container, detail, handlers);
     renderSingleFileArtifactLifecycle(container, detail, handlers);
     return;
   }

@@ -2,6 +2,7 @@ import {
   apiFetchJson,
   archiveArtifact,
   createArtifact,
+  createArtifactVersion,
   createWorkspace,
   deleteMemorySignal,
   getArtifact,
@@ -65,6 +66,7 @@ import {
   completeWorkDetailLoad,
   completeWorkListLoad,
   completeWorkMetadataUpdate,
+  completeWorkVersionCreate,
   completeWorkRestore,
   completePendingTurn,
   createInitialState,
@@ -639,6 +641,9 @@ function ensureWorkView() {
       onUpdateArtifactMetadata(artifactId, metadata) {
         updateGenericArtifactMetadata(artifactId, metadata);
       },
+      onCreateArtifactVersion(artifactId, request) {
+        createGenericArtifactVersion(artifactId, request);
+      },
       onSetArtifactLifecycleStatus(lifecycleStatus) {
         setArtifactLifecycleStatus(lifecycleStatus);
       },
@@ -723,6 +728,33 @@ async function updateGenericArtifactMetadata(artifactId, metadata) {
       authOptions(),
     );
     state = completeWorkMetadataUpdate(state, response.metadata);
+    ensureWorkView().render(state);
+    await loadWorkList();
+  } catch (error) {
+    showWorkError(error.message);
+  }
+}
+
+async function createGenericArtifactVersion(artifactId, versionRequest) {
+  if (!state.context || state.pendingTurn !== null) {
+    return;
+  }
+  clearWorkError();
+  try {
+    const response = await createArtifactVersion(
+      state.context.project_id,
+      artifactId,
+      {
+        session_id: state.context.session_id,
+        user_id: state.context.user_id,
+        content: versionRequest.content,
+        filename: versionRequest.filename || undefined,
+        display_label: versionRequest.display_label || undefined,
+        summary: versionRequest.summary || undefined,
+      },
+      authOptions(),
+    );
+    state = completeWorkVersionCreate(state, response);
     ensureWorkView().render(state);
     await loadWorkList();
   } catch (error) {

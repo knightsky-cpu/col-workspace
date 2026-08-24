@@ -507,6 +507,52 @@ test("renderWorkDetail submits single-file artifact metadata rename", () => {
   ]]);
 });
 
+test("renderWorkDetail submits single-file artifact content replacement", () => {
+  const container = node();
+  const versions = [];
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: genericDetail, error: null },
+      feedback: { status: "idle", events: [], error: null },
+    },
+    {
+      onSubmitFeedback: () => {},
+      onCreateArtifactVersion: (artifactId, request) => {
+        versions.push([artifactId, request]);
+      },
+    },
+  );
+
+  const form = container.children.find((child) => (
+    child.attributes["data-artifact-version-form"] === ""
+  ));
+  assert.ok(form);
+  const contentInput = form.children.find((child) => (
+    child.name === "content"
+  ));
+  const filenameInput = form.children.find((child) => (
+    child.name === "filename"
+  ));
+  assert.equal(contentInput.value, "print('secure')\n");
+  assert.equal(filenameInput.value, "password_generator.py");
+
+  contentInput.value = "print('updated')\n";
+  filenameInput.value = "password_generator_v2.py";
+  form.onsubmit({ preventDefault() {} });
+
+  assert.deepEqual(versions, [[
+    "artifact--script",
+    {
+      content: "print('updated')\n",
+      filename: "password_generator_v2.py",
+      display_label: "Password Generator",
+      summary: "Generates a secure password.",
+    },
+  ]]);
+});
+
 test("renderWorkDetail uses artifact terminology for idle and loading states", () => {
   const container = node();
 

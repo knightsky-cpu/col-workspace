@@ -17,6 +17,7 @@ class FakeGenericArtifactWriter:
         artifact: dict[str, object],
         display_label: str,
         originating_turn_id: str | None = None,
+        parent_artifact_id: str | None = None,
     ) -> str:
         self.calls.append(
             {
@@ -27,6 +28,7 @@ class FakeGenericArtifactWriter:
                 "artifact": artifact,
                 "display_label": display_label,
                 "originating_turn_id": originating_turn_id,
+                "parent_artifact_id": parent_artifact_id,
             }
         )
         return "artifact--abc"
@@ -83,6 +85,7 @@ async def test_create_artifact_validates_persists_and_returns_reference(
             },
             "display_label": "Secure Password Generator",
             "originating_turn_id": "turn-1",
+            "parent_artifact_id": None,
         }
     ]
 
