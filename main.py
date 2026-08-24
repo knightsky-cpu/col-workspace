@@ -51,6 +51,12 @@ from artifact_read_service import (
     GetBlueprintArtifactCommand,
     ListBlueprintArtifactsCommand,
 )
+from generic_artifact_service import (
+    ArtifactReadStateError as GenericArtifactReadStateError,
+    GenericArtifactReadService,
+    GetGenericArtifactCommand,
+    ListGenericArtifactsCommand,
+)
 from artifact_feedback_service import (
     ArtifactFeedbackSchemaConflictError,
     ArtifactFeedbackService,
@@ -70,6 +76,8 @@ from chat_turns import (
 )
 from computational_expert_service import ComputationalExpertService
 from database import (
+    ArtifactCursorNotFoundError,
+    ArtifactNotFoundError,
     BlueprintArtifactCursorNotFoundError,
     BlueprintArtifactNotFoundError,
     BlueprintFeedbackConflictError,
@@ -108,6 +116,8 @@ from schemas import (
     MemoryProposalReceipt,
     SynthesisRequest,
     SynthesisResponse,
+    SingleFileArtifactDetailResponse,
+    SingleFileArtifactListResponse,
     WorkspaceCreateRequest,
     WorkspaceCreateResponse,
     WorkspaceListResponse,
@@ -541,6 +551,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             database=database,
         )
         artifact_service = ArtifactReadService(database=database)
+        generic_artifact_service = GenericArtifactReadService(
+            database=database
+        )
         artifact_executor = AgentColArtifactExecutor(
             synthesis_service=synthesis_service,
             artifact_ledger=database,
@@ -601,6 +614,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = database
     app.state.synthesis_service = synthesis_service
     app.state.artifact_service = artifact_service
+    app.state.generic_artifact_service = generic_artifact_service
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.turn_service = turn_service
@@ -1098,6 +1112,94 @@ async def get_blueprint_artifact(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Stored blueprint artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.get(
+    "/api/projects/{project_id}/artifacts",
+    response_model=SingleFileArtifactListResponse,
+)
+async def list_generic_artifacts(
+    project_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    before: IdentifierStr | None = None,
+) -> SingleFileArtifactListResponse:
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        return await request.app.state.generic_artifact_service.list_artifacts(
+            ListGenericArtifactsCommand(
+                project_id=effective_project_id,
+                limit=limit,
+                before=before,
+            )
+        )
+    except ArtifactCursorNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact cursor was not found.",
+        ) from exc
+    except GenericArtifactReadStateError as exc:
+        logger.error(
+            "Stored generic artifact list is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.get(
+    "/api/projects/{project_id}/artifacts/{artifact_id}",
+    response_model=SingleFileArtifactDetailResponse,
+)
+async def get_generic_artifact(
+    project_id: IdentifierStr,
+    artifact_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> SingleFileArtifactDetailResponse:
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        return await request.app.state.generic_artifact_service.get_artifact(
+            GetGenericArtifactCommand(
+                project_id=effective_project_id,
+                artifact_id=artifact_id,
+            )
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact was not found.",
+        ) from exc
+    except GenericArtifactReadStateError as exc:
+        logger.error(
+            "Stored generic artifact detail is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact is invalid.",
         ) from exc
     except MemoryEngineError as exc:
         _raise_database_http_error(exc)

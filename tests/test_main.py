@@ -22,6 +22,11 @@ from artifact_read_service import (
     GetBlueprintArtifactCommand,
     ListBlueprintArtifactsCommand,
 )
+from generic_artifact_service import (
+    ArtifactReadStateError as GenericArtifactReadStateError,
+    GetGenericArtifactCommand,
+    ListGenericArtifactsCommand,
+)
 from agent_col_turn_service import (
     AgentColTurnCommand,
     AgentColTurnResponderError,
@@ -44,6 +49,8 @@ from chat_turns import (
     ChatTurnStateError,
 )
 from database import (
+    ArtifactCursorNotFoundError,
+    ArtifactNotFoundError,
     BlueprintArtifactCursorNotFoundError,
     BlueprintArtifactNotFoundError,
     BlueprintDocumentRecord,
@@ -84,6 +91,10 @@ from schemas import (
     MemoryEvent,
     MemoryProposal,
     MemoryProposalReceipt,
+    SingleFileArtifact,
+    SingleFileArtifactDetailResponse,
+    SingleFileArtifactListResponse,
+    SingleFileArtifactMetadata,
     SynthesisBlueprint,
     WorkspaceCreateRequest,
     WorkspaceListResponse,
@@ -670,6 +681,37 @@ class FakeArtifactFeedbackService:
 
 
 @dataclass
+class FakeGenericArtifactReadService:
+    events: list[tuple[Any, ...]]
+    list_result: SingleFileArtifactListResponse
+    detail_result: SingleFileArtifactDetailResponse
+    list_error: Exception | None = None
+    detail_error: Exception | None = None
+    list_calls: list[ListGenericArtifactsCommand] = field(default_factory=list)
+    detail_calls: list[GetGenericArtifactCommand] = field(default_factory=list)
+
+    async def list_artifacts(
+        self,
+        command: ListGenericArtifactsCommand,
+    ) -> SingleFileArtifactListResponse:
+        self.list_calls.append(command)
+        self.events.append(("generic_artifact_list",))
+        if self.list_error is not None:
+            raise self.list_error
+        return self.list_result
+
+    async def get_artifact(
+        self,
+        command: GetGenericArtifactCommand,
+    ) -> SingleFileArtifactDetailResponse:
+        self.detail_calls.append(command)
+        self.events.append(("generic_artifact_detail",))
+        if self.detail_error is not None:
+            raise self.detail_error
+        return self.detail_result
+
+
+@dataclass
 class ServiceState:
     events: list[tuple[Any, ...]]
     database: FakeMemoryEngine
@@ -684,6 +726,7 @@ class ServiceState:
     turn_service: FakeAgentColTurnService
     memory_service: FakeTrustedMemoryService
     artifact_service: FakeArtifactReadService
+    generic_artifact_service: FakeGenericArtifactReadService
     artifact_executor: object
     artifact_feedback_service: FakeArtifactFeedbackService
     artifact_feedback_executor: object
@@ -829,6 +872,40 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             applied_feedback_ids=[],
         ),
     )
+    generic_artifact = SingleFileArtifact(
+        artifact_family="code",
+        format="python",
+        filename="password_generator.py",
+        content="print('secure password placeholder')\n",
+        summary="A simple Python password generator script.",
+    )
+    generic_artifact_metadata = SingleFileArtifactMetadata(
+        reference=ArtifactReference(
+            artifact_type="single_file_artifact",
+            project_id="project-1",
+            artifact_id="artifact-1",
+            schema_version="1.0",
+            display_label="Password Generator",
+        ),
+        created_at=MEMORY_NOW,
+        originating_session_id="session-1",
+        originating_turn_id="turn-1",
+        filename="password_generator.py",
+        artifact_family="code",
+        format="python",
+        byte_size=37,
+    )
+    generic_artifact_service = FakeGenericArtifactReadService(
+        events=events,
+        list_result=SingleFileArtifactListResponse(
+            artifacts=[generic_artifact_metadata],
+            next_before=None,
+        ),
+        detail_result=SingleFileArtifactDetailResponse(
+            metadata=generic_artifact_metadata,
+            artifact=generic_artifact,
+        ),
+    )
     artifact_executor = object()
     artifact_feedback_service = FakeArtifactFeedbackService(
         result=BlueprintArtifactFeedbackListResponse(
@@ -871,6 +948,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         turn_service=turn_service,
         memory_service=memory_service,
         artifact_service=artifact_service,
+        generic_artifact_service=generic_artifact_service,
         artifact_executor=artifact_executor,
         artifact_feedback_service=artifact_feedback_service,
         artifact_feedback_executor=artifact_feedback_executor,
@@ -1061,6 +1139,16 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             artifact_service
             if database is state.database
             else pytest.fail("Unexpected artifact service database.")
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "GenericArtifactReadService",
+        lambda *, database: (
+            generic_artifact_service
+            if database is state.database
+            else pytest.fail("Unexpected generic artifact service database.")
         ),
         raising=False,
     )
@@ -1839,6 +1927,10 @@ async def test_lifespan_exposes_artifact_read_service(
 ) -> None:
     async with main.lifespan(main.app):
         assert main.app.state.artifact_service is service_state.artifact_service
+        assert (
+            main.app.state.generic_artifact_service
+            is service_state.generic_artifact_service
+        )
 
 
 @pytest.mark.asyncio
@@ -1942,6 +2034,54 @@ async def test_get_blueprint_artifact_returns_canonical_detail(
         GetBlueprintArtifactCommand(
             project_id="project-1",
             blueprint_id="blueprint-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_generic_artifacts_returns_bounded_public_metadata(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/projects/project-1/artifacts",
+        params={"limit": 10, "before": "artifact-cursor"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == (
+        service_state.generic_artifact_service.list_result.model_dump(
+            mode="json"
+        )
+    )
+    assert service_state.generic_artifact_service.list_calls == [
+        ListGenericArtifactsCommand(
+            project_id="project-1",
+            limit=10,
+            before="artifact-cursor",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_generic_artifact_returns_canonical_detail(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/projects/project-1/artifacts/artifact-1"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == (
+        service_state.generic_artifact_service.detail_result.model_dump(
+            mode="json"
+        )
+    )
+    assert service_state.generic_artifact_service.detail_calls == [
+        GetGenericArtifactCommand(
+            project_id="project-1",
+            artifact_id="artifact-1",
         )
     ]
 
@@ -2079,6 +2219,68 @@ async def test_get_blueprint_artifact_translates_missing_artifact(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    (
+        (
+            ArtifactCursorNotFoundError("missing"),
+            404,
+            "Artifact cursor was not found.",
+        ),
+        (
+            GenericArtifactReadStateError("invalid"),
+            500,
+            "Stored artifact is invalid.",
+        ),
+    ),
+)
+async def test_list_generic_artifacts_translates_safe_errors(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    service_state.generic_artifact_service.list_error = error
+
+    response = await client.get("/api/projects/project-1/artifacts")
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    (
+        (
+            ArtifactNotFoundError("missing"),
+            404,
+            "Artifact was not found.",
+        ),
+        (
+            GenericArtifactReadStateError("invalid"),
+            500,
+            "Stored artifact is invalid.",
+        ),
+    ),
+)
+async def test_get_generic_artifact_translates_safe_errors(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    service_state.generic_artifact_service.detail_error = error
+
+    response = await client.get("/api/projects/project-1/artifacts/artifact-1")
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+
+
+@pytest.mark.asyncio
 async def test_get_blueprint_artifact_rejects_schema_v1_explicitly(
     client: httpx.AsyncClient,
 ) -> None:
@@ -2134,6 +2336,20 @@ async def test_list_blueprint_artifacts_rejects_unbounded_limit(
 
     assert response.status_code == 422
     assert service_state.artifact_service.list_calls == []
+
+
+@pytest.mark.asyncio
+async def test_list_generic_artifacts_rejects_unbounded_limit(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/projects/project-1/artifacts",
+        params={"limit": 51},
+    )
+
+    assert response.status_code == 422
+    assert service_state.generic_artifact_service.list_calls == []
 
 
 @pytest.mark.asyncio
