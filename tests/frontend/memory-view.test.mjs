@@ -64,7 +64,13 @@ const memory = {
   profile: {
     memory_schema_version: "1.0",
     memory_revision: 1,
-    identity_context: {},
+    identity_context: {
+      preferred_name: {
+        signal_id: "preferred_name--signal-1",
+        value: "wifiknight",
+        source_event_id: "preferred_name--signal-1--approved",
+      },
+    },
     active_preferences: {
       response_length: {
         signal_id: "response_length--signal-1",
@@ -104,6 +110,8 @@ test("renderMemoryPanel renders active preferences, proposals, and events safely
   const text = textTree(container);
   assert.equal(text.includes("response_length"), true);
   assert.equal(text.includes("concise"), true);
+  assert.equal(text.includes("preferred_name"), true);
+  assert.equal(text.includes("wifiknight"), true);
   assert.equal(text.includes("planning_granularity"), true);
   assert.equal(text.includes("micro_steps"), true);
   assert.equal(text.includes("response_length--signal-1--approved"), true);
@@ -186,6 +194,48 @@ test("renderMemoryPanel exposes revoke and delete controls for active preference
     signal_id: "response_length--signal-1",
     value: "concise",
     source_event_id: "response_length--signal-1--approved",
+  }]);
+});
+
+test("renderMemoryPanel exposes revoke and delete controls for identity context", () => {
+  const revoked = [];
+  const deleted = [];
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+    onRevokeSignal: (signal) => revoked.push(signal),
+    onDeleteSignal: (signal) => deleted.push(signal),
+  });
+
+  const signalCard = findTree(container, (child) => (
+    child.attributes["data-memory-signal"] === "preferred_name--signal-1"
+  ));
+  assert.notEqual(signalCard, null);
+
+  const revokeButton = findTree(signalCard, (child) => (
+    child.attributes["data-memory-signal-action"] === "revoke"
+  ));
+  const deleteButton = findTree(signalCard, (child) => (
+    child.attributes["data-memory-signal-action"] === "delete"
+  ));
+  assert.notEqual(revokeButton, null);
+  assert.notEqual(deleteButton, null);
+
+  revokeButton.onclick();
+  deleteButton.onclick();
+
+  assert.deepEqual(revoked, [{
+    category: "preferred_name",
+    signal_id: "preferred_name--signal-1",
+    value: "wifiknight",
+    source_event_id: "preferred_name--signal-1--approved",
+  }]);
+  assert.deepEqual(deleted, [{
+    category: "preferred_name",
+    signal_id: "preferred_name--signal-1",
+    value: "wifiknight",
+    source_event_id: "preferred_name--signal-1--approved",
   }]);
 });
 

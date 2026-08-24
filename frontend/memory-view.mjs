@@ -19,11 +19,11 @@ function stringValue(value) {
   return String(value);
 }
 
-function activePreferences(profile) {
-  if (!profile || typeof profile.active_preferences !== "object") {
+function memorySignals(profile, key) {
+  if (!profile || typeof profile[key] !== "object") {
     return [];
   }
-  return Object.entries(profile.active_preferences ?? {})
+  return Object.entries(profile[key] ?? {})
     .filter(([, signal]) => signal && typeof signal === "object")
     .map(([category, signal]) => ({
       category,
@@ -33,36 +33,36 @@ function activePreferences(profile) {
     }));
 }
 
-function renderActivePreferences(container, preferences, handlers) {
-  appendTextElement(container, "h3", "work-heading contain-text", "Active preferences");
-  if (preferences.length === 0) {
-    appendTextElement(container, "p", "muted contain-text", "No active preferences.");
+function renderMemorySignals(container, title, emptyText, signals, handlers) {
+  appendTextElement(container, "h3", "work-heading contain-text", title);
+  if (signals.length === 0) {
+    appendTextElement(container, "p", "muted contain-text", emptyText);
     return;
   }
-  for (const preference of preferences) {
+  for (const signal of signals) {
     const card = element("div", "memory-card contain-text");
-    card.setAttribute("data-memory-signal", preference.signal_id);
+    card.setAttribute("data-memory-signal", signal.signal_id);
     appendTextElement(card, "p", "work-heading contain-text", compactText([
-      preference.category,
-      stringValue(preference.value),
+      signal.category,
+      stringValue(signal.value),
     ]));
     appendTextElement(card, "p", "muted contain-text", compactText([
-      "saved preference",
-      preference.signal_id,
-      preference.source_event_id,
+      "saved memory",
+      signal.signal_id,
+      signal.source_event_id,
     ]));
     const actions = element("div", "memory-actions contain-text");
     const revoke = element("button", "", "Revoke");
     revoke.setAttribute("type", "button");
     revoke.setAttribute("data-memory-signal-action", "revoke");
     revoke.addEventListener("click", () => {
-      handlers.onRevokeSignal(preference);
+      handlers.onRevokeSignal(signal);
     });
     const deleteButton = element("button", "", "Delete");
     deleteButton.setAttribute("type", "button");
     deleteButton.setAttribute("data-memory-signal-action", "delete");
     deleteButton.addEventListener("click", () => {
-      handlers.onDeleteSignal(preference);
+      handlers.onDeleteSignal(signal);
     });
     actions.append(revoke, deleteButton);
     card.append(actions);
@@ -156,7 +156,20 @@ export function renderMemoryPanel(container, memory, handlers) {
   }
 
   renderProposals(container, memory.unresolvedProposals ?? [], handlers);
-  renderActivePreferences(container, activePreferences(memory.profile), handlers);
+  renderMemorySignals(
+    container,
+    "Identity context",
+    "No identity context saved.",
+    memorySignals(memory.profile, "identity_context"),
+    handlers,
+  );
+  renderMemorySignals(
+    container,
+    "Active preferences",
+    "No active preferences.",
+    memorySignals(memory.profile, "active_preferences"),
+    handlers,
+  );
   renderEvents(container, memory.events ?? []);
 }
 

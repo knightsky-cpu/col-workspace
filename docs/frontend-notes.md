@@ -85,3 +85,11 @@ the implementation boundary.
   before excessive visual polish.
 - Polish issues should be tracked without derailing completion of core
   functional wiring.
+- Memory-request wording should be normalized in a later pass. Users should not have to know the exact trigger word `remember`; explicit requests like `save to memory`, `store this preference`, or `keep this preference` should route to the same governed memory proposal flow when policy allows it.
+- User-facing names for memory, Work, Artifacts, and Chats should use human
+  language conventions instead of source-code or database conventions. For
+  example, show `Preferred name`, not `preferred_name`, and avoid making long
+  signal, artifact, or session identifiers primary visible labels. Internal
+  field names and storage identifiers can confuse users and may leak useful
+  implementation detail to attackers. If identifiers are needed, expose them
+  only as secondary metadata or explicit copy/debug controls.
