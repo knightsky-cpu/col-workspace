@@ -71,7 +71,8 @@ export function buildArtifactCreateRequest(formData) {
 }
 
 export function buildBlueprintDownload(detail) {
-  return buildBlueprintExports(detail)[0];
+  return buildBlueprintExports(detail).find((item) => item.format === "json")
+    ?? buildBlueprintExports(detail)[0];
 }
 
 function blueprintMarkdown(detail) {
@@ -113,6 +114,14 @@ function dataHref(mimeType, value) {
   return `data:${mimeType};charset=utf-8,${encodeURIComponent(value)}`;
 }
 
+function replaceExtension(filename, extension) {
+  const base = String(filename ?? "artifact")
+    .replace(/[/\\]/g, "-")
+    .replace(/\.[^.]*$/, "")
+    || "artifact";
+  return extension ? `${base}.${extension}` : base;
+}
+
 export function buildBlueprintExports(detail) {
   const reference = detail.metadata.reference;
   const label = reference.display_label
@@ -122,16 +131,11 @@ export function buildBlueprintExports(detail) {
   const markdown = blueprintMarkdown(detail);
   return [
     {
-      format: "json",
-      label: "JSON",
-      filename: `${basename}.json`,
-      href: dataHref("application/json", JSON.stringify(detail, null, 2)),
-    },
-    {
       format: "md",
       label: "Markdown",
       filename: `${basename}.md`,
       href: dataHref("text/markdown", markdown),
+      primary: true,
     },
     {
       format: "txt",
@@ -140,8 +144,14 @@ export function buildBlueprintExports(detail) {
       href: dataHref("text/plain", markdown.replace(/^#+ /gm, "")),
     },
     {
+      format: "json",
+      label: "Metadata JSON",
+      filename: `${basename}.json`,
+      href: dataHref("application/json", JSON.stringify(detail, null, 2)),
+    },
+    {
       format: "pdf-print",
-      label: "PDF / Print",
+      label: "Print / Save as PDF",
       filename: `${basename}.pdf`,
       href: "#print-work",
     },
@@ -204,37 +214,60 @@ export function buildSingleFileArtifactExports(detail) {
     ?? "artifact";
   const filename = artifact.filename ?? metadata.filename ?? `${slug(label)}.txt`;
   const markdown = singleFileArtifactMarkdown(detail);
+  const content = artifact.content ?? "";
+  const original = {
+    format: "original",
+    label: "Original",
+    filename,
+    href: dataHref(mimeTypeForArtifact(artifact.format ?? metadata.format), content),
+    primary: true,
+  };
+  const markdownExport = {
+    format: "md",
+    label: "Markdown",
+    filename: replaceExtension(filename, "md"),
+    href: dataHref("text/markdown", markdown),
+  };
+  const textExport = {
+    format: "txt",
+    label: "Text",
+    filename: replaceExtension(filename, "txt"),
+    href: dataHref("text/plain", content || markdown),
+  };
+  const htmlExport = {
+    format: "html",
+    label: "HTML",
+    filename: replaceExtension(filename, "html"),
+    href: dataHref(
+      "text/html",
+      `<pre>${String(content || markdown)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")}</pre>`,
+    ),
+  };
+  const jsonExport = {
+    format: "json",
+    label: "Metadata JSON",
+    filename: replaceExtension(filename, "json"),
+    href: dataHref("application/json", JSON.stringify(detail, null, 2)),
+  };
+  const printExport = {
+    format: "pdf-print",
+    label: "Print / Save as PDF",
+    filename: replaceExtension(filename, "pdf"),
+    href: "#print-work",
+  };
+  const artifactFormat = String(artifact.format ?? metadata.format ?? "")
+    .toLowerCase();
+  const alternatives = [markdownExport, textExport, htmlExport];
+  if (artifactFormat === "json") {
+    alternatives.push(jsonExport);
+  }
   return [
-    {
-      format: "json",
-      label: "JSON",
-      filename: `${slug(label)}.json`,
-      href: dataHref("application/json", JSON.stringify(detail, null, 2)),
-    },
-    {
-      format: "original",
-      label: "Original",
-      filename,
-      href: dataHref(mimeTypeForArtifact(artifact.format ?? metadata.format), artifact.content ?? ""),
-    },
-    {
-      format: "md",
-      label: "Markdown",
-      filename: `${slug(label)}.md`,
-      href: dataHref("text/markdown", markdown),
-    },
-    {
-      format: "txt",
-      label: "Text",
-      filename: `${slug(label)}.txt`,
-      href: dataHref("text/plain", artifact.content ?? markdown),
-    },
-    {
-      format: "pdf-print",
-      label: "PDF / Print",
-      filename: `${slug(label)}.pdf`,
-      href: "#print-work",
-    },
+    original,
+    ...alternatives,
+    printExport,
   ];
 }
 
@@ -250,22 +283,66 @@ function renderExportControls(parent, detail, handlers) {
   box.classList.add("export-controls", "contain-text");
   box.setAttribute("data-export-controls", "");
   appendTextElement(box, "h4", "", "Export");
-  for (const item of buildArtifactExports(detail)) {
-    if (item.format === "pdf-print") {
-      const button = document.createElement("button");
-      button.type = "button";
-      setText(button, item.label);
-      button.addEventListener("click", () => {
-        handlers.onPrintWork?.();
-      });
-      box.append(button);
-      continue;
+  const exports = buildArtifactExports(detail);
+  const primaryExport = exports.find((item) => item.primary)
+    ?? exports.find((item) => item.format !== "pdf-print");
+  if (primaryExport) {
+    const primary = document.createElement("a");
+    primary.classList.add("control-compact", "button-link");
+    primary.setAttribute("data-primary-export", "");
+    primary.href = primaryExport.href;
+    primary.download = primaryExport.filename;
+    primary.setAttribute("download", primaryExport.filename);
+    setText(primary, "Export");
+    box.append(primary);
+  }
+  const alternatives = exports.filter((item) => (
+    item !== primaryExport && item.format !== "pdf-print"
+  ));
+  if (alternatives.length) {
+    const label = document.createElement("span");
+    label.classList.add("export-alternative-label");
+    label.setAttribute("data-export-alternative-label", "");
+    setText(label, "Export alternative");
+    box.append(label);
+
+    const select = document.createElement("select");
+    select.classList.add("control-compact");
+    select.setAttribute("data-export-alternative-select", "");
+    for (const item of alternatives) {
+      const option = document.createElement("option");
+      option.value = item.format;
+      setText(option, item.label);
+      select.append(option);
     }
-    const link = document.createElement("a");
-    link.href = item.href;
-    link.download = item.filename;
-    setText(link, item.label);
-    box.append(link);
+    box.append(select);
+
+    const alternative = document.createElement("a");
+    alternative.classList.add("control-compact", "button-link");
+    alternative.setAttribute("data-alternative-export", "");
+    const syncAlternative = () => {
+      const item = alternatives.find((entry) => entry.format === select.value)
+        ?? alternatives[0];
+      alternative.href = item.href;
+      alternative.download = item.filename;
+      alternative.setAttribute("download", item.filename);
+      setText(alternative, "Export alternative");
+    };
+    select.addEventListener("change", syncAlternative);
+    syncAlternative();
+    box.append(alternative);
+  }
+  const printExport = exports.find((item) => item.format === "pdf-print");
+  if (printExport) {
+    const button = document.createElement("button");
+    button.classList.add("control-compact");
+    button.type = "button";
+    button.setAttribute("data-print-export", "");
+    setText(button, printExport.label);
+    button.addEventListener("click", () => {
+      handlers.onPrintWork?.();
+    });
+    box.append(button);
   }
   parent.append(box);
 }

@@ -437,6 +437,14 @@ p {
   display: inline-block;
 }
 
+.button-link {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  line-height: 1.2;
+  text-decoration: none;
+}
+
 .work-heading {
   font-weight: 700;
 }
@@ -455,6 +463,19 @@ p {
 .export-controls h4 {
   flex-basis: 100%;
   margin: 0;
+}
+
+.export-controls select.control-compact {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  width: auto;
+}
+
+.export-alternative-label {
+  color: var(--muted);
+  font-size: 0.8125rem;
 }
 
 .feedback-form {

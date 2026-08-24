@@ -157,6 +157,28 @@ const genericDetail = {
   },
 };
 
+const textArtifactDetail = {
+  metadata: {
+    reference: {
+      artifact_id: "artifact--note",
+      artifact_type: "single_file_artifact",
+      schema_version: "1.0",
+      display_label: "Plain note",
+    },
+    filename: "note.txt",
+    artifact_family: "document",
+    format: "text",
+    byte_size: 18,
+  },
+  artifact: {
+    artifact_family: "document",
+    format: "text",
+    filename: "note.txt",
+    content: "Plain text note.\n",
+    summary: "A plain text note.",
+  },
+};
+
 test("buildArtifactCreateRequest maps form data to API payload", () => {
   const formData = new FormData();
   formData.set("artifact_family", "code");
@@ -501,21 +523,22 @@ test("buildBlueprintDownload creates a safe filename and JSON data URL", () => {
   );
 });
 
-test("buildBlueprintExports offers JSON, Markdown, text, and print export options", () => {
+test("buildBlueprintExports offers Markdown, text, metadata, and print export options", () => {
   const exports = buildBlueprintExports(detail);
 
   assert.deepEqual(
     exports.map((item) => item.format),
-    ["json", "md", "txt", "pdf-print"],
+    ["md", "txt", "json", "pdf-print"],
   );
-  assert.equal(exports[0].filename, "safe-blueprint.json");
-  assert.equal(exports[1].filename, "safe-blueprint.md");
-  assert.equal(exports[2].filename, "safe-blueprint.txt");
-  assert.equal(exports[1].href.startsWith("data:text/markdown;charset=utf-8,"), true);
-  assert.equal(exports[2].href.startsWith("data:text/plain;charset=utf-8,"), true);
+  assert.equal(exports[0].filename, "safe-blueprint.md");
+  assert.equal(exports[1].filename, "safe-blueprint.txt");
+  assert.equal(exports[2].filename, "safe-blueprint.json");
+  assert.equal(exports[0].primary, true);
+  assert.equal(exports[0].href.startsWith("data:text/markdown;charset=utf-8,"), true);
+  assert.equal(exports[1].href.startsWith("data:text/plain;charset=utf-8,"), true);
   assert.equal(exports[3].href, "#print-work");
   assert.match(
-    decodeURIComponent(exports[1].href.split(",", 2)[1]),
+    decodeURIComponent(exports[0].href.split(",", 2)[1]),
     /# Safe <Blueprint>/,
   );
 });
@@ -536,12 +559,107 @@ test("renderWorkDetail renders export controls for every supported format", () =
     child.attributes["data-export-controls"] === ""
   ));
   assert.ok(exportBox);
-  assert.equal(
-    exportBox.children.map((child) => child.textContent).join(" ").includes("Markdown"),
-    true,
+  const primary = exportBox.children.find((child) => (
+    child.attributes["data-primary-export"] === ""
+  ));
+  const select = exportBox.children.find((child) => (
+    child.attributes["data-export-alternative-select"] === ""
+  ));
+  assert.ok(primary);
+  assert.ok(select);
+  assert.equal(primary.textContent, "Export");
+  assert.equal(primary.attributes.download, "safe-blueprint.md");
+  assert.deepEqual(
+    select.children.map((child) => child.textContent),
+    ["Text", "Metadata JSON"],
   );
   assert.equal(
-    exportBox.children.map((child) => child.textContent).join(" ").includes("PDF / Print"),
+    exportBox.children.map((child) => child.textContent).join(" ").includes("Print / Save as PDF"),
     true,
+  );
+});
+
+test("renderWorkDetail renders compact artifact-aware export controls", () => {
+  const container = node();
+  let printed = false;
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: genericDetail, error: null },
+      feedback: { status: "idle", events: [], error: null },
+    },
+    { onSubmitFeedback: () => {}, onPrintWork: () => { printed = true; } },
+  );
+
+  const exportBox = container.children.find((child) => (
+    child.attributes["data-export-controls"] === ""
+  ));
+  assert.ok(exportBox);
+  const primary = exportBox.children.find((child) => (
+    child.attributes["data-primary-export"] === ""
+  ));
+  const label = exportBox.children.find((child) => (
+    child.attributes["data-export-alternative-label"] === ""
+  ));
+  const select = exportBox.children.find((child) => (
+    child.attributes["data-export-alternative-select"] === ""
+  ));
+  const alternative = exportBox.children.find((child) => (
+    child.attributes["data-alternative-export"] === ""
+  ));
+  const print = exportBox.children.find((child) => (
+    child.attributes["data-print-export"] === ""
+  ));
+
+  assert.ok(primary);
+  assert.ok(label);
+  assert.ok(select);
+  assert.ok(alternative);
+  assert.ok(print);
+  assert.equal(primary.textContent, "Export");
+  assert.equal(label.textContent, "Export alternative");
+  assert.equal(primary.attributes.download, "password_generator.py");
+  assert.equal(primary.classList.values.includes("control-compact"), true);
+  assert.equal(select.classList.values.includes("control-compact"), true);
+  assert.equal(alternative.classList.values.includes("control-compact"), true);
+  assert.equal(print.classList.values.includes("control-compact"), true);
+  assert.deepEqual(
+    select.children.map((child) => child.textContent),
+    ["Markdown", "Text", "HTML"],
+  );
+  select.value = "html";
+  select.onchange();
+  assert.equal(alternative.attributes.download.endsWith(".html"), true);
+  print.onclick();
+  assert.equal(printed, true);
+});
+
+test("renderWorkDetail omits metadata JSON from plain text artifact alternatives", () => {
+  const container = node();
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: textArtifactDetail, error: null },
+      feedback: { status: "idle", events: [], error: null },
+    },
+    { onSubmitFeedback: () => {}, onPrintWork: () => {} },
+  );
+
+  const exportBox = container.children.find((child) => (
+    child.attributes["data-export-controls"] === ""
+  ));
+  const primary = exportBox.children.find((child) => (
+    child.attributes["data-primary-export"] === ""
+  ));
+  const select = exportBox.children.find((child) => (
+    child.attributes["data-export-alternative-select"] === ""
+  ));
+
+  assert.equal(primary.attributes.download, "note.txt");
+  assert.deepEqual(
+    select.children.map((child) => child.textContent),
+    ["Markdown", "Text", "HTML"],
   );
 });
