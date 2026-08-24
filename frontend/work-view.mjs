@@ -143,7 +143,7 @@ function renderExportControls(parent, detail, handlers) {
 export function renderWorkList(container, work, handlers) {
   container.replaceChildren();
   if (work.list.status === "loading") {
-    appendTextElement(container, "p", "muted", "Loading Work...");
+    appendTextElement(container, "p", "muted", "Loading Artifacts...");
     return;
   }
   if (work.list.status === "error") {
@@ -151,7 +151,7 @@ export function renderWorkList(container, work, handlers) {
     return;
   }
   if (!work.list.items.length) {
-    appendTextElement(container, "p", "muted", "No Work loaded yet.");
+    appendTextElement(container, "p", "muted", "No Artifacts loaded yet.");
     return;
   }
   for (const item of work.list.items) {
@@ -159,6 +159,9 @@ export function renderWorkList(container, work, handlers) {
     button.type = "button";
     button.classList.add("work-list-item", "contain-text");
     button.setAttribute("data-artifact-id", item.reference.artifact_id);
+    if (work.selectedArtifactId === item.reference.artifact_id) {
+      button.setAttribute("aria-current", "true");
+    }
     setText(button, compactText([
       item.reference.display_label,
       item.reference.artifact_id,
@@ -328,12 +331,12 @@ export function renderWorkDetail(container, work, handlers) {
       container,
       "p",
       "muted",
-      "Select a Work item to inspect its canonical backend detail.",
+      "Select an Artifact to inspect its canonical backend detail.",
     );
     return;
   }
   if (work.detail.status === "loading") {
-    appendTextElement(container, "p", "muted", "Loading Work detail...");
+    appendTextElement(container, "p", "muted", "Loading Artifact detail...");
     return;
   }
   if (work.detail.status === "error") {

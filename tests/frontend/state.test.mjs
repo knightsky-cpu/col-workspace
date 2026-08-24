@@ -202,7 +202,7 @@ test("activity projection tolerates malformed receipt entries", () => {
     [
       "Action",
       "Citation",
-      "Work",
+      "Artifact",
       "Feedback",
       "Memory proposal",
       "Adaptation",

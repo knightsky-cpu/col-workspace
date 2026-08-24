@@ -85,6 +85,11 @@ the implementation boundary.
   before excessive visual polish.
 - Polish issues should be tracked without derailing completion of core
   functional wiring.
+- Pass proposals should prioritize baseline application mechanics and
+  functionality before conversational-friction or cosmetic polish work. Core
+  controls still needing functional closure include artifact interaction,
+  memory lifecycle controls, chat session controls, authentication/ownership,
+  and any remaining backend-to-frontend contract wiring.
 - Memory-request wording should be normalized in a later pass. Users should not have to know the exact trigger word `remember`; explicit requests like `save to memory`, `store this preference`, or `keep this preference` should route to the same governed memory proposal flow when policy allows it.
 - User-facing names for memory, Work, Artifacts, and Chats should use human
   language conventions instead of source-code or database conventions. For

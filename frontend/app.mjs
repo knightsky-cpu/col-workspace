@@ -139,7 +139,7 @@ function renderLayout() {
   }
   for (const button of document.querySelectorAll('[data-drawer-toggle="right"]')) {
     const expanded = isDrawerExpanded(layoutState, "right");
-    setText(button, expanded ? "Hide" : "Show Artifacts");
+    setText(button, expanded ? "Hide" : "Show Artifacts Viewer");
     button.setAttribute("aria-expanded", String(expanded));
   }
 
@@ -147,7 +147,7 @@ function renderLayout() {
   const artifactsExpanded = layoutState.artifactDrawerMode === "expanded";
   setText(
     artifactExpandButton,
-    artifactsExpanded ? "Normal Artifacts" : "Expand Artifacts",
+    artifactsExpanded ? "Normal Viewer" : "Expand Artifacts Viewer",
   );
   artifactExpandButton.setAttribute("aria-expanded", String(artifactsExpanded));
 
@@ -391,7 +391,7 @@ async function submitArtifactFeedback(decision) {
   }
   const request = buildArtifactFeedbackChatRequest(
     state.context,
-    `Record ${decision.decision} feedback for Work artifact ${decision.artifact_id}.`,
+    `Record ${decision.decision} feedback for Artifact ${decision.artifact_id}.`,
     decision,
   );
   await submitRequest(request);

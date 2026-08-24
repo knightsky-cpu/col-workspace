@@ -16,7 +16,7 @@ export function renderReceipts(container, response) {
     appendReceipt(list, "Citation", citation.label);
   }
   for (const artifact of response.artifacts ?? []) {
-    appendReceipt(list, "Work", artifact.display_label);
+    appendReceipt(list, "Artifact", artifact.display_label);
   }
   for (const feedback of response.artifact_feedback ?? []) {
     appendReceipt(

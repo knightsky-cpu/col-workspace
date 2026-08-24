@@ -345,7 +345,7 @@ function activityEntriesFromResponse(response) {
     const artifact = objectOrEmpty(rawArtifact);
     entries.push({
       kind: "work",
-      label: artifact.display_label ?? "Work",
+      label: artifact.display_label ?? "Artifact",
       detail: artifact.artifact_id ?? "",
     });
   }
