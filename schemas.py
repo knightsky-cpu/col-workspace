@@ -201,6 +201,16 @@ _DOCUMENT_ARTIFACT_FORMATS = {"markdown", "text", "html"}
 _DATA_ARTIFACT_FORMATS = {"json", "yaml", "toml"}
 
 
+def _allowed_single_file_artifact_formats(
+    artifact_family: SingleFileArtifactFamily,
+) -> set[str]:
+    return {
+        "code": _CODE_ARTIFACT_FORMATS,
+        "document": _DOCUMENT_ARTIFACT_FORMATS,
+        "data": _DATA_ARTIFACT_FORMATS,
+    }[artifact_family]
+
+
 class SingleFileArtifact(StrictModel):
     artifact_family: SingleFileArtifactFamily
     format: SingleFileArtifactFormat
@@ -221,11 +231,9 @@ class SingleFileArtifact(StrictModel):
 
     @model_validator(mode="after")
     def validate_family_format_pair(self) -> Self:
-        allowed_formats = {
-            "code": _CODE_ARTIFACT_FORMATS,
-            "document": _DOCUMENT_ARTIFACT_FORMATS,
-            "data": _DATA_ARTIFACT_FORMATS,
-        }[self.artifact_family]
+        allowed_formats = _allowed_single_file_artifact_formats(
+            self.artifact_family
+        )
         if self.format not in allowed_formats:
             raise ValueError("Artifact family and format do not match.")
         if self.format == "json":
@@ -264,6 +272,34 @@ class SingleFileArtifactListResponse(StrictModel):
     artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
     artifacts: list[SingleFileArtifactMetadata] = Field(max_length=50)
     next_before: IdentifierStr | None = None
+
+
+class SingleFileArtifactCreateRequest(StrictModel):
+    session_id: IdentifierStr
+    user_id: IdentifierStr
+    artifact_family: SingleFileArtifactFamily
+    format: SingleFileArtifactFormat
+    filename: ArtifactFilenameStr
+    source_text: SourceText
+    display_label: DisplayLabelStr | None = None
+    context_messages: list[SourceText] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+
+    @model_validator(mode="after")
+    def validate_family_format_pair(self) -> Self:
+        if self.format not in _allowed_single_file_artifact_formats(
+            self.artifact_family
+        ):
+            raise ValueError("Artifact family and format do not match.")
+        return self
+
+
+class SingleFileArtifactCreateResponse(StrictModel):
+    artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
+    reference: ArtifactReference
+    artifact: SingleFileArtifact
 
 
 class ArtifactFeedbackCounts(StrictModel):

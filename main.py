@@ -57,8 +57,16 @@ from generic_artifact_service import (
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
 )
-from generic_artifact_creation_service import GenericArtifactCreationService
-from generic_artifact_generation import generate_generic_artifact
+from generic_artifact_creation_service import (
+    GenericArtifactCreationCommand,
+    GenericArtifactCreationService,
+)
+from generic_artifact_generation import (
+    GenericArtifactGenerationError,
+    GenericArtifactGenerationRequest,
+    GenericArtifactGenerationTimeoutError,
+    generate_generic_artifact,
+)
 from artifact_feedback_service import (
     ArtifactFeedbackSchemaConflictError,
     ArtifactFeedbackService,
@@ -118,6 +126,8 @@ from schemas import (
     MemoryProposalReceipt,
     SynthesisRequest,
     SynthesisResponse,
+    SingleFileArtifactCreateRequest,
+    SingleFileArtifactCreateResponse,
     SingleFileArtifactDetailResponse,
     SingleFileArtifactListResponse,
     WorkspaceCreateRequest,
@@ -1169,6 +1179,72 @@ async def list_generic_artifacts(
         ) from exc
     except MemoryEngineError as exc:
         _raise_database_http_error(exc)
+
+
+@app.post(
+    "/api/projects/{project_id}/artifacts",
+    response_model=SingleFileArtifactCreateResponse,
+)
+async def create_generic_artifact(
+    project_id: IdentifierStr,
+    payload: SingleFileArtifactCreateRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> SingleFileArtifactCreateResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=payload.user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        artifact = await request.app.state.generic_artifact_generator(
+            request.app.state.genai_client,
+            GenericArtifactGenerationRequest(
+                artifact_family=payload.artifact_family,
+                artifact_format=payload.format,
+                filename=payload.filename,
+                source_text=payload.source_text,
+                context_messages=tuple(payload.context_messages),
+            ),
+        )
+        result = (
+            await request.app.state.generic_artifact_creation_service
+            .create_artifact(
+                GenericArtifactCreationCommand(
+                    project_id=effective_project_id,
+                    session_id=payload.session_id,
+                    user_id=effective_user_id,
+                    artifact=artifact.model_dump(mode="json"),
+                    display_label=payload.display_label,
+                    originating_turn_id=None,
+                )
+            )
+        )
+    except GenericArtifactGenerationTimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Artifact generation timed out.",
+        ) from exc
+    except GenericArtifactGenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Artifact generation failed.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+    return SingleFileArtifactCreateResponse(
+        reference=result.reference,
+        artifact=result.artifact,
+    )
 
 
 @app.get(

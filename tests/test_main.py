@@ -27,8 +27,17 @@ from generic_artifact_service import (
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
 )
-from generic_artifact_creation_service import GenericArtifactCreationService
-from generic_artifact_generation import generate_generic_artifact
+from generic_artifact_creation_service import (
+    GenericArtifactCreationCommand,
+    GenericArtifactCreationResult,
+    GenericArtifactCreationService,
+)
+from generic_artifact_generation import (
+    GenericArtifactGenerationError,
+    GenericArtifactGenerationRequest,
+    GenericArtifactGenerationTimeoutError,
+    generate_generic_artifact,
+)
 from agent_col_turn_service import (
     AgentColTurnCommand,
     AgentColTurnResponderError,
@@ -711,6 +720,41 @@ class FakeGenericArtifactReadService:
         if self.detail_error is not None:
             raise self.detail_error
         return self.detail_result
+
+
+@dataclass
+class FakeGenericArtifactGenerator:
+    result: SingleFileArtifact
+    error: Exception | None = None
+    calls: list[tuple[object, GenericArtifactGenerationRequest]] = (
+        field(default_factory=list)
+    )
+
+    async def __call__(
+        self,
+        client: object,
+        artifact_request: GenericArtifactGenerationRequest,
+    ) -> SingleFileArtifact:
+        self.calls.append((client, artifact_request))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+@dataclass
+class FakeGenericArtifactCreationService:
+    result: GenericArtifactCreationResult
+    error: Exception | None = None
+    calls: list[GenericArtifactCreationCommand] = field(default_factory=list)
+
+    async def create_artifact(
+        self,
+        command: GenericArtifactCreationCommand,
+    ) -> GenericArtifactCreationResult:
+        self.calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.result
 
 
 @dataclass
@@ -2094,6 +2138,292 @@ async def test_get_generic_artifact_returns_canonical_detail(
             artifact_id="artifact-1",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_generic_artifact_generates_persists_and_returns_reference(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    generated_artifact = SingleFileArtifact(
+        artifact_family="code",
+        format="python",
+        filename="password_generator.py",
+        content="print('generated')\n",
+        summary="Generated password script.",
+    )
+    reference = ArtifactReference(
+        artifact_type="single_file_artifact",
+        project_id="project-1",
+        artifact_id="artifact-generated",
+        schema_version="1.0",
+        display_label="Password Generator",
+    )
+    generator = FakeGenericArtifactGenerator(result=generated_artifact)
+    creator = FakeGenericArtifactCreationService(
+        result=GenericArtifactCreationResult(
+            reference=reference,
+            artifact=generated_artifact,
+        )
+    )
+    main.app.state.generic_artifact_generator = generator
+    main.app.state.generic_artifact_creation_service = creator
+
+    response = await client.post(
+        "/api/projects/project-1/artifacts",
+        json={
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "artifact_family": "code",
+            "format": "python",
+            "filename": "password_generator.py",
+            "source_text": (
+                "Create a Python password generator using secrets."
+            ),
+            "display_label": "Password Generator",
+            "context_messages": ["Use a command-line script."],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "artifact_contract_version": "1.0",
+        "reference": reference.model_dump(mode="json"),
+        "artifact": generated_artifact.model_dump(mode="json"),
+    }
+    assert generator.calls == [
+        (
+            service_state.genai_client,
+            GenericArtifactGenerationRequest(
+                artifact_family="code",
+                artifact_format="python",
+                filename="password_generator.py",
+                source_text=(
+                    "Create a Python password generator using secrets."
+                ),
+                context_messages=("Use a command-line script.",),
+            ),
+        )
+    ]
+    assert creator.calls == [
+        GenericArtifactCreationCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            artifact=generated_artifact.model_dump(mode="json"),
+            display_label="Password Generator",
+            originating_turn_id=None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_generic_artifact_rejects_family_format_mismatch(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    generator = FakeGenericArtifactGenerator(
+        result=service_state.generic_artifact_service.detail_result.artifact
+    )
+    creator = FakeGenericArtifactCreationService(
+        result=GenericArtifactCreationResult(
+            reference=(
+                service_state.generic_artifact_service.detail_result.metadata
+                .reference
+            ),
+            artifact=(
+                service_state.generic_artifact_service.detail_result.artifact
+            ),
+        )
+    )
+    main.app.state.generic_artifact_generator = generator
+    main.app.state.generic_artifact_creation_service = creator
+
+    response = await client.post(
+        "/api/projects/project-1/artifacts",
+        json={
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "artifact_family": "code",
+            "format": "markdown",
+            "filename": "notes.md",
+            "source_text": "Create markdown notes.",
+        },
+    )
+
+    assert response.status_code == 422
+    assert generator.calls == []
+    assert creator.calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_generic_artifact_rejects_unbounded_context_messages(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    generator = FakeGenericArtifactGenerator(
+        result=service_state.generic_artifact_service.detail_result.artifact
+    )
+    main.app.state.generic_artifact_generator = generator
+
+    response = await client.post(
+        "/api/projects/project-1/artifacts",
+        json={
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "artifact_family": "code",
+            "format": "python",
+            "filename": "script.py",
+            "source_text": "Create a script.",
+            "context_messages": [f"context {index}" for index in range(11)],
+        },
+    )
+
+    assert response.status_code == 422
+    assert generator.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    (
+        (
+            GenericArtifactGenerationTimeoutError("private timeout"),
+            504,
+            "Artifact generation timed out.",
+        ),
+        (
+            GenericArtifactGenerationError("private provider failure"),
+            502,
+            "Artifact generation failed.",
+        ),
+    ),
+)
+async def test_create_generic_artifact_translates_generation_failures(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    generator = FakeGenericArtifactGenerator(
+        result=service_state.generic_artifact_service.detail_result.artifact,
+        error=error,
+    )
+    main.app.state.generic_artifact_generator = generator
+
+    response = await client.post(
+        "/api/projects/project-1/artifacts",
+        json={
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "artifact_family": "code",
+            "format": "python",
+            "filename": "script.py",
+            "source_text": "Create a script.",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+    assert generator.calls == [
+        (
+            service_state.genai_client,
+            GenericArtifactGenerationRequest(
+                artifact_family="code",
+                artifact_format="python",
+                filename="script.py",
+                source_text="Create a script.",
+                context_messages=(),
+            ),
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_generic_artifact_translates_database_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    generated_artifact = SingleFileArtifact(
+        artifact_family="document",
+        format="markdown",
+        filename="notes.md",
+        content="# Notes\n",
+        summary="Notes",
+    )
+    generator = FakeGenericArtifactGenerator(result=generated_artifact)
+    creator = FakeGenericArtifactCreationService(
+        result=GenericArtifactCreationResult(
+            reference=(
+                service_state.generic_artifact_service.detail_result.metadata
+                .reference
+            ),
+            artifact=generated_artifact,
+        ),
+        error=main.MemoryEngineError("private database failure"),
+    )
+    main.app.state.generic_artifact_generator = generator
+    main.app.state.generic_artifact_creation_service = creator
+
+    response = await client.post(
+        "/api/projects/project-1/artifacts",
+        json={
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "artifact_family": "document",
+            "format": "markdown",
+            "filename": "notes.md",
+            "source_text": "Create notes.",
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Database operation failed."}
+    assert creator.calls == [
+        GenericArtifactCreationCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            artifact=generated_artifact.model_dump(mode="json"),
+            display_label=None,
+            originating_turn_id=None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_mode_rejects_generic_artifact_project_mismatch_before_generation(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+    generator = FakeGenericArtifactGenerator(
+        result=service_state.generic_artifact_service.detail_result.artifact
+    )
+    main.app.state.generic_artifact_generator = generator
+
+    response = await client.post(
+        "/api/projects/agent-col/artifacts",
+        json={
+            "session_id": "session-1",
+            "user_id": "google--109876543210",
+            "artifact_family": "code",
+            "format": "python",
+            "filename": "script.py",
+            "source_text": "Create a script.",
+        },
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Authenticated user does not own this request."
+    }
+    assert generator.calls == []
 
 
 @pytest.mark.asyncio
