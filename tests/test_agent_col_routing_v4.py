@@ -19,6 +19,7 @@ def artifact_routing_input(**overrides: object) -> object:
         ),
         "artifact_creation_available": True,
         "structured_decision_present": False,
+        "recent_user_messages": (),
     }
     payload.update(overrides)
     return AgentColRoutingInput.model_validate(payload)
@@ -67,6 +68,42 @@ def test_v4_accepts_one_bounded_artifact_creation_directive() -> None:
         validate_routing_directive_for_input(directive, routing_input)
         is directive
     )
+
+
+def test_v4_routing_input_accepts_bounded_recent_user_context() -> None:
+    routing_input = artifact_routing_input(
+        current_message="Turn that into a markdown deliverable.",
+        recent_user_messages=(
+            "I need a simple Pomodoro timer with work and break intervals.",
+        ),
+    )
+
+    assert routing_input.current_message == (
+        "Turn that into a markdown deliverable."
+    )
+    assert routing_input.recent_user_messages == (
+        "I need a simple Pomodoro timer with work and break intervals.",
+    )
+
+
+def test_v4_provider_instruction_accepts_common_artifact_words() -> None:
+    from agent_col_routing_provider_v4 import (
+        AGENT_COL_ROUTING_V4_SYSTEM_INSTRUCTION,
+    )
+
+    instruction = AGENT_COL_ROUTING_V4_SYSTEM_INSTRUCTION.casefold()
+
+    for phrase in (
+        "artifact",
+        "deliverable",
+        "markdown",
+        "text",
+        "json",
+        "pdf",
+        "recent user-authored context",
+        "simple common artifacts",
+    ):
+        assert phrase in instruction
 
 
 @pytest.mark.parametrize(

@@ -51,7 +51,9 @@ directly to `origin/main` with no pull request. Use explicit path staging for
 the accepted pass, not broad staging such as `git add -A`. Because the managed
 workspace may block writes to `.git`, perform the explicit staging and commit
 with elevated Git access when needed, then push the resulting commit to
-`origin/main`. Do not checkpoint unaccepted work.
+`origin/main`. The user's standing instruction authorizes this exact workflow
+whenever they ask for a GitHub checkpoint after manual verification succeeds.
+Do not checkpoint unaccepted work.
 
 ## Source-changing implementation workflow
 

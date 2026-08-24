@@ -136,6 +136,42 @@ def artifact_detail(
     )
 
 
+def test_build_artifact_source_text_uses_recent_context_for_reference_request(
+) -> None:
+    from agent_col_artifact_executor import build_artifact_source_text
+
+    source_text = build_artifact_source_text(
+        current_message="Turn that into a markdown artifact.",
+        recent_user_messages=(
+            "I need a simple Pomodoro timer with work sessions, short breaks, "
+            "and a reset control.",
+        ),
+    )
+
+    assert "[CURRENT_ARTIFACT_REQUEST]" in source_text
+    assert "Turn that into a markdown artifact." in source_text
+    assert "[RECENT_USER_CONTEXT]" in source_text
+    assert "simple Pomodoro timer" in source_text
+
+
+def test_build_artifact_source_text_keeps_self_contained_request_single_source(
+) -> None:
+    from agent_col_artifact_executor import build_artifact_source_text
+
+    source_text = build_artifact_source_text(
+        current_message=(
+            "Create a blueprint for a simple Pomodoro timer with a work "
+            "interval, break interval, start button, pause button, and reset."
+        ),
+        recent_user_messages=(
+            "Unrelated old request about a study tracker.",
+        ),
+    )
+
+    assert source_text.startswith("Create a blueprint for a simple Pomodoro")
+    assert "Unrelated old request" not in source_text
+
+
 @dataclass
 class FakeSynthesisService:
     generated: SynthesisBlueprint
@@ -274,6 +310,62 @@ async def test_artifact_executor_generates_once_and_projects_canonical_receipts(
     assert result.adaptations == (adaptation,)
     assert result.projection.adaptations == (adaptation,)
     assert result.projection.limitations == ()
+
+
+@pytest.mark.asyncio
+async def test_artifact_executor_uses_server_projected_source_text(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactExecutionCommand,
+        AgentColArtifactExecutor,
+    )
+    from synthesis_service import SynthesisCommand
+
+    claim = initial_claim()
+    generated = blueprint()
+    artifact = artifact_for_claim(claim)
+    action = AgentActionReceipt(
+        action_name="synthesize_project",
+        status="completed",
+    )
+    effect_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    synthesis_service = FakeSynthesisService(generated)
+    ledger = FakeArtifactLedger(
+        ChatTurnArtifactEffectResult(
+            claim=effect_claim,
+            artifact=artifact,
+        )
+    )
+    reader = FakeArtifactReader(
+        artifact_detail(effect_claim, artifact, generated)
+    )
+    executor = AgentColArtifactExecutor(
+        synthesis_service=synthesis_service,
+        artifact_ledger=ledger,
+        artifact_reader=reader,
+    )
+
+    await executor.execute(
+        AgentColArtifactExecutionCommand(
+            claim=claim,
+            routing_directive=artifact_directive(),
+            observed_at=NOW,
+            source_text="Server-owned source projection.",
+        )
+    )
+
+    assert synthesis_service.commands == [
+        SynthesisCommand(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            source_text="Server-owned source projection.",
+        )
+    ]
 
 
 @pytest.mark.asyncio

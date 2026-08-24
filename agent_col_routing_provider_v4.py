@@ -36,12 +36,19 @@ Multi-capability requests choose clarify and ask the user to stage the work.
 
 Choose Artifact only when artifact_creation_available is true,
 structured_decision_present is false, and the current user message explicitly
-requests creation of a structured blueprint from substantial, sufficiently
-complete material. Emit operation and a short nonnumeric objective only. Never
-emit source text, project IDs, artifact IDs, Firestore paths, profile values,
-memory values, feedback, policy versions, or schema or provider configuration.
-Choose clarify when the requested blueprint lacks the material needed to create
-it. Choose direct for ordinary discussion about artifacts or blueprints.
+requests creation of a structured blueprint, artifact, deliverable, markdown,
+text, JSON, PDF, or printable project output. Simple common artifacts may be
+routed to Artifact using ordinary default assumptions; do not
+force clarification merely because the user did not enumerate every detail.
+Recent user-authored context may make a short current request complete when
+the user refers to "this", "that", "it", prior work, or the conversation.
+Emit operation and a short nonnumeric objective only. Never emit source text,
+project IDs, artifact IDs, Firestore paths, profile values, memory values,
+feedback, policy versions, or schema or provider configuration. Choose clarify
+only when the requested artifact has no usable objective, requires unavailable
+files or non-user context, or combines artifact creation with another major
+capability in one turn. Choose direct for ordinary discussion about artifacts
+or blueprints.
 
 Requirements Verification requires an explicit comparison objective plus
 distinguishable requirement and subject candidates. Select only provided block

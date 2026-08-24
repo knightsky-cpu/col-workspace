@@ -17,6 +17,7 @@ from agent_col_artifact_executor import (
     AgentColArtifactExecutionResult,
     AgentColArtifactExecutorConfigurationError,
     build_agent_col_artifact_model_context,
+    build_artifact_source_text,
 )
 from agent_col_artifact_feedback_executor import (
     AgentColArtifactFeedbackExecutionCommand,
@@ -472,6 +473,7 @@ class AgentColTurnService:
             text_projection_incomplete=(
                 text_projection.text_projection_incomplete
             ),
+            recent_user_messages=command.recent_user_messages,
             available_capabilities=(
                 self._expert_executor.available_capabilities
             ),
@@ -531,6 +533,7 @@ class AgentColTurnService:
                 exclude={
                     "artifact_creation_available",
                     "structured_decision_present",
+                    "recent_user_messages",
                 }
             )
         )
@@ -559,6 +562,10 @@ class AgentColTurnService:
                     claim=claim,
                     routing_directive=directive,
                     observed_at=self._wall_clock(),
+                    source_text=build_artifact_source_text(
+                        current_message=command.message,
+                        recent_user_messages=command.recent_user_messages,
+                    ),
                 )
             )
         except AgentColArtifactExecutorConfigurationError as exc:

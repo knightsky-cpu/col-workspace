@@ -69,6 +69,10 @@ class RoutingDirectiveInputError(RuntimeError):
 
 
 class AgentColRoutingInput(AgentColRoutingInputV3):
+    recent_user_messages: tuple[RoutingTaskText, ...] = Field(
+        default_factory=tuple,
+        max_length=6,
+    )
     artifact_creation_available: bool = False
     structured_decision_present: bool = False
 
@@ -161,6 +165,7 @@ def validate_routing_directive_for_input(
             exclude={
                 "artifact_creation_available",
                 "structured_decision_present",
+                "recent_user_messages",
             }
         )
     )

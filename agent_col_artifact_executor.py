@@ -1,6 +1,8 @@
 """Deterministic synchronous artifact execution for routed Agent_Col turns."""
 
 import json
+import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
@@ -28,6 +30,15 @@ from synthesis_service import (
 
 _CONTEXT_START = "[SERVER_VALIDATED_ARTIFACT_RESULT]"
 _CONTEXT_END = "[/SERVER_VALIDATED_ARTIFACT_RESULT]"
+_ARTIFACT_REFERENCE_WORDS = re.compile(
+    r"\b(?:that|this|it|above|previous|conversation|chat)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_TRIGGER_WORDS = re.compile(
+    r"\b(?:artifact|blueprint|deliverable|markdown|text|json|pdf|printable)\b",
+    re.IGNORECASE,
+)
+_MAX_RECENT_ARTIFACT_CONTEXT_MESSAGES = 3
 
 
 class ArtifactSynthesisService(Protocol):
@@ -85,6 +96,7 @@ class AgentColArtifactExecutionCommand:
     claim: ChatTurnClaim
     routing_directive: AgentColRoutingDirective
     observed_at: datetime
+    source_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +134,9 @@ class AgentColArtifactExecutor:
                         project_id=claim.request.project_id,
                         session_id=claim.request.session_id,
                         user_id=claim.request.user_id,
-                        source_text=claim.request.message,
+                        source_text=(
+                            command.source_text or claim.request.message
+                        ),
                     )
                 )
             )
@@ -271,4 +285,53 @@ def build_agent_col_artifact_model_context(
     return types.Content(
         role="user",
         parts=[types.Part.from_text(text=text)],
+    )
+
+
+def build_artifact_source_text(
+    *,
+    current_message: str,
+    recent_user_messages: Sequence[str] = (),
+) -> str:
+    """Build the exact server-owned source text supplied to synthesis.
+
+    Self-contained artifact requests remain a single-source command. Short
+    reference-style requests can include recent user-authored messages, making
+    turns such as "turn that into a markdown artifact" useful without letting
+    the model choose persistence input.
+    """
+    current = current_message.strip()
+    if not current:
+        raise AgentColArtifactExecutorConfigurationError(
+            "Artifact source text is invalid."
+        )
+    if not _should_include_recent_artifact_context(current):
+        return current
+
+    recent = tuple(
+        message.strip()
+        for message in recent_user_messages[-_MAX_RECENT_ARTIFACT_CONTEXT_MESSAGES:]
+        if message.strip()
+    )
+    if not recent:
+        return current
+    recent_context = "\n\n".join(recent)
+    return (
+        "[CURRENT_ARTIFACT_REQUEST]\n"
+        f"{current}\n"
+        "[/CURRENT_ARTIFACT_REQUEST]\n\n"
+        "[RECENT_USER_CONTEXT]\n"
+        f"{recent_context}\n"
+        "[/RECENT_USER_CONTEXT]"
+    )
+
+
+def _should_include_recent_artifact_context(current_message: str) -> bool:
+    word_count = len(re.findall(r"\b[\w'-]+\b", current_message))
+    return bool(
+        _ARTIFACT_TRIGGER_WORDS.search(current_message)
+        and (
+            word_count < 10
+            or _ARTIFACT_REFERENCE_WORDS.search(current_message)
+        )
     )

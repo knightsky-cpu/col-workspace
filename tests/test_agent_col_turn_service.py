@@ -84,6 +84,39 @@ class RecordingResponder:
         return self.result
 
 
+class RecordingArtifactExecutor:
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+
+    async def execute(self, command: object) -> object:
+        from agent_col_artifact_executor import (
+            AgentColArtifactExecutionResult,
+            AgentColArtifactResponderProjection,
+        )
+        from schemas import ArtifactReference
+
+        self.calls.append(command)
+        artifact = ArtifactReference(
+            artifact_type="synthesis_blueprint",
+            project_id=command.claim.request.project_id,
+            artifact_id="artifact-1",
+            schema_version="2.0",
+            display_label="Simple Pomodoro Timer",
+        )
+        return AgentColArtifactExecutionResult(
+            claim=command.claim,
+            actions=(),
+            artifacts=(artifact,),
+            adaptations=(),
+            projection=AgentColArtifactResponderProjection(
+                artifact=artifact,
+                project_name="Simple Pomodoro Timer",
+                core_value_proposition="A minimal timer workflow.",
+                socratic_questions=(),
+            ),
+        )
+
+
 class SequenceClock:
     def __init__(self, *values: float) -> None:
         self._values = iter(values)
@@ -1291,6 +1324,72 @@ async def test_expert_starts_when_time_exceeds_responder_reserve() -> None:
     assert len(executor.calls) == 1
     assert result.actions == expert_context.actions
     assert result.citations == expert_context.citations
+
+
+@pytest.mark.asyncio
+async def test_artifact_turn_projects_recent_user_context_into_source_text(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Turn that into a markdown artifact.",
+        ),
+        ids=derive_chat_turn_ids("artifact-context-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    artifact_directive = AgentColRoutingDirectiveV4.model_validate(
+        {
+            "schema_version": "4.0",
+            "route": "artifact",
+            "artifact_intent": {
+                "operation": "create_blueprint",
+                "objective": "Create the requested artifact.",
+            },
+        }
+    )
+    artifact_routing = RecordingRoutingRequest(artifact_directive)
+    artifact_executor = RecordingArtifactExecutor()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        artifact_executor=artifact_executor,
+        artifact_routing_request=artifact_routing,
+    )
+
+    await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Turn that into a markdown artifact.",
+            recent_user_messages=(
+                "I need a simple Pomodoro timer with start, pause, reset, "
+                "work sessions, and short breaks.",
+            ),
+            chat_turn_claim=claim,
+        )
+    )
+
+    routing_input = artifact_routing.calls[0]["routing_input"]
+    assert routing_input.recent_user_messages == (
+        "I need a simple Pomodoro timer with start, pause, reset, "
+        "work sessions, and short breaks.",
+    )
+    artifact_command = artifact_executor.calls[0]
+    assert "[CURRENT_ARTIFACT_REQUEST]" in artifact_command.source_text
+    assert "Turn that into a markdown artifact." in artifact_command.source_text
+    assert "simple Pomodoro timer" in artifact_command.source_text
 
 
 @pytest.mark.asyncio
