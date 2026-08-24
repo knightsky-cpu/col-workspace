@@ -41,6 +41,10 @@ the implementation boundary.
   implementation-shaped.
 - Hiding either drawer must never hide, move offscreen, or make unusable the
   center chat composer.
+- The left drawer, center chat, and Artifacts drawer should behave as
+  independent same-layer application surfaces. Resizing, hiding, expanding, or
+  scrolling one surface should not push, scroll, or otherwise corrupt the other
+  two surfaces.
 - Replace the user-facing `Activity` section with `Chats`.
 - The product should store and expose chat sessions, not a non-interactive log
   of every low-level interaction.
@@ -56,6 +60,22 @@ the implementation boundary.
 - Agent Col should support conversational artifact creation from the current
   conversation when sufficient prior chat content exists, instead of requiring
   the user to paste explicit source text every time.
+- A request such as “create a blueprint for a simple Pomodoro timer” should not
+  create avoidable friction. If the user asks for a simple/common artifact, the
+  system should either produce a bounded simple version from safe ordinary
+  assumptions or intentionally route to research/source in a separately
+  approved capability flow, rather than repeatedly asking for specifications.
+- Users should be able to speak to Agent Col naturally without needing a prompt
+  guide or rigid command language. The collaboration layer should feel like
+  working with a capable colleague: ordinary requests should be interpreted
+  flexibly, missing details should be inferred when safe and low-risk, and
+  clarification should be reserved for materially ambiguous or unsafe cases.
+- Users need a clear way to inspect, modify, delete, add, approve, reject, and
+  correct memory/preferences from the UI. Agent Col should also be able to
+  honor explicit basic memory lifecycle requests in conversation when the
+  underlying governed-memory contract supports the action. If explicit memory
+  deletion or correction fails or has no visible interaction surface, that is
+  user-facing friction.
 - The frontend should remain focused on finishing backend-to-frontend wiring
   before excessive visual polish.
 - Polish issues should be tracked without derailing completion of core

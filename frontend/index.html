@@ -54,41 +54,43 @@
               Refresh
             </button>
           </div>
-          <section class="drawer-section" aria-labelledby="work-list-title" data-section="work">
-            <div class="section-heading">
-              <h2 id="work-list-title">Work</h2>
-              <button type="button" class="drawer-toggle" data-section-toggle="work" aria-expanded="false">
-                Expand
-              </button>
-            </div>
-            <div data-section-content="work" hidden>
-              <p class="form-error" role="alert" data-work-error hidden></p>
-              <div data-work-list></div>
-            </div>
-          </section>
-          <section class="drawer-section" aria-labelledby="memory-title" data-section="memory">
-            <div class="section-heading">
-              <h2 id="memory-title">Memory</h2>
-              <button type="button" class="drawer-toggle" data-section-toggle="memory" aria-expanded="false">
-                Expand
-              </button>
-            </div>
-            <div data-section-content="memory" hidden>
-              <p class="form-error" role="alert" data-memory-error hidden></p>
-              <div data-memory-panel></div>
-            </div>
-          </section>
-          <section class="drawer-section" aria-labelledby="chats-title" data-section="chats">
-            <div class="section-heading">
-              <h2 id="chats-title">Chats</h2>
-              <button type="button" class="drawer-toggle" data-section-toggle="chats" aria-expanded="false">
-                Expand
-              </button>
-            </div>
-            <div data-section-content="chats" hidden>
-              <div data-chats-list></div>
-            </div>
-          </section>
+          <div class="supporting-panel__body">
+            <section class="drawer-section" aria-labelledby="work-list-title" data-section="work">
+              <div class="section-heading">
+                <h2 id="work-list-title">Work</h2>
+                <button type="button" class="drawer-toggle" data-section-toggle="work" aria-expanded="false">
+                  Expand
+                </button>
+              </div>
+              <div data-section-content="work" hidden>
+                <p class="form-error" role="alert" data-work-error hidden></p>
+                <div data-work-list></div>
+              </div>
+            </section>
+            <section class="drawer-section" aria-labelledby="memory-title" data-section="memory">
+              <div class="section-heading">
+                <h2 id="memory-title">Memory</h2>
+                <button type="button" class="drawer-toggle" data-section-toggle="memory" aria-expanded="false">
+                  Expand
+                </button>
+              </div>
+              <div data-section-content="memory" hidden>
+                <p class="form-error" role="alert" data-memory-error hidden></p>
+                <div data-memory-panel></div>
+              </div>
+            </section>
+            <section class="drawer-section" aria-labelledby="chats-title" data-section="chats">
+              <div class="section-heading">
+                <h2 id="chats-title">Chats</h2>
+                <button type="button" class="drawer-toggle" data-section-toggle="chats" aria-expanded="false">
+                  Expand
+                </button>
+              </div>
+              <div data-section-content="chats" hidden>
+                <div data-chats-list></div>
+              </div>
+            </section>
+          </div>
         </aside>
 
         <main id="conversation-workspace" class="conversation" tabindex="-1">

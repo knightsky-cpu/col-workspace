@@ -134,8 +134,8 @@ export function renderMemoryPanel(container, memory, handlers) {
     return;
   }
 
-  renderActivePreferences(container, activePreferences(memory.profile));
   renderProposals(container, memory.unresolvedProposals ?? [], handlers);
+  renderActivePreferences(container, activePreferences(memory.profile));
   renderEvents(container, memory.events ?? []);
 }
 

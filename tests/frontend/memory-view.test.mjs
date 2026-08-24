@@ -128,6 +128,25 @@ test("renderMemoryPanel renders active preferences, proposals, and events safely
   }]);
 });
 
+test("renderMemoryPanel orders pending proposals before active preferences and events", () => {
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+  });
+
+  const text = textTree(container);
+  const pendingIndex = text.indexOf("Pending proposals");
+  const activeIndex = text.indexOf("Active preferences");
+  const recentIndex = text.indexOf("Recent memory events");
+
+  assert.notEqual(pendingIndex, -1);
+  assert.notEqual(activeIndex, -1);
+  assert.notEqual(recentIndex, -1);
+  assert.equal(pendingIndex < activeIndex, true);
+  assert.equal(activeIndex < recentIndex, true);
+});
+
 test("renderMemoryPanel exposes useful empty, loading, and error states", () => {
   const container = node();
 

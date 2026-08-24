@@ -75,9 +75,10 @@ main:focus-visible {
 }
 
 .workspace-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .top-bar {
@@ -142,30 +143,32 @@ p {
 .workspace-grid {
   min-height: 0;
   overflow: hidden;
-  flex: 1;
+  flex: 1 1 0;
+  height: 0;
   display: grid;
+  align-items: stretch;
   grid-template-areas: "left-restore support conversation work right-restore";
-  grid-template-columns: 0 minmax(16rem, 22rem) minmax(0, 1fr) minmax(18rem, 26rem) 0;
+  grid-template-columns: 0 minmax(16rem, 22rem) minmax(20rem, 1fr) minmax(18rem, 26rem) 0;
 }
 
 .workspace-grid--left-collapsed {
-  grid-template-columns: 3rem 0 minmax(0, 1fr) minmax(18rem, 26rem) 0;
+  grid-template-columns: 3rem 0 minmax(20rem, 1fr) minmax(18rem, 26rem) 0;
 }
 
 .workspace-grid--right-collapsed {
-  grid-template-columns: 0 minmax(16rem, 22rem) minmax(0, 1fr) 0 3rem;
+  grid-template-columns: 0 minmax(16rem, 22rem) minmax(20rem, 1fr) 0 3rem;
 }
 
 .workspace-grid--left-collapsed.workspace-grid--right-collapsed {
-  grid-template-columns: 3rem 0 minmax(0, 1fr) 0 3rem;
+  grid-template-columns: 3rem 0 minmax(20rem, 1fr) 0 3rem;
 }
 
 .workspace-grid--artifacts-expanded {
-  grid-template-columns: 0 minmax(14rem, 18rem) minmax(0, 1fr) minmax(32rem, 80vw) 0;
+  grid-template-columns: 0 minmax(14rem, 18rem) minmax(20rem, 1fr) minmax(32rem, 80vw) 0;
 }
 
 .workspace-grid--left-collapsed.workspace-grid--artifacts-expanded {
-  grid-template-columns: 3rem 0 minmax(0, 1fr) minmax(32rem, 80vw) 0;
+  grid-template-columns: 3rem 0 minmax(20rem, 1fr) minmax(32rem, 80vw) 0;
 }
 
 .supporting-panel,
@@ -190,11 +193,22 @@ p {
 .supporting-panel,
 .work-panel {
   background: var(--surface-muted);
-  overflow: auto;
+  overflow: hidden;
 }
 
 .supporting-panel {
   border-inline-end: 1px solid var(--border);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.supporting-panel__body {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline-end: 0.25rem;
+  scrollbar-gutter: stable;
 }
 
 .work-panel {
@@ -206,8 +220,11 @@ p {
 
 .work-panel__body {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-inline-end: 0.25rem;
+  scrollbar-gutter: stable;
 }
 
 .workspace-grid--artifacts-expanded .work-panel__body {
@@ -284,6 +301,7 @@ p {
   background: var(--background);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  max-height: 100%;
   overflow: hidden;
 }
 
@@ -296,8 +314,11 @@ p {
   gap: 1rem;
   margin-block-end: 1rem;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-inline-end: 0.25rem;
+  scrollbar-gutter: stable;
 }
 
 .turn {
