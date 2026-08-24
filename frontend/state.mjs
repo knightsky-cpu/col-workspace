@@ -35,6 +35,13 @@ export function createInitialState() {
       next_event_id: null,
       error: null,
     },
+    chats: {
+      status: "idle",
+      sessions: [],
+      selectedSessionId: null,
+      detailStatus: "idle",
+      error: null,
+    },
     activity: {
       entries: [],
     },
@@ -96,6 +103,12 @@ export function completePendingTurn(state, response) {
       state.activity,
       activityEntriesFromResponse(response),
     ),
+    chats: {
+      ...state.chats,
+      selectedSessionId: state.context?.session_id ?? null,
+      detailStatus: "loaded",
+      error: null,
+    },
     pendingTurn: null,
     lastFailure: null,
   };
@@ -116,6 +129,88 @@ export function startNewConversation(state, cryptoLike = globalThis.crypto) {
     transcript: [],
     pendingTurn: null,
     lastFailure: null,
+    chats: {
+      ...state.chats,
+      selectedSessionId: null,
+      detailStatus: "idle",
+      error: null,
+    },
+  };
+}
+
+export function beginChatSessionListLoad(state) {
+  return {
+    ...state,
+    chats: {
+      ...state.chats,
+      status: "loading",
+      error: null,
+    },
+  };
+}
+
+export function completeChatSessionListLoad(state, response) {
+  return {
+    ...state,
+    chats: {
+      ...state.chats,
+      status: "loaded",
+      sessions: Array.isArray(response.sessions) ? response.sessions : [],
+      error: null,
+    },
+  };
+}
+
+export function failChatSessionListLoad(state, error) {
+  return {
+    ...state,
+    chats: {
+      ...state.chats,
+      status: "error",
+      error: errorMessage(error),
+    },
+  };
+}
+
+export function beginChatSessionDetailLoad(state, sessionId) {
+  return {
+    ...state,
+    chats: {
+      ...state.chats,
+      selectedSessionId: sessionId,
+      detailStatus: "loading",
+      error: null,
+    },
+  };
+}
+
+export function completeChatSessionDetailLoad(state, response) {
+  return {
+    ...state,
+    context: {
+      ...state.context,
+      session_id: response.session_id,
+    },
+    transcript: transcriptFromMessages(response.messages),
+    pendingTurn: null,
+    lastFailure: null,
+    chats: {
+      ...state.chats,
+      selectedSessionId: response.session_id,
+      detailStatus: "loaded",
+      error: null,
+    },
+  };
+}
+
+export function failChatSessionDetailLoad(state, error) {
+  return {
+    ...state,
+    chats: {
+      ...state.chats,
+      detailStatus: "error",
+      error: errorMessage(error),
+    },
   };
 }
 
@@ -166,6 +261,55 @@ function compactText(parts) {
     && part !== null
     && part !== ""
   )).map((part) => String(part)).join(" · ");
+}
+
+function transcriptFromMessages(messages) {
+  const transcript = [];
+  let pendingUser = null;
+  for (const rawMessage of Array.isArray(messages) ? messages : []) {
+    const message = objectOrEmpty(rawMessage);
+    if (message.role === "user" && typeof message.text === "string") {
+      pendingUser = {
+        key: `reopened--${message.message_id ?? transcript.length}`,
+        body: { message: message.text },
+      };
+      continue;
+    }
+    if (
+      message.role === "model"
+      && typeof message.text === "string"
+      && pendingUser !== null
+    ) {
+      transcript.push({
+        request: pendingUser,
+        response: {
+          response: message.text,
+          actions: [],
+          artifacts: [],
+          artifact_feedback: [],
+          citations: [],
+          memory_proposals: [],
+          adaptations: [],
+        },
+      });
+      pendingUser = null;
+    }
+  }
+  if (pendingUser !== null) {
+    transcript.push({
+      request: pendingUser,
+      response: {
+        response: "",
+        actions: [],
+        artifacts: [],
+        artifact_feedback: [],
+        citations: [],
+        memory_proposals: [],
+        adaptations: [],
+      },
+    });
+  }
+  return transcript;
 }
 
 function appendActivityEntries(activity, entries) {

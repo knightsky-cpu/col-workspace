@@ -55,7 +55,11 @@ from schemas import (
     ArtifactFeedbackReference,
     ArtifactFeedbackTargetKind,
     ArtifactReference,
+    ChatMessageRecord,
     ChatResponse,
+    ChatSessionDetailResponse,
+    ChatSessionListResponse,
+    ChatSessionSummary,
     CollaborationProfile,
     MemoryEvent,
     MemoryDecisionRequest,
@@ -227,12 +231,31 @@ class MemoryEngine:
         self._client = client if client is not None else AsyncClient()
 
     async def save_message(
-        self, session_id: str, role: str, text: str
+        self,
+        session_id: str,
+        role: str,
+        text: str,
+        *,
+        project_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         """Atomically persist a session update and a new chat message."""
         self._validate_string(session_id, "session_id")
         self._validate_string(role, "role")
         self._validate_string(text, "text")
+        if project_id is not None:
+            self._validate_string(project_id, "project_id")
+        if user_id is not None:
+            self._validate_string(user_id, "user_id")
+        session_document: dict[str, object] = {
+            "updated_at": firestore.SERVER_TIMESTAMP,
+            "last_message_preview": self._chat_preview(text),
+            "last_message_role": role,
+        }
+        if project_id is not None:
+            session_document["project_id"] = project_id
+        if user_id is not None:
+            session_document["user_id"] = user_id
 
         try:
             session_ref = self._client.collection("sessions").document(
@@ -242,7 +265,7 @@ class MemoryEngine:
             batch = self._client.batch()
             batch.set(
                 session_ref,
-                {"updated_at": firestore.SERVER_TIMESTAMP},
+                session_document,
                 merge=True,
             )
             batch.set(
@@ -257,6 +280,142 @@ class MemoryEngine:
             return message_ref.id
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_message", exc)
+
+    async def list_chat_sessions(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        limit: int,
+    ) -> ChatSessionListResponse:
+        """Return bounded chat sessions visible to a local user/project."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_limit(limit, "limit", maximum=50)
+
+        try:
+            sessions_ref = self._client.collection("sessions")
+            sessions: list[ChatSessionSummary] = []
+            async for snapshot in sessions_ref.limit(200).stream():
+                data = snapshot.to_dict()
+                if not isinstance(data, Mapping):
+                    continue
+                if (
+                    data.get("user_id") != user_id
+                    or data.get("project_id") != project_id
+                ):
+                    continue
+                sessions.append(
+                    ChatSessionSummary(
+                        session_id=snapshot.id,
+                        project_id=project_id,
+                        user_id=user_id,
+                        updated_at=(
+                            data.get("updated_at")
+                            if isinstance(data.get("updated_at"), datetime)
+                            else None
+                        ),
+                        last_message_preview=(
+                            data.get("last_message_preview")
+                            if isinstance(
+                                data.get("last_message_preview"), str
+                            )
+                            else None
+                        ),
+                        last_message_role=(
+                            data.get("last_message_role")
+                            if data.get("last_message_role")
+                            in {"user", "model"}
+                            else None
+                        ),
+                    )
+                )
+            sessions.sort(
+                key=lambda item: (
+                    item.updated_at is not None,
+                    (
+                        item.updated_at
+                        if item.updated_at is not None
+                        else datetime.min
+                    ),
+                ),
+                reverse=True,
+            )
+            return ChatSessionListResponse(sessions=sessions[:limit])
+        except ValidationError as exc:
+            raise ValueError("Stored chat session metadata is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_chat_sessions", exc)
+
+    async def get_chat_session_detail(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        limit: int,
+    ) -> ChatSessionDetailResponse:
+        """Return a bounded chronological transcript for one chat session."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_string(session_id, "session_id")
+        self._validate_limit(limit, "limit", maximum=100)
+
+        try:
+            session_ref = self._client.collection("sessions").document(
+                session_id
+            )
+            session_snapshot = await session_ref.get()
+            session_data = session_snapshot.to_dict()
+            if (
+                not session_snapshot.exists
+                or not isinstance(session_data, Mapping)
+                or session_data.get("user_id") != user_id
+                or session_data.get("project_id") != project_id
+            ):
+                return ChatSessionDetailResponse(
+                    session_id=session_id,
+                    project_id=project_id,
+                    user_id=user_id,
+                    messages=[],
+                )
+            messages_ref = session_ref.collection("messages")
+            query = messages_ref.order_by(
+                "timestamp",
+                direction=firestore.Query.ASCENDING,
+            ).limit(limit)
+            messages: list[ChatMessageRecord] = []
+            async for snapshot in query.stream():
+                data = snapshot.to_dict()
+                if not isinstance(data, Mapping):
+                    continue
+                role = data.get("role")
+                text = data.get("text")
+                if role not in {"user", "model"} or not isinstance(text, str):
+                    continue
+                timestamp = data.get("timestamp")
+                messages.append(
+                    ChatMessageRecord(
+                        message_id=snapshot.id,
+                        role=role,
+                        text=text,
+                        timestamp=(
+                            timestamp
+                            if isinstance(timestamp, datetime)
+                            else None
+                        ),
+                    )
+                )
+            return ChatSessionDetailResponse(
+                session_id=session_id,
+                project_id=project_id,
+                user_id=user_id,
+                messages=messages,
+            )
+        except ValidationError as exc:
+            raise ValueError("Stored chat session detail is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("get_chat_session_detail", exc)
 
     async def claim_chat_turn(
         self,
@@ -415,7 +574,15 @@ class MemoryEngine:
                 return resumed_claim
             transaction.set(
                 session_ref,
-                {"updated_at": firestore.SERVER_TIMESTAMP},
+                {
+                    "project_id": request.project_id,
+                    "user_id": request.user_id,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "last_message_preview": self._chat_preview(
+                        request.message
+                    ),
+                    "last_message_role": "user",
+                },
                 merge=True,
             )
             feedback_decision = request.artifact_feedback_decision
@@ -1330,7 +1497,15 @@ class MemoryEngine:
             )
             transaction.set(
                 session_ref,
-                {"updated_at": firestore.SERVER_TIMESTAMP},
+                {
+                    "project_id": claim.request.project_id,
+                    "user_id": claim.request.user_id,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "last_message_preview": self._chat_preview(
+                        response.response
+                    ),
+                    "last_message_role": "model",
+                },
                 merge=True,
             )
             transaction.set(
@@ -3483,6 +3658,27 @@ class MemoryEngine:
     def close(self) -> None:
         """Close the Firestore client's transport."""
         self._client.close()
+
+    @staticmethod
+    def _chat_preview(text: str) -> str:
+        compact = " ".join(text.split())
+        return compact[:180]
+
+    @staticmethod
+    def _validate_limit(
+        limit: object,
+        field_name: str,
+        *,
+        maximum: int,
+    ) -> None:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= maximum
+        ):
+            raise ValueError(
+                f"{field_name} must be an integer between 1 and {maximum}."
+            )
 
     @staticmethod
     def _proposal_document(proposal: MemoryProposal) -> dict[str, object]:

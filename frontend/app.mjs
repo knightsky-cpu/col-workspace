@@ -1,11 +1,13 @@
 import {
   apiFetchJson,
+  getChatSession,
   getBlueprint,
   inspectMemory,
+  listChatSessions,
   listBlueprintFeedback,
   listBlueprints,
 } from "./api.mjs";
-import { createActivityView } from "./activity-view.mjs";
+import { createChatsView } from "./chats-view.mjs";
 import { createChatView } from "./chat-view.mjs";
 import { createMemoryView } from "./memory-view.mjs";
 import { createWorkView } from "./work-view.mjs";
@@ -26,16 +28,22 @@ import {
 } from "./workspace-layout.mjs";
 import {
   acceptContext,
+  beginChatSessionDetailLoad,
+  beginChatSessionListLoad,
   beginMemoryLoad,
   beginPendingTurn,
   beginWorkDetailLoad,
   beginWorkListLoad,
   completeMemoryLoad,
+  completeChatSessionDetailLoad,
+  completeChatSessionListLoad,
   completeWorkDetailLoad,
   completeWorkListLoad,
   completePendingTurn,
   createInitialState,
   failMemoryLoad,
+  failChatSessionDetailLoad,
+  failChatSessionListLoad,
   failPendingTurn,
   failWorkDetailLoad,
   failWorkListLoad,
@@ -50,7 +58,7 @@ let state = createInitialState();
 let chatView = null;
 let workView = null;
 let memoryView = null;
-let activityView = null;
+let chatsView = null;
 let layoutState = createInitialLayoutState();
 
 function showWorkspace() {
@@ -103,7 +111,7 @@ function renderWorkspace() {
   ensureChatView().render(state);
   ensureWorkView().render(state);
   ensureMemoryView().render(state);
-  ensureActivityView().render(state);
+  ensureChatsView().render(state);
   renderLayout();
 }
 
@@ -205,6 +213,47 @@ async function loadMemory() {
   ensureMemoryView().render(state);
 }
 
+async function loadChatSessions() {
+  if (!state.context) {
+    return;
+  }
+  state = beginChatSessionListLoad(state);
+  ensureChatsView().render(state);
+  try {
+    const response = await listChatSessions(
+      state.context.user_id,
+      state.context.project_id,
+      { limit: 20 },
+    );
+    state = completeChatSessionListLoad(state, response);
+  } catch (error) {
+    state = failChatSessionListLoad(state, error);
+  }
+  ensureChatsView().render(state);
+}
+
+async function loadChatSession(sessionId) {
+  if (!state.context || !selectCanSubmit(state)) {
+    return;
+  }
+  state = beginChatSessionDetailLoad(state, sessionId);
+  renderWorkspace();
+  try {
+    const response = await getChatSession(
+      state.context.user_id,
+      state.context.project_id,
+      sessionId,
+      { limit: 100 },
+    );
+    state = completeChatSessionDetailLoad(state, response);
+    document.querySelector("[data-chat-error]").hidden = true;
+    setText(document.querySelector("[data-chat-status]"), "");
+  } catch (error) {
+    state = failChatSessionDetailLoad(state, error);
+  }
+  renderWorkspace();
+}
+
 async function submitRequest(request) {
   state = beginPendingTurn(state, request);
   renderWorkspace();
@@ -229,6 +278,7 @@ async function submitRequest(request) {
     if (selectNeedsReceiptRefresh(response).memory) {
       await loadMemory();
     }
+    await loadChatSessions();
   } catch (error) {
     state = failPendingTurn(state, error);
     setText(document.querySelector("[data-chat-error]"), error.message);
@@ -310,14 +360,21 @@ function ensureMemoryView() {
   return memoryView;
 }
 
-function ensureActivityView() {
-  if (activityView !== null) {
-    return activityView;
+function ensureChatsView() {
+  if (chatsView !== null) {
+    return chatsView;
   }
-  activityView = createActivityView({
-    list: document.querySelector("[data-chats-list]"),
-  });
-  return activityView;
+  chatsView = createChatsView(
+    {
+      list: document.querySelector("[data-chats-list]"),
+    },
+    {
+      onSelectSession(sessionId) {
+        loadChatSession(sessionId);
+      },
+    },
+  );
+  return chatsView;
 }
 
 async function submitArtifactFeedback(decision) {
@@ -354,10 +411,11 @@ document.querySelector("[data-context-form]").addEventListener("submit", (event)
     ensureChatView();
     ensureWorkView();
     ensureMemoryView();
-    ensureActivityView();
+    ensureChatsView();
     showWorkspace();
     loadWorkList();
     loadMemory();
+    loadChatSessions();
   } catch (error) {
     showContextError(error.message);
   }
@@ -371,6 +429,7 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
   document.querySelector("[data-chat-error]").hidden = true;
   setText(document.querySelector("[data-chat-status]"), "");
   renderWorkspace();
+  loadChatSessions();
   document.querySelector("#conversation-workspace").focus();
 });
 
@@ -417,4 +476,5 @@ document.querySelector("[data-artifacts-expand]").addEventListener("click", () =
 document.querySelector("[data-left-refresh]").addEventListener("click", () => {
   loadWorkList();
   loadMemory();
+  loadChatSessions();
 });

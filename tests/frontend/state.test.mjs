@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   acceptContext,
+  beginChatSessionDetailLoad,
+  beginChatSessionListLoad,
   beginWorkDetailLoad,
   beginWorkListLoad,
   beginMemoryLoad,
@@ -11,11 +13,15 @@ import {
   completeWorkListLoad,
   completeMemoryLoad,
   completePendingTurn,
+  completeChatSessionDetailLoad,
+  completeChatSessionListLoad,
   createInitialState,
   failWorkDetailLoad,
   failWorkListLoad,
   failMemoryLoad,
   failPendingTurn,
+  failChatSessionDetailLoad,
+  failChatSessionListLoad,
   selectCanSubmit,
   selectFirstSupportedArtifact,
   selectNeedsReceiptRefresh,
@@ -61,11 +67,15 @@ test("pending turn lifecycle preserves exact retry envelope on failure", () => {
 });
 
 test("completed turn records response and clears pending failure", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
   const request = Object.freeze({
     key: "chat--1",
     body: Object.freeze({ message: "hello" }),
   });
-  const pending = beginPendingTurn(createInitialState(), request);
+  const pending = beginPendingTurn(accepted, request);
   const completed = completePendingTurn(
     pending,
     { response: "ok", actions: [] },
@@ -77,6 +87,10 @@ test("completed turn records response and clears pending failure", () => {
   assert.deepEqual(
     completed.transcript[0].response,
     { response: "ok", actions: [] },
+  );
+  assert.equal(
+    completed.chats.selectedSessionId,
+    "session--123e4567-e89b-12d3-a456-426614174000",
   );
 });
 
@@ -216,6 +230,92 @@ test("new conversation preserves activity because it is workspace scoped", () =>
 
   assert.equal(next.transcript.length, 0);
   assert.equal(next.activity.entries[0].label, "propose_memory_signal");
+});
+
+test("chat session list load stores bounded session summaries", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+
+  const loaded = completeChatSessionListLoad(
+    beginChatSessionListLoad(state),
+    {
+      chat_contract_version: "1.0",
+      sessions: [
+        {
+          session_id: "session--1",
+          project_id: "agent-col",
+          user_id: "wifiknight",
+          last_message_preview: "hello world",
+          last_message_role: "user",
+          updated_at: "2026-08-24T10:00:00Z",
+        },
+      ],
+    },
+  );
+
+  assert.equal(loaded.chats.status, "loaded");
+  assert.equal(loaded.chats.sessions.length, 1);
+  assert.equal(loaded.chats.sessions[0].session_id, "session--1");
+});
+
+test("chat session detail load switches context and rebuilds transcript", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+
+  const loaded = completeChatSessionDetailLoad(
+    beginChatSessionDetailLoad(state, "session--old"),
+    {
+      chat_contract_version: "1.0",
+      session_id: "session--old",
+      project_id: "agent-col",
+      user_id: "wifiknight",
+      messages: [
+        {
+          message_id: "message--1",
+          role: "user",
+          text: "hello",
+          timestamp: "2026-08-24T10:00:00Z",
+        },
+        {
+          message_id: "message--2",
+          role: "model",
+          text: "hi",
+          timestamp: "2026-08-24T10:00:01Z",
+        },
+      ],
+    },
+  );
+
+  assert.equal(loaded.context.session_id, "session--old");
+  assert.equal(loaded.chats.selectedSessionId, "session--old");
+  assert.equal(loaded.transcript.length, 1);
+  assert.equal(loaded.transcript[0].request.body.message, "hello");
+  assert.equal(loaded.transcript[0].response.response, "hi");
+});
+
+test("chat session load failures are bounded in state", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+
+  const listFailed = failChatSessionListLoad(
+    beginChatSessionListLoad(state),
+    new Error("list failed"),
+  );
+  const detailFailed = failChatSessionDetailLoad(
+    beginChatSessionDetailLoad(listFailed, "session--old"),
+    new Error("detail failed"),
+  );
+
+  assert.equal(listFailed.chats.status, "error");
+  assert.equal(listFailed.chats.error, "list failed");
+  assert.equal(detailFailed.chats.detailStatus, "error");
+  assert.equal(detailFailed.chats.error, "detail failed");
 });
 
 test("new conversation keeps user and project but replaces session and clears page state", () => {

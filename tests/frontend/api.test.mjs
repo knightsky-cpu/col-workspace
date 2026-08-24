@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import {
   apiFetchJson,
   getBlueprint,
+  getChatSession,
   inspectMemory,
+  listChatSessions,
   listBlueprintFeedback,
   listBlueprints,
 } from "../../frontend/api.mjs";
@@ -202,4 +204,46 @@ test("inspectMemory rejects invalid user and event cursors", async () => {
     ),
     /invalid/i,
   );
+});
+
+test("listChatSessions calls the bounded user project sessions path", async () => {
+  const calls = [];
+  await listChatSessions(
+    "wifiknight",
+    "agent-col",
+    { limit: 20 },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { chat_contract_version: "1.0", sessions: [] });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/projects/agent-col/chat-sessions?limit=20",
+  );
+  assert.equal(calls[0][1].method, "GET");
+});
+
+test("getChatSession calls the bounded chat transcript path", async () => {
+  const calls = [];
+  await getChatSession(
+    "wifiknight",
+    "agent-col",
+    "session--123",
+    { limit: 50 },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        messages: [],
+      });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/projects/agent-col/chat-sessions/session--123?limit=50",
+  );
+  assert.equal(calls[0][1].method, "GET");
 });

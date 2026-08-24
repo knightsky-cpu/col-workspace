@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call
 
@@ -27,7 +28,13 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
     client.batch.return_value = batch
 
     engine = MemoryEngine(client=client)
-    message_id = await engine.save_message("session-1", "user", "hello")
+    message_id = await engine.save_message(
+        "session-1",
+        "user",
+        "hello",
+        project_id="project-1",
+        user_id="user-1",
+    )
 
     assert message_id == "message-1"
     client.collection.assert_called_once_with("sessions")
@@ -37,7 +44,13 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
     assert batch.set.call_args_list == [
         call(
             session,
-            {"updated_at": firestore.SERVER_TIMESTAMP},
+            {
+                "project_id": "project-1",
+                "user_id": "user-1",
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "last_message_preview": "hello",
+                "last_message_role": "user",
+            },
             merge=True,
         ),
         call(
@@ -370,6 +383,15 @@ async def snapshot_stream_from(items: list[dict[str, object]]):
         yield SimpleNamespace(to_dict=lambda item=item: item)
 
 
+async def snapshot_stream_with_ids(items: list[tuple[str, dict[str, object]]]):
+    for snapshot_id, item in items:
+        yield SimpleNamespace(
+            id=snapshot_id,
+            exists=True,
+            to_dict=lambda item=item: item,
+        )
+
+
 @pytest.mark.asyncio
 async def test_get_chat_history_orders_by_timestamp() -> None:
     client = MagicMock()
@@ -395,6 +417,51 @@ async def test_get_chat_history_orders_by_timestamp() -> None:
         {"role": "user", "text": "first"},
         {"role": "model", "text": "second"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_chat_sessions_filters_user_project_metadata() -> None:
+    client = MagicMock()
+    sessions = MagicMock()
+    limited = MagicMock()
+    client.collection.return_value = sessions
+    sessions.limit.return_value = limited
+    limited.stream.return_value = snapshot_stream_with_ids(
+        [
+            (
+                "session-new",
+                {
+                    "project_id": "project-1",
+                    "user_id": "user-1",
+                    "updated_at": datetime(2026, 8, 24, 12, 0),
+                    "last_message_preview": "new question",
+                    "last_message_role": "user",
+                },
+            ),
+            (
+                "session-other-project",
+                {
+                    "project_id": "other-project",
+                    "user_id": "user-1",
+                    "updated_at": datetime(2026, 8, 24, 13, 0),
+                    "last_message_preview": "private",
+                    "last_message_role": "user",
+                },
+            ),
+        ]
+    )
+
+    result = await MemoryEngine(client).list_chat_sessions(
+        user_id="user-1",
+        project_id="project-1",
+        limit=20,
+    )
+
+    assert [session.session_id for session in result.sessions] == [
+        "session-new"
+    ]
+    assert result.sessions[0].last_message_preview == "new question"
+    sessions.limit.assert_called_once_with(200)
 
 
 @pytest.mark.asyncio

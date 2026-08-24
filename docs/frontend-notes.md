@@ -49,6 +49,11 @@ the implementation boundary.
 - The product should store and expose chat sessions, not a non-interactive log
   of every low-level interaction.
 - Chat session history should be human-facing and navigable.
+- Chat session history names should be concise. Cards should use a short
+  phrase that generally describes the chat or the first prompt, not a long
+  paragraph-like preview that becomes hard to scan as history grows.
+- Future chat history controls should let users rename, delete, and archive
+  chat sessions from the UI.
 - User-facing lists should avoid exposing large machine IDs as primary labels.
   IDs may remain available as secondary details, copyable metadata, or debug
   information, but humans should primarily see readable names, titles, dates,

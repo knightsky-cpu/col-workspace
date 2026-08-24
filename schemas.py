@@ -340,6 +340,38 @@ class ChatResponse(StrictModel):
     )
 
 
+ChatRole = Literal["user", "model"]
+
+
+class ChatSessionSummary(StrictModel):
+    session_id: IdentifierStr
+    project_id: IdentifierStr
+    user_id: IdentifierStr
+    updated_at: datetime | None = None
+    last_message_preview: str | None = Field(default=None, max_length=180)
+    last_message_role: ChatRole | None = None
+
+
+class ChatSessionListResponse(StrictModel):
+    chat_contract_version: Literal["1.0"] = "1.0"
+    sessions: list[ChatSessionSummary] = Field(max_length=50)
+
+
+class ChatMessageRecord(StrictModel):
+    message_id: IdentifierStr
+    role: ChatRole
+    text: ChatMessageText
+    timestamp: datetime | None = None
+
+
+class ChatSessionDetailResponse(StrictModel):
+    chat_contract_version: Literal["1.0"] = "1.0"
+    session_id: IdentifierStr
+    project_id: IdentifierStr
+    user_id: IdentifierStr
+    messages: list[ChatMessageRecord] = Field(max_length=100)
+
+
 class ChatPartialFailureResponse(StrictModel):
     detail: Literal[
         "Agent_Col response failed after a completed action.",

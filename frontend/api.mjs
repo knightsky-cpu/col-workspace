@@ -200,3 +200,35 @@ export function inspectMemory(
     fetchLike,
   );
 }
+
+export function listChatSessions(
+  userId,
+  projectId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/chat-sessions${buildQuery(options)}`,
+    { method: "GET" },
+    fetchLike,
+  );
+}
+
+export function getChatSession(
+  userId,
+  projectId,
+  sessionId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("session_id", sessionId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/chat-sessions/${encodeURIComponent(sessionId)}${buildQuery(options)}`,
+    { method: "GET" },
+    fetchLike,
+  );
+}

@@ -89,6 +89,8 @@ from schemas import (
     BlueprintArtifactFeedbackListResponse,
     BlueprintArtifactListResponse,
     ChatPartialFailureResponse,
+    ChatSessionDetailResponse,
+    ChatSessionListResponse,
     ChatRequest,
     ChatResponse,
     CollaborationProfile,
@@ -566,6 +568,58 @@ async def inspect_memory(
     )
 
 
+@app.get(
+    "/api/users/{user_id}/projects/{project_id}/chat-sessions",
+    response_model=ChatSessionListResponse,
+)
+async def list_chat_sessions(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> ChatSessionListResponse:
+    try:
+        return await request.app.state.db.list_chat_sessions(
+            user_id=user_id,
+            project_id=project_id,
+            limit=limit,
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Chat session request is invalid.",
+        ) from exc
+
+
+@app.get(
+    "/api/users/{user_id}/projects/{project_id}/chat-sessions/{session_id}",
+    response_model=ChatSessionDetailResponse,
+)
+async def get_chat_session(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    session_id: IdentifierStr,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> ChatSessionDetailResponse:
+    try:
+        return await request.app.state.db.get_chat_session_detail(
+            user_id=user_id,
+            project_id=project_id,
+            session_id=session_id,
+            limit=limit,
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Chat session request is invalid.",
+        ) from exc
+
+
 @app.post(
     "/api/users/{user_id}/memory/signals/{signal_id}/revoke",
     response_model=MemoryMutationResponse,
@@ -938,6 +992,8 @@ async def chat(
                 payload.session_id,
                 "user",
                 payload.message,
+                project_id=payload.project_id,
+                user_id=payload.user_id,
             )
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
@@ -1148,6 +1204,8 @@ async def chat(
                 payload.session_id,
                 "model",
                 result.response,
+                project_id=payload.project_id,
+                user_id=payload.user_id,
             )
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)

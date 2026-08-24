@@ -71,7 +71,11 @@ from schemas import (
     BlueprintArtifactFeedbackListResponse,
     BlueprintArtifactListResponse,
     BlueprintArtifactMetadata,
+    ChatMessageRecord,
     ChatResponse,
+    ChatSessionDetailResponse,
+    ChatSessionListResponse,
+    ChatSessionSummary,
     CitationReference,
     CollaborationProfile,
     MemoryDecisionRequest,
@@ -240,6 +244,24 @@ class FakeMemoryEngine:
     complete_calls: list[
         tuple[ChatTurnClaim, ChatResponse, datetime]
     ] = field(default_factory=list)
+    chat_session_list_result: ChatSessionListResponse = field(
+        default_factory=lambda: ChatSessionListResponse(sessions=[])
+    )
+    chat_session_detail_result: ChatSessionDetailResponse = field(
+        default_factory=lambda: ChatSessionDetailResponse(
+            session_id="session-1",
+            project_id="project-1",
+            user_id="user-1",
+            messages=[],
+        )
+    )
+    chat_session_error: Exception | None = None
+    chat_session_list_calls: list[
+        tuple[str, str, int]
+    ] = field(default_factory=list)
+    chat_session_detail_calls: list[
+        tuple[str, str, str, int]
+    ] = field(default_factory=list)
     decision_action_calls: list[
         tuple[ChatTurnClaim, AgentActionReceipt, datetime]
     ] = field(default_factory=list)
@@ -277,12 +299,49 @@ class FakeMemoryEngine:
         return self.history
 
     async def save_message(
-        self, session_id: str, role: str, text: str
+        self,
+        session_id: str,
+        role: str,
+        text: str,
+        *,
+        project_id: str | None = None,
+        user_id: str | None = None,
     ) -> str:
         if self.fail_on == f"save_{role}":
             raise main.MemoryEngineError(f"{role} save failed")
         self.events.append(("save", session_id, role, text))
         return f"{role}-message-1"
+
+    async def list_chat_sessions(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        limit: int,
+    ) -> ChatSessionListResponse:
+        self.chat_session_list_calls.append((user_id, project_id, limit))
+        self.events.append(("chat_session_list", user_id, project_id, limit))
+        if self.chat_session_error is not None:
+            raise self.chat_session_error
+        return self.chat_session_list_result
+
+    async def get_chat_session_detail(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        limit: int,
+    ) -> ChatSessionDetailResponse:
+        self.chat_session_detail_calls.append(
+            (user_id, project_id, session_id, limit)
+        )
+        self.events.append(
+            ("chat_session_detail", user_id, project_id, session_id, limit)
+        )
+        if self.chat_session_error is not None:
+            raise self.chat_session_error
+        return self.chat_session_detail_result
 
     async def claim_chat_turn(
         self,
@@ -1084,6 +1143,97 @@ async def test_memory_inspection_returns_typed_service_result(
             after_event_id="response_length--cursor--approved",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_chat_sessions_returns_project_user_sessions(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_session_list_result = ChatSessionListResponse(
+        sessions=[
+            ChatSessionSummary(
+                session_id="session-1",
+                project_id="project-1",
+                user_id="user-1",
+                updated_at=MEMORY_NOW,
+                last_message_preview="Earlier planning question",
+                last_message_role="user",
+            )
+        ]
+    )
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/chat-sessions",
+        params={"limit": 10},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == (
+        service_state.database.chat_session_list_result.model_dump(
+            mode="json"
+        )
+    )
+    assert service_state.database.chat_session_list_calls == [
+        ("user-1", "project-1", 10)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_chat_session_detail_returns_chronological_messages(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_session_detail_result = (
+        ChatSessionDetailResponse(
+            session_id="session-1",
+            project_id="project-1",
+            user_id="user-1",
+            messages=[
+                ChatMessageRecord(
+                    message_id="message-1",
+                    role="user",
+                    text="hello",
+                    timestamp=MEMORY_NOW,
+                ),
+                ChatMessageRecord(
+                    message_id="message-2",
+                    role="model",
+                    text="hi",
+                    timestamp=MEMORY_NOW,
+                ),
+            ],
+        )
+    )
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/chat-sessions/session-1",
+        params={"limit": 50},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == (
+        service_state.database.chat_session_detail_result.model_dump(
+            mode="json"
+        )
+    )
+    assert service_state.database.chat_session_detail_calls == [
+        ("user-1", "project-1", "session-1", 50)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_session_routes_validate_limit(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/chat-sessions",
+        params={"limit": 101},
+    )
+
+    assert response.status_code == 422
+    assert service_state.database.chat_session_list_calls == []
 
 
 @pytest.mark.asyncio
