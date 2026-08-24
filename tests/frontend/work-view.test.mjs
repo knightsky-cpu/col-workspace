@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildBlueprintExports,
   buildBlueprintDownload,
   renderFeedbackHistory,
   renderWorkDetail,
@@ -258,5 +259,50 @@ test("buildBlueprintDownload creates a safe filename and JSON data URL", () => {
     JSON.parse(decodeURIComponent(download.href.split(",", 2)[1]))
       .metadata.reference.artifact_id,
     "blueprint--abc",
+  );
+});
+
+test("buildBlueprintExports offers JSON, Markdown, text, and print export options", () => {
+  const exports = buildBlueprintExports(detail);
+
+  assert.deepEqual(
+    exports.map((item) => item.format),
+    ["json", "md", "txt", "pdf-print"],
+  );
+  assert.equal(exports[0].filename, "safe-blueprint-blueprint--abc.json");
+  assert.equal(exports[1].filename, "safe-blueprint-blueprint--abc.md");
+  assert.equal(exports[2].filename, "safe-blueprint-blueprint--abc.txt");
+  assert.equal(exports[1].href.startsWith("data:text/markdown;charset=utf-8,"), true);
+  assert.equal(exports[2].href.startsWith("data:text/plain;charset=utf-8,"), true);
+  assert.equal(exports[3].href, "#print-work");
+  assert.match(
+    decodeURIComponent(exports[1].href.split(",", 2)[1]),
+    /# Safe <Blueprint>/,
+  );
+});
+
+test("renderWorkDetail renders export controls for every supported format", () => {
+  const container = node();
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: detail, error: null },
+      feedback: { status: "ready", events: [], error: null },
+    },
+    { onSubmitFeedback: () => {}, onPrintWork: () => {} },
+  );
+
+  const exportBox = container.children.find((child) => (
+    child.attributes["data-export-controls"] === ""
+  ));
+  assert.ok(exportBox);
+  assert.equal(
+    exportBox.children.map((child) => child.textContent).join(" ").includes("Markdown"),
+    true,
+  );
+  assert.equal(
+    exportBox.children.map((child) => child.textContent).join(" ").includes("PDF / Print"),
+    true,
   );
 });

@@ -1,13 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderReceipts, renderTranscript } from "../../frontend/chat-view.mjs";
+import { createChatView, renderReceipts, renderTranscript } from "../../frontend/chat-view.mjs";
 
 function node(tagName = "div") {
   return {
     tagName,
     children: [],
     attributes: {},
+    value: "",
+    scrollHeight: 0,
+    scrollTop: 0,
     textContent: "",
     hidden: false,
     append(...items) {
@@ -18,6 +21,9 @@ function node(tagName = "div") {
     },
     setAttribute(name, value) {
       this.attributes[name] = value;
+    },
+    addEventListener(name, handler) {
+      this[`on${name}`] = handler;
     },
     classList: {
       values: [],
@@ -87,7 +93,7 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
   assert.match(text, /Example Domain/);
   assert.match(text, /Blueprint/);
   assert.match(text, /response_length--1/);
-  assert.match(text, /planning_granularity--1/);
+  assert.doesNotMatch(text, /planning_granularity--1/);
   assert.doesNotMatch(text, /google_search/);
   assert.equal(
     container.children[0].children.every((receipt) => (
@@ -95,4 +101,63 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
     )),
     true,
   );
+});
+
+test("createChatView updates the character counter from prompt input", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+
+  createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  input.value = "hello";
+  input.oninput();
+
+  assert.equal(counter.textContent, "5 / 10000");
+});
+
+test("createChatView scrolls the transcript to the latest rendered turn", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+  transcript.scrollHeight = 1200;
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  view.render({
+    transcript: [{
+      request: { body: { message: "question" } },
+      response: { response: "answer" },
+    }],
+    lastFailure: null,
+    pendingTurn: null,
+  });
+
+  assert.equal(transcript.scrollTop, 1200);
 });

@@ -38,16 +38,106 @@ function feedbackCounts(item) {
 }
 
 export function buildBlueprintDownload(detail) {
+  return buildBlueprintExports(detail)[0];
+}
+
+function blueprintMarkdown(detail) {
+  const reference = detail.metadata.reference;
+  const blueprint = detail.blueprint;
+  const model = blueprint.synthesized_conceptual_model;
+  const lines = [
+    `# ${model.project_name}`,
+    "",
+    model.core_value_proposition,
+    "",
+    `Artifact ID: ${reference.artifact_id}`,
+    `Schema version: ${reference.schema_version}`,
+    "",
+    "## In scope",
+    ...(model.in_scope ?? []).map((item) => `- ${item}`),
+    "",
+    "## Out of scope",
+    ...(model.out_of_scope ?? []).map((item) => `- ${item}`),
+    "",
+    "## Assumptions",
+    ...(model.assumptions ?? []).map((item) => `- ${item}`),
+    "",
+    "## Architectural decisions",
+  ];
+  for (const decision of blueprint.architectural_decisions ?? []) {
+    lines.push(
+      "",
+      `### ${decision.component_name}`,
+      decision.proposed_solution,
+      "",
+      decision.rationale,
+    );
+  }
+  return lines.join("\n");
+}
+
+function dataHref(mimeType, value) {
+  return `data:${mimeType};charset=utf-8,${encodeURIComponent(value)}`;
+}
+
+export function buildBlueprintExports(detail) {
   const reference = detail.metadata.reference;
   const label = reference.display_label
     ?? detail.blueprint?.synthesized_conceptual_model?.project_name
     ?? "blueprint";
-  return {
-    filename: `${slug(label)}-${reference.artifact_id}.json`,
-    href: `data:application/json;charset=utf-8,${
-      encodeURIComponent(JSON.stringify(detail, null, 2))
-    }`,
-  };
+  const basename = `${slug(label)}-${reference.artifact_id}`;
+  const markdown = blueprintMarkdown(detail);
+  return [
+    {
+      format: "json",
+      label: "JSON",
+      filename: `${basename}.json`,
+      href: dataHref("application/json", JSON.stringify(detail, null, 2)),
+    },
+    {
+      format: "md",
+      label: "Markdown",
+      filename: `${basename}.md`,
+      href: dataHref("text/markdown", markdown),
+    },
+    {
+      format: "txt",
+      label: "Text",
+      filename: `${basename}.txt`,
+      href: dataHref("text/plain", markdown.replace(/^#+ /gm, "")),
+    },
+    {
+      format: "pdf-print",
+      label: "PDF / Print",
+      filename: `${basename}.pdf`,
+      href: "#print-work",
+    },
+  ];
+}
+
+function renderExportControls(parent, detail, handlers) {
+  const box = document.createElement("section");
+  box.classList.add("export-controls", "contain-text");
+  box.setAttribute("data-export-controls", "");
+  appendTextElement(box, "h4", "", "Export");
+  for (const item of buildBlueprintExports(detail)) {
+    if (item.format === "pdf-print") {
+      const button = document.createElement("button");
+      button.type = "button";
+      setText(button, item.label);
+      button.addEventListener("click", () => {
+        handlers.onPrintWork?.();
+      });
+      box.append(button);
+      continue;
+    }
+    const link = document.createElement("a");
+    link.href = item.href;
+    link.download = item.filename;
+    setText(link, item.label);
+    box.append(link);
+  }
+  parent.append(box);
 }
 
 export function renderWorkList(container, work, handlers) {
@@ -252,12 +342,7 @@ export function renderWorkDetail(container, work, handlers) {
   }
 
   const detail = work.detail.item;
-  const download = buildBlueprintDownload(detail);
-  const link = document.createElement("a");
-  link.href = download.href;
-  link.download = download.filename;
-  setText(link, "Download canonical JSON");
-  container.append(link);
+  renderExportControls(container, detail, handlers);
 
   renderBlueprint(container, detail.blueprint);
   appendTextElement(container, "h4", "", "Verified adaptations");

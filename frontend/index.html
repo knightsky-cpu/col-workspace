@@ -40,26 +40,53 @@
       </section>
 
       <div class="workspace-grid" data-workspace hidden>
+        <div class="drawer-restore drawer-restore--left">
+          <button type="button" class="drawer-toggle" data-drawer-toggle="left" disabled>
+            Show side panel
+          </button>
+        </div>
         <aside class="supporting-panel" aria-label="Supporting context">
-          <section aria-labelledby="work-list-title">
+          <div class="drawer-heading">
+            <button type="button" class="drawer-toggle" data-drawer-toggle="left" disabled>
+              Hide
+            </button>
+          </div>
+          <section class="drawer-section" aria-labelledby="work-list-title" data-section="work">
             <div class="section-heading">
               <h2 id="work-list-title">Work</h2>
+              <button type="button" data-section-toggle="work" aria-expanded="true">
+                Collapse
+              </button>
               <button type="button" data-work-refresh>Refresh</button>
             </div>
-            <p class="form-error" role="alert" data-work-error hidden></p>
-            <div data-work-list></div>
+            <div data-section-content="work">
+              <p class="form-error" role="alert" data-work-error hidden></p>
+              <div data-work-list></div>
+            </div>
           </section>
-          <section aria-labelledby="memory-title">
+          <section class="drawer-section" aria-labelledby="memory-title" data-section="memory">
             <div class="section-heading">
               <h2 id="memory-title">Memory</h2>
+              <button type="button" data-section-toggle="memory" aria-expanded="true">
+                Collapse
+              </button>
               <button type="button" data-memory-refresh>Refresh</button>
             </div>
-            <p class="form-error" role="alert" data-memory-error hidden></p>
-            <div data-memory-panel></div>
+            <div data-section-content="memory">
+              <p class="form-error" role="alert" data-memory-error hidden></p>
+              <div data-memory-panel></div>
+            </div>
           </section>
-          <section aria-labelledby="activity-title">
-            <h2 id="activity-title">Activity</h2>
-            <div data-activity-list></div>
+          <section class="drawer-section" aria-labelledby="activity-title" data-section="activity">
+            <div class="section-heading">
+              <h2 id="activity-title">Activity</h2>
+              <button type="button" data-section-toggle="activity" aria-expanded="true">
+                Collapse
+              </button>
+            </div>
+            <div data-section-content="activity">
+              <div data-activity-list></div>
+            </div>
           </section>
         </aside>
 
@@ -93,9 +120,19 @@
         </main>
 
         <aside class="work-panel" aria-label="Work review">
-          <h2>Work review</h2>
+          <div class="drawer-heading">
+            <h2>Work review</h2>
+            <button type="button" class="drawer-toggle" data-drawer-toggle="right" disabled>
+              Hide
+            </button>
+          </div>
           <div data-work-detail></div>
         </aside>
+        <div class="drawer-restore drawer-restore--right">
+          <button type="button" class="drawer-toggle" data-drawer-toggle="right" disabled>
+            Show Work review
+          </button>
+        </div>
       </div>
     </div>
   </body>

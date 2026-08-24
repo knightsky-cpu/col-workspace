@@ -27,6 +27,20 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert "data-chat-transcript" in response.text
     assert "data-chat-status" in response.text
     assert "data-retry-turn" in response.text
+    assert 'data-drawer-toggle="left"' in response.text
+    assert 'data-drawer-toggle="right"' in response.text
+    header = response.text.split("</header>", maxsplit=1)[0]
+    assert "data-drawer-toggle" not in header
+    supporting_panel = response.text.split(
+        '<aside class="supporting-panel"',
+        maxsplit=1,
+    )[1].split("</aside>", maxsplit=1)[0]
+    assert 'data-drawer-toggle="left"' in supporting_panel
+    work_panel = response.text.split(
+        '<aside class="work-panel"',
+        maxsplit=1,
+    )[1].split("</aside>", maxsplit=1)[0]
+    assert 'data-drawer-toggle="right"' in work_panel
     assert "data-work-list" in response.text
     assert "data-work-detail" in response.text
     assert "data-work-error" in response.text
@@ -55,6 +69,15 @@ async def test_workspace_static_assets_are_local() -> None:
     assert "javascript" in js_response.headers["content-type"]
     assert ".contain-text" in css_response.text
     assert "overflow-wrap: anywhere" in css_response.text
+    assert "grid-template-areas" in css_response.text
+    assert ".conversation" in css_response.text
+    assert "grid-area: conversation" in css_response.text
+    collapsed_left = css_response.text.split(
+        ".workspace-grid--left-collapsed",
+        maxsplit=1,
+    )[1].split(".workspace-grid--right-collapsed", maxsplit=1)[0]
+    assert ".conversation" not in collapsed_left
+    assert ".composer" not in collapsed_left
 
 
 @pytest.mark.asyncio

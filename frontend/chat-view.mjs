@@ -28,9 +28,6 @@ export function renderReceipts(container, response) {
   for (const proposal of response.memory_proposals ?? []) {
     appendReceipt(list, "Memory proposal", proposal.proposal_id);
   }
-  for (const adaptation of response.adaptations ?? []) {
-    appendReceipt(list, "Adaptation", adaptation.signal_id);
-  }
   if (list.children.length > 0) {
     container.append(list);
   }
@@ -53,18 +50,30 @@ export function renderTranscript(container, transcript) {
 }
 
 export function createChatView(elements, handlers) {
+  function updateCharacterCount() {
+    if (!elements.characterCount) {
+      return;
+    }
+    const count = String(elements.input.value ?? "").length;
+    elements.characterCount.textContent = `${count} / 10000`;
+  }
+
   elements.form.addEventListener("submit", (event) => {
     event.preventDefault();
     handlers.onSubmit(elements.input.value);
   });
+  elements.input.addEventListener("input", updateCharacterCount);
   elements.retryButton.addEventListener("click", () => {
     handlers.onRetry();
   });
+  updateCharacterCount();
   return {
     render(state) {
       renderTranscript(elements.transcript, state.transcript);
+      elements.transcript.scrollTop = elements.transcript.scrollHeight;
       elements.retryButton.hidden = state.lastFailure === null;
       elements.submitButton.disabled = state.pendingTurn !== null;
+      updateCharacterCount();
     },
   };
 }

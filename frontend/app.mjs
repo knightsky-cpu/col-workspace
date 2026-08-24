@@ -17,6 +17,13 @@ import {
   readContextForm,
 } from "./requests.mjs";
 import {
+  createInitialLayoutState,
+  isDrawerExpanded,
+  isSectionExpanded,
+  setDrawerCollapsed,
+  setSectionExpanded,
+} from "./workspace-layout.mjs";
+import {
   acceptContext,
   beginMemoryLoad,
   beginPendingTurn,
@@ -43,12 +50,17 @@ let chatView = null;
 let workView = null;
 let memoryView = null;
 let activityView = null;
+let layoutState = createInitialLayoutState();
 
 function showWorkspace() {
   document.querySelector("[data-context-error]").hidden = true;
   document.querySelector("[data-workspace]").hidden = false;
   document.querySelector(".context-gate").hidden = true;
   document.querySelector("[data-new-conversation]").disabled = false;
+  for (const button of document.querySelectorAll("[data-drawer-toggle]")) {
+    button.disabled = false;
+  }
+  renderLayout();
   document.querySelector("#conversation-workspace").focus();
 }
 
@@ -87,6 +99,39 @@ function renderWorkspace() {
   ensureWorkView().render(state);
   ensureMemoryView().render(state);
   ensureActivityView().render(state);
+  renderLayout();
+}
+
+function renderLayout() {
+  const workspace = document.querySelector("[data-workspace]");
+  workspace.classList.toggle(
+    "workspace-grid--left-collapsed",
+    !isDrawerExpanded(layoutState, "left"),
+  );
+  workspace.classList.toggle(
+    "workspace-grid--right-collapsed",
+    !isDrawerExpanded(layoutState, "right"),
+  );
+
+  for (const button of document.querySelectorAll('[data-drawer-toggle="left"]')) {
+    const expanded = isDrawerExpanded(layoutState, "left");
+    setText(button, expanded ? "Hide" : "Show side panel");
+    button.setAttribute("aria-expanded", String(expanded));
+  }
+  for (const button of document.querySelectorAll('[data-drawer-toggle="right"]')) {
+    const expanded = isDrawerExpanded(layoutState, "right");
+    setText(button, expanded ? "Hide" : "Show Work review");
+    button.setAttribute("aria-expanded", String(expanded));
+  }
+
+  for (const section of ["work", "memory", "activity"]) {
+    const expanded = isSectionExpanded(layoutState, section);
+    const content = document.querySelector(`[data-section-content="${section}"]`);
+    const toggle = document.querySelector(`[data-section-toggle="${section}"]`);
+    content.hidden = !expanded;
+    toggle.setAttribute("aria-expanded", String(expanded));
+    setText(toggle, expanded ? "Collapse" : "Expand");
+  }
 }
 
 async function loadWorkList() {
@@ -186,6 +231,7 @@ function ensureChatView() {
       submitButton: document.querySelector("[data-chat-submit]"),
       retryButton: document.querySelector("[data-retry-turn]"),
       transcript: document.querySelector("[data-chat-transcript]"),
+      characterCount: document.querySelector("[data-character-count]"),
     },
     {
       onSubmit(message) {
@@ -221,6 +267,9 @@ function ensureWorkView() {
       },
       onSubmitFeedback(decision) {
         submitArtifactFeedback(decision);
+      },
+      onPrintWork() {
+        window.print();
       },
     },
   );
@@ -307,6 +356,30 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
   renderWorkspace();
   document.querySelector("#conversation-workspace").focus();
 });
+
+for (const button of document.querySelectorAll("[data-drawer-toggle]")) {
+  button.addEventListener("click", () => {
+    const drawer = button.getAttribute("data-drawer-toggle");
+    layoutState = setDrawerCollapsed(
+      layoutState,
+      drawer,
+      isDrawerExpanded(layoutState, drawer),
+    );
+    renderLayout();
+  });
+}
+
+for (const button of document.querySelectorAll("[data-section-toggle]")) {
+  button.addEventListener("click", () => {
+    const section = button.getAttribute("data-section-toggle");
+    layoutState = setSectionExpanded(
+      layoutState,
+      section,
+      !isSectionExpanded(layoutState, section),
+    );
+    renderLayout();
+  });
+}
 
 document.querySelector("[data-work-refresh]").addEventListener("click", () => {
   loadWorkList();

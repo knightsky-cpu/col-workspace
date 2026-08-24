@@ -33,7 +33,8 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
   background: var(--background);
   color: var(--text);
 }
@@ -76,11 +77,15 @@ main:focus-visible {
 .top-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem;
   padding: 1rem;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+}
+
+.top-bar > div {
+  margin-inline-end: auto;
 }
 
 h1,
@@ -130,15 +135,30 @@ p {
 
 .workspace-grid {
   min-height: 0;
+  overflow: hidden;
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr) minmax(18rem, 26rem);
+  grid-template-areas: "left-restore support conversation work right-restore";
+  grid-template-columns: 0 minmax(16rem, 22rem) minmax(0, 1fr) minmax(18rem, 26rem) 0;
+}
+
+.workspace-grid--left-collapsed {
+  grid-template-columns: 3rem 0 minmax(0, 1fr) minmax(18rem, 26rem) 0;
+}
+
+.workspace-grid--right-collapsed {
+  grid-template-columns: 0 minmax(16rem, 22rem) minmax(0, 1fr) 0 3rem;
+}
+
+.workspace-grid--left-collapsed.workspace-grid--right-collapsed {
+  grid-template-columns: 3rem 0 minmax(0, 1fr) 0 3rem;
 }
 
 .supporting-panel,
 .conversation,
 .work-panel {
   min-width: 0;
+  min-height: 0;
   padding: 1rem;
 }
 
@@ -157,20 +177,93 @@ p {
 .work-panel {
   background: var(--surface-muted);
   border-inline-end: 1px solid var(--border);
+  overflow: auto;
 }
 
 .work-panel {
   border-inline: 1px solid var(--border) 0;
 }
 
+.drawer-restore--left {
+  grid-area: left-restore;
+}
+
+.supporting-panel {
+  grid-area: support;
+}
+
+.conversation {
+  grid-area: conversation;
+}
+
+.work-panel {
+  grid-area: work;
+}
+
+.drawer-restore--right {
+  grid-area: right-restore;
+}
+
+.workspace-grid--left-collapsed .supporting-panel,
+.workspace-grid--right-collapsed .work-panel {
+  border: 0;
+  overflow: hidden;
+  padding: 0;
+  visibility: hidden;
+}
+
+.drawer-restore {
+  align-items: start;
+  background: var(--surface-muted);
+  border-inline-end: 1px solid var(--border);
+  display: none;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  padding-block-start: 1rem;
+}
+
+.workspace-grid--left-collapsed .drawer-restore--left,
+.workspace-grid--right-collapsed .drawer-restore--right {
+  display: flex;
+}
+
+.drawer-heading {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: space-between;
+  margin-block-end: 0.75rem;
+}
+
+.drawer-heading h2 {
+  margin: 0;
+}
+
+.drawer-toggle {
+  font-size: 0.8125rem;
+  min-height: 1.75rem;
+  padding: 0.15rem 0.35rem;
+}
+
+.drawer-restore .drawer-toggle {
+  writing-mode: vertical-rl;
+}
+
 .conversation {
   background: var(--background);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  overflow: hidden;
 }
 
 .chat-transcript {
   display: grid;
   gap: 1rem;
   margin-block-end: 1rem;
+  min-height: 0;
+  overflow: auto;
+  padding-inline-end: 0.25rem;
 }
 
 .turn {
@@ -208,8 +301,6 @@ p {
 }
 
 .composer {
-  position: sticky;
-  bottom: 0;
   display: grid;
   gap: 0.5rem;
   padding-block-start: 1rem;
@@ -244,6 +335,13 @@ p {
   display: flex;
   gap: 0.75rem;
   justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.drawer-section {
+  border-block-end: 1px solid var(--border);
+  margin-block-end: 1rem;
+  padding-block-end: 1rem;
 }
 
 .work-list-item {
@@ -256,7 +354,8 @@ p {
 .work-list-item,
 .feedback-event,
 .feedback-form,
-.work-panel a {
+.work-panel a,
+.export-controls {
   max-width: 100%;
   overflow-wrap: anywhere;
 }
@@ -265,13 +364,24 @@ p {
   display: inline-block;
 }
 
-.work-panel {
-  max-height: calc(100vh - 5rem);
-  overflow: auto;
-}
-
 .work-heading {
   font-weight: 700;
+}
+
+.export-controls {
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-end: 1rem;
+  padding: 0.75rem;
+}
+
+.export-controls h4 {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .feedback-form {
@@ -330,11 +440,24 @@ p {
 @media (max-width: 900px) {
   .workspace-grid {
     grid-template-columns: 1fr;
+    overflow: auto;
   }
 
   .supporting-panel,
   .work-panel {
     border-inline: 0;
     border-block-end: 1px solid var(--border);
+    visibility: visible;
+  }
+
+  .workspace-grid--left-collapsed,
+  .workspace-grid--right-collapsed,
+  .workspace-grid--left-collapsed.workspace-grid--right-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-grid--left-collapsed .supporting-panel,
+  .workspace-grid--right-collapsed .work-panel {
+    display: none;
   }
 }
