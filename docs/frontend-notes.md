@@ -113,3 +113,9 @@ the implementation boundary.
   locator instead of the visible/local `agent-col` project field. The local
   project field can remain a development label, but authenticated API calls
   must not let users choose arbitrary project IDs.
+- Deferred conversational-friction evidence: after the naming-normalization
+  pass, Agent Col still rejected natural memory requests such as preferring
+  `long detailed responses` or `detailed explanations` because the wording did
+  not fit the current governed-memory candidate contract. This should be
+  addressed in a later memory/artifact language-normalization polish pass, not
+  before the remaining core mechanics are wired.

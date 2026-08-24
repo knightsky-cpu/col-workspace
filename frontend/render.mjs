@@ -24,3 +24,12 @@ export function appendTextElement(parent, tagName, className, value) {
   parent.append(created);
   return created;
 }
+
+export function humanLabel(value) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}

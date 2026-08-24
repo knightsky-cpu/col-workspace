@@ -65,8 +65,9 @@ test("renderActivityPanel renders structured activity safely", () => {
   });
 
   const text = textTree(container);
-  assert.equal(text.includes("propose_memory_signal"), true);
-  assert.equal(text.includes("preferred_name--proposal-1"), true);
+  assert.equal(text.includes("Propose memory signal"), true);
+  assert.equal(text.includes("Preferred name"), true);
+  assert.equal(text.includes("preferred_name--proposal-1"), false);
   assert.equal(text.includes("<strong>not html</strong>"), true);
   assert.equal(
     container.children.every((child) => (

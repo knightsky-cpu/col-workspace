@@ -45,6 +45,13 @@ globalThis.document = {
   },
 };
 
+function textTree(item) {
+  return [
+    item.textContent,
+    ...item.children.flatMap((child) => textTree(child)),
+  ].join(" ");
+}
+
 const detail = {
   metadata: {
     reference: {
@@ -150,6 +157,8 @@ test("renderWorkList renders blueprint metadata and selection controls", () => {
 
   assert.equal(container.children.length, 1);
   assert.equal(container.children[0].textContent.includes("Safe <Blueprint>"), true);
+  assert.equal(container.children[0].textContent.includes("blueprint--abc"), false);
+  assert.equal(container.children[0].textContent.includes("Accepted 1"), true);
   assert.equal(
     container.children[0].classList.values.includes("contain-text"),
     true,
@@ -218,7 +227,7 @@ test("renderWorkDetail projects canonical schema-2 blueprint text safely", () =>
     { onSubmitFeedback: () => {} },
   );
 
-  const text = container.children.map((child) => child.textContent).join(" ");
+  const text = textTree(container);
   assert.equal(text.includes("Safe <Blueprint>"), true);
   assert.equal(text.includes("Use textContent."), true);
   assert.equal(text.includes("Which target matters most?"), true);
@@ -325,6 +334,25 @@ test("feedback form submits canonical artifact decision fields", () => {
   }]);
 });
 
+test("renderWorkDetail uses human target kind and adaptation labels", () => {
+  const container = node();
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: detail, error: null },
+      feedback: { status: "ready", events: [], error: null },
+    },
+    { onSubmitFeedback: () => {} },
+  );
+
+  const text = textTree(container);
+  assert.equal(text.includes("Whole blueprint"), true);
+  assert.equal(text.includes("whole_blueprint"), false);
+  assert.equal(text.includes("Planning granularity"), true);
+  assert.equal(text.includes("planning_granularity--1"), false);
+});
+
 test("renderFeedbackHistory shows supersession state without mutating artifacts", () => {
   const container = node();
 
@@ -355,9 +383,10 @@ test("renderFeedbackHistory shows supersession state without mutating artifacts"
   });
 
   const text = container.children.map((child) => child.textContent).join(" ");
-  assert.equal(text.includes("feedback--new"), true);
-  assert.equal(text.includes("superseded"), true);
-  assert.equal(text.includes("feedback--old"), true);
+  assert.equal(text.includes("Feedback · Rejected"), true);
+  assert.equal(text.includes("Superseded"), true);
+  assert.equal(text.includes("feedback--new"), false);
+  assert.equal(text.includes("feedback--old"), false);
   assert.equal(
     container.children.every((child) => (
       child.classList.values.includes("contain-text")
@@ -369,7 +398,7 @@ test("renderFeedbackHistory shows supersession state without mutating artifacts"
 test("buildBlueprintDownload creates a safe filename and JSON data URL", () => {
   const download = buildBlueprintDownload(detail);
 
-  assert.equal(download.filename, "safe-blueprint-blueprint--abc.json");
+  assert.equal(download.filename, "safe-blueprint.json");
   assert.equal(
     download.href.startsWith("data:application/json;charset=utf-8,"),
     true,
@@ -388,9 +417,9 @@ test("buildBlueprintExports offers JSON, Markdown, text, and print export option
     exports.map((item) => item.format),
     ["json", "md", "txt", "pdf-print"],
   );
-  assert.equal(exports[0].filename, "safe-blueprint-blueprint--abc.json");
-  assert.equal(exports[1].filename, "safe-blueprint-blueprint--abc.md");
-  assert.equal(exports[2].filename, "safe-blueprint-blueprint--abc.txt");
+  assert.equal(exports[0].filename, "safe-blueprint.json");
+  assert.equal(exports[1].filename, "safe-blueprint.md");
+  assert.equal(exports[2].filename, "safe-blueprint.txt");
   assert.equal(exports[1].href.startsWith("data:text/markdown;charset=utf-8,"), true);
   assert.equal(exports[2].href.startsWith("data:text/plain;charset=utf-8,"), true);
   assert.equal(exports[3].href, "#print-work");

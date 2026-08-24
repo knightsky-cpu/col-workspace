@@ -1,4 +1,4 @@
-import { appendTextElement } from "./render.mjs";
+import { appendTextElement, humanLabel } from "./render.mjs";
 
 function compactText(parts) {
   return parts.filter((part) => part !== undefined && part !== null && part !== "")
@@ -15,9 +15,9 @@ export function renderActivityPanel(container, activity) {
   }
   for (const entry of [...entries].reverse()) {
     appendTextElement(container, "p", "activity-event contain-text", compactText([
-      entry.kind,
-      entry.label,
-      entry.detail,
+      humanLabel(entry.kind),
+      humanLabel(entry.label),
+      entry.detail && !String(entry.detail).includes("--") ? entry.detail : "",
     ]));
   }
 }

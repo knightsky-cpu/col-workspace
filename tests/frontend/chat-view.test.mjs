@@ -89,10 +89,11 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
   });
 
   const text = textTree(container);
-  assert.match(text, /url_context/);
+  assert.match(text, /Url context/);
   assert.match(text, /Example Domain/);
   assert.match(text, /Blueprint/);
-  assert.match(text, /response_length--1/);
+  assert.match(text, /Response length/);
+  assert.doesNotMatch(text, /response_length--1/);
   assert.doesNotMatch(text, /planning_granularity--1/);
   assert.doesNotMatch(text, /google_search/);
   assert.equal(

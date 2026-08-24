@@ -1,4 +1,4 @@
-import { appendTextElement, setText } from "./render.mjs";
+import { appendTextElement, humanLabel, setText } from "./render.mjs";
 
 function compactText(parts) {
   return parts
@@ -31,9 +31,9 @@ function slug(value) {
 function feedbackCounts(item) {
   const counts = item.feedback_counts ?? {};
   return compactText([
-    `accepted ${counts.accepted ?? 0}`,
-    `rejected ${counts.rejected ?? 0}`,
-    `edited ${counts.edited ?? 0}`,
+    `Accepted ${counts.accepted ?? 0}`,
+    `Rejected ${counts.rejected ?? 0}`,
+    `Edited ${counts.edited ?? 0}`,
   ]);
 }
 
@@ -85,7 +85,7 @@ export function buildBlueprintExports(detail) {
   const label = reference.display_label
     ?? detail.blueprint?.synthesized_conceptual_model?.project_name
     ?? "blueprint";
-  const basename = `${slug(label)}-${reference.artifact_id}`;
+  const basename = slug(label);
   const markdown = blueprintMarkdown(detail);
   return [
     {
@@ -164,7 +164,6 @@ export function renderWorkList(container, work, handlers) {
     }
     setText(button, compactText([
       item.reference.display_label,
-      item.reference.artifact_id,
       feedbackCounts(item),
     ]));
     button.addEventListener("click", () => {
@@ -243,7 +242,7 @@ function renderFeedbackTargets(parent, detail, handlers) {
 
     appendTextElement(form, "p", "work-heading", compactText([
       target.display_label,
-      target.target_kind,
+      humanLabel(target.target_kind),
     ]));
 
     const select = document.createElement("select");
@@ -310,15 +309,15 @@ export function renderFeedbackHistory(container, work) {
   }
   for (const event of work.feedback.events) {
     appendTextElement(container, "p", "feedback-event contain-text", compactText([
-      event.reference.feedback_id,
-      event.reference.decision,
-      event.status,
+      "Feedback",
+      humanLabel(event.reference.decision),
+      humanLabel(event.status),
       event.feedback_text,
       event.supersedes_feedback_id
-        ? `supersedes ${event.supersedes_feedback_id}`
+        ? "supersedes earlier feedback"
         : "",
       event.superseded_by_feedback_id
-        ? `superseded by ${event.superseded_by_feedback_id}`
+        ? "superseded by newer feedback"
         : "",
     ]));
   }
@@ -350,9 +349,8 @@ export function renderWorkDetail(container, work, handlers) {
   renderBlueprint(container, detail.blueprint);
   appendTextElement(container, "h4", "", "Verified adaptations");
   appendList(container, (detail.adaptations ?? []).map((item) => compactText([
-    item.category,
-    item.status,
-    item.signal_id,
+    humanLabel(item.category),
+    humanLabel(item.status),
   ])));
   renderFeedbackTargets(container, detail, handlers);
 

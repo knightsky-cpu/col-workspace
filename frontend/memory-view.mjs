@@ -1,4 +1,4 @@
-import { appendTextElement, element } from "./render.mjs";
+import { appendTextElement, element, humanLabel } from "./render.mjs";
 
 function compactText(parts) {
   return parts.filter((part) => part !== undefined && part !== null && part !== "")
@@ -16,7 +16,8 @@ function stringValue(value) {
   if (typeof value === "object") {
     return JSON.stringify(value);
   }
-  return String(value);
+  const text = String(value);
+  return /[_-]/.test(text) ? humanLabel(text) : text;
 }
 
 function memorySignals(profile, key) {
@@ -43,13 +44,11 @@ function renderMemorySignals(container, title, emptyText, signals, handlers) {
     const card = element("div", "memory-card contain-text");
     card.setAttribute("data-memory-signal", signal.signal_id);
     appendTextElement(card, "p", "work-heading contain-text", compactText([
-      signal.category,
+      humanLabel(signal.category),
       stringValue(signal.value),
     ]));
     appendTextElement(card, "p", "muted contain-text", compactText([
-      "saved memory",
-      signal.signal_id,
-      signal.source_event_id,
+      "Saved memory",
     ]));
     const actions = element("div", "memory-actions contain-text");
     const revoke = element("button", "", "Revoke");
@@ -74,12 +73,11 @@ function renderProposal(container, proposal, handlers) {
   const card = element("div", "memory-card contain-text");
   card.setAttribute("data-memory-proposal", proposal.proposal_id);
   appendTextElement(card, "p", "work-heading contain-text", compactText([
-    proposal.category,
+    humanLabel(proposal.category),
     stringValue(proposal.proposed_value),
   ]));
   appendTextElement(card, "p", "muted contain-text", compactText([
-    proposal.proposal_id,
-    proposal.status,
+    humanLabel(proposal.status),
     proposal.expires_at,
   ]));
 
@@ -126,9 +124,8 @@ function renderEvents(container, events) {
   }
   for (const event of events) {
     appendTextElement(container, "p", "memory-event contain-text", compactText([
-      event.event_id,
-      event.event_type,
-      event.category,
+      humanLabel(event.category),
+      humanLabel(event.event_type),
       stringValue(event.value),
     ]));
   }

@@ -108,13 +108,17 @@ test("renderMemoryPanel renders active preferences, proposals, and events safely
   });
 
   const text = textTree(container);
-  assert.equal(text.includes("response_length"), true);
+  assert.equal(text.includes("Response length"), true);
   assert.equal(text.includes("concise"), true);
-  assert.equal(text.includes("preferred_name"), true);
+  assert.equal(text.includes("Preferred name"), true);
   assert.equal(text.includes("wifiknight"), true);
-  assert.equal(text.includes("planning_granularity"), true);
-  assert.equal(text.includes("micro_steps"), true);
-  assert.equal(text.includes("response_length--signal-1--approved"), true);
+  assert.equal(text.includes("Planning granularity"), true);
+  assert.equal(text.includes("Micro steps"), true);
+  assert.equal(text.includes("response_length"), false);
+  assert.equal(text.includes("preferred_name"), false);
+  assert.equal(text.includes("planning_granularity"), false);
+  assert.equal(text.includes("micro_steps"), false);
+  assert.equal(text.includes("response_length--signal-1--approved"), false);
   assert.equal(
     container.children.every((child) => (
       child.classList.values.includes("contain-text")
@@ -251,7 +255,8 @@ test("renderMemoryPanel keeps active preference IDs secondary to human labels", 
   const signalCard = findTree(container, (child) => (
     child.attributes["data-memory-signal"] === "response_length--signal-1"
   ));
-  assert.equal(signalCard.children[0].textContent, "response_length · concise");
+  assert.equal(signalCard.children[0].textContent, "Response length · concise");
+  assert.equal(signalCard.children[1].textContent, "Saved memory");
 });
 
 test("renderMemoryPanel exposes useful empty, loading, and error states", () => {

@@ -71,6 +71,7 @@ test("renderChatsPanel renders human-facing session cards", () => {
   );
 
   assert.equal(textTree(container).includes("Plan the artifact viewer"), true);
+  assert.equal(textTree(container).includes("session--1"), false);
   assert.equal(container.children[0].attributes["data-session-id"], "session--1");
   assert.equal(container.children[0].attributes["aria-current"], "true");
   container.children[0].onclick();

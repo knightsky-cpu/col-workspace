@@ -1,8 +1,8 @@
-import { element, setText } from "./render.mjs";
+import { element, humanLabel, setText } from "./render.mjs";
 
 function appendReceipt(container, label, value) {
   const item = element("li", "receipt-item contain-text");
-  item.textContent = `${label}: ${value}`;
+  item.textContent = value ? `${label}: ${value}` : label;
   container.append(item);
 }
 
@@ -10,7 +10,7 @@ export function renderReceipts(container, response) {
   container.replaceChildren();
   const list = element("ul", "receipt-list");
   for (const action of response.actions ?? []) {
-    appendReceipt(list, "Action", `${action.action_name} ${action.status}`);
+    appendReceipt(list, "Action", `${humanLabel(action.action_name)} ${humanLabel(action.status)}`);
   }
   for (const citation of response.citations ?? []) {
     appendReceipt(list, "Citation", citation.label);
@@ -22,11 +22,11 @@ export function renderReceipts(container, response) {
     appendReceipt(
       list,
       "Feedback",
-      `${feedback.decision} ${feedback.feedback_id}`,
+      humanLabel(feedback.decision),
     );
   }
   for (const proposal of response.memory_proposals ?? []) {
-    appendReceipt(list, "Memory proposal", proposal.proposal_id);
+    appendReceipt(list, "Memory proposal", humanLabel(proposal.category));
   }
   if (list.children.length > 0) {
     container.append(list);
