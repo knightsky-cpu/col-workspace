@@ -5,6 +5,7 @@ import {
   buildArtifactFeedbackChatRequest,
   buildChatRequest,
   buildExactRetryRequest,
+  buildMemoryDecisionChatRequest,
   buildOrdinaryChatRequest,
   generateIdempotencyKey,
   generateSessionId,
@@ -190,5 +191,47 @@ test("artifact feedback can supersede a previous feedback event", () => {
   assert.equal(
     request.body.artifact_feedback_decision.supersedes_feedback_id,
     "feedback--old",
+  );
+});
+
+test("memory decision chat request includes the structured memory decision", () => {
+  const request = buildMemoryDecisionChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    "Approve this memory proposal.",
+    {
+      proposal_id: "response_length--proposal-1",
+      decision: "approve",
+    },
+    cryptoStub,
+  );
+
+  assert.equal(request.key, "chat--123e4567-e89b-12d3-a456-426614174000");
+  assert.deepEqual(request.body.memory_decision, {
+    proposal_id: "response_length--proposal-1",
+    decision: "approve",
+  });
+  assert.equal(request.body.message, "Approve this memory proposal.");
+});
+
+test("memory decision chat request rejects invalid decisions", () => {
+  assert.throws(
+    () => buildMemoryDecisionChatRequest(
+      {
+        project_id: "agent-col",
+        session_id: "session-1",
+        user_id: "wifiknight",
+      },
+      "Approve this memory proposal.",
+      {
+        proposal_id: "response_length--proposal-1",
+        decision: "approved",
+      },
+      cryptoStub,
+    ),
+    /Memory decision is invalid/,
   );
 });

@@ -31,6 +31,9 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert "data-work-detail" in response.text
     assert "data-work-error" in response.text
     assert "data-work-refresh" in response.text
+    assert "data-memory-panel" in response.text
+    assert "data-memory-refresh" in response.text
+    assert "data-memory-error" in response.text
     assert "https://" not in response.text
     assert "http://" not in response.text
 
@@ -49,6 +52,8 @@ async def test_workspace_static_assets_are_local() -> None:
     assert "text/css" in css_response.headers["content-type"]
     assert js_response.status_code == 200
     assert "javascript" in js_response.headers["content-type"]
+    assert ".contain-text" in css_response.text
+    assert "overflow-wrap: anywhere" in css_response.text
 
 
 @pytest.mark.asyncio

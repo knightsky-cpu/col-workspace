@@ -27,6 +27,14 @@ export function createInitialState() {
         error: null,
       },
     },
+    memory: {
+      status: "idle",
+      profile: null,
+      unresolvedProposals: [],
+      events: [],
+      next_event_id: null,
+      error: null,
+    },
   };
 }
 
@@ -121,7 +129,10 @@ export function selectNeedsReceiptRefresh(response) {
         && response.adaptations.length > 0
       )
       || actions.some((action) => (
-        action.action_name.includes("memory_signal")
+        action !== null
+        && typeof action === "object"
+        && typeof action.action_name === "string"
+        && action.action_name.includes("memory")
       ))
     ),
   };
@@ -220,6 +231,44 @@ export function failWorkDetailLoad(state, error) {
         status: "error",
         error: errorMessage(error),
       },
+    },
+  };
+}
+
+export function beginMemoryLoad(state) {
+  return {
+    ...state,
+    memory: {
+      ...state.memory,
+      status: "loading",
+      error: null,
+    },
+  };
+}
+
+export function completeMemoryLoad(state, response) {
+  return {
+    ...state,
+    memory: {
+      status: "ready",
+      profile: response.profile ?? null,
+      unresolvedProposals: Array.isArray(response.unresolved_proposals)
+        ? response.unresolved_proposals
+        : [],
+      events: Array.isArray(response.events) ? response.events : [],
+      next_event_id: response.next_event_id ?? null,
+      error: null,
+    },
+  };
+}
+
+export function failMemoryLoad(state, error) {
+  return {
+    ...state,
+    memory: {
+      ...state.memory,
+      status: "error",
+      error: errorMessage(error),
     },
   };
 }

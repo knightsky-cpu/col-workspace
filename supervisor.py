@@ -58,6 +58,10 @@ memory intent is ambiguous, ask one concise question without calling a tool.
 When the current message contains more than one eligible memory candidate,
 do not choose between them and do not call propose_memory_signal. Ask which
 single candidate the user wants remembered.
+If the user answers a prior clarification by choosing one candidate but the
+current message does not restate the exact value required for the memory
+proposal, ask the user to restate that exact value in the current message and
+do not call propose_memory_signal.
 
 Do not propose memory when the current turn carries a structured memory
 decision, when the same value is already active, or when a matching pending

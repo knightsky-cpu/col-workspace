@@ -89,4 +89,10 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
   assert.match(text, /response_length--1/);
   assert.match(text, /planning_granularity--1/);
   assert.doesNotMatch(text, /google_search/);
+  assert.equal(
+    container.children[0].children.every((receipt) => (
+      receipt.classList.values.includes("contain-text")
+    )),
+    true,
+  );
 });

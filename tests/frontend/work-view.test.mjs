@@ -149,6 +149,10 @@ test("renderWorkList renders blueprint metadata and selection controls", () => {
 
   assert.equal(container.children.length, 1);
   assert.equal(container.children[0].textContent.includes("Safe <Blueprint>"), true);
+  assert.equal(
+    container.children[0].classList.values.includes("contain-text"),
+    true,
+  );
   container.children[0].onclick();
   assert.deepEqual(selected, ["blueprint--abc"]);
 });
@@ -234,6 +238,12 @@ test("renderFeedbackHistory shows supersession state without mutating artifacts"
   assert.equal(text.includes("feedback--new"), true);
   assert.equal(text.includes("superseded"), true);
   assert.equal(text.includes("feedback--old"), true);
+  assert.equal(
+    container.children.every((child) => (
+      child.classList.values.includes("contain-text")
+    )),
+    true,
+  );
 });
 
 test("buildBlueprintDownload creates a safe filename and JSON data URL", () => {

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   apiFetchJson,
   getBlueprint,
+  inspectMemory,
   listBlueprintFeedback,
   listBlueprints,
 } from "../../frontend/api.mjs";
@@ -141,6 +142,44 @@ test("artifact API wrappers reject invalid project and artifact identifiers", as
     () => getBlueprint(
       "agent-col",
       "bad/slash",
+      async () => jsonResponse(200, {}),
+    ),
+    /invalid/i,
+  );
+});
+
+test("inspectMemory calls the canonical user memory inspection path", async () => {
+  const calls = [];
+  await inspectMemory(
+    "wifiknight",
+    { after_event_id: "response_length--cursor--approved" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        profile: { active_preferences: {} },
+        unresolved_proposals: [],
+        events: [],
+        next_event_id: null,
+      });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/memory?after_event_id=response_length--cursor--approved",
+  );
+  assert.equal(calls[0][1].method, "GET");
+});
+
+test("inspectMemory rejects invalid user and event cursors", async () => {
+  assert.throws(
+    () => inspectMemory("bad/slash", {}, async () => jsonResponse(200, {})),
+    /invalid/i,
+  );
+  assert.throws(
+    () => inspectMemory(
+      "wifiknight",
+      { after_event_id: "bad/slash" },
       async () => jsonResponse(200, {}),
     ),
     /invalid/i,

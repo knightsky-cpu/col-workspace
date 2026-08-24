@@ -113,6 +113,22 @@ def test_supervisor_requires_clarification_for_multiple_memory_candidates(
     assert "which single candidate" in normalized_instruction
 
 
+def test_supervisor_requires_current_message_value_after_memory_clarification(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+
+    assert "prior clarification" in normalized_instruction
+    assert "current message does not restate the exact value" in (
+        normalized_instruction
+    )
+    assert "ask the user to restate that exact value" in (
+        normalized_instruction
+    )
+    assert "do not call propose_memory_signal" in normalized_instruction
+
+
 def test_create_supervisor_app_registers_only_bounded_research_expert(
 ) -> None:
     from research_expert import (

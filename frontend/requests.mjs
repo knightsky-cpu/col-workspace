@@ -4,6 +4,7 @@ const ARTIFACT_FEEDBACK_DECISIONS = new Set([
   "rejected",
   "edited",
 ]);
+const MEMORY_DECISIONS = new Set(["approve", "reject"]);
 
 function deepFreeze(value) {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -164,6 +165,34 @@ export function buildArtifactFeedbackChatRequest(
     user_id: context.user_id,
     message,
     artifact_feedback_decision: artifactDecision,
+    crypto: cryptoLike,
+  });
+}
+
+export function buildMemoryDecisionChatRequest(
+  context,
+  message,
+  decision,
+  cryptoLike = globalThis.crypto,
+) {
+  const memoryDecision = {
+    proposal_id: String(decision.proposal_id ?? "").trim(),
+    decision: String(decision.decision ?? "").trim(),
+  };
+
+  if (!isValidIdentifier(memoryDecision.proposal_id)) {
+    throw new Error("proposal_id is invalid.");
+  }
+  if (!MEMORY_DECISIONS.has(memoryDecision.decision)) {
+    throw new Error("Memory decision is invalid.");
+  }
+
+  return buildChatRequest({
+    project_id: context.project_id,
+    session_id: context.session_id,
+    user_id: context.user_id,
+    message,
+    memory_decision: memoryDecision,
     crypto: cryptoLike,
   });
 }

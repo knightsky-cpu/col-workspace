@@ -1,30 +1,37 @@
 import {
   apiFetchJson,
   getBlueprint,
+  inspectMemory,
   listBlueprintFeedback,
   listBlueprints,
 } from "./api.mjs";
 import { createChatView } from "./chat-view.mjs";
+import { createMemoryView } from "./memory-view.mjs";
 import { createWorkView } from "./work-view.mjs";
 import {
   buildArtifactFeedbackChatRequest,
   buildExactRetryRequest,
+  buildMemoryDecisionChatRequest,
   buildOrdinaryChatRequest,
   readContextForm,
 } from "./requests.mjs";
 import {
   acceptContext,
+  beginMemoryLoad,
   beginPendingTurn,
   beginWorkDetailLoad,
   beginWorkListLoad,
+  completeMemoryLoad,
   completeWorkDetailLoad,
   completeWorkListLoad,
   completePendingTurn,
   createInitialState,
+  failMemoryLoad,
   failPendingTurn,
   failWorkDetailLoad,
   failWorkListLoad,
   selectCanSubmit,
+  selectNeedsReceiptRefresh,
   selectWorkRefreshPlan,
   startNewConversation,
 } from "./state.mjs";
@@ -33,6 +40,7 @@ import { setText } from "./render.mjs";
 let state = createInitialState();
 let chatView = null;
 let workView = null;
+let memoryView = null;
 
 function showWorkspace() {
   document.querySelector("[data-context-error]").hidden = true;
@@ -60,9 +68,22 @@ function clearWorkError() {
   error.hidden = true;
 }
 
+function showMemoryError(message) {
+  const error = document.querySelector("[data-memory-error]");
+  setText(error, message);
+  error.hidden = false;
+}
+
+function clearMemoryError() {
+  const error = document.querySelector("[data-memory-error]");
+  setText(error, "");
+  error.hidden = true;
+}
+
 function renderWorkspace() {
   ensureChatView().render(state);
   ensureWorkView().render(state);
+  ensureMemoryView().render(state);
 }
 
 async function loadWorkList() {
@@ -102,6 +123,23 @@ async function loadWorkDetail(artifactId) {
   ensureWorkView().render(state);
 }
 
+async function loadMemory() {
+  if (!state.context) {
+    return;
+  }
+  clearMemoryError();
+  state = beginMemoryLoad(state);
+  ensureMemoryView().render(state);
+  try {
+    const response = await inspectMemory(state.context.user_id);
+    state = completeMemoryLoad(state, response);
+  } catch (error) {
+    state = failMemoryLoad(state, error);
+    showMemoryError(error.message);
+  }
+  ensureMemoryView().render(state);
+}
+
 async function submitRequest(request) {
   state = beginPendingTurn(state, request);
   renderWorkspace();
@@ -122,6 +160,9 @@ async function submitRequest(request) {
     }
     if (refreshPlan.selectArtifactId !== null) {
       await loadWorkDetail(refreshPlan.selectArtifactId);
+    }
+    if (selectNeedsReceiptRefresh(response).memory) {
+      await loadMemory();
     }
   } catch (error) {
     state = failPendingTurn(state, error);
@@ -183,6 +224,23 @@ function ensureWorkView() {
   return workView;
 }
 
+function ensureMemoryView() {
+  if (memoryView !== null) {
+    return memoryView;
+  }
+  memoryView = createMemoryView(
+    {
+      panel: document.querySelector("[data-memory-panel]"),
+    },
+    {
+      onSubmitDecision(decision) {
+        submitMemoryDecision(decision);
+      },
+    },
+  );
+  return memoryView;
+}
+
 async function submitArtifactFeedback(decision) {
   if (!selectCanSubmit(state)) {
     return;
@@ -190,6 +248,18 @@ async function submitArtifactFeedback(decision) {
   const request = buildArtifactFeedbackChatRequest(
     state.context,
     `Record ${decision.decision} feedback for Work artifact ${decision.artifact_id}.`,
+    decision,
+  );
+  await submitRequest(request);
+}
+
+async function submitMemoryDecision(decision) {
+  if (!selectCanSubmit(state)) {
+    return;
+  }
+  const request = buildMemoryDecisionChatRequest(
+    state.context,
+    `Record ${decision.decision} decision for memory proposal ${decision.proposal_id}.`,
     decision,
   );
   await submitRequest(request);
@@ -204,8 +274,10 @@ document.querySelector("[data-context-form]").addEventListener("submit", (event)
     );
     ensureChatView();
     ensureWorkView();
+    ensureMemoryView();
     showWorkspace();
     loadWorkList();
+    loadMemory();
   } catch (error) {
     showContextError(error.message);
   }
@@ -224,4 +296,8 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
 
 document.querySelector("[data-work-refresh]").addEventListener("click", () => {
   loadWorkList();
+});
+
+document.querySelector("[data-memory-refresh]").addEventListener("click", () => {
+  loadMemory();
 });

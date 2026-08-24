@@ -105,6 +105,19 @@ function buildQuery(options = {}) {
   return query ? `?${query}` : "";
 }
 
+function buildMemoryQuery(options = {}) {
+  const params = new URLSearchParams();
+  if (options.after_event_id !== undefined && options.after_event_id !== null) {
+    const eventId = String(options.after_event_id);
+    if (!isValidIdentifier(eventId)) {
+      throw new Error("after_event_id is invalid.");
+    }
+    params.set("after_event_id", eventId);
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 export function listBlueprints(
   projectId,
   options = {},
@@ -142,6 +155,19 @@ export function listBlueprintFeedback(
   assertIdentifier("artifact_id", artifactId);
   return apiFetchJson(
     `/api/projects/${encodeURIComponent(projectId)}/blueprints/${encodeURIComponent(artifactId)}/feedback${buildQuery(options)}`,
+    { method: "GET" },
+    fetchLike,
+  );
+}
+
+export function inspectMemory(
+  userId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  assertIdentifier("user_id", userId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/memory${buildMemoryQuery(options)}`,
     { method: "GET" },
     fetchLike,
   );

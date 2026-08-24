@@ -50,8 +50,12 @@
             <div data-work-list></div>
           </section>
           <section aria-labelledby="memory-title">
-            <h2 id="memory-title">Memory</h2>
-            <p data-memory-empty>No memory loaded yet.</p>
+            <div class="section-heading">
+              <h2 id="memory-title">Memory</h2>
+              <button type="button" data-memory-refresh>Refresh</button>
+            </div>
+            <p class="form-error" role="alert" data-memory-error hidden></p>
+            <div data-memory-panel></div>
           </section>
           <section aria-labelledby="activity-title">
             <h2 id="activity-title">Activity</h2>

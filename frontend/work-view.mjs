@@ -67,7 +67,7 @@ export function renderWorkList(container, work, handlers) {
   for (const item of work.list.items) {
     const button = document.createElement("button");
     button.type = "button";
-    button.classList.add("work-list-item");
+    button.classList.add("work-list-item", "contain-text");
     button.setAttribute("data-artifact-id", item.reference.artifact_id);
     setText(button, compactText([
       item.reference.display_label,
@@ -216,7 +216,7 @@ export function renderFeedbackHistory(container, work) {
     return;
   }
   for (const event of work.feedback.events) {
-    appendTextElement(container, "p", "feedback-event", compactText([
+    appendTextElement(container, "p", "feedback-event contain-text", compactText([
       event.reference.feedback_id,
       event.reference.decision,
       event.status,

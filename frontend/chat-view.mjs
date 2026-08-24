@@ -1,7 +1,7 @@
 import { element, setText } from "./render.mjs";
 
 function appendReceipt(container, label, value) {
-  const item = element("li", "receipt-item");
+  const item = element("li", "receipt-item contain-text");
   item.textContent = `${label}: ${value}`;
   container.append(item);
 }

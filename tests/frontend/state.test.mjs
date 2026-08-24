@@ -5,13 +5,16 @@ import {
   acceptContext,
   beginWorkDetailLoad,
   beginWorkListLoad,
+  beginMemoryLoad,
   beginPendingTurn,
   completeWorkDetailLoad,
   completeWorkListLoad,
+  completeMemoryLoad,
   completePendingTurn,
   createInitialState,
   failWorkDetailLoad,
   failWorkListLoad,
+  failMemoryLoad,
   failPendingTurn,
   selectCanSubmit,
   selectFirstSupportedArtifact,
@@ -163,6 +166,70 @@ test("work list lifecycle stores newest-first metadata and cursor", () => {
     "blueprint--abc",
   );
   assert.equal(completed.work.list.next_before, "cursor--1");
+});
+
+test("memory lifecycle stores profile, unresolved proposals, events, and cursor", () => {
+  const loading = beginMemoryLoad(createInitialState());
+  assert.equal(loading.memory.status, "loading");
+
+  const completed = completeMemoryLoad(loading, {
+    profile: {
+      memory_schema_version: "1.0",
+      memory_revision: 1,
+      identity_context: {},
+      active_preferences: {
+        response_length: {
+          signal_id: "response_length--signal-1",
+          value: "concise",
+        },
+      },
+    },
+    unresolved_proposals: [
+      {
+        proposal_id: "response_length--proposal-1",
+        category: "response_length",
+        proposed_value: "concise",
+        status: "pending",
+      },
+    ],
+    events: [
+      {
+        event_id: "response_length--signal-1--approved",
+        event_type: "approved",
+        category: "response_length",
+        value: "concise",
+      },
+    ],
+    next_event_id: "response_length--signal-1--approved",
+  });
+
+  assert.equal(completed.memory.status, "ready");
+  assert.equal(
+    completed.memory.profile.active_preferences.response_length.value,
+    "concise",
+  );
+  assert.equal(
+    completed.memory.unresolvedProposals[0].proposal_id,
+    "response_length--proposal-1",
+  );
+  assert.equal(
+    completed.memory.events[0].event_id,
+    "response_length--signal-1--approved",
+  );
+  assert.equal(
+    completed.memory.next_event_id,
+    "response_length--signal-1--approved",
+  );
+});
+
+test("memory load failures store safe error messages", () => {
+  assert.equal(
+    failMemoryLoad(
+      beginMemoryLoad(createInitialState()),
+      { message: "memory unavailable" },
+    ).memory.error,
+    "memory unavailable",
+  );
 });
 
 test("work detail lifecycle stores canonical detail and feedback history", () => {

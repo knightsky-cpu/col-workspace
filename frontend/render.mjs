@@ -11,7 +11,7 @@ export function setHidden(element, hidden) {
 export function element(tagName, className, text) {
   const created = document.createElement(tagName);
   if (className) {
-    created.classList.add(className);
+    created.classList.add(...String(className).split(/\s+/).filter(Boolean));
   }
   if (text !== undefined) {
     created.textContent = String(text);
