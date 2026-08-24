@@ -23,6 +23,12 @@ from agent_col_routing_v3 import (
     StrictRoutingModel,
     validate_routing_directive_for_input as validate_v3_directive_for_input,
 )
+from schemas import (
+    ArtifactFilenameStr,
+    SingleFileArtifactFamily,
+    SingleFileArtifactFormat,
+    _allowed_single_file_artifact_formats,
+)
 
 
 class AgentColRoute(StrEnum):
@@ -78,8 +84,41 @@ class AgentColRoutingInput(AgentColRoutingInputV3):
 
 
 class ArtifactRoutingIntent(StrictRoutingModel):
-    operation: Literal["create_blueprint"]
+    operation: Literal["create_blueprint", "create_single_file_artifact"]
     objective: RoutingTaskText
+    artifact_family: SingleFileArtifactFamily | None = None
+    format: SingleFileArtifactFormat | None = None
+    filename: ArtifactFilenameStr | None = None
+
+    @model_validator(mode="after")
+    def validate_operation_fields(self) -> Self:
+        single_file_fields = (
+            self.artifact_family,
+            self.format,
+            self.filename,
+        )
+        if self.operation == "create_blueprint":
+            if any(value is not None for value in single_file_fields):
+                raise ValueError(
+                    "Blueprint artifact intents cannot include single-file "
+                    "fields."
+                )
+            return self
+        if not all(value is not None for value in single_file_fields):
+            raise ValueError(
+                "Single-file artifact intents require family, format, and "
+                "filename."
+            )
+        assert self.artifact_family is not None
+        assert self.format is not None
+        if (
+            self.format
+            not in _allowed_single_file_artifact_formats(
+                self.artifact_family
+            )
+        ):
+            raise ValueError("Artifact family and format do not match.")
+        return self
 
 
 class AgentColRoutingDirective(StrictRoutingModel):

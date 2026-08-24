@@ -786,7 +786,7 @@ class ServiceState:
         tuple[object, object, object | None, object | None]
     ]
     artifact_executor_dependencies: list[
-        tuple[object, object, object]
+        tuple[object, object, object, object, object, object]
     ]
     artifact_feedback_service_dependencies: list[tuple[object, object]]
     artifact_feedback_executor_dependencies: list[tuple[object, object]]
@@ -971,7 +971,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         tuple[object, object, object | None, object | None]
     ] = []
     artifact_executor_dependencies: list[
-        tuple[object, object, object]
+        tuple[object, object, object, object, object, object]
     ] = []
     artifact_feedback_service_dependencies: list[tuple[object, object]] = []
     artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
@@ -1204,9 +1204,19 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         synthesis_service: object,
         artifact_ledger: object,
         artifact_reader: object,
+        generic_artifact_generator: object,
+        generic_artifact_reader: object,
+        genai_client: object,
     ) -> object:
         artifact_executor_dependencies.append(
-            (synthesis_service, artifact_ledger, artifact_reader)
+            (
+                synthesis_service,
+                artifact_ledger,
+                artifact_reader,
+                generic_artifact_generator,
+                generic_artifact_reader,
+                genai_client,
+            )
         )
         return artifact_executor
 
@@ -1931,6 +1941,9 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 service_state.synthesis_service,
                 service_state.database,
                 service_state.artifact_service,
+                main.generate_generic_artifact,
+                service_state.generic_artifact_service,
+                service_state.genai_client,
             )
         ]
         assert service_state.artifact_feedback_service_dependencies == [

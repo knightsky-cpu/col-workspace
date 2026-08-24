@@ -16,6 +16,9 @@ from schemas import (
     BlueprintArtifactDetailResponse,
     BlueprintArtifactMetadata,
     MemoryDecisionRequest,
+    SingleFileArtifact,
+    SingleFileArtifactDetailResponse,
+    SingleFileArtifactMetadata,
     SynthesisBlueprint,
 )
 
@@ -93,6 +96,22 @@ def artifact_directive() -> AgentColRoutingDirective:
     )
 
 
+def single_file_artifact_directive() -> AgentColRoutingDirective:
+    return AgentColRoutingDirective.model_validate(
+        {
+            "schema_version": "4.0",
+            "route": "artifact",
+            "artifact_intent": {
+                "operation": "create_single_file_artifact",
+                "objective": "Create the requested password generator code artifact.",
+                "artifact_family": "code",
+                "format": "python",
+                "filename": "password_generator.py",
+            },
+        }
+    )
+
+
 def initial_claim() -> ChatTurnClaim:
     return ChatTurnClaim(
         request=ChatTurnRequest(
@@ -115,6 +134,46 @@ def artifact_for_claim(claim: ChatTurnClaim) -> ArtifactReference:
         artifact_id=f"blueprint--{claim.ids.turn_id}",
         schema_version="2.0",
         display_label="Collaborative Study Partner",
+    )
+
+
+def single_file_reference_for_claim(claim: ChatTurnClaim) -> ArtifactReference:
+    return ArtifactReference(
+        artifact_type="single_file_artifact",
+        project_id=claim.request.project_id,
+        artifact_id=f"artifact--{claim.ids.turn_id}",
+        schema_version="1.0",
+        display_label="Password Generator",
+    )
+
+
+def single_file_artifact() -> SingleFileArtifact:
+    return SingleFileArtifact(
+        artifact_family="code",
+        format="python",
+        filename="password_generator.py",
+        content="import secrets\nprint(secrets.token_urlsafe(12))\n",
+        summary="Password Generator",
+    )
+
+
+def single_file_detail(
+    claim: ChatTurnClaim,
+    artifact: ArtifactReference,
+    generated: SingleFileArtifact,
+) -> SingleFileArtifactDetailResponse:
+    return SingleFileArtifactDetailResponse(
+        metadata=SingleFileArtifactMetadata(
+            reference=artifact,
+            created_at=NOW,
+            originating_session_id=claim.request.session_id,
+            originating_turn_id=claim.ids.turn_id,
+            filename=generated.filename,
+            artifact_family=generated.artifact_family,
+            format=generated.format,
+            byte_size=len(generated.content.encode("utf-8")),
+        ),
+        artifact=generated,
     )
 
 
@@ -189,11 +248,33 @@ class FakeSynthesisService:
 
 
 @dataclass
+class FakeGenericArtifactGenerator:
+    generated: SingleFileArtifact
+    calls: list[tuple[object, object]] = field(default_factory=list)
+
+    async def __call__(
+        self,
+        client: object,
+        request: object,
+    ) -> SingleFileArtifact:
+        self.calls.append((client, request))
+        return self.generated
+
+
+@dataclass
 class FakeArtifactLedger:
     result: ChatTurnArtifactEffectResult
     calls: list[tuple[object, dict[str, object]]] = field(default_factory=list)
 
     async def record_chat_turn_blueprint_effect(
+        self,
+        claim: ChatTurnClaim,
+        **kwargs: object,
+    ) -> ChatTurnArtifactEffectResult:
+        self.calls.append((claim, kwargs))
+        return self.result
+
+    async def record_chat_turn_single_file_artifact_effect(
         self,
         claim: ChatTurnClaim,
         **kwargs: object,
@@ -211,6 +292,19 @@ class FakeArtifactReader:
         self,
         command: object,
     ) -> BlueprintArtifactDetailResponse:
+        self.commands.append(command)
+        return self.detail
+
+
+@dataclass
+class FakeGenericArtifactReader:
+    detail: SingleFileArtifactDetailResponse
+    commands: list[object] = field(default_factory=list)
+
+    async def get_artifact(
+        self,
+        command: object,
+    ) -> SingleFileArtifactDetailResponse:
         self.commands.append(command)
         return self.detail
 
@@ -366,6 +460,101 @@ async def test_artifact_executor_uses_server_projected_source_text(
             source_text="Server-owned source projection.",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_artifact_executor_generates_single_file_artifact_without_blueprint(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactExecutionCommand,
+        AgentColArtifactExecutor,
+    )
+    from generic_artifact_generation import GenericArtifactGenerationRequest
+    from generic_artifact_service import GetGenericArtifactCommand
+
+    claim = initial_claim()
+    generated = single_file_artifact()
+    artifact = single_file_reference_for_claim(claim)
+    action = AgentActionReceipt(
+        action_name="create_artifact",
+        status="completed",
+    )
+    effect_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    synthesis_service = FakeSynthesisService(blueprint())
+    generic_generator = FakeGenericArtifactGenerator(generated)
+    ledger = FakeArtifactLedger(
+        ChatTurnArtifactEffectResult(
+            claim=effect_claim,
+            artifact=artifact,
+        )
+    )
+    reader = FakeArtifactReader(
+        artifact_detail(effect_claim, artifact_for_claim(claim), blueprint())
+    )
+    generic_reader = FakeGenericArtifactReader(
+        single_file_detail(effect_claim, artifact, generated)
+    )
+    genai_client = object()
+    executor = AgentColArtifactExecutor(
+        synthesis_service=synthesis_service,
+        artifact_ledger=ledger,
+        artifact_reader=reader,
+        generic_artifact_generator=generic_generator,
+        generic_artifact_reader=generic_reader,
+        genai_client=genai_client,
+    )
+
+    result = await executor.execute(
+        AgentColArtifactExecutionCommand(
+            claim=claim,
+            routing_directive=single_file_artifact_directive(),
+            observed_at=NOW,
+            source_text="Create a Python password generator.",
+        )
+    )
+
+    assert synthesis_service.commands == []
+    assert generic_generator.calls == [
+        (
+            genai_client,
+            GenericArtifactGenerationRequest(
+                artifact_family="code",
+                artifact_format="python",
+                filename="password_generator.py",
+                source_text="Create a Python password generator.",
+                context_messages=(),
+            ),
+        )
+    ]
+    assert len(ledger.calls) == 1
+    ledger_claim, ledger_arguments = ledger.calls[0]
+    assert ledger_claim is claim
+    assert ledger_arguments == {
+        "model_name": "gemini-3.6-flash",
+        "artifact": generated.model_dump(mode="json"),
+        "display_label": "Password Generator",
+        "observed_at": NOW,
+    }
+    assert generic_reader.commands == [
+        GetGenericArtifactCommand(
+            project_id="agent-col",
+            artifact_id=artifact.artifact_id,
+        )
+    ]
+    assert reader.commands == []
+    assert result.claim is effect_claim
+    assert result.actions == (action,)
+    assert result.artifacts == (artifact,)
+    assert result.projection.operation == "create_single_file_artifact"
+    assert result.projection.artifact == artifact
+    assert result.projection.filename == "password_generator.py"
+    assert result.projection.format == "python"
+    assert result.projection.artifact_family == "code"
+    assert result.projection.summary == "Password Generator"
 
 
 @pytest.mark.asyncio

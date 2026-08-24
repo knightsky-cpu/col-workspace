@@ -226,6 +226,55 @@ export function listBlueprintFeedback(
   );
 }
 
+export function listArtifacts(
+  projectId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/artifacts${buildQuery(options)}`,
+    { method: "GET", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function getArtifact(
+  projectId,
+  artifactId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
+    { method: "GET", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function createArtifact(
+  projectId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/artifacts`,
+    {
+      method: "POST",
+      authToken: options.authToken,
+      body: request,
+    },
+    fetchLike,
+  );
+}
+
 export function inspectMemory(
   userId,
   options = {},

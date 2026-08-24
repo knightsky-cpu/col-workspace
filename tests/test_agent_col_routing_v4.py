@@ -70,6 +70,56 @@ def test_v4_accepts_one_bounded_artifact_creation_directive() -> None:
     )
 
 
+def test_v4_accepts_single_file_artifact_creation_directive() -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoute,
+        AgentColRoutingDirective,
+        validate_routing_directive_for_input,
+    )
+
+    routing_input = artifact_routing_input(
+        current_message=(
+            "Create a Python code artifact for a password generator using "
+            "uppercase letters, lowercase letters, numbers, and symbols."
+        )
+    )
+    directive = AgentColRoutingDirective.model_validate(
+        {
+            "schema_version": "4.0",
+            "route": "artifact",
+            "artifact_intent": {
+                "operation": "create_single_file_artifact",
+                "objective": "Create the requested password generator code artifact.",
+                "artifact_family": "code",
+                "format": "python",
+                "filename": "password_generator.py",
+            },
+        }
+    )
+
+    assert directive.route is AgentColRoute.ARTIFACT
+    assert directive.artifact_intent is not None
+    assert directive.artifact_intent.operation == "create_single_file_artifact"
+    assert directive.artifact_intent.artifact_family == "code"
+    assert directive.artifact_intent.format == "python"
+    assert directive.artifact_intent.filename == "password_generator.py"
+    assert (
+        validate_routing_directive_for_input(directive, routing_input)
+        is directive
+    )
+
+
+def test_v4_single_file_artifact_intent_rejects_family_format_mismatch(
+) -> None:
+    with pytest.raises(ValidationError):
+        artifact_directive(
+            operation="create_single_file_artifact",
+            artifact_family="document",
+            format="python",
+            filename="password_generator.py",
+        )
+
+
 def test_v4_routing_input_accepts_bounded_recent_user_context() -> None:
     routing_input = artifact_routing_input(
         current_message="Turn that into a markdown deliverable.",

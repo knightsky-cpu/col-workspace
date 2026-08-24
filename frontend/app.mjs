@@ -1,13 +1,16 @@
 import {
   apiFetchJson,
+  createArtifact,
   createWorkspace,
   deleteMemorySignal,
+  getArtifact,
   getAuthConfig,
   getAuthSession,
   getChatSession,
   getBlueprint,
   inspectMemory,
   listChatSessions,
+  listArtifacts,
   listWorkspaces,
   listBlueprintFeedback,
   listBlueprints,
@@ -128,6 +131,27 @@ function clearWorkError() {
   const error = document.querySelector("[data-work-error]");
   setText(error, "");
   error.hidden = true;
+}
+
+function newestFirst(a, b) {
+  const left = Date.parse(a.created_at ?? "");
+  const right = Date.parse(b.created_at ?? "");
+  if (Number.isNaN(left) && Number.isNaN(right)) {
+    return 0;
+  }
+  if (Number.isNaN(left)) {
+    return 1;
+  }
+  if (Number.isNaN(right)) {
+    return -1;
+  }
+  return right - left;
+}
+
+function selectedArtifactMetadata(artifactId) {
+  return state.work.list.items.find((item) => (
+    item.reference?.artifact_id === artifactId
+  )) ?? null;
 }
 
 function showMemoryError(message) {
@@ -335,11 +359,23 @@ async function loadWorkList() {
   state = beginWorkListLoad(state);
   ensureWorkView().render(state);
   try {
-    const response = await listBlueprints(
-      state.context.project_id,
-      authOptions({ limit: 20 }),
-    );
-    state = completeWorkListLoad(state, response);
+    const [blueprints, artifacts] = await Promise.all([
+      listBlueprints(
+        state.context.project_id,
+        authOptions({ limit: 20 }),
+      ),
+      listArtifacts(
+        state.context.project_id,
+        authOptions({ limit: 20 }),
+      ),
+    ]);
+    state = completeWorkListLoad(state, {
+      artifacts: [
+        ...(Array.isArray(artifacts.artifacts) ? artifacts.artifacts : []),
+        ...(Array.isArray(blueprints.artifacts) ? blueprints.artifacts : []),
+      ].sort(newestFirst),
+      next_before: null,
+    });
   } catch (error) {
     state = failWorkListLoad(state, error);
     showWorkError(error.message);
@@ -355,14 +391,25 @@ async function loadWorkDetail(artifactId) {
   state = beginWorkDetailLoad(state, artifactId);
   ensureWorkView().render(state);
   try {
-    const [detail, feedback] = await Promise.all([
-      getBlueprint(state.context.project_id, artifactId, authOptions()),
-      listBlueprintFeedback(
+    const metadata = selectedArtifactMetadata(artifactId);
+    let detail = null;
+    let feedback = { events: [], next_before: null };
+    if (metadata?.reference?.artifact_type === "single_file_artifact") {
+      detail = await getArtifact(
         state.context.project_id,
         artifactId,
-        authOptions({ limit: 20 }),
-      ),
-    ]);
+        authOptions(),
+      );
+    } else {
+      [detail, feedback] = await Promise.all([
+        getBlueprint(state.context.project_id, artifactId, authOptions()),
+        listBlueprintFeedback(
+          state.context.project_id,
+          artifactId,
+          authOptions({ limit: 20 }),
+        ),
+      ]);
+    }
     state = completeWorkDetailLoad(state, detail, feedback);
   } catch (error) {
     state = failWorkDetailLoad(state, error);
@@ -551,10 +598,14 @@ function ensureWorkView() {
     {
       list: document.querySelector("[data-work-list]"),
       detail: document.querySelector("[data-work-detail]"),
+      createForm: document.querySelector("[data-artifact-create-form]"),
     },
     {
       onSelectArtifact(artifactId) {
         loadWorkDetail(artifactId);
+      },
+      onCreateArtifact(request) {
+        createGenericArtifact(request);
       },
       onSubmitFeedback(decision) {
         submitArtifactFeedback(decision);
@@ -565,6 +616,28 @@ function ensureWorkView() {
     },
   );
   return workView;
+}
+
+async function createGenericArtifact(request) {
+  if (!state.context || state.pendingTurn !== null) {
+    return;
+  }
+  clearWorkError();
+  try {
+    const response = await createArtifact(
+      state.context.project_id,
+      {
+        ...request,
+        session_id: state.context.session_id,
+        user_id: state.context.user_id,
+      },
+      authOptions(),
+    );
+    await loadWorkList();
+    await loadWorkDetail(response.reference.artifact_id);
+  } catch (error) {
+    showWorkError(error.message);
+  }
 }
 
 function ensureMemoryView() {

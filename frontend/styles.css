@@ -466,6 +466,40 @@ p {
   padding: 0.75rem;
 }
 
+.artifact-create-form {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.75rem 1rem;
+  padding: 0.75rem;
+}
+
+.artifact-create-form h3 {
+  margin: 0;
+}
+
+.artifact-create-form label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.artifact-create-form input,
+.artifact-create-form select,
+.artifact-create-form textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.5rem;
+}
+
+.artifact-create-form textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+
 .feedback-form textarea,
 .feedback-form input,
 .feedback-form select {
@@ -485,6 +519,14 @@ p {
 .feedback-event {
   border-top: 1px solid var(--border);
   padding-block: 0.5rem;
+}
+
+.artifact-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  white-space: pre-wrap;
 }
 
 .memory-card,

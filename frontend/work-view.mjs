@@ -28,6 +28,25 @@ function slug(value) {
     .slice(0, 48) || "blueprint";
 }
 
+function artifactReference(detail) {
+  return detail.metadata?.reference ?? detail.reference ?? {};
+}
+
+function isSingleFileArtifactDetail(detail) {
+  return artifactReference(detail).artifact_type === "single_file_artifact";
+}
+
+function artifactTypeLabel(item) {
+  const format = item.format ?? item.metadata?.format ?? item.artifact?.format;
+  const family = item.artifact_family
+    ?? item.metadata?.artifact_family
+    ?? item.artifact?.artifact_family;
+  return [
+    format ? humanLabel(format) : "",
+    family ? humanLabel(family).toLowerCase() : "",
+  ].filter(Boolean).join(" ");
+}
+
 function feedbackCounts(item) {
   const counts = item.feedback_counts ?? {};
   return compactText([
@@ -35,6 +54,20 @@ function feedbackCounts(item) {
     `Rejected ${counts.rejected ?? 0}`,
     `Edited ${counts.edited ?? 0}`,
   ]);
+}
+
+export function buildArtifactCreateRequest(formData) {
+  const request = {
+    artifact_family: String(formData.get("artifact_family") ?? "").trim(),
+    format: String(formData.get("format") ?? "").trim(),
+    filename: String(formData.get("filename") ?? "").trim(),
+    source_text: String(formData.get("source_text") ?? "").trim(),
+  };
+  const displayLabel = String(formData.get("display_label") ?? "").trim();
+  if (displayLabel) {
+    request.display_label = displayLabel;
+  }
+  return request;
 }
 
 export function buildBlueprintDownload(detail) {
@@ -115,12 +148,109 @@ export function buildBlueprintExports(detail) {
   ];
 }
 
+function singleFileArtifactMarkdown(detail) {
+  const artifact = detail.artifact ?? {};
+  const metadata = detail.metadata ?? {};
+  const reference = artifactReference(detail);
+  const label = reference.display_label
+    ?? artifact.display_label
+    ?? artifact.filename
+    ?? metadata.filename
+    ?? "Artifact";
+  const type = artifactTypeLabel({
+    format: artifact.format ?? metadata.format,
+    artifact_family: artifact.artifact_family ?? metadata.artifact_family,
+  });
+  return [
+    `# ${label}`,
+    "",
+    type,
+    "",
+    artifact.summary ?? "",
+    "",
+    "```",
+    artifact.content ?? "",
+    "```",
+  ].join("\n");
+}
+
+function mimeTypeForArtifact(format) {
+  const normalized = String(format ?? "").toLowerCase();
+  if (normalized === "json") {
+    return "application/json";
+  }
+  if (normalized === "markdown" || normalized === "md") {
+    return "text/markdown";
+  }
+  if (normalized === "html") {
+    return "text/html";
+  }
+  if (normalized === "css") {
+    return "text/css";
+  }
+  if (normalized === "javascript" || normalized === "js") {
+    return "text/javascript";
+  }
+  return "text/plain";
+}
+
+export function buildSingleFileArtifactExports(detail) {
+  const artifact = detail.artifact ?? {};
+  const metadata = detail.metadata ?? {};
+  const reference = artifactReference(detail);
+  const label = reference.display_label
+    ?? artifact.display_label
+    ?? metadata.filename
+    ?? "artifact";
+  const filename = artifact.filename ?? metadata.filename ?? `${slug(label)}.txt`;
+  const markdown = singleFileArtifactMarkdown(detail);
+  return [
+    {
+      format: "json",
+      label: "JSON",
+      filename: `${slug(label)}.json`,
+      href: dataHref("application/json", JSON.stringify(detail, null, 2)),
+    },
+    {
+      format: "original",
+      label: "Original",
+      filename,
+      href: dataHref(mimeTypeForArtifact(artifact.format ?? metadata.format), artifact.content ?? ""),
+    },
+    {
+      format: "md",
+      label: "Markdown",
+      filename: `${slug(label)}.md`,
+      href: dataHref("text/markdown", markdown),
+    },
+    {
+      format: "txt",
+      label: "Text",
+      filename: `${slug(label)}.txt`,
+      href: dataHref("text/plain", artifact.content ?? markdown),
+    },
+    {
+      format: "pdf-print",
+      label: "PDF / Print",
+      filename: `${slug(label)}.pdf`,
+      href: "#print-work",
+    },
+  ];
+}
+
+function buildArtifactExports(detail) {
+  if (isSingleFileArtifactDetail(detail)) {
+    return buildSingleFileArtifactExports(detail);
+  }
+  return buildBlueprintExports(detail);
+}
+
 function renderExportControls(parent, detail, handlers) {
   const box = document.createElement("section");
   box.classList.add("export-controls", "contain-text");
   box.setAttribute("data-export-controls", "");
   appendTextElement(box, "h4", "", "Export");
-  for (const item of buildBlueprintExports(detail)) {
+  for (const item of buildArtifactExports(detail)) {
     if (item.format === "pdf-print") {
       const button = document.createElement("button");
       button.type = "button";
@@ -155,19 +285,23 @@ export function renderWorkList(container, work, handlers) {
     return;
   }
   for (const item of work.list.items) {
+    const reference = item.reference;
     const button = document.createElement("button");
     button.type = "button";
     button.classList.add("work-list-item", "contain-text");
-    button.setAttribute("data-artifact-id", item.reference.artifact_id);
-    if (work.selectedArtifactId === item.reference.artifact_id) {
+    button.setAttribute("data-artifact-id", reference.artifact_id);
+    if (work.selectedArtifactId === reference.artifact_id) {
       button.setAttribute("aria-current", "true");
     }
+    const secondary = reference.artifact_type === "single_file_artifact"
+      ? artifactTypeLabel(item)
+      : feedbackCounts(item);
     setText(button, compactText([
-      item.reference.display_label,
-      feedbackCounts(item),
+      reference.display_label,
+      secondary,
     ]));
     button.addEventListener("click", () => {
-      handlers.onSelectArtifact(item.reference.artifact_id);
+      handlers.onSelectArtifact(reference.artifact_id);
     });
     container.append(button);
   }
@@ -231,6 +365,31 @@ function renderBlueprint(parent, blueprint) {
     appendTextElement(parent, "p", "", warning.risk_identified);
     appendTextElement(parent, "p", "muted", warning.preventative_guidance);
   }
+}
+
+function renderSingleFileArtifact(parent, detail) {
+  const artifact = detail.artifact ?? {};
+  const metadata = detail.metadata ?? {};
+  const reference = artifactReference(detail);
+  const label = reference.display_label
+    ?? artifact.display_label
+    ?? metadata.filename
+    ?? artifact.filename
+    ?? "Artifact";
+  appendTextElement(parent, "h3", "", label);
+  appendTextElement(parent, "p", "work-heading", artifactTypeLabel({
+    format: artifact.format ?? metadata.format,
+    artifact_family: artifact.artifact_family ?? metadata.artifact_family,
+  }));
+  if (artifact.summary) {
+    appendTextElement(parent, "p", "", artifact.summary);
+  }
+  const content = document.createElement("pre");
+  content.classList.add("artifact-content", "contain-text");
+  const code = document.createElement("code");
+  setText(code, artifact.content ?? "");
+  content.append(code);
+  parent.append(content);
 }
 
 function renderFeedbackTargets(parent, detail, handlers) {
@@ -346,6 +505,11 @@ export function renderWorkDetail(container, work, handlers) {
   const detail = work.detail.item;
   renderExportControls(container, detail, handlers);
 
+  if (isSingleFileArtifactDetail(detail)) {
+    renderSingleFileArtifact(container, detail);
+    return;
+  }
+
   renderBlueprint(container, detail.blueprint);
   appendTextElement(container, "h4", "", "Verified adaptations");
   appendList(container, (detail.adaptations ?? []).map((item) => compactText([
@@ -361,6 +525,13 @@ export function renderWorkDetail(container, work, handlers) {
 }
 
 export function createWorkView(elements, handlers) {
+  elements.createForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handlers.onCreateArtifact?.(
+      buildArtifactCreateRequest(new FormData(event.currentTarget)),
+    );
+  });
+
   return {
     render(state) {
       renderWorkList(elements.list, state.work, handlers);

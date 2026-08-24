@@ -648,6 +648,23 @@ test("receipt refresh plan follows artifact and feedback response fields", () =>
   );
 
   assert.deepEqual(
+    selectFirstSupportedArtifact({
+      artifacts: [
+        {
+          artifact_type: "single_file_artifact",
+          artifact_id: "artifact--abc",
+          schema_version: "1.0",
+        },
+      ],
+    }),
+    {
+      artifact_type: "single_file_artifact",
+      artifact_id: "artifact--abc",
+      schema_version: "1.0",
+    },
+  );
+
+  assert.deepEqual(
     selectWorkRefreshPlan({
       artifacts: [
         {

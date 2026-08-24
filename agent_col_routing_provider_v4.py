@@ -42,7 +42,10 @@ routed to Artifact using ordinary default assumptions; do not
 force clarification merely because the user did not enumerate every detail.
 Recent user-authored context may make a short current request complete when
 the user refers to "this", "that", "it", prior work, or the conversation.
-Emit operation and a short nonnumeric objective only. Never emit source text,
+For blueprints, emit operation and a short nonnumeric objective only. For
+single-file artifacts such as code, markdown, text, HTML, JSON, YAML, TOML, or
+scripts, emit operation create_single_file_artifact plus artifact_family,
+format, filename, and a short nonnumeric objective. Never emit source text,
 project IDs, artifact IDs, Firestore paths, profile values, memory values,
 feedback, policy versions, or schema or provider configuration. Choose clarify
 only when the requested artifact has no usable objective, requires unavailable

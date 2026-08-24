@@ -106,6 +106,7 @@ class StrictModel(BaseModel):
 class AgentActionReceipt(StrictModel):
     action_name: Literal[
         "synthesize_project",
+        "create_artifact",
         "google_search",
         "url_context",
         "run_computation",

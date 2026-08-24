@@ -1188,6 +1188,183 @@ class MemoryEngine:
                 exc,
             )
 
+    async def record_chat_turn_single_file_artifact_effect(
+        self,
+        claim: ChatTurnClaim,
+        *,
+        model_name: str,
+        artifact: dict[str, object],
+        display_label: str,
+        observed_at: datetime,
+    ) -> ChatTurnArtifactEffectResult:
+        """Atomically persist one single-file artifact and turn receipts."""
+        self._validate_chat_turn_claim(claim)
+        self._validate_string(model_name, "model_name")
+        validated_artifact = SingleFileArtifact.model_validate(artifact)
+        self._validate_string(display_label, "display_label")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        if (
+            claim.request.memory_decision is not None
+            or claim.precompleted_memory_proposals
+        ):
+            raise ValueError(
+                "artifact turns cannot contain governed-memory decisions."
+            )
+        if (
+            claim.request.artifact_feedback_decision is not None
+            or claim.precompleted_artifact_feedback
+        ):
+            raise ValueError(
+                "artifact turns cannot contain artifact-feedback decisions."
+            )
+
+        artifact_ref = ArtifactReference(
+            artifact_type="single_file_artifact",
+            project_id=claim.request.project_id,
+            artifact_id=f"artifact--{claim.ids.turn_id}",
+            schema_version="1.0",
+            display_label=display_label,
+        )
+        action = AgentActionReceipt(
+            action_name="create_artifact",
+            status="completed",
+        )
+        document = validated_artifact.model_dump(mode="python")
+        session_ref = self._client.collection("sessions").document(
+            claim.request.session_id
+        )
+        turn_ref = session_ref.collection("turns").document(
+            claim.ids.turn_id
+        )
+        project_ref = self._client.collection("projects").document(
+            claim.request.project_id
+        )
+        stored_artifact_ref = project_ref.collection("artifacts").document(
+            artifact_ref.artifact_id
+        )
+        transaction = self._client.transaction()
+
+        async def record_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ChatTurnArtifactEffectResult:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            artifact_snapshot = await stored_artifact_ref.get(
+                transaction=transaction
+            )
+            turn_data = turn_snapshot.to_dict()
+            if not turn_snapshot.exists or not isinstance(
+                turn_data,
+                Mapping,
+            ):
+                raise ChatTurnStateError("Stored chat turn is invalid.")
+            self._assert_chat_turn_claim_matches_document(claim, turn_data)
+            stored_expiry = turn_data.get("lease_expires_at")
+            if (
+                turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(stored_expiry)
+                or stored_expiry <= observed_at
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn cannot record an artifact effect."
+                )
+            (
+                stored_actions,
+                stored_proposals,
+                stored_artifacts,
+            ) = self._chat_turn_effects(turn_data)
+            if stored_proposals:
+                raise ChatTurnStateError(
+                    "Stored artifact turn contains a memory proposal."
+                )
+            if stored_artifacts:
+                if not artifact_snapshot.exists:
+                    raise ChatTurnStateError(
+                        "Stored artifact effect has no artifact document."
+                    )
+                stored_artifact = stored_artifacts[0]
+                self._assert_chat_turn_single_file_document_matches(
+                    claim,
+                    stored_artifact,
+                    artifact_snapshot.to_dict(),
+                )
+                return ChatTurnArtifactEffectResult(
+                    claim=replace(
+                        claim,
+                        precompleted_actions=stored_actions,
+                        precompleted_memory_proposals=stored_proposals,
+                        precompleted_artifacts=stored_artifacts,
+                    ),
+                    artifact=stored_artifact,
+                )
+            if artifact_snapshot.exists:
+                raise ChatTurnStateError(
+                    "Artifact document has no stored turn effect."
+                )
+
+            actions = (*stored_actions, action)
+            artifacts = (artifact_ref,)
+            transaction.set(
+                project_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            transaction.set(
+                stored_artifact_ref,
+                {
+                    "artifact_contract_version": ARTIFACT_CONTRACT_VERSION,
+                    "artifact_type": "single_file_artifact",
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "originating_session_id": claim.request.session_id,
+                    "originating_turn_id": claim.ids.turn_id,
+                    "user_id": claim.request.user_id,
+                    "model_name": model_name,
+                    "schema_version": "1.0",
+                    "display_label": display_label,
+                    "filename": validated_artifact.filename,
+                    "artifact_family": validated_artifact.artifact_family,
+                    "format": validated_artifact.format,
+                    "byte_size": len(
+                        validated_artifact.content.encode("utf-8")
+                    ),
+                    "content": validated_artifact.content,
+                    "summary": validated_artifact.summary,
+                },
+            )
+            transaction.set(
+                turn_ref,
+                {
+                    "actions": [
+                        item.model_dump(mode="python") for item in actions
+                    ],
+                    "artifacts": [
+                        item.model_dump(mode="python") for item in artifacts
+                    ],
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return ChatTurnArtifactEffectResult(
+                claim=replace(
+                    claim,
+                    precompleted_actions=actions,
+                    precompleted_artifacts=artifacts,
+                ),
+                artifact=artifact_ref,
+            )
+
+        run_transaction = firestore.async_transactional(
+            record_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "record_chat_turn_single_file_artifact_effect",
+                exc,
+            )
+
     async def record_chat_turn_artifact_feedback_effect(
         self,
         claim: ChatTurnClaim,
@@ -1582,6 +1759,46 @@ class MemoryEngine:
                 "turn effect."
             )
 
+    def _assert_chat_turn_single_file_document_matches(
+        self,
+        claim: ChatTurnClaim,
+        artifact: ArtifactReference,
+        document: object,
+    ) -> None:
+        if not isinstance(document, Mapping):
+            raise ChatTurnStateError("Stored artifact document is invalid.")
+        if (
+            document.get("artifact_contract_version")
+            != ARTIFACT_CONTRACT_VERSION
+            or document.get("artifact_type") != artifact.artifact_type
+            or document.get("originating_session_id")
+            != claim.request.session_id
+            or document.get("originating_turn_id") != claim.ids.turn_id
+            or document.get("user_id") != claim.request.user_id
+            or document.get("schema_version") != artifact.schema_version
+            or document.get("display_label") != artifact.display_label
+            or not self._is_aware_datetime(document.get("created_at"))
+            or not isinstance(document.get("model_name"), str)
+            or not document.get("model_name")
+        ):
+            raise ChatTurnStateError(
+                "Stored artifact document does not match its turn effect."
+            )
+        try:
+            SingleFileArtifact.model_validate(
+                {
+                    "artifact_family": document.get("artifact_family"),
+                    "format": document.get("format"),
+                    "filename": document.get("filename"),
+                    "content": document.get("content"),
+                    "summary": document.get("summary"),
+                }
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored artifact document does not match its turn effect."
+            ) from exc
+
     async def complete_chat_turn(
         self,
         claim: ChatTurnClaim,
@@ -1845,14 +2062,25 @@ class MemoryEngine:
             for action in actions
             if action.action_name == "synthesize_project"
         )
+        artifact_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "create_artifact"
+        )
+        artifact_effect_actions = synthesis_actions + artifact_actions
         if (
             len(artifacts) > 1
-            or bool(synthesis_actions) != bool(artifacts)
-            or (artifacts and len(synthesis_actions) != 1)
+            or bool(artifact_effect_actions) != bool(artifacts)
+            or (artifacts and len(artifact_effect_actions) != 1)
             or any(
-                artifact.project_id != request.project_id
-                or artifact.artifact_id
-                != f"blueprint--{claim.ids.turn_id}"
+                not self._artifact_matches_chat_turn_effect(
+                    artifact,
+                    request.project_id,
+                    claim.ids.turn_id,
+                    artifact_effect_actions[0].action_name
+                    if artifact_effect_actions
+                    else None,
+                )
                 for artifact in artifacts
             )
         ):
@@ -1977,6 +2205,12 @@ class MemoryEngine:
             for action in actions
             if action.action_name == "synthesize_project"
         )
+        artifact_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "create_artifact"
+        )
+        artifact_effect_actions = synthesis_actions + artifact_actions
         model_message_id = turn_data.get("model_message_id")
         turn_id = (
             model_message_id.removeprefix("turn--").removesuffix("--model")
@@ -1986,16 +2220,49 @@ class MemoryEngine:
         project_id = turn_data.get("project_id")
         if (
             len(artifacts) > 1
-            or bool(synthesis_actions) != bool(artifacts)
-            or (artifacts and len(synthesis_actions) != 1)
+            or bool(artifact_effect_actions) != bool(artifacts)
+            or (artifacts and len(artifact_effect_actions) != 1)
             or any(
-                artifact.project_id != project_id
-                or artifact.artifact_id != f"blueprint--{turn_id}"
+                not MemoryEngine._artifact_matches_chat_turn_effect(
+                    artifact,
+                    project_id,
+                    turn_id,
+                    artifact_effect_actions[0].action_name
+                    if artifact_effect_actions
+                    else None,
+                )
                 for artifact in artifacts
             )
         ):
             raise ChatTurnStateError("Stored chat turn effects are invalid.")
         return actions, proposals, artifacts
+
+    @staticmethod
+    def _artifact_matches_chat_turn_effect(
+        artifact: ArtifactReference,
+        project_id: object,
+        turn_id: object,
+        action_name: object,
+    ) -> bool:
+        if (
+            not isinstance(project_id, str)
+            or not isinstance(turn_id, str)
+            or artifact.project_id != project_id
+        ):
+            return False
+        if action_name == "synthesize_project":
+            return (
+                artifact.artifact_type == "synthesis_blueprint"
+                and artifact.artifact_id == f"blueprint--{turn_id}"
+                and artifact.schema_version == "2.0"
+            )
+        if action_name == "create_artifact":
+            return (
+                artifact.artifact_type == "single_file_artifact"
+                and artifact.artifact_id == f"artifact--{turn_id}"
+                and artifact.schema_version == "1.0"
+            )
+        return False
 
     @staticmethod
     def _chat_turn_feedback_effects(

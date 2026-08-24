@@ -21,3 +21,11 @@ test("workspace hides internal Google subject field from authenticated users", (
   assert.doesNotMatch(html, /verified workspace user/);
   assert.match(html, /data-google-account-status/);
 });
+
+test("workspace exposes a bounded generic artifact creation form", () => {
+  assert.match(html, /data-artifact-create-form/);
+  assert.match(html, /name="artifact_family"/);
+  assert.match(html, /name="format"/);
+  assert.match(html, /name="filename"/);
+  assert.match(html, /name="source_text"/);
+});

@@ -659,8 +659,16 @@ export function failMemoryLoad(state, error) {
 export function selectFirstSupportedArtifact(response) {
   const artifacts = Array.isArray(response.artifacts) ? response.artifacts : [];
   return artifacts.find((artifact) => (
-    artifact.artifact_type === "synthesis_blueprint"
-    && artifact.schema_version === "2.0"
+    (
+      (
+        artifact.artifact_type === "synthesis_blueprint"
+        && artifact.schema_version === "2.0"
+      )
+      || (
+        artifact.artifact_type === "single_file_artifact"
+        && artifact.schema_version === "1.0"
+      )
+    )
     && typeof artifact.artifact_id === "string"
   )) ?? null;
 }

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildArtifactCreateRequest,
   buildBlueprintExports,
   buildBlueprintDownload,
   renderFeedbackHistory,
@@ -134,6 +135,45 @@ const detail = {
   applied_feedback_ids: [],
 };
 
+const genericDetail = {
+  metadata: {
+    reference: {
+      artifact_id: "artifact--script",
+      artifact_type: "single_file_artifact",
+      schema_version: "1.0",
+      display_label: "Password Generator",
+    },
+    filename: "password_generator.py",
+    artifact_family: "code",
+    format: "python",
+    byte_size: 32,
+  },
+  artifact: {
+    artifact_family: "code",
+    format: "python",
+    filename: "password_generator.py",
+    content: "print('secure')\n",
+    summary: "Generates a secure password.",
+  },
+};
+
+test("buildArtifactCreateRequest maps form data to API payload", () => {
+  const formData = new FormData();
+  formData.set("artifact_family", "code");
+  formData.set("format", "python");
+  formData.set("filename", "password_generator.py");
+  formData.set("display_label", "Password Generator");
+  formData.set("source_text", "Create a password generator.");
+
+  assert.deepEqual(buildArtifactCreateRequest(formData), {
+    artifact_family: "code",
+    format: "python",
+    filename: "password_generator.py",
+    display_label: "Password Generator",
+    source_text: "Create a password generator.",
+  });
+});
+
 test("renderWorkList renders blueprint metadata and selection controls", () => {
   const selected = [];
   const container = node();
@@ -165,6 +205,36 @@ test("renderWorkList renders blueprint metadata and selection controls", () => {
   );
   container.children[0].onclick();
   assert.deepEqual(selected, ["blueprint--abc"]);
+});
+
+test("renderWorkList renders single-file artifact metadata and selection controls", () => {
+  const selected = [];
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        items: [{
+          reference: genericDetail.metadata.reference,
+          filename: "password_generator.py",
+          artifact_family: "code",
+          format: "python",
+          byte_size: 32,
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    { onSelectArtifact: (artifactId) => selected.push(artifactId) },
+  );
+
+  assert.equal(container.children[0].textContent.includes("Password Generator"), true);
+  assert.equal(container.children[0].textContent.includes("Python code"), true);
+  assert.equal(container.children[0].textContent.includes("artifact--script"), false);
+  container.children[0].onclick();
+  assert.deepEqual(selected, ["artifact--script"]);
 });
 
 test("renderWorkList marks the selected artifact and avoids Work terminology", () => {
@@ -232,6 +302,27 @@ test("renderWorkDetail projects canonical schema-2 blueprint text safely", () =>
   assert.equal(text.includes("Use textContent."), true);
   assert.equal(text.includes("Which target matters most?"), true);
   assert.equal(text.includes("Never use innerHTML."), true);
+});
+
+test("renderWorkDetail projects canonical single-file artifact safely", () => {
+  const container = node();
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: genericDetail, error: null },
+      feedback: { status: "idle", events: [], error: null },
+    },
+    { onSubmitFeedback: () => {}, onPrintWork: () => {} },
+  );
+
+  const text = textTree(container);
+  assert.equal(text.includes("Password Generator"), true);
+  assert.equal(text.includes("Python code"), true);
+  assert.equal(text.includes("Generates a secure password."), true);
+  assert.equal(text.includes("print('secure')"), true);
+  assert.equal(text.includes("Feedback targets"), false);
+  assert.equal(text.includes("artifact--script"), false);
 });
 
 test("renderWorkDetail uses artifact terminology for idle and loading states", () => {

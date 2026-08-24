@@ -97,6 +97,8 @@ class ArtifactEffectStore(ChatTurnStore):
         self.project_ref = MagicMock()
         self.blueprints = MagicMock()
         self.blueprint_ref = MagicMock()
+        self.artifacts = MagicMock()
+        self.artifact_ref = MagicMock()
 
         def root_collection(name: str) -> MagicMock:
             if name == "sessions":
@@ -107,8 +109,16 @@ class ArtifactEffectStore(ChatTurnStore):
 
         self.client.collection.side_effect = root_collection
         self.projects.document.return_value = self.project_ref
-        self.project_ref.collection.return_value = self.blueprints
+        def project_collection(name: str) -> MagicMock:
+            if name == "blueprints":
+                return self.blueprints
+            if name == "artifacts":
+                return self.artifacts
+            raise AssertionError(f"Unexpected project collection: {name}")
+
+        self.project_ref.collection.side_effect = project_collection
         self.blueprints.document.return_value = self.blueprint_ref
+        self.artifacts.document.return_value = self.artifact_ref
 
 
 class FeedbackEffectStore(ChatTurnStore):
@@ -1674,6 +1684,107 @@ async def test_record_chat_turn_blueprint_effect_writes_artifact_and_ledger_atom
                 ],
                 "applied_feedback_ids": [],
                 "blueprint": blueprint,
+            },
+        ),
+        call(
+            store.turn_ref,
+            {
+                "actions": [action.model_dump(mode="python")],
+                "artifacts": [artifact.model_dump(mode="python")],
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_single_file_artifact_effect_writes_artifact_and_ledger_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-generic-artifact-1")
+    store = ArtifactEffectStore(ids)
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a Python password generator artifact.",
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=turn_document(
+                ids,
+                owner=claim.owner_token,
+                lease_expires_at=claim.lease_expires_at,
+            ),
+        )
+    )
+    store.artifact_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    artifact_document = {
+        "artifact_family": "code",
+        "format": "python",
+        "filename": "password_generator.py",
+        "content": "import secrets\nprint(secrets.token_urlsafe(12))\n",
+        "summary": "Password Generator",
+    }
+
+    result = await MemoryEngine(
+        store.client
+    ).record_chat_turn_single_file_artifact_effect(
+        claim,
+        model_name="gemini-3.6-flash",
+        artifact=artifact_document,
+        display_label="Password Generator",
+        observed_at=NOW,
+    )
+
+    artifact = ArtifactReference(
+        artifact_type="single_file_artifact",
+        project_id="agent-col",
+        artifact_id=f"artifact--{ids.turn_id}",
+        schema_version="1.0",
+        display_label="Password Generator",
+    )
+    action = AgentActionReceipt(
+        action_name="create_artifact",
+        status="completed",
+    )
+    assert result.artifact == artifact
+    assert result.claim.precompleted_actions == (action,)
+    assert result.claim.precompleted_artifacts == (artifact,)
+    store.artifacts.document.assert_called_once_with(artifact.artifact_id)
+    assert store.transaction.set.call_args_list == [
+        call(
+            store.project_ref,
+            {"updated_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        ),
+        call(
+            store.artifact_ref,
+            {
+                "artifact_contract_version": "1.0",
+                "artifact_type": "single_file_artifact",
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "originating_session_id": "session-1",
+                "originating_turn_id": ids.turn_id,
+                "user_id": "user-1",
+                "model_name": "gemini-3.6-flash",
+                "schema_version": "1.0",
+                "display_label": "Password Generator",
+                "filename": "password_generator.py",
+                "artifact_family": "code",
+                "format": "python",
+                "byte_size": 48,
+                "content": "import secrets\nprint(secrets.token_urlsafe(12))\n",
+                "summary": "Password Generator",
             },
         ),
         call(

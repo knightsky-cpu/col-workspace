@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 
 import {
   apiFetchJson,
+  createArtifact,
   getAuthConfig,
   getAuthSession,
+  getArtifact,
   getBlueprint,
   getChatSession,
   inspectMemory,
+  listArtifacts,
   listChatSessions,
   listBlueprintFeedback,
   listBlueprints,
@@ -215,6 +218,61 @@ test("listBlueprintFeedback calls the canonical feedback history path", async ()
   assert.equal(calls[0][1].method, "GET");
 });
 
+test("generic artifact API wrappers use the canonical artifact paths", async () => {
+  const calls = [];
+  await listArtifacts(
+    "agent-col",
+    { limit: 5 },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifacts: [], next_before: null });
+    },
+  );
+  await getArtifact(
+    "agent-col",
+    "artifact--abc",
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_contract_version: "1.0" });
+    },
+  );
+  await createArtifact(
+    "agent-col",
+    {
+      session_id: "session--1",
+      user_id: "wifiknight",
+      artifact_family: "code",
+      format: "python",
+      filename: "script.py",
+      source_text: "Create a script.",
+    },
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_contract_version: "1.0" });
+    },
+  );
+
+  assert.equal(calls[0][0], "/api/projects/agent-col/artifacts?limit=5");
+  assert.equal(calls[0][1].method, "GET");
+  assert.equal(calls[1][0], "/api/projects/agent-col/artifacts/artifact--abc");
+  assert.equal(calls[1][1].method, "GET");
+  assert.equal(calls[2][0], "/api/projects/agent-col/artifacts");
+  assert.equal(calls[2][1].method, "POST");
+  assert.equal(calls[2][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[2][1].body,
+    JSON.stringify({
+      session_id: "session--1",
+      user_id: "wifiknight",
+      artifact_family: "code",
+      format: "python",
+      filename: "script.py",
+      source_text: "Create a script.",
+    }),
+  );
+});
+
 test("artifact API wrappers reject invalid project and artifact identifiers", async () => {
   assert.throws(
     () => listBlueprints("bad/slash", {}, async () => jsonResponse(200, {})),
@@ -222,6 +280,18 @@ test("artifact API wrappers reject invalid project and artifact identifiers", as
   );
   assert.throws(
     () => getBlueprint(
+      "agent-col",
+      "bad/slash",
+      async () => jsonResponse(200, {}),
+    ),
+    /invalid/i,
+  );
+  assert.throws(
+    () => listArtifacts("bad/slash", {}, async () => jsonResponse(200, {})),
+    /invalid/i,
+  );
+  assert.throws(
+    () => getArtifact(
       "agent-col",
       "bad/slash",
       async () => jsonResponse(200, {}),

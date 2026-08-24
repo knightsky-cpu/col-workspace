@@ -573,6 +573,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             synthesis_service=synthesis_service,
             artifact_ledger=database,
             artifact_reader=artifact_service,
+            generic_artifact_generator=generate_generic_artifact,
+            generic_artifact_reader=generic_artifact_service,
+            genai_client=client,
         )
         artifact_feedback_service = ArtifactFeedbackService(
             artifact_reader=artifact_service,
