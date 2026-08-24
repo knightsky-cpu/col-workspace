@@ -132,6 +132,16 @@ export function getAuthSession(
   );
 }
 
+export function getAuthConfig(fetchLike = globalThis.fetch) {
+  return apiFetchJson(
+    "/api/auth/config",
+    {
+      method: "GET",
+    },
+    fetchLike,
+  );
+}
+
 function assertIdentifier(name, value) {
   if (!isValidIdentifier(value)) {
     throw new Error(`${name} is invalid.`);

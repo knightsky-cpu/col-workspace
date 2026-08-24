@@ -11,7 +11,7 @@
     <div class="workspace-shell" data-app-root>
       <header class="top-bar" aria-label="Workspace">
         <div>
-          <p class="eyebrow">Local development mode</p>
+          <p class="eyebrow" data-auth-mode-label>Loading authentication</p>
           <h1>Agent Col</h1>
         </div>
         <button type="button" data-new-conversation disabled>
@@ -23,22 +23,27 @@
         <h2 id="context-title">Development context</h2>
         <p>
           These values are local request locators only. They are not
-          authentication or ownership.
+          authentication. In Google mode, identity comes from the verified
+          Google session.
         </p>
+        <div class="google-signin" data-google-signin hidden>
+          <p>
+            Sign in with Google to enter the workspace. Do not paste tokens;
+            authentication is handled by Google.
+          </p>
+          <div data-google-button></div>
+          <p class="form-error" role="alert" data-auth-error hidden></p>
+        </div>
         <form data-context-form>
           <label>
-            User ID
-            <input name="user_id" autocomplete="off" required>
+            User ID / verified workspace user
+            <input name="user_id" autocomplete="off" required disabled>
           </label>
           <label>
             Project ID
-            <input name="project_id" autocomplete="off" value="agent-col" required>
+            <input name="project_id" autocomplete="off" value="agent-col" required disabled>
           </label>
-          <label>
-            Google ID token (optional)
-            <input name="auth_token" autocomplete="off">
-          </label>
-          <button type="submit">Enter workspace</button>
+          <button type="submit" disabled>Enter workspace</button>
           <p class="form-error" role="alert" data-context-error hidden></p>
         </form>
       </section>

@@ -1101,6 +1101,27 @@ async def test_auth_session_requires_bearer_in_google_mode(
 
 
 @pytest.mark.asyncio
+async def test_auth_config_exposes_only_public_google_settings(
+    client: httpx.AsyncClient,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    response = await client.get("/api/auth/config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "auth_contract_version": "1.0",
+        "auth_mode": "google_oidc",
+        "google_client_id": "client-123",
+        "google_signin_required": True,
+        "local_development": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_auth_session_returns_google_principal(
     client: httpx.AsyncClient,
 ) -> None:

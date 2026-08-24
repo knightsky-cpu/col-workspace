@@ -1,6 +1,8 @@
 import {
   apiFetchJson,
   deleteMemorySignal,
+  getAuthConfig,
+  getAuthSession,
   getChatSession,
   getBlueprint,
   inspectMemory,
@@ -9,6 +11,12 @@ import {
   listBlueprints,
   revokeMemorySignal,
 } from "./api.mjs";
+import {
+  authRequiresGoogleSignIn,
+  googleSessionToContext,
+  initializeGoogleSignIn,
+  loadGoogleIdentityScript,
+} from "./auth-view.mjs";
 import { createChatsView } from "./chats-view.mjs";
 import { createChatView } from "./chat-view.mjs";
 import { createMemoryView } from "./memory-view.mjs";
@@ -62,6 +70,20 @@ let workView = null;
 let memoryView = null;
 let chatsView = null;
 let layoutState = createInitialLayoutState();
+let authConfig = null;
+let verifiedGoogleContext = null;
+
+function showAuthError(message) {
+  const error = document.querySelector("[data-auth-error]");
+  setText(error, message);
+  error.hidden = false;
+}
+
+function clearAuthError() {
+  const error = document.querySelector("[data-auth-error]");
+  setText(error, "");
+  error.hidden = true;
+}
 
 function showWorkspace() {
   document.querySelector("[data-context-error]").hidden = true;
@@ -114,6 +136,93 @@ function authOptions(options = {}) {
     ...options,
     authToken: state.context?.auth_token ?? null,
   };
+}
+
+function setAuthModeLabel(text) {
+  setText(document.querySelector("[data-auth-mode-label]"), text);
+}
+
+function setContextFormEnabled(enabled) {
+  for (const input of document.querySelectorAll("[data-context-form] input")) {
+    input.disabled = !enabled;
+  }
+  document.querySelector('[data-context-form] button[type="submit"]').disabled = !enabled;
+}
+
+function populateGoogleContext(session, authToken) {
+  const projectInput = document.querySelector('[name="project_id"]');
+  verifiedGoogleContext = googleSessionToContext(
+    session,
+    projectInput.value.trim() || "agent-col",
+    authToken,
+  );
+  const userInput = document.querySelector('[name="user_id"]');
+  userInput.value = verifiedGoogleContext.user_id;
+  userInput.readOnly = true;
+  setContextFormEnabled(true);
+  setAuthModeLabel(`Signed in as ${session.email ?? session.display_name ?? session.user_id}`);
+}
+
+function contextForSubmit(form) {
+  if (!authRequiresGoogleSignIn(authConfig)) {
+    return readContextForm(new FormData(form));
+  }
+  if (verifiedGoogleContext === null) {
+    throw new Error("Sign in with Google before entering the workspace.");
+  }
+  const formData = new FormData(form);
+  return googleSessionToContext(
+    {
+      authenticated: true,
+      user_id: verifiedGoogleContext.user_id,
+    },
+    formData.get("project_id"),
+    verifiedGoogleContext.auth_token,
+  );
+}
+
+async function bootstrapAuth() {
+  const form = document.querySelector("[data-context-form]");
+  const googleSignIn = document.querySelector("[data-google-signin]");
+  try {
+    authConfig = await getAuthConfig();
+  } catch (error) {
+    showContextError(error.message);
+    setAuthModeLabel("Authentication unavailable");
+    setContextFormEnabled(false);
+    return;
+  }
+
+  if (!authRequiresGoogleSignIn(authConfig)) {
+    setAuthModeLabel("Local development mode");
+    googleSignIn.hidden = true;
+    form.hidden = false;
+    setContextFormEnabled(true);
+    return;
+  }
+
+  setAuthModeLabel("Google authentication required");
+  googleSignIn.hidden = false;
+  form.hidden = false;
+  setContextFormEnabled(false);
+  try {
+    await loadGoogleIdentityScript();
+    initializeGoogleSignIn({
+      clientId: authConfig.google_client_id,
+      buttonContainer: document.querySelector("[data-google-button]"),
+      async onCredential(authToken) {
+        clearAuthError();
+        try {
+          const session = await getAuthSession(authToken);
+          populateGoogleContext(session, authToken);
+        } catch (error) {
+          showAuthError(error.message);
+        }
+      },
+    });
+  } catch (error) {
+    showAuthError(error.message);
+  }
 }
 
 function renderWorkspace() {
@@ -468,7 +577,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", (event)
   try {
     state = acceptContext(
       state,
-      readContextForm(new FormData(event.currentTarget)),
+      contextForSubmit(event.currentTarget),
     );
     ensureChatView();
     ensureWorkView();
@@ -540,3 +649,5 @@ document.querySelector("[data-left-refresh]").addEventListener("click", () => {
   loadMemory();
   loadChatSessions();
 });
+
+bootstrapAuth();

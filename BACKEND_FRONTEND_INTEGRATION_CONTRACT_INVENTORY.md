@@ -114,6 +114,7 @@ responses.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Health check |
+| `GET` | `/api/auth/config` | Read public frontend authentication bootstrap config |
 | `GET` | `/api/auth/session` | Inspect local-dev or Google OIDC session state |
 | `GET` | `/api/users/{user_id}/memory` | Inspect governed memory |
 | `POST` | `/api/users/{user_id}/memory/signals/{signal_id}/revoke` | Revoke an active memory signal |
@@ -142,6 +143,31 @@ Limitations:
 - does not prove Vertex AI availability;
 - does not exercise any expert;
 - is a liveness response, not a full readiness check.
+
+### `GET /api/auth/config`
+
+Purpose: expose only public authentication bootstrap settings to the browser.
+
+Request: none.
+
+Response fields:
+
+- `auth_contract_version`;
+- `auth_mode`;
+- `google_client_id`;
+- `google_signin_required`;
+- `local_development`.
+
+Frontend purpose:
+
+- decide whether to show the local-development locator form or require Google
+  sign-in before workspace entry;
+- configure the Google sign-in client with the public OAuth client ID.
+
+Limitations:
+
+- the Google client ID is public configuration, not a secret;
+- this route does not create sessions, projects, or ownership records.
 
 ### `GET /api/auth/session`
 
@@ -175,7 +201,7 @@ Validation and failures:
 
 Limitations:
 
-- this is an authentication-principal boundary, not a full sign-in UI;
+- this is an authentication-principal boundary;
 - local development mode still accepts request-provided locators;
 - project, session, artifact, and feedback ownership records are not yet
   enforced for every resource.
@@ -733,7 +759,9 @@ The following were previously documented as pending but are implemented:
 - chat-routed artifact synthesis;
 - governed synthesis personalization;
 - verified adaptation receipts;
-- authentication session inspection and bearer-token transport.
+- public auth bootstrap config;
+- authentication session inspection;
+- Google sign-in initiated by the browser with bearer-token transport.
 
 A dedicated feedback `POST` endpoint is not required by the accepted design.
 Structured `/api/chat` is the current write authority.
@@ -787,11 +815,11 @@ The backend must not be exposed publicly in this state.
 
 ### Required before public deployment
 
-- real Google sign-in or Identity Platform browser flow;
 - project, session, artifact, feedback, and memory ownership records;
 - project, session, artifact, feedback, and memory ownership checks;
 - safe unavailable-resource behavior for unauthorized resources;
-- logout and authenticated-session lifecycle;
+- durable logout and authenticated-session lifecycle beyond clearing browser
+  runtime state;
 - account deletion and data-retention policy;
 - request-rate controls;
 - secure deployment headers and hosted security review.

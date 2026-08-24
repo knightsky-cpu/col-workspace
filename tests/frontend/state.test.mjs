@@ -50,7 +50,7 @@ test("acceptContext stores local locators and creates a session", () => {
   assert.equal(state.mode, "workspace");
 });
 
-test("acceptContext stores optional auth token separately from request locators", () => {
+test("acceptContext stores verified auth token separately from request locators", () => {
   const state = acceptContext(
     createInitialState(),
     {

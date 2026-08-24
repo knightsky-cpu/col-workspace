@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   apiFetchJson,
+  getAuthConfig,
   getAuthSession,
   getBlueprint,
   getChatSession,
@@ -78,6 +79,25 @@ test("getAuthSession calls the canonical auth session path", async () => {
   assert.equal(calls[0][0], "/api/auth/session");
   assert.equal(calls[0][1].method, "GET");
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+});
+
+test("getAuthConfig calls the public auth config path", async () => {
+  const calls = [];
+  const result = await getAuthConfig(async (path, init) => {
+    calls.push([path, init]);
+    return jsonResponse(200, {
+      auth_contract_version: "1.0",
+      auth_mode: "google_oidc",
+      google_client_id: "client-123",
+      google_signin_required: true,
+      local_development: false,
+    });
+  });
+
+  assert.equal(result.google_client_id, "client-123");
+  assert.equal(calls[0][0], "/api/auth/config");
+  assert.equal(calls[0][1].method, "GET");
+  assert.equal("Authorization" in calls[0][1].headers, false);
 });
 
 test("apiFetchJson rejects remote URLs", async () => {

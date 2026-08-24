@@ -600,6 +600,18 @@ async def health_check() -> dict[str, str]:
     return {"status": "online"}
 
 
+@app.get("/api/auth/config")
+async def auth_config(request: Request) -> dict[str, object]:
+    settings = _get_authenticator(request).settings
+    return {
+        "auth_contract_version": "1.0",
+        "auth_mode": settings.mode,
+        "google_client_id": settings.google_client_id,
+        "google_signin_required": settings.mode == "google_oidc",
+        "local_development": settings.mode == "local_dev",
+    }
+
+
 @app.get("/api/auth/session")
 async def auth_session(
     request: Request,
