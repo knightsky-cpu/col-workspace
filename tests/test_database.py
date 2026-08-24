@@ -11,6 +11,21 @@ from database import MemoryEngine, MemoryEngineError
 from schemas import AdaptationReceipt, WorkspaceCreateRequest
 
 
+class AsyncSnapshotStream:
+    def __init__(self, snapshots: list[object]) -> None:
+        self._snapshots = snapshots
+
+    def __aiter__(self) -> object:
+        self._iterator = iter(self._snapshots)
+        return self
+
+    async def __anext__(self) -> object:
+        try:
+            return next(self._iterator)
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
+
+
 @pytest.mark.asyncio
 async def test_save_message_commits_parent_and_message_atomically() -> None:
     client = MagicMock()
@@ -274,6 +289,179 @@ async def test_save_blueprint_rejects_unvalidated_adaptation_mapping() -> None:
         )
 
     client.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_save_single_file_artifact_commits_parent_and_artifact_atomically(
+) -> None:
+    client = MagicMock()
+    projects = MagicMock()
+    project = MagicMock()
+    artifacts = MagicMock()
+    artifact_ref = MagicMock(id="artifact-1")
+    batch = MagicMock()
+    batch.commit = AsyncMock(return_value=[])
+
+    client.collection.return_value = projects
+    projects.document.return_value = project
+    project.collection.return_value = artifacts
+    artifacts.document.return_value = artifact_ref
+    client.batch.return_value = batch
+
+    artifact_id = await MemoryEngine(client).save_single_file_artifact(
+        project_id="project-1",
+        session_id="session-1",
+        user_id="user-1",
+        model_name="gemini-3.6-flash",
+        artifact={
+            "artifact_family": "code",
+            "format": "python",
+            "filename": "password_generator.py",
+            "content": "import secrets\nprint(secrets.token_hex(8))\n",
+            "summary": "Secure password generator.",
+        },
+        display_label="Password Generator",
+        originating_turn_id="turn-1",
+    )
+
+    assert artifact_id == "artifact-1"
+    client.collection.assert_called_once_with("projects")
+    projects.document.assert_called_once_with("project-1")
+    project.collection.assert_called_once_with("artifacts")
+    artifacts.document.assert_called_once_with()
+    assert batch.set.call_args_list == [
+        call(
+            project,
+            {"updated_at": firestore.SERVER_TIMESTAMP},
+            merge=True,
+        ),
+        call(
+            artifact_ref,
+            {
+                "artifact_contract_version": "1.0",
+                "artifact_type": "single_file_artifact",
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "originating_session_id": "session-1",
+                "originating_turn_id": "turn-1",
+                "user_id": "user-1",
+                "model_name": "gemini-3.6-flash",
+                "schema_version": "1.0",
+                "display_label": "Password Generator",
+                "filename": "password_generator.py",
+                "artifact_family": "code",
+                "format": "python",
+                "byte_size": 43,
+                "content": "import secrets\nprint(secrets.token_hex(8))\n",
+                "summary": "Secure password generator.",
+            },
+        ),
+    ]
+    batch.commit.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_save_single_file_artifact_rejects_invalid_json_content(
+) -> None:
+    client = MagicMock()
+
+    with pytest.raises(ValueError, match="JSON artifact content is invalid"):
+        await MemoryEngine(client).save_single_file_artifact(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            model_name="gemini-3.6-flash",
+            artifact={
+                "artifact_family": "data",
+                "format": "json",
+                "filename": "bad.json",
+                "content": "{not json}",
+            },
+            display_label="Bad Config",
+        )
+
+    client.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_artifact_document_reads_project_artifact() -> None:
+    client = MagicMock()
+    projects = MagicMock()
+    project = MagicMock()
+    artifacts = MagicMock()
+    artifact_ref = MagicMock()
+    snapshot = MagicMock()
+    snapshot.exists = True
+    snapshot.to_dict.return_value = {
+        "artifact_contract_version": "1.0",
+        "artifact_type": "single_file_artifact",
+        "schema_version": "1.0",
+    }
+    artifact_ref.get = AsyncMock(return_value=snapshot)
+
+    client.collection.return_value = projects
+    projects.document.return_value = project
+    project.collection.return_value = artifacts
+    artifacts.document.return_value = artifact_ref
+
+    record = await MemoryEngine(client).get_artifact_document(
+        "project-1",
+        "artifact--abc",
+    )
+
+    assert record.artifact_id == "artifact--abc"
+    assert record.document["artifact_type"] == "single_file_artifact"
+    client.collection.assert_called_once_with("projects")
+    projects.document.assert_called_once_with("project-1")
+    project.collection.assert_called_once_with("artifacts")
+    artifacts.document.assert_called_once_with("artifact--abc")
+    artifact_ref.get.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_list_artifact_documents_reads_bounded_project_artifacts(
+) -> None:
+    client = MagicMock()
+    projects = MagicMock()
+    project = MagicMock()
+    artifacts = MagicMock()
+    ordered_query = MagicMock()
+    limited_query = MagicMock()
+    snapshot_1 = MagicMock(id="artifact--2")
+    snapshot_1.to_dict.return_value = {
+        "artifact_contract_version": "1.0",
+        "artifact_type": "single_file_artifact",
+    }
+    snapshot_2 = MagicMock(id="artifact--1")
+    snapshot_2.to_dict.return_value = {
+        "artifact_contract_version": "1.0",
+        "artifact_type": "single_file_artifact",
+    }
+    limited_query.stream.return_value = AsyncSnapshotStream(
+        [snapshot_1, snapshot_2]
+    )
+
+    client.collection.return_value = projects
+    projects.document.return_value = project
+    project.collection.return_value = artifacts
+    artifacts.order_by.return_value = ordered_query
+    ordered_query.order_by.return_value = ordered_query
+    ordered_query.limit.return_value = limited_query
+
+    page = await MemoryEngine(client).list_artifact_documents(
+        "project-1",
+        limit=1,
+        before=None,
+    )
+
+    assert [record.artifact_id for record in page.records] == [
+        "artifact--2"
+    ]
+    assert page.next_before == "artifact--2"
+    project.collection.assert_called_once_with("artifacts")
+    artifacts.order_by.assert_called_once_with(
+        "created_at",
+        direction=firestore.Query.DESCENDING,
+    )
 
 
 @pytest.mark.asyncio

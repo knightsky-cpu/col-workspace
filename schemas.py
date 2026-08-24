@@ -1,3 +1,4 @@
+import json
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Annotated, Literal, Self
@@ -79,6 +80,19 @@ ArtifactFeedbackText = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=1_500),
 ]
+ArtifactFilenameStr = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=160,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._ -]*$",
+    ),
+]
+ArtifactContentStr = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=200_000),
+]
 VerificationStepStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
@@ -107,11 +121,149 @@ class AgentActionReceipt(StrictModel):
 
 
 class ArtifactReference(StrictModel):
-    artifact_type: Literal["synthesis_blueprint"]
+    artifact_type: Literal["synthesis_blueprint", "single_file_artifact"]
     project_id: IdentifierStr
     artifact_id: IdentifierStr
-    schema_version: Literal["2.0"]
+    schema_version: Literal["1.0", "2.0"]
     display_label: DisplayLabelStr
+
+    @model_validator(mode="after")
+    def validate_type_schema_pair(self) -> Self:
+        if (
+            self.artifact_type == "synthesis_blueprint"
+            and self.schema_version != SYNTHESIS_BLUEPRINT_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "Synthesis blueprint artifacts require schema version 2.0."
+            )
+        if (
+            self.artifact_type == "single_file_artifact"
+            and self.schema_version != "1.0"
+        ):
+            raise ValueError(
+                "Single-file artifacts require schema version 1.0."
+            )
+        return self
+
+
+SingleFileArtifactFamily = Literal["code", "document", "data"]
+SingleFileArtifactFormat = Literal[
+    "assembly",
+    "bash",
+    "c",
+    "cpp",
+    "csharp",
+    "css",
+    "go",
+    "html",
+    "java",
+    "javascript",
+    "json",
+    "kotlin",
+    "markdown",
+    "objective_c",
+    "php",
+    "python",
+    "ruby",
+    "rust",
+    "sql",
+    "swift",
+    "text",
+    "toml",
+    "typescript",
+    "yaml",
+    "zsh",
+]
+
+_CODE_ARTIFACT_FORMATS = {
+    "assembly",
+    "bash",
+    "c",
+    "cpp",
+    "csharp",
+    "css",
+    "go",
+    "html",
+    "java",
+    "javascript",
+    "kotlin",
+    "objective_c",
+    "php",
+    "python",
+    "ruby",
+    "rust",
+    "sql",
+    "swift",
+    "typescript",
+    "zsh",
+}
+_DOCUMENT_ARTIFACT_FORMATS = {"markdown", "text", "html"}
+_DATA_ARTIFACT_FORMATS = {"json", "yaml", "toml"}
+
+
+class SingleFileArtifact(StrictModel):
+    artifact_family: SingleFileArtifactFamily
+    format: SingleFileArtifactFormat
+    filename: ArtifactFilenameStr
+    content: ArtifactContentStr
+    summary: DisplayLabelStr | None = None
+
+    @field_validator("content")
+    @classmethod
+    def reject_unsafe_content_control_characters(cls, value: str) -> str:
+        if any(
+            (ord(character) < 32 and character not in "\t\n\r")
+            or ord(character) == 127
+            for character in value
+        ):
+            raise ValueError("Artifact content contains control characters.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_family_format_pair(self) -> Self:
+        allowed_formats = {
+            "code": _CODE_ARTIFACT_FORMATS,
+            "document": _DOCUMENT_ARTIFACT_FORMATS,
+            "data": _DATA_ARTIFACT_FORMATS,
+        }[self.artifact_family]
+        if self.format not in allowed_formats:
+            raise ValueError("Artifact family and format do not match.")
+        if self.format == "json":
+            try:
+                json.loads(self.content)
+            except json.JSONDecodeError as exc:
+                raise ValueError("JSON artifact content is invalid.") from exc
+        return self
+
+
+class SingleFileArtifactMetadata(StrictModel):
+    reference: ArtifactReference
+    created_at: datetime
+    originating_session_id: IdentifierStr
+    originating_turn_id: IdentifierStr | None = None
+    filename: ArtifactFilenameStr
+    artifact_family: SingleFileArtifactFamily
+    format: SingleFileArtifactFormat
+    byte_size: int = Field(ge=1, le=1_000_000)
+
+    @field_validator("created_at")
+    @classmethod
+    def require_aware_created_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("created_at must be timezone aware.")
+        return value
+
+    @model_validator(mode="after")
+    def require_single_file_reference(self) -> Self:
+        if self.reference.artifact_type != "single_file_artifact":
+            raise ValueError("Metadata requires a single-file reference.")
+        return self
+
+
+class SingleFileArtifactListResponse(StrictModel):
+    artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
+    artifacts: list[SingleFileArtifactMetadata] = Field(max_length=50)
+    next_before: IdentifierStr | None = None
 
 
 class ArtifactFeedbackCounts(StrictModel):
@@ -719,6 +871,12 @@ class BlueprintArtifactDetailResponse(StrictModel):
         default_factory=list,
         max_length=50,
     )
+
+
+class SingleFileArtifactDetailResponse(StrictModel):
+    artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
+    metadata: SingleFileArtifactMetadata
+    artifact: SingleFileArtifact
 
 
 class SynthesisRequest(StrictModel):

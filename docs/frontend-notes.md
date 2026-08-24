@@ -119,3 +119,8 @@ the implementation boundary.
   not fit the current governed-memory candidate contract. This should be
   addressed in a later memory/artifact language-normalization polish pass, not
   before the remaining core mechanics are wired.
+- PNG and JPEG artifact support is deferred to a future image-capable pass.
+  Generic artifact work should cover text/code/document/data artifacts first.
+  Image artifacts should wait until the project has an image generation or
+  upload/edit integration, because adding them now would increase complexity
+  without a real image artifact production path.

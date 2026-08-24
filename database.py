@@ -65,6 +65,7 @@ from schemas import (
     MemoryDecisionRequest,
     MemoryProposal,
     MemoryProposalReceipt,
+    SingleFileArtifact,
     WorkspaceCreateRequest,
     WorkspaceListResponse,
     WorkspaceSummary,
@@ -120,6 +121,14 @@ class BlueprintArtifactNotFoundError(RuntimeError):
 
 class BlueprintArtifactCursorNotFoundError(RuntimeError):
     """Raised when a blueprint pagination cursor cannot be resolved."""
+
+
+class ArtifactNotFoundError(RuntimeError):
+    """Raised when a project-owned generic artifact does not exist."""
+
+
+class ArtifactCursorNotFoundError(RuntimeError):
+    """Raised when generic artifact pagination cursor cannot be resolved."""
 
 
 class BlueprintFeedbackCursorNotFoundError(RuntimeError):
@@ -190,6 +199,22 @@ class BlueprintDocumentPage:
     """One bounded newest-first page of blueprint documents."""
 
     records: tuple[BlueprintDocumentRecord, ...]
+    next_before: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactDocumentRecord:
+    """One project-owned generic artifact document."""
+
+    artifact_id: str
+    document: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactDocumentPage:
+    """One bounded newest-first page of generic artifact documents."""
+
+    records: tuple[ArtifactDocumentRecord, ...]
     next_before: str | None
 
 
@@ -2148,6 +2173,68 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_blueprint", exc)
 
+    async def save_single_file_artifact(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        user_id: str,
+        model_name: str,
+        artifact: dict[str, object],
+        display_label: str,
+        originating_turn_id: str | None = None,
+    ) -> str:
+        """Atomically persist one generic project-owned single-file artifact."""
+        self._validate_memory_identifier(project_id, "project_id")
+        self._validate_string(session_id, "session_id")
+        self._validate_string(user_id, "user_id")
+        self._validate_string(model_name, "model_name")
+        validated_artifact = SingleFileArtifact.model_validate(artifact)
+        self._validate_string(display_label, "display_label")
+        if originating_turn_id is not None:
+            self._validate_memory_identifier(
+                originating_turn_id,
+                "originating_turn_id",
+            )
+
+        try:
+            project_ref = self._client.collection("projects").document(
+                project_id
+            )
+            artifact_ref = project_ref.collection("artifacts").document()
+            batch = self._client.batch()
+            batch.set(
+                project_ref,
+                {"updated_at": firestore.SERVER_TIMESTAMP},
+                merge=True,
+            )
+            batch.set(
+                artifact_ref,
+                {
+                    "artifact_contract_version": ARTIFACT_CONTRACT_VERSION,
+                    "artifact_type": "single_file_artifact",
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                    "originating_session_id": session_id,
+                    "originating_turn_id": originating_turn_id,
+                    "user_id": user_id,
+                    "model_name": model_name,
+                    "schema_version": "1.0",
+                    "display_label": display_label,
+                    "filename": validated_artifact.filename,
+                    "artifact_family": validated_artifact.artifact_family,
+                    "format": validated_artifact.format,
+                    "byte_size": len(
+                        validated_artifact.content.encode("utf-8")
+                    ),
+                    "content": validated_artifact.content,
+                    "summary": validated_artifact.summary,
+                },
+            )
+            await batch.commit()
+            return artifact_ref.id
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("save_single_file_artifact", exc)
+
     async def record_blueprint_feedback(
         self,
         *,
@@ -2523,6 +2610,109 @@ class MemoryEngine:
             self._raise_firestore_error("list_blueprint_documents", exc)
         except ValueError as exc:
             self._raise_firestore_error("read_blueprint_documents", exc)
+
+    async def get_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> ArtifactDocumentRecord:
+        """Return one project-owned generic artifact document."""
+        self._validate_memory_identifier(project_id, "project_id")
+        self._validate_memory_identifier(artifact_id, "artifact_id")
+
+        try:
+            artifact_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("artifacts")
+                .document(artifact_id)
+            )
+            snapshot = await artifact_ref.get()
+            if not snapshot.exists:
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored artifact document is invalid.")
+            return ArtifactDocumentRecord(
+                artifact_id=artifact_id,
+                document=document,
+            )
+        except ArtifactNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("get_artifact_document", exc)
+        except ValueError as exc:
+            self._raise_firestore_error("get_artifact_document", exc)
+
+    async def list_artifact_documents(
+        self,
+        project_id: str,
+        *,
+        limit: int,
+        before: str | None,
+    ) -> ArtifactDocumentPage:
+        """Return one bounded newest-first page of project generic artifacts."""
+        self._validate_memory_identifier(project_id, "project_id")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 50
+        ):
+            raise ValueError("limit must be an integer between 1 and 50.")
+        if before is not None:
+            self._validate_memory_identifier(before, "before")
+
+        try:
+            artifacts_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("artifacts")
+            )
+            query = artifacts_ref.order_by(
+                "created_at",
+                direction=firestore.Query.DESCENDING,
+            ).order_by(
+                FieldPath.document_id(),
+                direction=firestore.Query.DESCENDING,
+            )
+            if before is not None:
+                cursor_snapshot = await artifacts_ref.document(before).get()
+                if not cursor_snapshot.exists:
+                    raise ArtifactCursorNotFoundError(
+                        "Artifact cursor does not exist."
+                    )
+                query = query.start_after(cursor_snapshot)
+            query = query.limit(limit + 1)
+
+            records: list[ArtifactDocumentRecord] = []
+            async for snapshot in query.stream():
+                document = snapshot.to_dict()
+                if not isinstance(document, dict):
+                    raise ValueError("Stored artifact document is invalid.")
+                records.append(
+                    ArtifactDocumentRecord(
+                        artifact_id=snapshot.id,
+                        document=document,
+                    )
+                )
+
+            has_more = len(records) > limit
+            bounded_records = tuple(records[:limit])
+            next_before = (
+                bounded_records[-1].artifact_id
+                if has_more and bounded_records
+                else None
+            )
+            return ArtifactDocumentPage(
+                records=bounded_records,
+                next_before=next_before,
+            )
+        except ArtifactCursorNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_artifact_documents", exc)
+        except ValueError as exc:
+            self._raise_firestore_error("list_artifact_documents", exc)
 
     async def list_blueprint_feedback_documents(
         self,

@@ -86,3 +86,107 @@ def test_artifact_feedback_target_accepts_only_server_contract_kinds() -> None:
                 "display_label": "Unsafe target",
             }
         )
+
+
+def test_single_file_artifact_models_accept_common_code_document_and_data_formats(
+) -> None:
+    from schemas import (
+        SingleFileArtifact,
+        SingleFileArtifactDetailResponse,
+        SingleFileArtifactListResponse,
+        SingleFileArtifactMetadata,
+    )
+
+    code_artifact = SingleFileArtifact.model_validate(
+        {
+            "artifact_family": "code",
+            "format": "python",
+            "filename": "password_generator.py",
+            "content": "import secrets\nprint(secrets.token_hex(8))\n",
+            "summary": "Secure password generator script.",
+        }
+    )
+    document_artifact = SingleFileArtifact.model_validate(
+        {
+            "artifact_family": "document",
+            "format": "markdown",
+            "filename": "setup-guide.md",
+            "content": "# Setup\nRun the local server.\n",
+        }
+    )
+    data_artifact = SingleFileArtifact.model_validate(
+        {
+            "artifact_family": "data",
+            "format": "json",
+            "filename": "timer-config.json",
+            "content": '{"work_minutes":25,"break_minutes":5}',
+        }
+    )
+
+    metadata = SingleFileArtifactMetadata.model_validate(
+        {
+            "reference": {
+                "artifact_type": "single_file_artifact",
+                "project_id": "project-1",
+                "artifact_id": "artifact--abc",
+                "schema_version": "1.0",
+                "display_label": "Password Generator",
+            },
+            "created_at": NOW,
+            "originating_session_id": "session-1",
+            "originating_turn_id": "turn-1",
+            "filename": "password_generator.py",
+            "artifact_family": "code",
+            "format": "python",
+            "byte_size": 42,
+        }
+    )
+    listing = SingleFileArtifactListResponse(
+        artifacts=[metadata],
+        next_before="artifact--abc",
+    )
+    detail = SingleFileArtifactDetailResponse(
+        metadata=metadata,
+        artifact=code_artifact,
+    )
+
+    assert code_artifact.format == "python"
+    assert document_artifact.format == "markdown"
+    assert data_artifact.format == "json"
+    assert listing.artifacts[0].filename == "password_generator.py"
+    assert detail.artifact.content.startswith("import secrets")
+
+
+def test_single_file_artifact_models_reject_mismatched_family_and_format(
+) -> None:
+    from schemas import SingleFileArtifact
+
+    with pytest.raises(ValidationError):
+        SingleFileArtifact.model_validate(
+            {
+                "artifact_family": "code",
+                "format": "pdf",
+                "filename": "password_generator.py",
+                "content": "print('not a pdf')",
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SingleFileArtifact.model_validate(
+            {
+                "artifact_family": "document",
+                "format": "python",
+                "filename": "notes.py",
+                "content": "print('wrong family')",
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SingleFileArtifact.model_validate(
+            {
+                "artifact_family": "data",
+                "format": "json",
+                "filename": "bad.json",
+                "content": "{not json}",
+            }
+        )
