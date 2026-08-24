@@ -156,6 +156,9 @@ function buildQuery(options = {}) {
   if (options.before !== undefined && options.before !== null) {
     params.set("before", String(options.before));
   }
+  if (options.lifecycle_status !== undefined && options.lifecycle_status !== null) {
+    params.set("lifecycle_status", String(options.lifecycle_status));
+  }
   const query = params.toString();
   return query ? `?${query}` : "";
 }
@@ -286,6 +289,22 @@ export function archiveArtifact(
   assertIdentifier("artifact_id", artifactId);
   return apiFetchJson(
     `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/archive`,
+    { method: "POST", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function restoreArtifact(
+  projectId,
+  artifactId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/restore`,
     { method: "POST", authToken: options.authToken },
     fetchLike,
   );

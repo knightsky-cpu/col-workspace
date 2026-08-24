@@ -139,6 +139,47 @@ async def test_generic_artifact_service_omits_archived_single_file_metadata(
 
 
 @pytest.mark.asyncio
+async def test_generic_artifact_service_lists_archived_single_file_metadata(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        GenericArtifactReadService,
+        ListGenericArtifactsCommand,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--archived",
+                document={
+                    **stored_single_file_document(),
+                    "lifecycle_status": "archived",
+                },
+            ),
+            ArtifactDocumentRecord(
+                artifact_id="artifact--active",
+                document=stored_single_file_document(),
+            ),
+        )
+    )
+
+    listing = await GenericArtifactReadService(
+        database=database
+    ).list_artifacts(
+        ListGenericArtifactsCommand(
+            project_id="project-1",
+            limit=10,
+            lifecycle_status="archived",
+        )
+    )
+
+    assert [
+        item.reference.artifact_id for item in listing.artifacts
+    ] == ["artifact--archived"]
+    assert listing.artifacts[0].lifecycle_status == "archived"
+
+
+@pytest.mark.asyncio
 async def test_generic_artifact_service_gets_single_file_detail() -> None:
     from database import ArtifactDocumentRecord
     from generic_artifact_service import (
@@ -198,6 +239,50 @@ async def test_generic_artifact_service_archives_single_file_artifact(
 
     assert database.archive_calls == [("project-1", "artifact--abc")]
     assert result.metadata.lifecycle_status == "archived"
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_restores_single_file_artifact(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        GenericArtifactReadService,
+        RestoreGenericArtifactCommand,
+    )
+
+    class RestoreDatabase(FakeArtifactDatabase):
+        def __init__(self, records: tuple[object, ...]) -> None:
+            super().__init__(records)
+            self.restore_calls: list[tuple[str, str]] = []
+
+        async def restore_artifact_document(
+            self,
+            project_id: str,
+            artifact_id: str,
+        ) -> object:
+            self.restore_calls.append((project_id, artifact_id))
+            return self.records[0]
+
+    database = RestoreDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--abc",
+                document=stored_single_file_document(),
+            ),
+        )
+    )
+
+    result = await GenericArtifactReadService(
+        database=database
+    ).restore_artifact(
+        RestoreGenericArtifactCommand(
+            project_id="project-1",
+            artifact_id="artifact--abc",
+        )
+    )
+
+    assert database.restore_calls == [("project-1", "artifact--abc")]
+    assert result.metadata.lifecycle_status == "active"
 
 
 @pytest.mark.asyncio

@@ -352,8 +352,30 @@ export function renderWorkList(container, work, handlers) {
     appendTextElement(container, "p", "form-error", work.list.error);
     return;
   }
+  const lifecycleStatus = work.list.lifecycleStatus ?? "active";
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.classList.add("control-compact");
+  toggle.setAttribute("data-artifact-lifecycle-toggle", "");
+  setText(
+    toggle,
+    lifecycleStatus === "archived" ? "Show Active" : "Show Archived",
+  );
+  toggle.addEventListener("click", () => {
+    handlers.onSetArtifactLifecycleStatus?.(
+      lifecycleStatus === "archived" ? "active" : "archived",
+    );
+  });
   if (!work.list.items.length) {
-    appendTextElement(container, "p", "muted", "No Artifacts loaded yet.");
+    container.append(toggle);
+    appendTextElement(
+      container,
+      "p",
+      "muted",
+      lifecycleStatus === "archived"
+        ? "No Archived Artifacts."
+        : "No Artifacts loaded yet.",
+    );
     return;
   }
   for (const item of work.list.items) {
@@ -377,6 +399,7 @@ export function renderWorkList(container, work, handlers) {
     });
     container.append(button);
   }
+  container.append(toggle);
 }
 
 function renderBlueprint(parent, blueprint) {
@@ -466,12 +489,22 @@ function renderSingleFileArtifact(parent, detail) {
 
 function renderSingleFileArtifactLifecycle(parent, detail, handlers) {
   const reference = artifactReference(detail);
+  const lifecycleStatus = detail.metadata?.lifecycle_status ?? "active";
   const button = document.createElement("button");
   button.classList.add("control-compact");
   button.type = "button";
-  button.setAttribute("data-archive-artifact", "");
-  setText(button, "Archive");
+  button.setAttribute(
+    lifecycleStatus === "archived"
+      ? "data-restore-artifact"
+      : "data-archive-artifact",
+    "",
+  );
+  setText(button, lifecycleStatus === "archived" ? "Restore" : "Archive");
   button.addEventListener("click", () => {
+    if (lifecycleStatus === "archived") {
+      handlers.onRestoreArtifact?.(reference.artifact_id);
+      return;
+    }
     handlers.onArchiveArtifact?.(reference.artifact_id);
   });
   parent.append(button);

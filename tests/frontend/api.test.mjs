@@ -18,6 +18,7 @@ import {
   createWorkspace,
   listWorkspaces,
   deleteMemorySignal,
+  restoreArtifact,
   revokeMemorySignal,
 } from "../../frontend/api.mjs";
 
@@ -262,6 +263,23 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
       return jsonResponse(200, { artifact_contract_version: "1.0" });
     },
   );
+  await restoreArtifact(
+    "agent-col",
+    "artifact--abc",
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_contract_version: "1.0" });
+    },
+  );
+  await listArtifacts(
+    "agent-col",
+    { lifecycle_status: "archived", authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_contract_version: "1.0" });
+    },
+  );
 
   assert.equal(calls[0][0], "/api/projects/agent-col/artifacts?limit=5");
   assert.equal(calls[0][1].method, "GET");
@@ -276,6 +294,17 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
   );
   assert.equal(calls[3][1].method, "POST");
   assert.equal(calls[3][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[4][0],
+    "/api/projects/agent-col/artifacts/artifact--abc/restore",
+  );
+  assert.equal(calls[4][1].method, "POST");
+  assert.equal(calls[4][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[5][0],
+    "/api/projects/agent-col/artifacts?lifecycle_status=archived",
+  );
+  assert.equal(calls[5][1].method, "GET");
   assert.equal(
     calls[2][1].body,
     JSON.stringify({

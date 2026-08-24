@@ -217,7 +217,7 @@ test("renderWorkList renders blueprint metadata and selection controls", () => {
     { onSelectArtifact: (artifactId) => selected.push(artifactId) },
   );
 
-  assert.equal(container.children.length, 1);
+  assert.equal(container.children.length, 2);
   assert.equal(container.children[0].textContent.includes("Safe <Blueprint>"), true);
   assert.equal(container.children[0].textContent.includes("blueprint--abc"), false);
   assert.equal(container.children[0].textContent.includes("Accepted 1"), true);
@@ -225,6 +225,7 @@ test("renderWorkList renders blueprint metadata and selection controls", () => {
     container.children[0].classList.values.includes("contain-text"),
     true,
   );
+  assert.equal(container.children[1].textContent, "Show Archived");
   container.children[0].onclick();
   assert.deepEqual(selected, ["blueprint--abc"]);
 });
@@ -304,7 +305,73 @@ test("renderWorkList uses artifact terminology for list states", () => {
     },
     { onSelectArtifact: () => {} },
   );
-  assert.equal(container.children[0].textContent, "No Artifacts loaded yet.");
+  assert.equal(container.children[1].textContent, "No Artifacts loaded yet.");
+});
+
+test("renderWorkList can switch between active and archived artifact views", () => {
+  const switches = [];
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        lifecycleStatus: "active",
+        items: [{
+          reference: genericDetail.metadata.reference,
+          filename: "password_generator.py",
+          artifact_family: "code",
+          format: "python",
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    {
+      onSelectArtifact: () => {},
+      onSetArtifactLifecycleStatus: (status) => switches.push(status),
+    },
+  );
+
+  const toggle = container.children.find((child) => (
+    child.attributes["data-artifact-lifecycle-toggle"] === ""
+  ));
+  assert.ok(toggle);
+  assert.equal(toggle.textContent, "Show Archived");
+  toggle.onclick();
+  assert.deepEqual(switches, ["archived"]);
+});
+
+test("renderWorkList shows archived empty state and can return to active view", () => {
+  const switches = [];
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        lifecycleStatus: "archived",
+        items: [],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    {
+      onSelectArtifact: () => {},
+      onSetArtifactLifecycleStatus: (status) => switches.push(status),
+    },
+  );
+
+  const toggle = container.children.find((child) => (
+    child.attributes["data-artifact-lifecycle-toggle"] === ""
+  ));
+  assert.ok(toggle);
+  assert.equal(toggle.textContent, "Show Active");
+  assert.equal(textTree(container).includes("No Archived Artifacts."), true);
+  toggle.onclick();
+  assert.deepEqual(switches, ["active"]);
 });
 
 test("renderWorkDetail projects canonical schema-2 blueprint text safely", () => {
@@ -357,6 +424,43 @@ test("renderWorkDetail projects canonical single-file artifact safely", () => {
   assert.equal(archiveButton.textContent, "Archive");
   archiveButton.onclick();
   assert.deepEqual(archived, ["artifact--script"]);
+});
+
+test("renderWorkDetail restores archived single-file artifacts", () => {
+  const container = node();
+  const restored = [];
+  const archivedDetail = {
+    ...genericDetail,
+    metadata: {
+      ...genericDetail.metadata,
+      lifecycle_status: "archived",
+    },
+  };
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: archivedDetail, error: null },
+      feedback: { status: "idle", events: [], error: null },
+    },
+    {
+      onSubmitFeedback: () => {},
+      onPrintWork: () => {},
+      onRestoreArtifact: (artifactId) => restored.push(artifactId),
+    },
+  );
+
+  const restoreButton = container.children.find((child) => (
+    child.attributes["data-restore-artifact"] === ""
+  ));
+  const archiveButton = container.children.find((child) => (
+    child.attributes["data-archive-artifact"] === ""
+  ));
+  assert.ok(restoreButton);
+  assert.equal(archiveButton, undefined);
+  assert.equal(restoreButton.textContent, "Restore");
+  restoreButton.onclick();
+  assert.deepEqual(restored, ["artifact--script"]);
 });
 
 test("renderWorkDetail uses artifact terminology for idle and loading states", () => {

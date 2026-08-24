@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, NoReturn, TypeVar
+from typing import Annotated, Literal, NoReturn, TypeVar
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -57,6 +57,7 @@ from generic_artifact_service import (
     GenericArtifactReadService,
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
+    RestoreGenericArtifactCommand,
 )
 from generic_artifact_creation_service import (
     GenericArtifactCreationCommand,
@@ -1154,6 +1155,10 @@ async def list_generic_artifacts(
     ] = None,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     before: IdentifierStr | None = None,
+    lifecycle_status: Annotated[
+        Literal["active", "archived"],
+        Query(),
+    ] = "active",
 ) -> SingleFileArtifactListResponse:
     effective_project_id = _resolve_effective_project_id(
         request=request,
@@ -1166,6 +1171,7 @@ async def list_generic_artifacts(
                 project_id=effective_project_id,
                 limit=limit,
                 before=before,
+                lifecycle_status=lifecycle_status,
             )
         )
     except ArtifactCursorNotFoundError as exc:
@@ -1328,6 +1334,49 @@ async def archive_generic_artifact(
     except GenericArtifactReadStateError as exc:
         logger.error(
             "Stored generic artifact archive state is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.post(
+    "/api/projects/{project_id}/artifacts/{artifact_id}/restore",
+    response_model=SingleFileArtifactLifecycleResponse,
+)
+async def restore_generic_artifact(
+    project_id: IdentifierStr,
+    artifact_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> SingleFileArtifactLifecycleResponse:
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        return await request.app.state.generic_artifact_service.restore_artifact(
+            RestoreGenericArtifactCommand(
+                project_id=effective_project_id,
+                artifact_id=artifact_id,
+            )
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact was not found.",
+        ) from exc
+    except GenericArtifactReadStateError as exc:
+        logger.error(
+            "Stored generic artifact restore state is invalid (%s).",
             type(exc).__name__,
         )
         raise HTTPException(

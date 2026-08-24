@@ -16,6 +16,7 @@ export function createInitialState() {
     work: {
       list: {
         status: "idle",
+        lifecycleStatus: "active",
         items: [],
         next_before: null,
         error: null,
@@ -75,6 +76,7 @@ function emptyWorkState() {
   return {
     list: {
       status: "idle",
+      lifecycleStatus: "active",
       items: [],
       next_before: null,
       error: null,
@@ -537,6 +539,26 @@ export function beginWorkListLoad(state) {
   };
 }
 
+export function setWorkLifecycleStatus(state, lifecycleStatus) {
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      selectedArtifactId: null,
+      list: {
+        ...state.work.list,
+        lifecycleStatus,
+        status: "idle",
+        items: [],
+        next_before: null,
+        error: null,
+      },
+      detail: { status: "idle", item: null, error: null },
+      feedback: { status: "idle", events: [], next_before: null, error: null },
+    },
+  };
+}
+
 export function completeWorkListLoad(state, response) {
   return {
     ...state,
@@ -544,6 +566,7 @@ export function completeWorkListLoad(state, response) {
       ...state.work,
       list: {
         status: "ready",
+        lifecycleStatus: state.work.list.lifecycleStatus ?? "active",
         items: Array.isArray(response.artifacts) ? response.artifacts : [],
         next_before: response.next_before ?? null,
         error: null,
@@ -600,6 +623,14 @@ export function completeWorkDetailLoad(state, detail, feedback) {
 }
 
 export function completeWorkArchive(state, artifactId) {
+  return removeWorkArtifactFromCurrentView(state, artifactId);
+}
+
+export function completeWorkRestore(state, artifactId) {
+  return removeWorkArtifactFromCurrentView(state, artifactId);
+}
+
+function removeWorkArtifactFromCurrentView(state, artifactId) {
   const remainingItems = state.work.list.items.filter((item) => (
     item.reference?.artifact_id !== artifactId
   ));

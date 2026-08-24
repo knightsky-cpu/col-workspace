@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from pydantic import ValidationError
 
@@ -30,6 +30,7 @@ class ListGenericArtifactsCommand:
     project_id: str
     limit: int = 20
     before: str | None = None
+    lifecycle_status: Literal["active", "archived"] = "active"
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,12 @@ class GetGenericArtifactCommand:
 
 @dataclass(frozen=True, slots=True)
 class ArchiveGenericArtifactCommand:
+    project_id: str
+    artifact_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RestoreGenericArtifactCommand:
     project_id: str
     artifact_id: str
 
@@ -65,6 +72,12 @@ class GenericArtifactDatabase(Protocol):
         artifact_id: str,
     ) -> ArtifactDocumentRecord: ...
 
+    async def restore_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> ArtifactDocumentRecord: ...
+
 
 class GenericArtifactReadService:
     """Project validated Firestore generic artifacts into public models."""
@@ -85,7 +98,7 @@ class GenericArtifactReadService:
             self._project_metadata(command.project_id, record)
             for record in page.records
             if self._uses_single_file_contract(record)
-            and not self._is_archived(record)
+            and self._lifecycle_status(record) == command.lifecycle_status
         ]
         return SingleFileArtifactListResponse(
             artifacts=artifacts,
@@ -122,6 +135,22 @@ class GenericArtifactReadService:
             metadata=self._project_metadata(command.project_id, record)
         )
 
+    async def restore_artifact(
+        self,
+        command: RestoreGenericArtifactCommand,
+    ) -> SingleFileArtifactLifecycleResponse:
+        record = await self._database.restore_artifact_document(
+            command.project_id,
+            command.artifact_id,
+        )
+        if self._lifecycle_status(record) != "active":
+            raise ArtifactReadStateError(
+                "Restored generic artifact state is invalid."
+            )
+        return SingleFileArtifactLifecycleResponse(
+            metadata=self._project_metadata(command.project_id, record)
+        )
+
     @staticmethod
     def _uses_single_file_contract(record: ArtifactDocumentRecord) -> bool:
         document = record.document
@@ -135,7 +164,16 @@ class GenericArtifactReadService:
 
     @staticmethod
     def _is_archived(record: ArtifactDocumentRecord) -> bool:
-        return record.document.get("lifecycle_status") == "archived"
+        return GenericArtifactReadService._lifecycle_status(record) == "archived"
+
+    @staticmethod
+    def _lifecycle_status(
+        record: ArtifactDocumentRecord,
+    ) -> Literal["active", "archived"]:
+        status = record.document.get("lifecycle_status", "active")
+        if status == "archived":
+            return "archived"
+        return "active"
 
     @classmethod
     def _project_artifact(

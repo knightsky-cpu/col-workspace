@@ -2544,6 +2544,46 @@ class MemoryEngine:
         except ValueError as exc:
             self._raise_firestore_error("archive_artifact_document", exc)
 
+    async def restore_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> ArtifactDocumentRecord:
+        """Mark one project-owned generic artifact as active."""
+        self._validate_memory_identifier(project_id, "project_id")
+        self._validate_memory_identifier(artifact_id, "artifact_id")
+
+        try:
+            artifact_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("artifacts")
+                .document(artifact_id)
+            )
+            await artifact_ref.update(
+                {
+                    "lifecycle_status": "active",
+                    "restored_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+            snapshot = await artifact_ref.get()
+            if not snapshot.exists:
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored artifact document is invalid.")
+            return ArtifactDocumentRecord(
+                artifact_id=artifact_id,
+                document=document,
+            )
+        except ArtifactNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("restore_artifact_document", exc)
+        except ValueError as exc:
+            self._raise_firestore_error("restore_artifact_document", exc)
+
     async def record_blueprint_feedback(
         self,
         *,

@@ -12,6 +12,7 @@ import {
   beginPendingTurn,
   completeWorkDetailLoad,
   completeWorkArchive,
+  completeWorkRestore,
   completeWorkspaceCreate,
   completeWorkspaceListLoad,
   completeWorkListLoad,
@@ -32,6 +33,7 @@ import {
   selectNeedsReceiptRefresh,
   selectWorkRefreshPlan,
   selectWorkspace,
+  setWorkLifecycleStatus,
   startNewConversation,
 } from "../../frontend/state.mjs";
 
@@ -773,4 +775,57 @@ test("archiving selected work removes it from the visible list and clears detail
   );
   assert.equal(archived.work.selectedArtifactId, null);
   assert.equal(archived.work.detail.status, "idle");
+});
+
+test("work lifecycle mode can switch to archived and restores selected work out of view", () => {
+  const active = completeWorkListLoad(createInitialState(), {
+    artifacts: [{
+      reference: {
+        artifact_id: "artifact--abc",
+        artifact_type: "single_file_artifact",
+        schema_version: "1.0",
+        display_label: "Script",
+      },
+    }],
+  });
+
+  const archivedMode = setWorkLifecycleStatus(active, "archived");
+  assert.equal(archivedMode.work.list.lifecycleStatus, "archived");
+  assert.equal(archivedMode.work.list.items.length, 0);
+
+  const archivedDetail = completeWorkDetailLoad(
+    completeWorkListLoad(archivedMode, {
+      artifacts: [{
+        reference: {
+          artifact_id: "artifact--abc",
+          artifact_type: "single_file_artifact",
+          schema_version: "1.0",
+          display_label: "Script",
+        },
+      }],
+    }),
+    {
+      metadata: {
+        reference: {
+          artifact_id: "artifact--abc",
+          artifact_type: "single_file_artifact",
+          schema_version: "1.0",
+          display_label: "Script",
+        },
+        lifecycle_status: "archived",
+      },
+      artifact: {
+        artifact_family: "code",
+        format: "python",
+        filename: "script.py",
+        content: "print('hi')\n",
+      },
+    },
+    { events: [], next_before: null },
+  );
+
+  const restored = completeWorkRestore(archivedDetail, "artifact--abc");
+  assert.equal(restored.work.list.items.length, 0);
+  assert.equal(restored.work.selectedArtifactId, null);
+  assert.equal(restored.work.detail.status, "idle");
 });

@@ -15,6 +15,7 @@ import {
   listWorkspaces,
   listBlueprintFeedback,
   listBlueprints,
+  restoreArtifact,
   revokeMemorySignal,
 } from "./api.mjs";
 import {
@@ -62,6 +63,7 @@ import {
   completeWorkArchive,
   completeWorkDetailLoad,
   completeWorkListLoad,
+  completeWorkRestore,
   completePendingTurn,
   createInitialState,
   failMemoryLoad,
@@ -75,6 +77,7 @@ import {
   selectNeedsReceiptRefresh,
   selectWorkspace,
   selectWorkRefreshPlan,
+  setWorkLifecycleStatus,
   startNewConversation,
 } from "./state.mjs";
 import { setText } from "./render.mjs";
@@ -358,19 +361,29 @@ async function loadWorkList() {
     return;
   }
   clearWorkError();
+  const lifecycleStatus = state.work.list.lifecycleStatus ?? "active";
   state = beginWorkListLoad(state);
   ensureWorkView().render(state);
   try {
-    const [blueprints, artifacts] = await Promise.all([
-      listBlueprints(
-        state.context.project_id,
-        authOptions({ limit: 20 }),
-      ),
-      listArtifacts(
-        state.context.project_id,
-        authOptions({ limit: 20 }),
-      ),
-    ]);
+    const artifactOptions = authOptions({
+      limit: 20,
+      lifecycle_status: lifecycleStatus,
+    });
+    const [blueprints, artifacts] = lifecycleStatus === "archived"
+      ? [
+          { artifacts: [] },
+          await listArtifacts(state.context.project_id, artifactOptions),
+        ]
+      : await Promise.all([
+          listBlueprints(
+            state.context.project_id,
+            authOptions({ limit: 20 }),
+          ),
+          listArtifacts(
+            state.context.project_id,
+            artifactOptions,
+          ),
+        ]);
     state = completeWorkListLoad(state, {
       artifacts: [
         ...(Array.isArray(artifacts.artifacts) ? artifacts.artifacts : []),
@@ -618,6 +631,12 @@ function ensureWorkView() {
       onArchiveArtifact(artifactId) {
         archiveGenericArtifact(artifactId);
       },
+      onRestoreArtifact(artifactId) {
+        restoreGenericArtifact(artifactId);
+      },
+      onSetArtifactLifecycleStatus(lifecycleStatus) {
+        setArtifactLifecycleStatus(lifecycleStatus);
+      },
     },
   );
   return workView;
@@ -662,6 +681,34 @@ async function archiveGenericArtifact(artifactId) {
   } catch (error) {
     showWorkError(error.message);
   }
+}
+
+async function restoreGenericArtifact(artifactId) {
+  if (!state.context || state.pendingTurn !== null) {
+    return;
+  }
+  clearWorkError();
+  try {
+    await restoreArtifact(
+      state.context.project_id,
+      artifactId,
+      authOptions(),
+    );
+    state = completeWorkRestore(state, artifactId);
+    ensureWorkView().render(state);
+    await loadWorkList();
+  } catch (error) {
+    showWorkError(error.message);
+  }
+}
+
+async function setArtifactLifecycleStatus(lifecycleStatus) {
+  if (!state.context || state.pendingTurn !== null) {
+    return;
+  }
+  state = setWorkLifecycleStatus(state, lifecycleStatus);
+  ensureWorkView().render(state);
+  await loadWorkList();
 }
 
 function ensureMemoryView() {

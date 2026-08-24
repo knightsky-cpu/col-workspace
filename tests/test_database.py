@@ -439,6 +439,57 @@ async def test_archive_artifact_document_marks_project_artifact_archived(
 
 
 @pytest.mark.asyncio
+async def test_restore_artifact_document_marks_project_artifact_active(
+) -> None:
+    client = MagicMock()
+    projects = MagicMock()
+    project = MagicMock()
+    artifacts = MagicMock()
+    artifact_ref = MagicMock()
+    snapshot = MagicMock()
+    snapshot.exists = True
+    snapshot.to_dict.return_value = {
+        "artifact_contract_version": "1.0",
+        "artifact_type": "single_file_artifact",
+        "schema_version": "1.0",
+        "created_at": datetime.now().astimezone(),
+        "originating_session_id": "session-1",
+        "originating_turn_id": "turn-1",
+        "display_label": "Password Generator",
+        "lifecycle_status": "active",
+        "filename": "password_generator.py",
+        "artifact_family": "code",
+        "format": "python",
+        "byte_size": 43,
+        "content": "import secrets\nprint(secrets.token_hex(8))\n",
+        "summary": "Secure password generator.",
+    }
+    artifact_ref.get = AsyncMock(return_value=snapshot)
+    artifact_ref.update = AsyncMock(return_value=None)
+
+    client.collection.return_value = projects
+    projects.document.return_value = project
+    project.collection.return_value = artifacts
+    artifacts.document.return_value = artifact_ref
+
+    record = await MemoryEngine(client).restore_artifact_document(
+        "project-1",
+        "artifact--abc",
+    )
+
+    assert record.artifact_id == "artifact--abc"
+    assert record.document["lifecycle_status"] == "active"
+    artifact_ref.update.assert_awaited_once_with(
+        {
+            "lifecycle_status": "active",
+            "restored_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+    )
+    artifact_ref.get.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
 async def test_get_artifact_document_reads_project_artifact() -> None:
     client = MagicMock()
     projects = MagicMock()

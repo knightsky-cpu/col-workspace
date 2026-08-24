@@ -27,6 +27,7 @@ from generic_artifact_service import (
     ArtifactReadStateError as GenericArtifactReadStateError,
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
+    RestoreGenericArtifactCommand,
 )
 from generic_artifact_creation_service import (
     GenericArtifactCreationCommand,
@@ -701,9 +702,13 @@ class FakeGenericArtifactReadService:
     list_error: Exception | None = None
     detail_error: Exception | None = None
     archive_error: Exception | None = None
+    restore_error: Exception | None = None
     list_calls: list[ListGenericArtifactsCommand] = field(default_factory=list)
     detail_calls: list[GetGenericArtifactCommand] = field(default_factory=list)
     archive_calls: list[ArchiveGenericArtifactCommand] = (
+        field(default_factory=list)
+    )
+    restore_calls: list[RestoreGenericArtifactCommand] = (
         field(default_factory=list)
     )
 
@@ -738,6 +743,20 @@ class FakeGenericArtifactReadService:
         return SingleFileArtifactLifecycleResponse(
             metadata=self.detail_result.metadata.model_copy(
                 update={"lifecycle_status": "archived"}
+            )
+        )
+
+    async def restore_artifact(
+        self,
+        command: RestoreGenericArtifactCommand,
+    ) -> SingleFileArtifactLifecycleResponse:
+        self.restore_calls.append(command)
+        self.events.append(("generic_artifact_restore",))
+        if self.restore_error is not None:
+            raise self.restore_error
+        return SingleFileArtifactLifecycleResponse(
+            metadata=self.detail_result.metadata.model_copy(
+                update={"lifecycle_status": "active"}
             )
         )
 
@@ -2151,6 +2170,26 @@ async def test_list_generic_artifacts_returns_bounded_public_metadata(
 
 
 @pytest.mark.asyncio
+async def test_list_generic_artifacts_can_request_archived_metadata(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/projects/project-1/artifacts",
+        params={"limit": 10, "lifecycle_status": "archived"},
+    )
+
+    assert response.status_code == 200
+    assert service_state.generic_artifact_service.list_calls == [
+        ListGenericArtifactsCommand(
+            project_id="project-1",
+            limit=10,
+            lifecycle_status="archived",
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_generic_artifact_returns_canonical_detail(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -2196,6 +2235,25 @@ async def test_archive_generic_artifact_marks_artifact_archived(
     )
     assert service_state.generic_artifact_service.archive_calls == [
         ArchiveGenericArtifactCommand(
+            project_id="project-1",
+            artifact_id="artifact-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_restore_generic_artifact_marks_artifact_active(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/projects/project-1/artifacts/artifact-1/restore"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["lifecycle_status"] == "active"
+    assert service_state.generic_artifact_service.restore_calls == [
+        RestoreGenericArtifactCommand(
             project_id="project-1",
             artifact_id="artifact-1",
         )
