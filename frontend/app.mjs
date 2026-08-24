@@ -20,6 +20,7 @@ import {
   createInitialLayoutState,
   isDrawerExpanded,
   isSectionExpanded,
+  setArtifactDrawerMode,
   setDrawerCollapsed,
   setSectionExpanded,
 } from "./workspace-layout.mjs";
@@ -60,6 +61,10 @@ function showWorkspace() {
   for (const button of document.querySelectorAll("[data-drawer-toggle]")) {
     button.disabled = false;
   }
+  const artifactExpandButton = document.querySelector("[data-artifacts-expand]");
+  artifactExpandButton.disabled = false;
+  const leftRefreshButton = document.querySelector("[data-left-refresh]");
+  leftRefreshButton.disabled = false;
   renderLayout();
   document.querySelector("#conversation-workspace").focus();
 }
@@ -112,6 +117,10 @@ function renderLayout() {
     "workspace-grid--right-collapsed",
     !isDrawerExpanded(layoutState, "right"),
   );
+  workspace.classList.toggle(
+    "workspace-grid--artifacts-expanded",
+    layoutState.artifactDrawerMode === "expanded",
+  );
 
   for (const button of document.querySelectorAll('[data-drawer-toggle="left"]')) {
     const expanded = isDrawerExpanded(layoutState, "left");
@@ -120,11 +129,19 @@ function renderLayout() {
   }
   for (const button of document.querySelectorAll('[data-drawer-toggle="right"]')) {
     const expanded = isDrawerExpanded(layoutState, "right");
-    setText(button, expanded ? "Hide" : "Show Work review");
+    setText(button, expanded ? "Hide" : "Show Artifacts");
     button.setAttribute("aria-expanded", String(expanded));
   }
 
-  for (const section of ["work", "memory", "activity"]) {
+  const artifactExpandButton = document.querySelector("[data-artifacts-expand]");
+  const artifactsExpanded = layoutState.artifactDrawerMode === "expanded";
+  setText(
+    artifactExpandButton,
+    artifactsExpanded ? "Normal Artifacts" : "Expand Artifacts",
+  );
+  artifactExpandButton.setAttribute("aria-expanded", String(artifactsExpanded));
+
+  for (const section of ["work", "memory", "chats"]) {
     const expanded = isSectionExpanded(layoutState, section);
     const content = document.querySelector(`[data-section-content="${section}"]`);
     const toggle = document.querySelector(`[data-section-toggle="${section}"]`);
@@ -298,7 +315,7 @@ function ensureActivityView() {
     return activityView;
   }
   activityView = createActivityView({
-    list: document.querySelector("[data-activity-list]"),
+    list: document.querySelector("[data-chats-list]"),
   });
   return activityView;
 }
@@ -360,6 +377,14 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
 for (const button of document.querySelectorAll("[data-drawer-toggle]")) {
   button.addEventListener("click", () => {
     const drawer = button.getAttribute("data-drawer-toggle");
+    if (drawer === "right") {
+      layoutState = setArtifactDrawerMode(
+        layoutState,
+        isDrawerExpanded(layoutState, "right") ? "hidden" : "normal",
+      );
+      renderLayout();
+      return;
+    }
     layoutState = setDrawerCollapsed(
       layoutState,
       drawer,
@@ -381,10 +406,15 @@ for (const button of document.querySelectorAll("[data-section-toggle]")) {
   });
 }
 
-document.querySelector("[data-work-refresh]").addEventListener("click", () => {
-  loadWorkList();
+document.querySelector("[data-artifacts-expand]").addEventListener("click", () => {
+  layoutState = setArtifactDrawerMode(
+    layoutState,
+    layoutState.artifactDrawerMode === "expanded" ? "normal" : "expanded",
+  );
+  renderLayout();
 });
 
-document.querySelector("[data-memory-refresh]").addEventListener("click", () => {
+document.querySelector("[data-left-refresh]").addEventListener("click", () => {
+  loadWorkList();
   loadMemory();
 });

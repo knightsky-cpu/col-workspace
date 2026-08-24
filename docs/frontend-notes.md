@@ -28,8 +28,19 @@ the implementation boundary.
   small Hide/Show button size.
 - The left drawer should use one drawer-level refresh control that refreshes
   all left drawer data instead of separate large refresh buttons per section.
+- The left drawer must be independently scrollable without moving the center
+  chat or the Artifacts drawer.
 - Work, Memory, and Chats sections should collapse to section cards and expand
   their contents/subcards.
+- Expandable drawers and cards should be collapsed by default, not expanded by
+  default.
+- The Memory section should order its subcategories as Pending proposals first,
+  Active preferences second, and Recent memories third.
+- The left drawer information architecture needs a cleanup pass after core
+  wiring is complete so Work, Memory, and Chats feel human-facing rather than
+  implementation-shaped.
+- Hiding either drawer must never hide, move offscreen, or make unusable the
+  center chat composer.
 - Replace the user-facing `Activity` section with `Chats`.
 - The product should store and expose chat sessions, not a non-interactive log
   of every low-level interaction.

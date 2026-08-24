@@ -511,9 +511,23 @@ app.mount(
 )
 
 
+@app.middleware("http")
+async def add_workspace_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+    if (
+        request.url.path == "/workspace"
+        or request.url.path.startswith("/static/agent-col/")
+    ):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/workspace", response_class=HTMLResponse)
 async def workspace() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(
+        FRONTEND_DIR / "index.html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/")

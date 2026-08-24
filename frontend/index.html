@@ -50,16 +50,18 @@
             <button type="button" class="drawer-toggle" data-drawer-toggle="left" disabled>
               Hide
             </button>
+            <button type="button" class="drawer-toggle" data-left-refresh disabled>
+              Refresh
+            </button>
           </div>
           <section class="drawer-section" aria-labelledby="work-list-title" data-section="work">
             <div class="section-heading">
               <h2 id="work-list-title">Work</h2>
-              <button type="button" data-section-toggle="work" aria-expanded="true">
-                Collapse
+              <button type="button" class="drawer-toggle" data-section-toggle="work" aria-expanded="false">
+                Expand
               </button>
-              <button type="button" data-work-refresh>Refresh</button>
             </div>
-            <div data-section-content="work">
+            <div data-section-content="work" hidden>
               <p class="form-error" role="alert" data-work-error hidden></p>
               <div data-work-list></div>
             </div>
@@ -67,31 +69,30 @@
           <section class="drawer-section" aria-labelledby="memory-title" data-section="memory">
             <div class="section-heading">
               <h2 id="memory-title">Memory</h2>
-              <button type="button" data-section-toggle="memory" aria-expanded="true">
-                Collapse
+              <button type="button" class="drawer-toggle" data-section-toggle="memory" aria-expanded="false">
+                Expand
               </button>
-              <button type="button" data-memory-refresh>Refresh</button>
             </div>
-            <div data-section-content="memory">
+            <div data-section-content="memory" hidden>
               <p class="form-error" role="alert" data-memory-error hidden></p>
               <div data-memory-panel></div>
             </div>
           </section>
-          <section class="drawer-section" aria-labelledby="activity-title" data-section="activity">
+          <section class="drawer-section" aria-labelledby="chats-title" data-section="chats">
             <div class="section-heading">
-              <h2 id="activity-title">Activity</h2>
-              <button type="button" data-section-toggle="activity" aria-expanded="true">
-                Collapse
+              <h2 id="chats-title">Chats</h2>
+              <button type="button" class="drawer-toggle" data-section-toggle="chats" aria-expanded="false">
+                Expand
               </button>
             </div>
-            <div data-section-content="activity">
-              <div data-activity-list></div>
+            <div data-section-content="chats" hidden>
+              <div data-chats-list></div>
             </div>
           </section>
         </aside>
 
         <main id="conversation-workspace" class="conversation" tabindex="-1">
-          <section aria-labelledby="empty-conversation-title">
+          <section class="conversation-intro" aria-labelledby="empty-conversation-title">
             <h2 id="empty-conversation-title">Start a conversation</h2>
             <p>
               Ask Agent Col for help, or ask it to create a structured
@@ -99,38 +100,43 @@
             </p>
           </section>
           <div class="chat-transcript" data-chat-transcript aria-live="polite"></div>
-          <p class="chat-status" data-chat-status role="status"></p>
-          <p class="chat-error" data-chat-error role="alert" hidden></p>
-          <button type="button" data-retry-turn hidden>Retry exact request</button>
-          <form class="composer" data-chat-form>
-            <label for="chat-message">Message</label>
-            <textarea
-              id="chat-message"
-              name="message"
-              data-chat-input
-              rows="4"
-              maxlength="10000"
-              required
-            ></textarea>
-            <div class="composer-actions">
-              <span data-character-count>0 / 10000</span>
-              <button type="submit" data-chat-submit>Send</button>
-            </div>
-          </form>
+          <div class="conversation-footer">
+            <p class="chat-status" data-chat-status role="status"></p>
+            <p class="chat-error" data-chat-error role="alert" hidden></p>
+            <button type="button" data-retry-turn hidden>Retry exact request</button>
+            <form class="composer" data-chat-form>
+              <label for="chat-message">Message</label>
+              <textarea
+                id="chat-message"
+                name="message"
+                data-chat-input
+                rows="4"
+                maxlength="10000"
+                required
+              ></textarea>
+              <div class="composer-actions">
+                <span data-character-count>0 / 10000</span>
+                <button type="submit" data-chat-submit>Send</button>
+              </div>
+            </form>
+          </div>
         </main>
 
-        <aside class="work-panel" aria-label="Work review">
+        <aside class="work-panel" aria-label="Artifacts">
           <div class="drawer-heading">
-            <h2>Work review</h2>
+            <h2>Artifacts</h2>
+            <button type="button" class="drawer-toggle" data-artifacts-expand disabled>
+              Expand Artifacts
+            </button>
             <button type="button" class="drawer-toggle" data-drawer-toggle="right" disabled>
               Hide
             </button>
           </div>
-          <div data-work-detail></div>
+          <div class="work-panel__body" data-work-detail></div>
         </aside>
         <div class="drawer-restore drawer-restore--right">
           <button type="button" class="drawer-toggle" data-drawer-toggle="right" disabled>
-            Show Work review
+            Show Artifacts
           </button>
         </div>
       </div>

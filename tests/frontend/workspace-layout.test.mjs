@@ -3,9 +3,19 @@ import assert from "node:assert/strict";
 
 import {
   createInitialLayoutState,
+  isDrawerExpanded,
+  setArtifactDrawerMode,
   setDrawerCollapsed,
   setSectionExpanded,
 } from "../../frontend/workspace-layout.mjs";
+
+test("drawer sections are collapsed by default", () => {
+  const initial = createInitialLayoutState();
+
+  assert.equal(initial.sections.work, false);
+  assert.equal(initial.sections.memory, false);
+  assert.equal(initial.sections.chats, false);
+});
 
 test("drawer collapse state is explicit and reversible", () => {
   const initial = createInitialLayoutState();
@@ -18,14 +28,38 @@ test("drawer collapse state is explicit and reversible", () => {
   assert.equal(expanded.drawers.left, true);
 });
 
+test("artifact drawer mode supports hidden normal and expanded states", () => {
+  const initial = createInitialLayoutState();
+
+  assert.equal(initial.artifactDrawerMode, "normal");
+  assert.equal(isDrawerExpanded(initial, "right"), true);
+
+  const expanded = setArtifactDrawerMode(initial, "expanded");
+  assert.equal(expanded.artifactDrawerMode, "expanded");
+  assert.equal(isDrawerExpanded(expanded, "right"), true);
+
+  const hidden = setArtifactDrawerMode(expanded, "hidden");
+  assert.equal(hidden.artifactDrawerMode, "hidden");
+  assert.equal(isDrawerExpanded(hidden, "right"), false);
+
+  const normal = setArtifactDrawerMode(hidden, "normal");
+  assert.equal(normal.artifactDrawerMode, "normal");
+  assert.equal(isDrawerExpanded(normal, "right"), true);
+});
+
 test("left drawer sections can collapse without changing neighboring sections", () => {
   const initial = createInitialLayoutState();
 
-  const collapsedMemory = setSectionExpanded(initial, "memory", false);
-  assert.equal(collapsedMemory.sections.work, true);
-  assert.equal(collapsedMemory.sections.memory, false);
-  assert.equal(collapsedMemory.sections.activity, true);
-
-  const expandedMemory = setSectionExpanded(collapsedMemory, "memory", true);
+  const expandedMemory = setSectionExpanded(initial, "memory", true);
+  assert.equal(expandedMemory.sections.work, false);
   assert.equal(expandedMemory.sections.memory, true);
+  assert.equal(expandedMemory.sections.chats, false);
+
+  const collapsedMemory = setSectionExpanded(expandedMemory, "memory", false);
+  assert.equal(collapsedMemory.sections.memory, false);
+
+  assert.throws(
+    () => setSectionExpanded(initial, "activity", true),
+    /Unsupported section/,
+  );
 });

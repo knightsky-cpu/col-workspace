@@ -1,16 +1,18 @@
 const DRAWERS = new Set(["left", "right"]);
-const SECTIONS = new Set(["work", "memory", "activity"]);
+const SECTIONS = new Set(["work", "memory", "chats"]);
+const ARTIFACT_DRAWER_MODES = new Set(["hidden", "normal", "expanded"]);
 
 export function createInitialLayoutState() {
   return {
+    artifactDrawerMode: "normal",
     drawers: {
       left: true,
       right: true,
     },
     sections: {
-      work: true,
-      memory: true,
-      activity: true,
+      work: false,
+      memory: false,
+      chats: false,
     },
   };
 }
@@ -24,6 +26,20 @@ export function setDrawerCollapsed(layout, drawer, collapsed) {
     drawers: {
       ...layout.drawers,
       [drawer]: !collapsed,
+    },
+  };
+}
+
+export function setArtifactDrawerMode(layout, mode) {
+  if (!ARTIFACT_DRAWER_MODES.has(mode)) {
+    throw new Error(`Unsupported artifact drawer mode: ${mode}`);
+  }
+  return {
+    ...layout,
+    artifactDrawerMode: mode,
+    drawers: {
+      ...layout.drawers,
+      right: mode !== "hidden",
     },
   };
 }
@@ -42,6 +58,9 @@ export function setSectionExpanded(layout, section, expanded) {
 }
 
 export function isDrawerExpanded(layout, drawer) {
+  if (drawer === "right" && layout.artifactDrawerMode === "hidden") {
+    return false;
+  }
   return layout.drawers[drawer] === true;
 }
 

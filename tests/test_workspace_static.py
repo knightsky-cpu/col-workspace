@@ -15,6 +15,7 @@ async def test_workspace_route_serves_html_shell() -> None:
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
+    assert response.headers["cache-control"] == "no-store"
     assert "<h1>Agent Col</h1>" in response.text
     assert "Ask Agent Col for help" in response.text
     assert ">Agent_Col<" not in response.text
@@ -29,6 +30,11 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert "data-retry-turn" in response.text
     assert 'data-drawer-toggle="left"' in response.text
     assert 'data-drawer-toggle="right"' in response.text
+    assert "Work review" not in response.text
+    assert 'aria-label="Artifacts"' in response.text
+    assert "<h2>Artifacts</h2>" in response.text
+    assert "Show Artifacts" in response.text
+    assert "Expand Artifacts" in response.text
     header = response.text.split("</header>", maxsplit=1)[0]
     assert "data-drawer-toggle" not in header
     supporting_panel = response.text.split(
@@ -44,11 +50,13 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert "data-work-list" in response.text
     assert "data-work-detail" in response.text
     assert "data-work-error" in response.text
-    assert "data-work-refresh" in response.text
+    assert "data-left-refresh" in response.text
+    assert "data-work-refresh" not in response.text
     assert "data-memory-panel" in response.text
-    assert "data-memory-refresh" in response.text
+    assert "data-memory-refresh" not in response.text
     assert "data-memory-error" in response.text
-    assert "data-activity-list" in response.text
+    assert "data-activity-list" not in response.text
+    assert "data-chats-list" in response.text
     assert "https://" not in response.text
     assert "http://" not in response.text
 
@@ -65,13 +73,21 @@ async def test_workspace_static_assets_are_local() -> None:
 
     assert css_response.status_code == 200
     assert "text/css" in css_response.headers["content-type"]
+    assert css_response.headers["cache-control"] == "no-store"
     assert js_response.status_code == 200
     assert "javascript" in js_response.headers["content-type"]
+    assert js_response.headers["cache-control"] == "no-store"
     assert ".contain-text" in css_response.text
     assert "overflow-wrap: anywhere" in css_response.text
     assert "grid-template-areas" in css_response.text
     assert ".conversation" in css_response.text
     assert "grid-area: conversation" in css_response.text
+    assert "grid-template-rows: auto minmax(0, 1fr) auto" in css_response.text
+    assert ".work-panel__body" in css_response.text
+    assert "overflow: auto" in css_response.text
+    assert "80vw" in css_response.text
+    assert ".workspace-grid--artifacts-expanded" in css_response.text
+    assert ".workspace-grid--right-collapsed .conversation" not in css_response.text
     collapsed_left = css_response.text.split(
         ".workspace-grid--left-collapsed",
         maxsplit=1,
