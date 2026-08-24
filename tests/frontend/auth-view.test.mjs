@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   authRequiresGoogleSignIn,
+  googleSessionDisplayLabel,
   googleSessionToContext,
   initializeGoogleSignIn,
 } from "../../frontend/auth-view.mjs";
@@ -51,6 +52,18 @@ test("googleSessionToContext validates project locator and auth token", () => {
       "",
     ),
     /Google authentication token is missing/,
+  );
+});
+
+test("googleSessionDisplayLabel hides Google subject from user-facing UI", () => {
+  assert.equal(
+    googleSessionDisplayLabel({
+      authenticated: true,
+      user_id: "google--109876543210",
+      email: "user@example.com",
+      display_name: "WiFi Knight",
+    }),
+    "Signed in with Google",
   );
 });
 

@@ -13,6 +13,7 @@ import {
 } from "./api.mjs";
 import {
   authRequiresGoogleSignIn,
+  googleSessionDisplayLabel,
   googleSessionToContext,
   initializeGoogleSignIn,
   loadGoogleIdentityScript,
@@ -157,10 +158,13 @@ function populateGoogleContext(session, authToken) {
     authToken,
   );
   const userInput = document.querySelector('[name="user_id"]');
-  userInput.value = verifiedGoogleContext.user_id;
+  userInput.value = googleSessionDisplayLabel(session);
   userInput.readOnly = true;
+  const accountStatus = document.querySelector("[data-google-account-status]");
+  setText(accountStatus, googleSessionDisplayLabel(session));
+  accountStatus.hidden = false;
   setContextFormEnabled(true);
-  setAuthModeLabel(`Signed in as ${session.email ?? session.display_name ?? session.user_id}`);
+  setAuthModeLabel(googleSessionDisplayLabel(session));
 }
 
 function contextForSubmit(form) {

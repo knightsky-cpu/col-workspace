@@ -16,3 +16,8 @@ test("workspace does not expose a raw Google ID token field", () => {
   assert.doesNotMatch(html, /name="auth_token"/);
   assert.match(html, /data-google-signin/);
 });
+
+test("workspace hides internal Google subject field from authenticated users", () => {
+  assert.doesNotMatch(html, /verified workspace user/);
+  assert.match(html, /data-google-account-status/);
+});

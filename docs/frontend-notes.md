@@ -105,3 +105,7 @@ the implementation boundary.
   for requests. The existing user/session/project prompt context remains a
   secondary validation and scoping layer, not proof of identity. The product
   still needs server-side project/session/artifact ownership records.
+- Authenticated mode must not reveal backend-derived Google subject identifiers
+  such as `google--...` in the user-facing workspace. Show a human-safe session
+  status like `Signed in with Google` and keep the internal subject only in
+  application state and server requests.

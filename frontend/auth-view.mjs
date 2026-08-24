@@ -26,6 +26,10 @@ export function googleSessionToContext(session, projectId, authToken) {
   };
 }
 
+export function googleSessionDisplayLabel() {
+  return "Signed in with Google";
+}
+
 export function initializeGoogleSignIn({
   clientId,
   buttonContainer,
