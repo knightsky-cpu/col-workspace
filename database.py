@@ -2584,6 +2584,66 @@ class MemoryEngine:
         except ValueError as exc:
             self._raise_firestore_error("restore_artifact_document", exc)
 
+    async def update_artifact_metadata_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+        *,
+        display_label: str | None,
+        filename: str | None,
+    ) -> ArtifactDocumentRecord:
+        """Update mutable public metadata for one project-owned artifact."""
+        self._validate_memory_identifier(project_id, "project_id")
+        self._validate_memory_identifier(artifact_id, "artifact_id")
+        updates: dict[str, object] = {}
+        if display_label is not None:
+            self._validate_string(display_label, "display_label")
+            updates["display_label"] = display_label
+        if filename is not None:
+            validated = SingleFileArtifact.model_validate(
+                {
+                    "artifact_family": "document",
+                    "format": "text",
+                    "filename": filename,
+                    "content": "placeholder",
+                }
+            )
+            updates["filename"] = validated.filename
+        if not updates:
+            raise ValueError("At least one metadata field is required.")
+        updates["updated_at"] = firestore.SERVER_TIMESTAMP
+
+        try:
+            artifact_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("artifacts")
+                .document(artifact_id)
+            )
+            await artifact_ref.update(updates)
+            snapshot = await artifact_ref.get()
+            if not snapshot.exists:
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored artifact document is invalid.")
+            return ArtifactDocumentRecord(
+                artifact_id=artifact_id,
+                document=document,
+            )
+        except ArtifactNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "update_artifact_metadata_document",
+                exc,
+            )
+        except ValueError as exc:
+            self._raise_firestore_error(
+                "update_artifact_metadata_document",
+                exc,
+            )
+
     async def record_blueprint_feedback(
         self,
         *,

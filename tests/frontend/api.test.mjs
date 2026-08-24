@@ -20,6 +20,7 @@ import {
   deleteMemorySignal,
   restoreArtifact,
   revokeMemorySignal,
+  updateArtifactMetadata,
 } from "../../frontend/api.mjs";
 
 function jsonResponse(status, body, headers = {}) {
@@ -272,6 +273,19 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
       return jsonResponse(200, { artifact_contract_version: "1.0" });
     },
   );
+  await updateArtifactMetadata(
+    "agent-col",
+    "artifact--abc",
+    {
+      display_label: "Renamed Script",
+      filename: "renamed_script.py",
+    },
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_contract_version: "1.0" });
+    },
+  );
   await listArtifacts(
     "agent-col",
     { lifecycle_status: "archived", authToken: "token-1" },
@@ -302,9 +316,22 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
   assert.equal(calls[4][1].headers.Authorization, "Bearer token-1");
   assert.equal(
     calls[5][0],
+    "/api/projects/agent-col/artifacts/artifact--abc/metadata",
+  );
+  assert.equal(calls[5][1].method, "PATCH");
+  assert.equal(calls[5][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[5][1].body,
+    JSON.stringify({
+      display_label: "Renamed Script",
+      filename: "renamed_script.py",
+    }),
+  );
+  assert.equal(
+    calls[6][0],
     "/api/projects/agent-col/artifacts?lifecycle_status=archived",
   );
-  assert.equal(calls[5][1].method, "GET");
+  assert.equal(calls[6][1].method, "GET");
   assert.equal(
     calls[2][1].body,
     JSON.stringify({

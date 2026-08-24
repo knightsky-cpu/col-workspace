@@ -309,6 +309,17 @@ class SingleFileArtifactLifecycleResponse(StrictModel):
     metadata: SingleFileArtifactMetadata
 
 
+class SingleFileArtifactMetadataUpdateRequest(StrictModel):
+    display_label: DisplayLabelStr | None = None
+    filename: ArtifactFilenameStr | None = None
+
+    @model_validator(mode="after")
+    def require_metadata_change(self) -> Self:
+        if self.display_label is None and self.filename is None:
+            raise ValueError("At least one metadata field is required.")
+        return self
+
+
 class ArtifactFeedbackCounts(StrictModel):
     accepted: int = Field(default=0, ge=0)
     rejected: int = Field(default=0, ge=0)

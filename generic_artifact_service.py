@@ -51,6 +51,14 @@ class RestoreGenericArtifactCommand:
     artifact_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class UpdateGenericArtifactMetadataCommand:
+    project_id: str
+    artifact_id: str
+    display_label: str | None = None
+    filename: str | None = None
+
+
 class GenericArtifactDatabase(Protocol):
     async def list_artifact_documents(
         self,
@@ -76,6 +84,15 @@ class GenericArtifactDatabase(Protocol):
         self,
         project_id: str,
         artifact_id: str,
+    ) -> ArtifactDocumentRecord: ...
+
+    async def update_artifact_metadata_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+        *,
+        display_label: str | None,
+        filename: str | None,
     ) -> ArtifactDocumentRecord: ...
 
 
@@ -147,6 +164,20 @@ class GenericArtifactReadService:
             raise ArtifactReadStateError(
                 "Restored generic artifact state is invalid."
             )
+        return SingleFileArtifactLifecycleResponse(
+            metadata=self._project_metadata(command.project_id, record)
+        )
+
+    async def update_artifact_metadata(
+        self,
+        command: UpdateGenericArtifactMetadataCommand,
+    ) -> SingleFileArtifactLifecycleResponse:
+        record = await self._database.update_artifact_metadata_document(
+            command.project_id,
+            command.artifact_id,
+            display_label=command.display_label,
+            filename=command.filename,
+        )
         return SingleFileArtifactLifecycleResponse(
             metadata=self._project_metadata(command.project_id, record)
         )

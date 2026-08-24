@@ -463,6 +463,50 @@ test("renderWorkDetail restores archived single-file artifacts", () => {
   assert.deepEqual(restored, ["artifact--script"]);
 });
 
+test("renderWorkDetail submits single-file artifact metadata rename", () => {
+  const container = node();
+  const updates = [];
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: genericDetail, error: null },
+      feedback: { status: "idle", events: [], error: null },
+    },
+    {
+      onSubmitFeedback: () => {},
+      onUpdateArtifactMetadata: (artifactId, request) => {
+        updates.push([artifactId, request]);
+      },
+    },
+  );
+
+  const form = container.children.find((child) => (
+    child.attributes["data-artifact-metadata-form"] === ""
+  ));
+  assert.ok(form);
+  const labelInput = form.children.find((child) => (
+    child.tagName === "input" && child.name === "display_label"
+  ));
+  const filenameInput = form.children.find((child) => (
+    child.tagName === "input" && child.name === "filename"
+  ));
+  assert.equal(labelInput.value, "Password Generator");
+  assert.equal(filenameInput.value, "password_generator.py");
+
+  labelInput.value = "Renamed Password Generator";
+  filenameInput.value = "renamed_password_generator.py";
+  form.onsubmit({ preventDefault() {} });
+
+  assert.deepEqual(updates, [[
+    "artifact--script",
+    {
+      display_label: "Renamed Password Generator",
+      filename: "renamed_password_generator.py",
+    },
+  ]]);
+});
+
 test("renderWorkDetail uses artifact terminology for idle and loading states", () => {
   const container = node();
 

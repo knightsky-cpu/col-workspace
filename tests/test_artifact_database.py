@@ -8,6 +8,7 @@ from google.cloud.firestore_v1.field_path import FieldPath
 from database import (
     BlueprintArtifactCursorNotFoundError,
     BlueprintArtifactNotFoundError,
+    ArtifactNotFoundError,
     MemoryEngine,
 )
 
@@ -164,6 +165,67 @@ async def test_get_blueprint_document_rejects_missing_artifact() -> None:
         await MemoryEngine(client).get_blueprint_document(
             "project-1",
             "missing-blueprint",
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_artifact_metadata_document_updates_only_public_metadata(
+) -> None:
+    client, projects, project, artifacts = artifact_store()
+    artifact_ref = MagicMock()
+    artifact_ref.update = AsyncMock()
+    snapshot = SimpleNamespace(
+        exists=True,
+        to_dict=lambda: {
+            "artifact_contract_version": "1.0",
+            "artifact_type": "single_file_artifact",
+            "schema_version": "1.0",
+            "display_label": "Renamed Generator",
+            "filename": "renamed_generator.py",
+            "content": "print('unchanged')\n",
+        },
+    )
+    artifact_ref.get = AsyncMock(return_value=snapshot)
+    artifacts.document.return_value = artifact_ref
+
+    record = await MemoryEngine(client).update_artifact_metadata_document(
+        "project-1",
+        "artifact--abc",
+        display_label="Renamed Generator",
+        filename="renamed_generator.py",
+    )
+
+    projects.document.assert_called_once_with("project-1")
+    project.collection.assert_called_once_with("artifacts")
+    artifacts.document.assert_called_once_with("artifact--abc")
+    artifact_ref.update.assert_awaited_once_with(
+        {
+            "display_label": "Renamed Generator",
+            "filename": "renamed_generator.py",
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+    )
+    assert record.artifact_id == "artifact--abc"
+    assert record.document["content"] == "print('unchanged')\n"
+
+
+@pytest.mark.asyncio
+async def test_update_artifact_metadata_document_rejects_missing_artifact(
+) -> None:
+    client, _, _, artifacts = artifact_store()
+    artifact_ref = MagicMock()
+    artifact_ref.update = AsyncMock()
+    artifact_ref.get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+    artifacts.document.return_value = artifact_ref
+
+    with pytest.raises(ArtifactNotFoundError):
+        await MemoryEngine(client).update_artifact_metadata_document(
+            "project-1",
+            "artifact--abc",
+            display_label="Renamed Generator",
+            filename=None,
         )
 
 

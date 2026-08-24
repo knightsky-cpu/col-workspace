@@ -310,6 +310,27 @@ export function restoreArtifact(
   );
 }
 
+export function updateArtifactMetadata(
+  projectId,
+  artifactId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/metadata`,
+    {
+      method: "PATCH",
+      authToken: options.authToken,
+      body: request,
+    },
+    fetchLike,
+  );
+}
+
 export function inspectMemory(
   userId,
   options = {},

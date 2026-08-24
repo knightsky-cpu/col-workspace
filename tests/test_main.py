@@ -28,6 +28,7 @@ from generic_artifact_service import (
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
     RestoreGenericArtifactCommand,
+    UpdateGenericArtifactMetadataCommand,
 )
 from generic_artifact_creation_service import (
     GenericArtifactCreationCommand,
@@ -108,6 +109,7 @@ from schemas import (
     SingleFileArtifactDetailResponse,
     SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
+    SingleFileArtifactMetadataUpdateRequest,
     SingleFileArtifactMetadata,
     SynthesisBlueprint,
     WorkspaceCreateRequest,
@@ -703,6 +705,7 @@ class FakeGenericArtifactReadService:
     detail_error: Exception | None = None
     archive_error: Exception | None = None
     restore_error: Exception | None = None
+    update_metadata_error: Exception | None = None
     list_calls: list[ListGenericArtifactsCommand] = field(default_factory=list)
     detail_calls: list[GetGenericArtifactCommand] = field(default_factory=list)
     archive_calls: list[ArchiveGenericArtifactCommand] = (
@@ -711,6 +714,9 @@ class FakeGenericArtifactReadService:
     restore_calls: list[RestoreGenericArtifactCommand] = (
         field(default_factory=list)
     )
+    update_metadata_calls: list[
+        UpdateGenericArtifactMetadataCommand
+    ] = field(default_factory=list)
 
     async def list_artifacts(
         self,
@@ -757,6 +763,28 @@ class FakeGenericArtifactReadService:
         return SingleFileArtifactLifecycleResponse(
             metadata=self.detail_result.metadata.model_copy(
                 update={"lifecycle_status": "active"}
+            )
+        )
+
+    async def update_artifact_metadata(
+        self,
+        command: UpdateGenericArtifactMetadataCommand,
+    ) -> SingleFileArtifactLifecycleResponse:
+        self.update_metadata_calls.append(command)
+        self.events.append(("generic_artifact_update_metadata",))
+        if self.update_metadata_error is not None:
+            raise self.update_metadata_error
+        return SingleFileArtifactLifecycleResponse(
+            metadata=self.detail_result.metadata.model_copy(
+                update={
+                    "reference": (
+                        self.detail_result.metadata.reference.model_copy(
+                            update={"display_label": command.display_label}
+                        )
+                    ),
+                    "filename": command.filename
+                    or self.detail_result.metadata.filename,
+                }
             )
         )
 
@@ -2258,6 +2286,49 @@ async def test_restore_generic_artifact_marks_artifact_active(
             artifact_id="artifact-1",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_update_generic_artifact_metadata_returns_updated_metadata(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.patch(
+        "/api/projects/project-1/artifacts/artifact-1/metadata",
+        json={
+            "display_label": "Renamed Password Generator",
+            "filename": "renamed_password_generator.py",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["metadata"]["reference"]["display_label"] == (
+        "Renamed Password Generator"
+    )
+    assert body["metadata"]["filename"] == "renamed_password_generator.py"
+    assert service_state.generic_artifact_service.update_metadata_calls == [
+        UpdateGenericArtifactMetadataCommand(
+            project_id="project-1",
+            artifact_id="artifact-1",
+            display_label="Renamed Password Generator",
+            filename="renamed_password_generator.py",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_update_generic_artifact_metadata_rejects_empty_payload(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.patch(
+        "/api/projects/project-1/artifacts/artifact-1/metadata",
+        json={},
+    )
+
+    assert response.status_code == 422
+    assert service_state.generic_artifact_service.update_metadata_calls == []
 
 
 @pytest.mark.asyncio

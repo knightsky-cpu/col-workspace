@@ -17,6 +17,7 @@ import {
   listBlueprints,
   restoreArtifact,
   revokeMemorySignal,
+  updateArtifactMetadata,
 } from "./api.mjs";
 import {
   authRequiresGoogleSignIn,
@@ -63,6 +64,7 @@ import {
   completeWorkArchive,
   completeWorkDetailLoad,
   completeWorkListLoad,
+  completeWorkMetadataUpdate,
   completeWorkRestore,
   completePendingTurn,
   createInitialState,
@@ -634,6 +636,9 @@ function ensureWorkView() {
       onRestoreArtifact(artifactId) {
         restoreGenericArtifact(artifactId);
       },
+      onUpdateArtifactMetadata(artifactId, metadata) {
+        updateGenericArtifactMetadata(artifactId, metadata);
+      },
       onSetArtifactLifecycleStatus(lifecycleStatus) {
         setArtifactLifecycleStatus(lifecycleStatus);
       },
@@ -695,6 +700,29 @@ async function restoreGenericArtifact(artifactId) {
       authOptions(),
     );
     state = completeWorkRestore(state, artifactId);
+    ensureWorkView().render(state);
+    await loadWorkList();
+  } catch (error) {
+    showWorkError(error.message);
+  }
+}
+
+async function updateGenericArtifactMetadata(artifactId, metadata) {
+  if (!state.context || state.pendingTurn !== null) {
+    return;
+  }
+  clearWorkError();
+  try {
+    const response = await updateArtifactMetadata(
+      state.context.project_id,
+      artifactId,
+      {
+        display_label: metadata.display_label,
+        filename: metadata.filename,
+      },
+      authOptions(),
+    );
+    state = completeWorkMetadataUpdate(state, response.metadata);
     ensureWorkView().render(state);
     await loadWorkList();
   } catch (error) {

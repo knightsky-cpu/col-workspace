@@ -510,6 +510,45 @@ function renderSingleFileArtifactLifecycle(parent, detail, handlers) {
   parent.append(button);
 }
 
+function renderSingleFileArtifactMetadataForm(parent, detail, handlers) {
+  const artifact = detail.artifact ?? {};
+  const metadata = detail.metadata ?? {};
+  const reference = artifactReference(detail);
+  const form = document.createElement("form");
+  form.classList.add("feedback-form");
+  form.setAttribute("data-artifact-metadata-form", "");
+
+  appendTextElement(form, "h4", "", "Artifact details");
+
+  const labelInput = document.createElement("input");
+  labelInput.name = "display_label";
+  labelInput.placeholder = "Display name";
+  labelInput.value = reference.display_label
+    ?? artifact.display_label
+    ?? "";
+
+  const filenameInput = document.createElement("input");
+  filenameInput.name = "filename";
+  filenameInput.placeholder = "Filename";
+  filenameInput.value = metadata.filename
+    ?? artifact.filename
+    ?? "";
+
+  const submit = document.createElement("button");
+  submit.type = "submit";
+  setText(submit, "Rename");
+
+  form.append(labelInput, filenameInput, submit);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handlers.onUpdateArtifactMetadata?.(reference.artifact_id, {
+      display_label: labelInput.value,
+      filename: filenameInput.value,
+    });
+  });
+  parent.append(form);
+}
+
 function renderFeedbackTargets(parent, detail, handlers) {
   appendTextElement(parent, "h4", "", "Feedback targets");
   for (const target of detail.feedback_targets ?? []) {
@@ -625,6 +664,7 @@ export function renderWorkDetail(container, work, handlers) {
 
   if (isSingleFileArtifactDetail(detail)) {
     renderSingleFileArtifact(container, detail);
+    renderSingleFileArtifactMetadataForm(container, detail, handlers);
     renderSingleFileArtifactLifecycle(container, detail, handlers);
     return;
   }

@@ -58,6 +58,7 @@ from generic_artifact_service import (
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
     RestoreGenericArtifactCommand,
+    UpdateGenericArtifactMetadataCommand,
 )
 from generic_artifact_creation_service import (
     GenericArtifactCreationCommand,
@@ -133,6 +134,7 @@ from schemas import (
     SingleFileArtifactDetailResponse,
     SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
+    SingleFileArtifactMetadataUpdateRequest,
     WorkspaceCreateRequest,
     WorkspaceCreateResponse,
     WorkspaceListResponse,
@@ -1377,6 +1379,55 @@ async def restore_generic_artifact(
     except GenericArtifactReadStateError as exc:
         logger.error(
             "Stored generic artifact restore state is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.patch(
+    "/api/projects/{project_id}/artifacts/{artifact_id}/metadata",
+    response_model=SingleFileArtifactLifecycleResponse,
+)
+async def update_generic_artifact_metadata(
+    project_id: IdentifierStr,
+    artifact_id: IdentifierStr,
+    payload: SingleFileArtifactMetadataUpdateRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> SingleFileArtifactLifecycleResponse:
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        return (
+            await request.app.state.generic_artifact_service
+            .update_artifact_metadata(
+                UpdateGenericArtifactMetadataCommand(
+                    project_id=effective_project_id,
+                    artifact_id=artifact_id,
+                    display_label=payload.display_label,
+                    filename=payload.filename,
+                )
+            )
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact was not found.",
+        ) from exc
+    except GenericArtifactReadStateError as exc:
+        logger.error(
+            "Stored generic artifact metadata update state is invalid (%s).",
             type(exc).__name__,
         )
         raise HTTPException(

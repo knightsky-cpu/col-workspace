@@ -630,6 +630,62 @@ export function completeWorkRestore(state, artifactId) {
   return removeWorkArtifactFromCurrentView(state, artifactId);
 }
 
+export function completeWorkMetadataUpdate(state, metadata) {
+  const artifactId = metadata?.reference?.artifact_id ?? null;
+  if (!artifactId) {
+    return state;
+  }
+  const updateItem = (item) => {
+    if (item.reference?.artifact_id !== artifactId) {
+      return item;
+    }
+    return {
+      ...item,
+      ...metadata,
+      reference: {
+        ...item.reference,
+        ...metadata.reference,
+      },
+    };
+  };
+  const loadedDetailArtifactId = (
+    state.work.detail.item?.metadata?.reference?.artifact_id
+    ?? state.work.detail.item?.reference?.artifact_id
+  );
+  const detail = loadedDetailArtifactId === artifactId
+    ? {
+        ...state.work.detail,
+        item: {
+          ...state.work.detail.item,
+          metadata: {
+            ...state.work.detail.item.metadata,
+            ...metadata,
+            reference: {
+              ...state.work.detail.item.metadata.reference,
+              ...metadata.reference,
+            },
+          },
+          artifact: {
+            ...state.work.detail.item.artifact,
+            filename: metadata.filename
+              ?? state.work.detail.item.artifact?.filename,
+          },
+        },
+      }
+    : state.work.detail;
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      list: {
+        ...state.work.list,
+        items: state.work.list.items.map(updateItem),
+      },
+      detail,
+    },
+  };
+}
+
 function removeWorkArtifactFromCurrentView(state, artifactId) {
   const remainingItems = state.work.list.items.filter((item) => (
     item.reference?.artifact_id !== artifactId

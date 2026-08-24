@@ -11,6 +11,7 @@ import {
   beginMemoryLoad,
   beginPendingTurn,
   completeWorkDetailLoad,
+  completeWorkMetadataUpdate,
   completeWorkArchive,
   completeWorkRestore,
   completeWorkspaceCreate,
@@ -828,4 +829,63 @@ test("work lifecycle mode can switch to archived and restores selected work out 
   assert.equal(restored.work.list.items.length, 0);
   assert.equal(restored.work.selectedArtifactId, null);
   assert.equal(restored.work.detail.status, "idle");
+});
+
+test("work metadata update refreshes list and selected generic detail labels", () => {
+  const loaded = completeWorkDetailLoad(
+    completeWorkListLoad(createInitialState(), {
+      artifacts: [{
+        reference: {
+          artifact_id: "artifact--abc",
+          artifact_type: "single_file_artifact",
+          schema_version: "1.0",
+          display_label: "Old Script",
+        },
+        filename: "old.py",
+      }],
+    }),
+    {
+      metadata: {
+        reference: {
+          artifact_id: "artifact--abc",
+          artifact_type: "single_file_artifact",
+          schema_version: "1.0",
+          display_label: "Old Script",
+        },
+        filename: "old.py",
+      },
+      artifact: {
+        artifact_family: "code",
+        format: "python",
+        filename: "old.py",
+        content: "print('unchanged')\n",
+      },
+    },
+    { events: [], next_before: null },
+  );
+
+  const updated = completeWorkMetadataUpdate(loaded, {
+    reference: {
+      artifact_id: "artifact--abc",
+      artifact_type: "single_file_artifact",
+      schema_version: "1.0",
+      display_label: "Renamed Script",
+    },
+    filename: "renamed.py",
+  });
+
+  assert.equal(
+    updated.work.list.items[0].reference.display_label,
+    "Renamed Script",
+  );
+  assert.equal(updated.work.list.items[0].filename, "renamed.py");
+  assert.equal(
+    updated.work.detail.item.metadata.reference.display_label,
+    "Renamed Script",
+  );
+  assert.equal(updated.work.detail.item.metadata.filename, "renamed.py");
+  assert.equal(
+    updated.work.detail.item.artifact.content,
+    "print('unchanged')\n",
+  );
 });

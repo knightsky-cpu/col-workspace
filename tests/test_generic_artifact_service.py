@@ -10,6 +10,7 @@ class FakeArtifactDatabase:
     def __init__(self, records: tuple[object, ...]) -> None:
         self.records = records
         self.archive_calls: list[tuple[str, str]] = []
+        self.update_calls: list[tuple[str, str, str | None, str | None]] = []
 
     async def list_artifact_documents(
         self,
@@ -43,6 +44,19 @@ class FakeArtifactDatabase:
         artifact_id: str,
     ) -> object:
         self.archive_calls.append((project_id, artifact_id))
+        return self.records[0]
+
+    async def update_artifact_metadata_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+        *,
+        display_label: str | None,
+        filename: str | None,
+    ) -> object:
+        self.update_calls.append(
+            (project_id, artifact_id, display_label, filename)
+        )
         return self.records[0]
 
 
@@ -283,6 +297,52 @@ async def test_generic_artifact_service_restores_single_file_artifact(
 
     assert database.restore_calls == [("project-1", "artifact--abc")]
     assert result.metadata.lifecycle_status == "active"
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_updates_single_file_artifact_metadata(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        GenericArtifactReadService,
+        UpdateGenericArtifactMetadataCommand,
+    )
+
+    updated_document = {
+        **stored_single_file_document(),
+        "display_label": "Renamed Generator",
+        "filename": "renamed_generator.py",
+    }
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--abc",
+                document=updated_document,
+            ),
+        )
+    )
+
+    result = await GenericArtifactReadService(
+        database=database
+    ).update_artifact_metadata(
+        UpdateGenericArtifactMetadataCommand(
+            project_id="project-1",
+            artifact_id="artifact--abc",
+            display_label="Renamed Generator",
+            filename="renamed_generator.py",
+        )
+    )
+
+    assert database.update_calls == [
+        (
+            "project-1",
+            "artifact--abc",
+            "Renamed Generator",
+            "renamed_generator.py",
+        )
+    ]
+    assert result.metadata.reference.display_label == "Renamed Generator"
+    assert result.metadata.filename == "renamed_generator.py"
 
 
 @pytest.mark.asyncio
