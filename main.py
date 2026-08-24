@@ -58,6 +58,7 @@ from generic_artifact_service import (
     ListGenericArtifactsCommand,
 )
 from generic_artifact_creation_service import GenericArtifactCreationService
+from generic_artifact_generation import generate_generic_artifact
 from artifact_feedback_service import (
     ArtifactFeedbackSchemaConflictError,
     ArtifactFeedbackService,
@@ -622,6 +623,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.generic_artifact_creation_service = (
         generic_artifact_creation_service
     )
+    app.state.generic_artifact_generator = generate_generic_artifact
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.turn_service = turn_service
