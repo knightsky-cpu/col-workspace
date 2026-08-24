@@ -5,6 +5,7 @@ import {
   authRequiresGoogleSignIn,
   googleSessionDisplayLabel,
   googleSessionToContext,
+  googleWorkspaceDisplayLabel,
   initializeGoogleSignIn,
 } from "../../frontend/auth-view.mjs";
 
@@ -24,6 +25,7 @@ test("googleSessionToContext derives user ID from verified backend session", () 
     {
       authenticated: true,
       user_id: "google--109876543210",
+      workspace_project_id: "project--abcdef123456",
     },
     "agent-col",
     "google-id-token",
@@ -31,15 +33,30 @@ test("googleSessionToContext derives user ID from verified backend session", () 
 
   assert.deepEqual(context, {
     user_id: "google--109876543210",
-    project_id: "agent-col",
+    project_id: "project--abcdef123456",
     auth_token: "google-id-token",
   });
+});
+
+test("googleSessionToContext requires a server-owned workspace project in Google mode", () => {
+  assert.throws(
+    () => googleSessionToContext(
+      { authenticated: true, user_id: "google--109876543210" },
+      "agent-col",
+      "google-id-token",
+    ),
+    /Google authentication did not produce a workspace project/,
+  );
 });
 
 test("googleSessionToContext validates project locator and auth token", () => {
   assert.throws(
     () => googleSessionToContext(
-      { authenticated: true, user_id: "google--109876543210" },
+      {
+        authenticated: true,
+        user_id: "google--109876543210",
+        workspace_project_id: "bad/project",
+      },
       "bad/project",
       "google-id-token",
     ),
@@ -47,7 +64,11 @@ test("googleSessionToContext validates project locator and auth token", () => {
   );
   assert.throws(
     () => googleSessionToContext(
-      { authenticated: true, user_id: "google--109876543210" },
+      {
+        authenticated: true,
+        user_id: "google--109876543210",
+        workspace_project_id: "project--abcdef123456",
+      },
       "agent-col",
       "",
     ),
@@ -65,6 +86,10 @@ test("googleSessionDisplayLabel hides Google subject from user-facing UI", () =>
     }),
     "Signed in with Google",
   );
+});
+
+test("googleWorkspaceDisplayLabel hides Google-derived project locator", () => {
+  assert.equal(googleWorkspaceDisplayLabel(), "Private Google workspace");
 });
 
 test("initializeGoogleSignIn renders Google button and passes credential", () => {

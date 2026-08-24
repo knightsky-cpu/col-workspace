@@ -15,6 +15,7 @@ import {
   authRequiresGoogleSignIn,
   googleSessionDisplayLabel,
   googleSessionToContext,
+  googleWorkspaceDisplayLabel,
   initializeGoogleSignIn,
   loadGoogleIdentityScript,
 } from "./auth-view.mjs";
@@ -157,6 +158,8 @@ function populateGoogleContext(session, authToken) {
     projectInput.value.trim() || "agent-col",
     authToken,
   );
+  projectInput.value = googleWorkspaceDisplayLabel();
+  projectInput.readOnly = true;
   const userInput = document.querySelector('[name="user_id"]');
   userInput.value = googleSessionDisplayLabel(session);
   userInput.readOnly = true;
@@ -179,6 +182,7 @@ function contextForSubmit(form) {
     {
       authenticated: true,
       user_id: verifiedGoogleContext.user_id,
+      workspace_project_id: verifiedGoogleContext.project_id,
     },
     formData.get("project_id"),
     verifiedGoogleContext.auth_token,

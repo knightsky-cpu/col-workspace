@@ -1,4 +1,5 @@
 import os
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, Literal
@@ -38,6 +39,7 @@ class AuthenticatedPrincipal:
     subject: str | None
     email: str | None
     display_name: str | None
+    workspace_project_id: str | None
     provider: AuthMode
     authenticated: bool
     local_development: bool
@@ -49,6 +51,7 @@ class AuthenticatedPrincipal:
             "authenticated": self.authenticated,
             "local_development": self.local_development,
             "user_id": self.user_id,
+            "workspace_project_id": self.workspace_project_id,
             "subject": self.subject,
             "email": self.email,
             "display_name": self.display_name,
@@ -101,6 +104,14 @@ def google_subject_to_user_id(subject: str) -> str:
     return f"google--{normalized}"
 
 
+def google_subject_to_workspace_project_id(subject: str) -> str:
+    normalized = subject.strip()
+    if not normalized:
+        raise AuthForbiddenError("Google subject is invalid.")
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+    return f"project--{digest}"
+
+
 class Authenticator:
     def __init__(
         self,
@@ -125,6 +136,7 @@ class Authenticator:
                 subject=None,
                 email=None,
                 display_name=None,
+                workspace_project_id=None,
                 provider="local_dev",
                 authenticated=False,
                 local_development=True,
@@ -163,6 +175,7 @@ class Authenticator:
                 if isinstance(claims.get("name"), str)
                 else None
             ),
+            workspace_project_id=google_subject_to_workspace_project_id(subject),
             provider="google_oidc",
             authenticated=True,
             local_development=False,
@@ -182,6 +195,21 @@ class Authenticator:
                 "Authenticated user does not own this request."
             )
         return supplied_user_id
+
+    def resolve_project_id(
+        self,
+        *,
+        supplied_project_id: str,
+        authorization_header: str | None,
+    ) -> str:
+        if self._settings.mode == "local_dev":
+            return supplied_project_id
+        principal = self.authenticate(authorization_header)
+        if principal.workspace_project_id != supplied_project_id:
+            raise AuthForbiddenError(
+                "Authenticated user does not own this request."
+            )
+        return supplied_project_id
 
     @staticmethod
     def _extract_bearer_token(authorization_header: str | None) -> str:

@@ -243,6 +243,21 @@ def _resolve_effective_user_id(
         _raise_auth_http_error(exc)
 
 
+def _resolve_effective_project_id(
+    *,
+    request: Request,
+    supplied_project_id: str,
+    authorization_header: str | None,
+) -> str:
+    try:
+        return _get_authenticator(request).resolve_project_id(
+            supplied_project_id=supplied_project_id,
+            authorization_header=authorization_header,
+        )
+    except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
+        _raise_auth_http_error(exc)
+
+
 def _require_authenticated_request(
     *,
     request: Request,
@@ -686,10 +701,15 @@ async def list_chat_sessions(
         supplied_user_id=user_id,
         authorization_header=authorization,
     )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
     try:
         return await request.app.state.db.list_chat_sessions(
             user_id=effective_user_id,
-            project_id=project_id,
+            project_id=effective_project_id,
             limit=limit,
         )
     except MemoryEngineError as exc:
@@ -721,10 +741,15 @@ async def get_chat_session(
         supplied_user_id=user_id,
         authorization_header=authorization,
     )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
     try:
         return await request.app.state.db.get_chat_session_detail(
             user_id=effective_user_id,
-            project_id=project_id,
+            project_id=effective_project_id,
             session_id=session_id,
             limit=limit,
         )
@@ -835,11 +860,16 @@ async def synthesize(
         supplied_user_id=payload.user_id,
         authorization_header=authorization,
     )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=payload.project_id,
+        authorization_header=authorization,
+    )
 
     try:
         result = await synthesis_service.synthesize(
             SynthesisCommand(
-                project_id=payload.project_id,
+                project_id=effective_project_id,
                 session_id=payload.session_id,
                 user_id=effective_user_id,
                 source_text=payload.source_text,
@@ -877,14 +907,15 @@ async def list_blueprint_artifacts(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     before: IdentifierStr | None = None,
 ) -> BlueprintArtifactListResponse:
-    _require_authenticated_request(
+    effective_project_id = _resolve_effective_project_id(
         request=request,
+        supplied_project_id=project_id,
         authorization_header=authorization,
     )
     try:
         return await request.app.state.artifact_service.list_blueprints(
             ListBlueprintArtifactsCommand(
-                project_id=project_id,
+                project_id=effective_project_id,
                 limit=limit,
                 before=before,
             )
@@ -920,14 +951,15 @@ async def get_blueprint_artifact(
         Header(alias="Authorization"),
     ] = None,
 ) -> BlueprintArtifactDetailResponse:
-    _require_authenticated_request(
+    effective_project_id = _resolve_effective_project_id(
         request=request,
+        supplied_project_id=project_id,
         authorization_header=authorization,
     )
     try:
         return await request.app.state.artifact_service.get_blueprint(
             GetBlueprintArtifactCommand(
-                project_id=project_id,
+                project_id=effective_project_id,
                 blueprint_id=blueprint_id,
             )
         )
@@ -971,14 +1003,15 @@ async def list_blueprint_feedback(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     before: IdentifierStr | None = None,
 ) -> BlueprintArtifactFeedbackListResponse:
-    _require_authenticated_request(
+    effective_project_id = _resolve_effective_project_id(
         request=request,
+        supplied_project_id=project_id,
         authorization_header=authorization,
     )
     try:
         return await request.app.state.artifact_feedback_service.list_feedback(
             ListArtifactFeedbackCommand(
-                project_id=project_id,
+                project_id=effective_project_id,
                 artifact_id=blueprint_id,
                 limit=limit,
                 before=before,
@@ -1030,6 +1063,11 @@ async def chat(
         supplied_user_id=payload.user_id,
         authorization_header=authorization,
     )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=payload.project_id,
+        authorization_header=authorization,
+    )
 
     if (
         payload.artifact_feedback_decision is not None
@@ -1053,7 +1091,7 @@ async def chat(
         try:
             turn_result = await database.claim_chat_turn(
                 ChatTurnRequest(
-                    project_id=payload.project_id,
+                    project_id=effective_project_id,
                     session_id=payload.session_id,
                     user_id=effective_user_id,
                     message=payload.message,
@@ -1169,7 +1207,7 @@ async def chat(
                 payload.session_id,
                 "user",
                 payload.message,
-                project_id=payload.project_id,
+                project_id=effective_project_id,
                 user_id=effective_user_id,
             )
         except MemoryEngineError as exc:
@@ -1266,7 +1304,7 @@ async def chat(
     try:
         result = await turn_service.run_turn(
             AgentColTurnCommand(
-                project_id=payload.project_id,
+                project_id=effective_project_id,
                 session_id=payload.session_id,
                 user_id=effective_user_id,
                 message=payload.message,
@@ -1381,7 +1419,7 @@ async def chat(
                 payload.session_id,
                 "model",
                 result.response,
-                project_id=payload.project_id,
+                project_id=effective_project_id,
                 user_id=effective_user_id,
             )
         except MemoryEngineError as exc:

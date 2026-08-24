@@ -11,7 +11,12 @@ export function googleSessionToContext(session, projectId, authToken) {
   if (session?.authenticated !== true || !session.user_id) {
     throw new Error("Google authentication did not produce a verified user.");
   }
-  const normalizedProjectId = String(projectId ?? "").trim();
+  if (!session.workspace_project_id) {
+    throw new Error(
+      "Google authentication did not produce a workspace project.",
+    );
+  }
+  const normalizedProjectId = String(session.workspace_project_id).trim();
   const normalizedToken = String(authToken ?? "").trim();
   if (!isValidIdentifier(normalizedProjectId)) {
     throw new Error("Project ID is invalid.");
@@ -28,6 +33,10 @@ export function googleSessionToContext(session, projectId, authToken) {
 
 export function googleSessionDisplayLabel() {
   return "Signed in with Google";
+}
+
+export function googleWorkspaceDisplayLabel() {
+  return "Private Google workspace";
 }
 
 export function initializeGoogleSignIn({

@@ -32,6 +32,7 @@ from agent_col_turn_service import (
     AgentColTurnTimeoutError,
 )
 from auth import AuthSettings, Authenticator
+from auth import google_subject_to_workspace_project_id
 from chat_turns import (
     ChatTurnClaim,
     ChatTurnConflictError,
@@ -1146,10 +1147,35 @@ async def test_auth_session_returns_google_principal(
         "authenticated": True,
         "local_development": False,
         "user_id": "google--109876543210",
+        "workspace_project_id": (
+            google_subject_to_workspace_project_id("109876543210")
+        ),
         "subject": "109876543210",
         "email": "user@example.com",
         "display_name": "WiFi Knight",
     }
+
+
+@pytest.mark.asyncio
+async def test_google_mode_rejects_project_artifact_mismatch_before_service(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    response = await client.get(
+        "/api/projects/agent-col/blueprints",
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Authenticated user does not own this request."
+    }
+    assert service_state.artifact_service.list_calls == []
 
 
 @pytest.mark.asyncio

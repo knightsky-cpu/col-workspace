@@ -109,3 +109,7 @@ the implementation boundary.
   such as `google--...` in the user-facing workspace. Show a human-safe session
   status like `Signed in with Google` and keep the internal subject only in
   application state and server requests.
+- Google authenticated mode should use a server-derived workspace project
+  locator instead of the visible/local `agent-col` project field. The local
+  project field can remain a development label, but authenticated API calls
+  must not let users choose arbitrary project IDs.

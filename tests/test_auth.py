@@ -6,6 +6,7 @@ from auth import (
     AuthRequiredError,
     AuthSettings,
     Authenticator,
+    google_subject_to_workspace_project_id,
 )
 
 
@@ -53,6 +54,10 @@ def test_google_oidc_verifies_token_and_derives_stable_user_id() -> None:
     assert principal.provider == "google_oidc"
     assert principal.subject == "109876543210"
     assert principal.user_id == "google--109876543210"
+    assert principal.workspace_project_id == (
+        google_subject_to_workspace_project_id("109876543210")
+    )
+    assert "109876543210" not in principal.workspace_project_id
     assert principal.email == "user@example.com"
     assert principal.display_name == "WiFi Knight"
 
@@ -66,6 +71,25 @@ def test_google_oidc_rejects_request_user_mismatch() -> None:
     with pytest.raises(AuthForbiddenError):
         authenticator.resolve_user_id(
             supplied_user_id="attacker",
+            authorization_header="Bearer token-abc",
+        )
+
+
+def test_google_oidc_rejects_project_mismatch() -> None:
+    authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+    owned_project_id = google_subject_to_workspace_project_id("109876543210")
+
+    assert authenticator.resolve_project_id(
+        supplied_project_id=owned_project_id,
+        authorization_header="Bearer token-abc",
+    ) == owned_project_id
+
+    with pytest.raises(AuthForbiddenError):
+        authenticator.resolve_project_id(
+            supplied_project_id="agent-col",
             authorization_header="Bearer token-abc",
         )
 

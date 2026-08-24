@@ -189,6 +189,7 @@ Response fields:
 - `authenticated`;
 - `local_development`;
 - `user_id`;
+- `workspace_project_id`;
 - `subject`;
 - `email`;
 - `display_name`.
@@ -203,8 +204,10 @@ Limitations:
 
 - this is an authentication-principal boundary;
 - local development mode still accepts request-provided locators;
-- project, session, artifact, and feedback ownership records are not yet
-  enforced for every resource.
+- Google OIDC mode derives both `user_id` and `workspace_project_id` from the
+  verified token subject;
+- durable project membership records and project display metadata are not yet
+  implemented.
 
 ### `GET /api/users/{user_id}/memory`
 
@@ -368,7 +371,8 @@ Special behavior:
 
 - known legacy schema-1.0 artifacts are omitted from list results;
 - another invalid current artifact can fail the complete page;
-- no authenticated-user ownership filter is applied.
+- in Google OIDC mode, the path `project_id` must match the server-derived
+  `workspace_project_id`.
 
 ### `GET /api/projects/{project_id}/blueprints/{blueprint_id}`
 
@@ -797,21 +801,22 @@ and Firestore. ADC does not authenticate application users.
 
 ### Current ownership model
 
-The current model provides locator consistency, not security:
+The current model provides authenticated user and derived workspace-project
+consistency, but not a complete multi-project membership system:
 
 - in local mode, identifiers select Firestore paths;
 - in Google OIDC mode, the user identity is checked before user-scoped route
   service access;
-- turn records retain supplied user/project identity;
+- in Google OIDC mode, the effective project ID must match the
+  server-derived `workspace_project_id`;
+- turn records retain effective user/project identity;
 - feedback writes verify that supplied `user_id` matches the blueprint's stored
   supplied `user_id`;
-- artifact routes can require an authenticated session in Google OIDC mode, but
-  do not yet enforce project-owner membership because project ownership records
-  do not exist;
-- a caller that knows or guesses a `project_id` can still request project-scoped
-  artifacts until project ownership is implemented.
+- durable project membership records, project display names, sharing, and
+  project switching do not exist yet.
 
-The backend must not be exposed publicly in this state.
+The backend still needs durable project ownership records before public
+multi-project use.
 
 ### Required before public deployment
 
