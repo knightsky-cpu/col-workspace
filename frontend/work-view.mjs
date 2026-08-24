@@ -300,11 +300,11 @@ function renderExportControls(parent, detail, handlers) {
     item !== primaryExport && item.format !== "pdf-print"
   ));
   if (alternatives.length) {
-    const label = document.createElement("span");
-    label.classList.add("export-alternative-label");
-    label.setAttribute("data-export-alternative-label", "");
-    setText(label, "Export alternative");
-    box.append(label);
+    const alternative = document.createElement("a");
+    alternative.classList.add("control-compact", "button-link");
+    alternative.setAttribute("data-alternative-export", "");
+    setText(alternative, "Export alternative");
+    box.append(alternative);
 
     const select = document.createElement("select");
     select.classList.add("control-compact");
@@ -317,20 +317,15 @@ function renderExportControls(parent, detail, handlers) {
     }
     box.append(select);
 
-    const alternative = document.createElement("a");
-    alternative.classList.add("control-compact", "button-link");
-    alternative.setAttribute("data-alternative-export", "");
     const syncAlternative = () => {
       const item = alternatives.find((entry) => entry.format === select.value)
         ?? alternatives[0];
       alternative.href = item.href;
       alternative.download = item.filename;
       alternative.setAttribute("download", item.filename);
-      setText(alternative, "Export alternative");
     };
     select.addEventListener("change", syncAlternative);
     syncAlternative();
-    box.append(alternative);
   }
   const printExport = exports.find((item) => item.format === "pdf-print");
   if (printExport) {

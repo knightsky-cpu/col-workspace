@@ -473,11 +473,6 @@ p {
   width: auto;
 }
 
-.export-alternative-label {
-  color: var(--muted);
-  font-size: 0.8125rem;
-}
-
 .feedback-form {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -571,6 +566,46 @@ p {
 
 [hidden] {
   display: none !important;
+}
+
+@media print {
+  body {
+    background: #ffffff;
+    color: #000000;
+    height: auto;
+    overflow: visible;
+  }
+
+  .top-bar,
+  .supporting-panel,
+  .conversation,
+  .drawer-restore,
+  .drawer-heading,
+  .export-controls,
+  .feedback-form,
+  .feedback-event {
+    display: none !important;
+  }
+
+  .workspace-shell,
+  .workspace-grid,
+  .work-panel,
+  .work-panel__body,
+  [data-work-detail] {
+    background: #ffffff !important;
+    border: 0 !important;
+    color: #000000 !important;
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    visibility: visible !important;
+  }
+
+  [data-work-detail] {
+    max-width: 100% !important;
+  }
 }
 
 @media (max-width: 900px) {

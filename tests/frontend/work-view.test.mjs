@@ -599,9 +599,6 @@ test("renderWorkDetail renders compact artifact-aware export controls", () => {
   const primary = exportBox.children.find((child) => (
     child.attributes["data-primary-export"] === ""
   ));
-  const label = exportBox.children.find((child) => (
-    child.attributes["data-export-alternative-label"] === ""
-  ));
   const select = exportBox.children.find((child) => (
     child.attributes["data-export-alternative-select"] === ""
   ));
@@ -613,12 +610,38 @@ test("renderWorkDetail renders compact artifact-aware export controls", () => {
   ));
 
   assert.ok(primary);
-  assert.ok(label);
   assert.ok(select);
   assert.ok(alternative);
   assert.ok(print);
   assert.equal(primary.textContent, "Export");
-  assert.equal(label.textContent, "Export alternative");
+  assert.deepEqual(
+    exportBox.children
+      .filter((child) => (
+        child.attributes["data-primary-export"] === ""
+          || child.attributes["data-alternative-export"] === ""
+          || child.attributes["data-export-alternative-select"] === ""
+          || child.attributes["data-print-export"] === ""
+      ))
+      .map((child) => {
+        if (child.attributes["data-primary-export"] === "") {
+          return "primary";
+        }
+        if (child.attributes["data-alternative-export"] === "") {
+          return "alternative";
+        }
+        if (child.attributes["data-export-alternative-select"] === "") {
+          return "select";
+        }
+        return "print";
+      }),
+    ["primary", "alternative", "select", "print"],
+  );
+  assert.equal(
+    exportBox.children.some((child) => (
+      child.attributes["data-export-alternative-label"] === ""
+    )),
+    false,
+  );
   assert.equal(primary.attributes.download, "password_generator.py");
   assert.equal(primary.classList.values.includes("control-compact"), true);
   assert.equal(select.classList.values.includes("control-compact"), true);
