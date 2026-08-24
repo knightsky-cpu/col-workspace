@@ -52,6 +52,7 @@ from artifact_read_service import (
     ListBlueprintArtifactsCommand,
 )
 from generic_artifact_service import (
+    ArchiveGenericArtifactCommand,
     ArtifactReadStateError as GenericArtifactReadStateError,
     GenericArtifactReadService,
     GetGenericArtifactCommand,
@@ -129,6 +130,7 @@ from schemas import (
     SingleFileArtifactCreateRequest,
     SingleFileArtifactCreateResponse,
     SingleFileArtifactDetailResponse,
+    SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
     WorkspaceCreateRequest,
     WorkspaceCreateResponse,
@@ -1283,6 +1285,49 @@ async def get_generic_artifact(
     except GenericArtifactReadStateError as exc:
         logger.error(
             "Stored generic artifact detail is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+
+
+@app.post(
+    "/api/projects/{project_id}/artifacts/{artifact_id}/archive",
+    response_model=SingleFileArtifactLifecycleResponse,
+)
+async def archive_generic_artifact(
+    project_id: IdentifierStr,
+    artifact_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> SingleFileArtifactLifecycleResponse:
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        return await request.app.state.generic_artifact_service.archive_artifact(
+            ArchiveGenericArtifactCommand(
+                project_id=effective_project_id,
+                artifact_id=artifact_id,
+            )
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact was not found.",
+        ) from exc
+    except GenericArtifactReadStateError as exc:
+        logger.error(
+            "Stored generic artifact archive state is invalid (%s).",
             type(exc).__name__,
         )
         raise HTTPException(

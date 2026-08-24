@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   apiFetchJson,
+  archiveArtifact,
   createArtifact,
   getAuthConfig,
   getAuthSession,
@@ -252,6 +253,15 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
       return jsonResponse(200, { artifact_contract_version: "1.0" });
     },
   );
+  await archiveArtifact(
+    "agent-col",
+    "artifact--abc",
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_contract_version: "1.0" });
+    },
+  );
 
   assert.equal(calls[0][0], "/api/projects/agent-col/artifacts?limit=5");
   assert.equal(calls[0][1].method, "GET");
@@ -260,6 +270,12 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
   assert.equal(calls[2][0], "/api/projects/agent-col/artifacts");
   assert.equal(calls[2][1].method, "POST");
   assert.equal(calls[2][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[3][0],
+    "/api/projects/agent-col/artifacts/artifact--abc/archive",
+  );
+  assert.equal(calls[3][1].method, "POST");
+  assert.equal(calls[3][1].headers.Authorization, "Bearer token-1");
   assert.equal(
     calls[2][1].body,
     JSON.stringify({

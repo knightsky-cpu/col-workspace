@@ -328,6 +328,7 @@ test("renderWorkDetail projects canonical schema-2 blueprint text safely", () =>
 
 test("renderWorkDetail projects canonical single-file artifact safely", () => {
   const container = node();
+  const archived = [];
 
   renderWorkDetail(
     container,
@@ -335,7 +336,11 @@ test("renderWorkDetail projects canonical single-file artifact safely", () => {
       detail: { status: "ready", item: genericDetail, error: null },
       feedback: { status: "idle", events: [], error: null },
     },
-    { onSubmitFeedback: () => {}, onPrintWork: () => {} },
+    {
+      onSubmitFeedback: () => {},
+      onPrintWork: () => {},
+      onArchiveArtifact: (artifactId) => archived.push(artifactId),
+    },
   );
 
   const text = textTree(container);
@@ -345,6 +350,13 @@ test("renderWorkDetail projects canonical single-file artifact safely", () => {
   assert.equal(text.includes("print('secure')"), true);
   assert.equal(text.includes("Feedback targets"), false);
   assert.equal(text.includes("artifact--script"), false);
+  const archiveButton = container.children.find((child) => (
+    child.attributes["data-archive-artifact"] === ""
+  ));
+  assert.ok(archiveButton);
+  assert.equal(archiveButton.textContent, "Archive");
+  archiveButton.onclick();
+  assert.deepEqual(archived, ["artifact--script"]);
 });
 
 test("renderWorkDetail uses artifact terminology for idle and loading states", () => {

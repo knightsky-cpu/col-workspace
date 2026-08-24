@@ -599,6 +599,37 @@ export function completeWorkDetailLoad(state, detail, feedback) {
   };
 }
 
+export function completeWorkArchive(state, artifactId) {
+  const remainingItems = state.work.list.items.filter((item) => (
+    item.reference?.artifact_id !== artifactId
+  ));
+  const loadedDetailArtifactId = (
+    state.work.detail.item?.metadata?.reference?.artifact_id
+    ?? state.work.detail.item?.reference?.artifact_id
+  );
+  const selected = (
+    state.work.selectedArtifactId === artifactId
+    || loadedDetailArtifactId === artifactId
+  );
+  return {
+    ...state,
+    work: {
+      ...state.work,
+      selectedArtifactId: selected ? null : state.work.selectedArtifactId,
+      list: {
+        ...state.work.list,
+        items: remainingItems,
+      },
+      detail: selected
+        ? { status: "idle", item: null, error: null }
+        : state.work.detail,
+      feedback: selected
+        ? { status: "idle", events: [], next_before: null, error: null }
+        : state.work.feedback,
+    },
+  };
+}
+
 export function failWorkDetailLoad(state, error) {
   return {
     ...state,

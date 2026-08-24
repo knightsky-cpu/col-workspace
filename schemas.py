@@ -254,6 +254,7 @@ class SingleFileArtifactMetadata(StrictModel):
     artifact_family: SingleFileArtifactFamily
     format: SingleFileArtifactFormat
     byte_size: int = Field(ge=1, le=1_000_000)
+    lifecycle_status: Literal["active", "archived"] = "active"
 
     @field_validator("created_at")
     @classmethod
@@ -301,6 +302,11 @@ class SingleFileArtifactCreateResponse(StrictModel):
     artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
     reference: ArtifactReference
     artifact: SingleFileArtifact
+
+
+class SingleFileArtifactLifecycleResponse(StrictModel):
+    artifact_contract_version: Literal["1.0"] = ARTIFACT_CONTRACT_VERSION
+    metadata: SingleFileArtifactMetadata
 
 
 class ArtifactFeedbackCounts(StrictModel):

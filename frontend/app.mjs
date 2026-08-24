@@ -1,5 +1,6 @@
 import {
   apiFetchJson,
+  archiveArtifact,
   createArtifact,
   createWorkspace,
   deleteMemorySignal,
@@ -58,6 +59,7 @@ import {
   completeChatSessionListLoad,
   completeWorkspaceCreate,
   completeWorkspaceListLoad,
+  completeWorkArchive,
   completeWorkDetailLoad,
   completeWorkListLoad,
   completePendingTurn,
@@ -613,6 +615,9 @@ function ensureWorkView() {
       onPrintWork() {
         window.print();
       },
+      onArchiveArtifact(artifactId) {
+        archiveGenericArtifact(artifactId);
+      },
     },
   );
   return workView;
@@ -635,6 +640,25 @@ async function createGenericArtifact(request) {
     );
     await loadWorkList();
     await loadWorkDetail(response.reference.artifact_id);
+  } catch (error) {
+    showWorkError(error.message);
+  }
+}
+
+async function archiveGenericArtifact(artifactId) {
+  if (!state.context || state.pendingTurn !== null) {
+    return;
+  }
+  clearWorkError();
+  try {
+    await archiveArtifact(
+      state.context.project_id,
+      artifactId,
+      authOptions(),
+    );
+    state = completeWorkArchive(state, artifactId);
+    ensureWorkView().render(state);
+    await loadWorkList();
   } catch (error) {
     showWorkError(error.message);
   }

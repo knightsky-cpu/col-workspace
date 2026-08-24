@@ -464,6 +464,19 @@ function renderSingleFileArtifact(parent, detail) {
   parent.append(content);
 }
 
+function renderSingleFileArtifactLifecycle(parent, detail, handlers) {
+  const reference = artifactReference(detail);
+  const button = document.createElement("button");
+  button.classList.add("control-compact");
+  button.type = "button";
+  button.setAttribute("data-archive-artifact", "");
+  setText(button, "Archive");
+  button.addEventListener("click", () => {
+    handlers.onArchiveArtifact?.(reference.artifact_id);
+  });
+  parent.append(button);
+}
+
 function renderFeedbackTargets(parent, detail, handlers) {
   appendTextElement(parent, "h4", "", "Feedback targets");
   for (const target of detail.feedback_targets ?? []) {
@@ -579,6 +592,7 @@ export function renderWorkDetail(container, work, handlers) {
 
   if (isSingleFileArtifactDetail(detail)) {
     renderSingleFileArtifact(container, detail);
+    renderSingleFileArtifactLifecycle(container, detail, handlers);
     return;
   }
 

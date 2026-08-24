@@ -12,6 +12,7 @@ from schemas import (
     ArtifactReference,
     SingleFileArtifact,
     SingleFileArtifactDetailResponse,
+    SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
     SingleFileArtifactMetadata,
 )
@@ -37,6 +38,12 @@ class GetGenericArtifactCommand:
     artifact_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ArchiveGenericArtifactCommand:
+    project_id: str
+    artifact_id: str
+
+
 class GenericArtifactDatabase(Protocol):
     async def list_artifact_documents(
         self,
@@ -47,6 +54,12 @@ class GenericArtifactDatabase(Protocol):
     ) -> ArtifactDocumentPage: ...
 
     async def get_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> ArtifactDocumentRecord: ...
+
+    async def archive_artifact_document(
         self,
         project_id: str,
         artifact_id: str,
@@ -72,6 +85,7 @@ class GenericArtifactReadService:
             self._project_metadata(command.project_id, record)
             for record in page.records
             if self._uses_single_file_contract(record)
+            and not self._is_archived(record)
         ]
         return SingleFileArtifactListResponse(
             artifacts=artifacts,
@@ -92,6 +106,22 @@ class GenericArtifactReadService:
             artifact=artifact,
         )
 
+    async def archive_artifact(
+        self,
+        command: ArchiveGenericArtifactCommand,
+    ) -> SingleFileArtifactLifecycleResponse:
+        record = await self._database.archive_artifact_document(
+            command.project_id,
+            command.artifact_id,
+        )
+        if not self._is_archived(record):
+            raise ArtifactReadStateError(
+                "Archived generic artifact state is invalid."
+            )
+        return SingleFileArtifactLifecycleResponse(
+            metadata=self._project_metadata(command.project_id, record)
+        )
+
     @staticmethod
     def _uses_single_file_contract(record: ArtifactDocumentRecord) -> bool:
         document = record.document
@@ -102,6 +132,10 @@ class GenericArtifactReadService:
             and document.get("artifact_type") == "single_file_artifact"
             and document.get("schema_version") == "1.0"
         )
+
+    @staticmethod
+    def _is_archived(record: ArtifactDocumentRecord) -> bool:
+        return record.document.get("lifecycle_status") == "archived"
 
     @classmethod
     def _project_artifact(
@@ -161,6 +195,10 @@ class GenericArtifactReadService:
                     "artifact_family": artifact.artifact_family,
                     "format": artifact.format,
                     "byte_size": document.get("byte_size"),
+                    "lifecycle_status": document.get(
+                        "lifecycle_status",
+                        "active",
+                    ),
                 }
             )
         except ValidationError as exc:

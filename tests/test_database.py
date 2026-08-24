@@ -347,6 +347,7 @@ async def test_save_single_file_artifact_commits_parent_and_artifact_atomically(
                 "model_name": "gemini-3.6-flash",
                 "schema_version": "1.0",
                 "display_label": "Password Generator",
+                "lifecycle_status": "active",
                 "filename": "password_generator.py",
                 "artifact_family": "code",
                 "format": "python",
@@ -380,6 +381,61 @@ async def test_save_single_file_artifact_rejects_invalid_json_content(
         )
 
     client.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_archive_artifact_document_marks_project_artifact_archived(
+) -> None:
+    client = MagicMock()
+    projects = MagicMock()
+    project = MagicMock()
+    artifacts = MagicMock()
+    artifact_ref = MagicMock()
+    snapshot = MagicMock()
+    snapshot.exists = True
+    snapshot.to_dict.return_value = {
+        "artifact_contract_version": "1.0",
+        "artifact_type": "single_file_artifact",
+        "schema_version": "1.0",
+        "created_at": datetime.now().astimezone(),
+        "originating_session_id": "session-1",
+        "originating_turn_id": "turn-1",
+        "display_label": "Password Generator",
+        "lifecycle_status": "archived",
+        "filename": "password_generator.py",
+        "artifact_family": "code",
+        "format": "python",
+        "byte_size": 43,
+        "content": "import secrets\nprint(secrets.token_hex(8))\n",
+        "summary": "Secure password generator.",
+    }
+    artifact_ref.get = AsyncMock(return_value=snapshot)
+    artifact_ref.update = AsyncMock(return_value=None)
+
+    client.collection.return_value = projects
+    projects.document.return_value = project
+    project.collection.return_value = artifacts
+    artifacts.document.return_value = artifact_ref
+
+    record = await MemoryEngine(client).archive_artifact_document(
+        "project-1",
+        "artifact--abc",
+    )
+
+    assert record.artifact_id == "artifact--abc"
+    assert record.document["lifecycle_status"] == "archived"
+    client.collection.assert_called_once_with("projects")
+    projects.document.assert_called_once_with("project-1")
+    project.collection.assert_called_once_with("artifacts")
+    artifacts.document.assert_called_once_with("artifact--abc")
+    artifact_ref.update.assert_awaited_once_with(
+        {
+            "lifecycle_status": "archived",
+            "archived_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+    )
+    artifact_ref.get.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio

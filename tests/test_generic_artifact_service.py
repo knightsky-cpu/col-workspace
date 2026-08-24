@@ -9,6 +9,7 @@ NOW = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
 class FakeArtifactDatabase:
     def __init__(self, records: tuple[object, ...]) -> None:
         self.records = records
+        self.archive_calls: list[tuple[str, str]] = []
 
     async def list_artifact_documents(
         self,
@@ -34,6 +35,14 @@ class FakeArtifactDatabase:
     ) -> object:
         self.project_id = project_id
         self.artifact_id = artifact_id
+        return self.records[0]
+
+    async def archive_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> object:
+        self.archive_calls.append((project_id, artifact_id))
         return self.records[0]
 
 
@@ -89,6 +98,44 @@ async def test_generic_artifact_service_lists_single_file_metadata() -> None:
     )
     assert listing.artifacts[0].filename == "password_generator.py"
     assert listing.artifacts[0].format == "python"
+    assert listing.artifacts[0].lifecycle_status == "active"
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_omits_archived_single_file_metadata(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        GenericArtifactReadService,
+        ListGenericArtifactsCommand,
+    )
+
+    archived = {
+        **stored_single_file_document(),
+        "lifecycle_status": "archived",
+    }
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--archived",
+                document=archived,
+            ),
+            ArtifactDocumentRecord(
+                artifact_id="artifact--active",
+                document=stored_single_file_document(),
+            ),
+        )
+    )
+
+    listing = await GenericArtifactReadService(
+        database=database
+    ).list_artifacts(
+        ListGenericArtifactsCommand(project_id="project-1", limit=10)
+    )
+
+    assert [
+        item.reference.artifact_id for item in listing.artifacts
+    ] == ["artifact--active"]
 
 
 @pytest.mark.asyncio
@@ -117,6 +164,40 @@ async def test_generic_artifact_service_gets_single_file_detail() -> None:
 
     assert detail.metadata.filename == "password_generator.py"
     assert detail.artifact.content.startswith("import secrets")
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_archives_single_file_artifact(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        ArchiveGenericArtifactCommand,
+        GenericArtifactReadService,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--abc",
+                document={
+                    **stored_single_file_document(),
+                    "lifecycle_status": "archived",
+                },
+            ),
+        )
+    )
+
+    result = await GenericArtifactReadService(
+        database=database
+    ).archive_artifact(
+        ArchiveGenericArtifactCommand(
+            project_id="project-1",
+            artifact_id="artifact--abc",
+        )
+    )
+
+    assert database.archive_calls == [("project-1", "artifact--abc")]
+    assert result.metadata.lifecycle_status == "archived"
 
 
 @pytest.mark.asyncio

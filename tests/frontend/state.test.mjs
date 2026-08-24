@@ -11,6 +11,7 @@ import {
   beginMemoryLoad,
   beginPendingTurn,
   completeWorkDetailLoad,
+  completeWorkArchive,
   completeWorkspaceCreate,
   completeWorkspaceListLoad,
   completeWorkListLoad,
@@ -720,4 +721,56 @@ test("new conversation preserves loaded work because artifacts are project scope
 
   assert.equal(next.transcript.length, 0);
   assert.equal(next.work.list.items[0].reference.artifact_id, "blueprint--abc");
+});
+
+test("archiving selected work removes it from the visible list and clears detail", () => {
+  const loaded = completeWorkDetailLoad(
+    completeWorkListLoad(beginWorkListLoad(createInitialState()), {
+      artifacts: [
+        {
+          reference: {
+            artifact_id: "artifact--abc",
+            artifact_type: "single_file_artifact",
+            schema_version: "1.0",
+            display_label: "Script",
+          },
+        },
+        {
+          reference: {
+            artifact_id: "blueprint--abc",
+            artifact_type: "synthesis_blueprint",
+            schema_version: "2.0",
+            display_label: "Blueprint",
+          },
+        },
+      ],
+      next_before: null,
+    }),
+    {
+      metadata: {
+        reference: {
+          artifact_id: "artifact--abc",
+          artifact_type: "single_file_artifact",
+          schema_version: "1.0",
+          display_label: "Script",
+        },
+      },
+      artifact: {
+        artifact_family: "code",
+        format: "python",
+        filename: "script.py",
+        content: "print('hi')\n",
+      },
+    },
+    { events: [], next_before: null },
+  );
+
+  const archived = completeWorkArchive(loaded, "artifact--abc");
+
+  assert.deepEqual(
+    archived.work.list.items.map((item) => item.reference.artifact_id),
+    ["blueprint--abc"],
+  );
+  assert.equal(archived.work.selectedArtifactId, null);
+  assert.equal(archived.work.detail.status, "idle");
 });

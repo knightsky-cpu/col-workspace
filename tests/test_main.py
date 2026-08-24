@@ -23,6 +23,7 @@ from artifact_read_service import (
     ListBlueprintArtifactsCommand,
 )
 from generic_artifact_service import (
+    ArchiveGenericArtifactCommand,
     ArtifactReadStateError as GenericArtifactReadStateError,
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
@@ -104,6 +105,7 @@ from schemas import (
     MemoryProposalReceipt,
     SingleFileArtifact,
     SingleFileArtifactDetailResponse,
+    SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
     SingleFileArtifactMetadata,
     SynthesisBlueprint,
@@ -698,8 +700,12 @@ class FakeGenericArtifactReadService:
     detail_result: SingleFileArtifactDetailResponse
     list_error: Exception | None = None
     detail_error: Exception | None = None
+    archive_error: Exception | None = None
     list_calls: list[ListGenericArtifactsCommand] = field(default_factory=list)
     detail_calls: list[GetGenericArtifactCommand] = field(default_factory=list)
+    archive_calls: list[ArchiveGenericArtifactCommand] = (
+        field(default_factory=list)
+    )
 
     async def list_artifacts(
         self,
@@ -720,6 +726,20 @@ class FakeGenericArtifactReadService:
         if self.detail_error is not None:
             raise self.detail_error
         return self.detail_result
+
+    async def archive_artifact(
+        self,
+        command: ArchiveGenericArtifactCommand,
+    ) -> SingleFileArtifactLifecycleResponse:
+        self.archive_calls.append(command)
+        self.events.append(("generic_artifact_archive",))
+        if self.archive_error is not None:
+            raise self.archive_error
+        return SingleFileArtifactLifecycleResponse(
+            metadata=self.detail_result.metadata.model_copy(
+                update={"lifecycle_status": "archived"}
+            )
+        )
 
 
 @dataclass
@@ -2147,6 +2167,35 @@ async def test_get_generic_artifact_returns_canonical_detail(
     )
     assert service_state.generic_artifact_service.detail_calls == [
         GetGenericArtifactCommand(
+            project_id="project-1",
+            artifact_id="artifact-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_archive_generic_artifact_marks_artifact_archived(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/projects/project-1/artifacts/artifact-1/archive"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["lifecycle_status"] == "archived"
+    assert response.json() == (
+        SingleFileArtifactLifecycleResponse(
+            metadata=(
+                service_state.generic_artifact_service
+                .detail_result.metadata.model_copy(
+                    update={"lifecycle_status": "archived"}
+                )
+            )
+        ).model_dump(mode="json")
+    )
+    assert service_state.generic_artifact_service.archive_calls == [
+        ArchiveGenericArtifactCommand(
             project_id="project-1",
             artifact_id="artifact-1",
         )
