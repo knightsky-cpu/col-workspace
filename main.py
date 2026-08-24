@@ -57,6 +57,7 @@ from generic_artifact_service import (
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
 )
+from generic_artifact_creation_service import GenericArtifactCreationService
 from artifact_feedback_service import (
     ArtifactFeedbackSchemaConflictError,
     ArtifactFeedbackService,
@@ -554,6 +555,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         generic_artifact_service = GenericArtifactReadService(
             database=database
         )
+        generic_artifact_creation_service = (
+            GenericArtifactCreationService(artifact_writer=database)
+        )
         artifact_executor = AgentColArtifactExecutor(
             synthesis_service=synthesis_service,
             artifact_ledger=database,
@@ -615,6 +619,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.synthesis_service = synthesis_service
     app.state.artifact_service = artifact_service
     app.state.generic_artifact_service = generic_artifact_service
+    app.state.generic_artifact_creation_service = (
+        generic_artifact_creation_service
+    )
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.turn_service = turn_service

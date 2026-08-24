@@ -27,6 +27,7 @@ from generic_artifact_service import (
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
 )
+from generic_artifact_creation_service import GenericArtifactCreationService
 from agent_col_turn_service import (
     AgentColTurnCommand,
     AgentColTurnResponderError,
@@ -1930,6 +1931,10 @@ async def test_lifespan_exposes_artifact_read_service(
         assert (
             main.app.state.generic_artifact_service
             is service_state.generic_artifact_service
+        )
+        assert isinstance(
+            main.app.state.generic_artifact_creation_service,
+            GenericArtifactCreationService,
         )
 
 
