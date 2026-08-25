@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 
 
@@ -94,6 +96,96 @@ def test_derive_proposal_origin_ids_rejects_invalid_inputs(
             message_id,
             category,
         )
+
+
+def test_versioned_proposal_origin_reader_preserves_v1_shape() -> None:
+    from memory_proposals import ProposalOriginV1, parse_proposal_origin
+
+    origin = parse_proposal_origin(
+        {
+            "schema_version": "1.0",
+            "proposal_id": "response_length--origin-1",
+            "category": "response_length",
+            "source_session_id": "session-1",
+            "source_message_id": "message-1",
+            "created_at": datetime(2026, 8, 24, tzinfo=UTC),
+        }
+    )
+
+    assert isinstance(origin, ProposalOriginV1)
+    assert origin.source_message_id == "message-1"
+
+
+def test_versioned_proposal_origin_reader_accepts_v2_evidence() -> None:
+    from memory_proposals import ProposalOriginV2, parse_proposal_origin
+
+    origin = parse_proposal_origin(
+        {
+            "schema_version": "2.0",
+            "proposal_id": "development_environments--origin-2",
+            "category": "development_environments",
+            "source_session_id": "session-1",
+            "source_message_id": "selection-message",
+            "evidence_message_id": "evidence-message",
+            "clarification_id": "clarification-1",
+            "created_at": datetime(2026, 8, 24, tzinfo=UTC),
+        }
+    )
+
+    assert isinstance(origin, ProposalOriginV2)
+    assert origin.evidence_message_id == "evidence-message"
+    assert origin.clarification_id == "clarification-1"
+
+
+@pytest.mark.parametrize(
+    "document",
+    (
+        {
+            "schema_version": "3.0",
+            "proposal_id": "response_length--origin-1",
+            "category": "response_length",
+            "source_session_id": "session-1",
+            "source_message_id": "message-1",
+            "created_at": datetime(2026, 8, 24, tzinfo=UTC),
+        },
+        {
+            "schema_version": "2.0",
+            "proposal_id": "development_environments--origin-2",
+            "category": "development_environments",
+            "source_session_id": "session-1",
+            "source_message_id": "selection-message",
+            "evidence_message_id": "evidence-message",
+            "clarification_id": None,
+            "created_at": datetime(2026, 8, 24, tzinfo=UTC),
+        },
+        {
+            "schema_version": "2.0",
+            "proposal_id": "development_environments--origin-2",
+            "category": "development_environments",
+            "source_session_id": "session-1",
+            "source_message_id": "selection-message",
+            "evidence_message_id": "selection-message",
+            "clarification_id": "clarification-1",
+            "created_at": datetime(2026, 8, 24, tzinfo=UTC),
+        },
+        {
+            "schema_version": "1.0",
+            "proposal_id": "response_length--origin-1",
+            "category": "response_length",
+            "source_session_id": "session-1",
+            "source_message_id": "message-1",
+            "created_at": datetime(2026, 8, 24, tzinfo=UTC),
+            "unexpected": True,
+        },
+    ),
+)
+def test_versioned_proposal_origin_reader_fails_closed(
+    document: dict[str, object],
+) -> None:
+    from memory_proposals import parse_proposal_origin
+
+    with pytest.raises(ValueError):
+        parse_proposal_origin(document)
 
 
 @pytest.mark.parametrize(

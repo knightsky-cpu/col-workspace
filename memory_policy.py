@@ -8,6 +8,8 @@ from pydantic import StringConstraints
 
 MEMORY_SCHEMA_VERSION = "1.0"
 MEMORY_POLICY_VERSION = "1.0"
+MEMORY_SCHEMA_VERSION_V2 = "2.0"
+MEMORY_POLICY_VERSION_V2 = "2.0"
 
 PreferenceCategory = Literal[
     "response_length",
@@ -65,6 +67,52 @@ PreferredNameStr = Annotated[
     StringConstraints(strip_whitespace=True, min_length=1, max_length=80),
 ]
 MemoryValue = PreferenceValue | PreferredNameStr | list[BroadRole]
+ExplanationPace = Literal["deliberate", "balanced", "brisk"]
+LearningApproach = Literal[
+    "concept_first",
+    "example_first",
+    "practice_first",
+    "question_guided",
+]
+AccessibilitySupport = Literal[
+    "plain_language",
+    "screen_reader_friendly",
+    "low_visual_density",
+    "reduced_motion",
+    "keyboard_first",
+]
+DevelopmentEnvironment = Literal["macos", "linux", "windows"]
+DomainExperienceDomain = Literal[
+    "software_development",
+    "data_science",
+    "cybersecurity",
+    "research",
+    "writing",
+    "education",
+    "project_management",
+    "design",
+    "mathematics",
+    "science",
+    "business",
+    "creative_work",
+]
+DomainExperienceLevel = Literal[
+    "exploring",
+    "learning",
+    "practicing",
+    "experienced",
+]
+PreferenceCategoryV2 = PreferenceCategory | Literal[
+    "explanation_pace",
+    "learning_approach",
+    "accessibility_support",
+    "development_environments",
+]
+IdentityContextCategoryV2 = IdentityContextCategory | Literal[
+    "domain_experience"
+]
+MemoryCategoryV2 = PreferenceCategoryV2 | IdentityContextCategoryV2
+MemoryPolicyVersion = Literal["1.0", "2.0"]
 MemoryDecision = Literal["approve", "reject"]
 ConfirmationChannel = Literal["chat_decision", "memory_api"]
 MemoryEventType = Literal[
@@ -243,6 +291,141 @@ MEMORY_CATEGORY_ORDER: tuple[MemoryCategory, ...] = (
     "broad_roles",
     *PREFERENCE_CATEGORY_ORDER,
 )
+EXPLANATION_PACE_VALUES: tuple[ExplanationPace, ...] = (
+    "deliberate",
+    "balanced",
+    "brisk",
+)
+LEARNING_APPROACH_VALUES: tuple[LearningApproach, ...] = (
+    "concept_first",
+    "example_first",
+    "practice_first",
+    "question_guided",
+)
+ACCESSIBILITY_SUPPORT_ORDER: tuple[AccessibilitySupport, ...] = (
+    "plain_language",
+    "screen_reader_friendly",
+    "low_visual_density",
+    "reduced_motion",
+    "keyboard_first",
+)
+DEVELOPMENT_ENVIRONMENT_ORDER: tuple[DevelopmentEnvironment, ...] = (
+    "macos",
+    "linux",
+    "windows",
+)
+DOMAIN_EXPERIENCE_DOMAIN_ORDER: tuple[DomainExperienceDomain, ...] = (
+    "software_development",
+    "data_science",
+    "cybersecurity",
+    "research",
+    "writing",
+    "education",
+    "project_management",
+    "design",
+    "mathematics",
+    "science",
+    "business",
+    "creative_work",
+)
+DOMAIN_EXPERIENCE_LEVELS: tuple[DomainExperienceLevel, ...] = (
+    "exploring",
+    "learning",
+    "practicing",
+    "experienced",
+)
+MEMORY_CATEGORY_ORDER_V2: tuple[MemoryCategoryV2, ...] = (
+    "preferred_name",
+    "broad_roles",
+    "domain_experience",
+    "response_length",
+    "explanation_structure",
+    "explanation_pace",
+    "example_usage",
+    "learning_approach",
+    "question_style",
+    "planning_granularity",
+    "progress_check_ins",
+    "tool_use_style",
+    "formatting_style",
+    "accessibility_support",
+    "development_environments",
+)
+
+V2_SCALAR_VALUES_BY_CATEGORY = MappingProxyType(
+    {
+        "explanation_pace": frozenset(EXPLANATION_PACE_VALUES),
+        "learning_approach": frozenset(LEARNING_APPROACH_VALUES),
+    }
+)
+V2_SCALAR_INSTRUCTIONS = MappingProxyType(
+    {
+        ("explanation_pace", "deliberate"): (
+            "When the current request permits, introduce concepts gradually "
+            "and separate consequential stages so the user can follow each "
+            "transition."
+        ),
+        ("explanation_pace", "balanced"): (
+            "When the current request permits, use a steady explanatory pace "
+            "with enough transition to connect the main ideas."
+        ),
+        ("explanation_pace", "brisk"): (
+            "When the current request permits, move quickly to the result and "
+            "minimize transitional explanation without omitting required "
+            "evidence or limitations."
+        ),
+        ("learning_approach", "concept_first"): (
+            "For instructional requests, explain the governing concept before "
+            "applying it."
+        ),
+        ("learning_approach", "example_first"): (
+            "For instructional requests, begin with one concrete example "
+            "before explaining the governing rule."
+        ),
+        ("learning_approach", "practice_first"): (
+            "For instructional requests, begin with one small guided exercise "
+            "when practice is appropriate."
+        ),
+        ("learning_approach", "question_guided"): (
+            "For instructional requests, use at most one bounded guiding "
+            "question at a time when it helps the user reason without blocking "
+            "a requested direct answer."
+        ),
+    }
+)
+ACCESSIBILITY_SUPPORT_INSTRUCTIONS = MappingProxyType(
+    {
+        "plain_language": (
+            "Prefer plain language and define necessary technical terms."
+        ),
+        "screen_reader_friendly": (
+            "Use linear headings, descriptive link text, and text equivalents; "
+            "do not rely on spatial position alone."
+        ),
+        "low_visual_density": (
+            "Keep sections visually separated and avoid unnecessarily dense "
+            "presentation."
+        ),
+        "reduced_motion": (
+            "When producing interface specifications or UI code, avoid "
+            "nonessential motion and include reduced-motion behavior."
+        ),
+        "keyboard_first": (
+            "When producing interface specifications or UI code, include "
+            "complete keyboard operation."
+        ),
+    }
+)
+DEVELOPMENT_ENVIRONMENT_LABELS = MappingProxyType(
+    {"macos": "macOS", "linux": "Linux", "windows": "Windows"}
+)
+
+MEMORY_POLICY_REGISTRY = MappingProxyType(
+    {
+        MEMORY_POLICY_VERSION: MEMORY_CATEGORY_ORDER,
+        MEMORY_POLICY_VERSION_V2: MEMORY_CATEGORY_ORDER_V2,
+    }
+)
 
 
 class PreferencePolicy:
@@ -341,3 +524,164 @@ def memory_signal_sort_key(category: object) -> int:
         return MEMORY_CATEGORY_ORDER.index(category)
     except ValueError as exc:
         raise ValueError("Unknown memory category.") from exc
+
+
+def memory_category_order_for_policy(
+    policy_version: object,
+) -> tuple[MemoryCategory, ...] | tuple[MemoryCategoryV2, ...]:
+    if type(policy_version) is not str or policy_version not in (
+        MEMORY_POLICY_REGISTRY
+    ):
+        raise ValueError("Unsupported memory policy version.")
+    return MEMORY_POLICY_REGISTRY[policy_version]
+
+
+def validate_memory_value_for_policy(
+    policy_version: object,
+    category: object,
+    value: object,
+) -> object:
+    memory_category_order_for_policy(policy_version)
+    if policy_version == MEMORY_POLICY_VERSION:
+        return validate_memory_value(category, value)
+    return _validate_memory_value_v2(category, value)
+
+
+def memory_instruction_for_policy(
+    policy_version: object,
+    category: object,
+    value: object,
+) -> str:
+    validated = validate_memory_value_for_policy(
+        policy_version,
+        category,
+        value,
+    )
+    if category in PREFERENCE_VALUES_BY_CATEGORY:
+        return PreferencePolicy.instruction(category, validated)
+    if category in IDENTITY_CONTEXT_INSTRUCTIONS:
+        return IdentityContextPolicy.instruction(category, validated)
+    if category in V2_SCALAR_VALUES_BY_CATEGORY:
+        return V2_SCALAR_INSTRUCTIONS[(category, validated)]
+    if category == "accessibility_support":
+        return " ".join(
+            ACCESSIBILITY_SUPPORT_INSTRUCTIONS[item]
+            for item in cast(list[AccessibilitySupport], validated)
+        )
+    if category == "development_environments":
+        labels = [
+            DEVELOPMENT_ENVIRONMENT_LABELS[item]
+            for item in cast(list[DevelopmentEnvironment], validated)
+        ]
+        return (
+            "When platform-specific commands or paths are needed and the "
+            "current task does not specify another target, prefer guidance "
+            f"compatible with {_join_human_labels(labels)}."
+        )
+    if category == "domain_experience":
+        instructions = []
+        for entry in cast(list[dict[str, str]], validated):
+            domain_label = entry["domain"].replace("_", " ").title()
+            level_label = entry["level"].replace("_", " ").title()
+            instructions.append(
+                f"For {domain_label} material, calibrate vocabulary and "
+                "examples to the user's explicitly self-reported "
+                f"{level_label} experience; do not treat it as verified "
+                "expertise."
+            )
+        return " ".join(instructions)
+    raise ValueError("Unknown memory category.")
+
+
+def memory_signal_sort_key_for_policy(
+    policy_version: object,
+    category: object,
+) -> int:
+    order = memory_category_order_for_policy(policy_version)
+    try:
+        return order.index(category)
+    except ValueError as exc:
+        raise ValueError("Unknown memory category.") from exc
+
+
+def _validate_memory_value_v2(category: object, value: object) -> object:
+    if category in PREFERENCE_VALUES_BY_CATEGORY:
+        return PreferencePolicy.validate(category, value)
+    if category in IDENTITY_CONTEXT_INSTRUCTIONS:
+        return IdentityContextPolicy.validate(category, value)
+    if category in V2_SCALAR_VALUES_BY_CATEGORY:
+        if type(value) is not str:
+            raise ValueError("Preference value must be a string.")
+        if value not in V2_SCALAR_VALUES_BY_CATEGORY[category]:
+            raise ValueError("Value is not allowed for this category.")
+        return value
+    if category == "accessibility_support":
+        return _canonical_string_list(
+            value,
+            ACCESSIBILITY_SUPPORT_ORDER,
+            "Accessibility support",
+        )
+    if category == "development_environments":
+        return _canonical_string_list(
+            value,
+            DEVELOPMENT_ENVIRONMENT_ORDER,
+            "Development environments",
+        )
+    if category == "domain_experience":
+        return _canonical_domain_experience(value)
+    raise ValueError("Unknown memory category.")
+
+
+def _canonical_string_list(
+    value: object,
+    allowed_order: tuple[str, ...],
+    label: str,
+) -> list[str]:
+    if type(value) is not list:
+        raise ValueError(f"{label} must be a list.")
+    if not 1 <= len(value) <= 3:
+        raise ValueError(f"{label} must contain 1 through 3 values.")
+    if any(type(item) is not str for item in value):
+        raise ValueError(f"{label} must contain strings.")
+    if len(set(value)) != len(value):
+        raise ValueError(f"{label} values must be unique.")
+    if any(item not in allowed_order for item in value):
+        raise ValueError(f"{label} value is not allowed.")
+    return [item for item in allowed_order if item in value]
+
+
+def _canonical_domain_experience(value: object) -> list[dict[str, str]]:
+    if type(value) is not list:
+        raise ValueError("Domain experience must be a list.")
+    if not 1 <= len(value) <= 3:
+        raise ValueError(
+            "Domain experience must contain 1 through 3 entries."
+        )
+    normalized: dict[str, dict[str, str]] = {}
+    for entry in value:
+        if type(entry) is not dict or set(entry) != {"domain", "level"}:
+            raise ValueError("Domain experience entry is invalid.")
+        domain = entry["domain"]
+        level = entry["level"]
+        if type(domain) is not str or domain not in (
+            DOMAIN_EXPERIENCE_DOMAIN_ORDER
+        ):
+            raise ValueError("Domain experience domain is not allowed.")
+        if type(level) is not str or level not in DOMAIN_EXPERIENCE_LEVELS:
+            raise ValueError("Domain experience level is not allowed.")
+        if domain in normalized:
+            raise ValueError("Domain experience domains must be unique.")
+        normalized[domain] = {"domain": domain, "level": level}
+    return [
+        normalized[domain]
+        for domain in DOMAIN_EXPERIENCE_DOMAIN_ORDER
+        if domain in normalized
+    ]
+
+
+def _join_human_labels(labels: list[str]) -> str:
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return f"{', '.join(labels[:-1])}, and {labels[-1]}"

@@ -1,6 +1,7 @@
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from types import MappingProxyType
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -23,15 +24,27 @@ from collaborative_note_policy import (
 )
 from memory_policy import (
     ConfirmationChannel,
+    AccessibilitySupport,
+    DevelopmentEnvironment,
+    DomainExperienceDomain,
+    DomainExperienceLevel,
+    ExplanationPace,
     MEMORY_POLICY_VERSION,
+    MEMORY_POLICY_VERSION_V2,
     MEMORY_SCHEMA_VERSION,
+    MEMORY_SCHEMA_VERSION_V2,
     IdentityContextCategory,
+    IdentityContextCategoryV2,
+    LearningApproach,
     MemoryCategory,
+    MemoryCategoryV2,
     MemoryDecision,
     MemoryEventType,
     MemoryValue,
     PreferenceCategory,
+    PreferenceCategoryV2,
     validate_memory_value,
+    validate_memory_value_for_policy,
 )
 
 
@@ -496,6 +509,24 @@ def _normalize_memory_model_value(
     return normalized
 
 
+def _normalize_memory_model_value_for_policy(
+    data: object,
+    value_field: str,
+    policy_version: str,
+) -> object:
+    if not isinstance(data, Mapping):
+        return data
+    if "category" not in data or value_field not in data:
+        return data
+    normalized = dict(data)
+    normalized[value_field] = validate_memory_value_for_policy(
+        policy_version,
+        data["category"],
+        data[value_field],
+    )
+    return normalized
+
+
 def _normalize_collaborative_note_text(data: object) -> object:
     if not isinstance(data, Mapping):
         return data
@@ -823,6 +854,227 @@ class MemoryEvent(StrictModel):
                 "Confirmation identifiers do not match the channel."
             )
         return self
+
+
+class DomainExperienceEntry(StrictModel):
+    domain: DomainExperienceDomain
+    level: DomainExperienceLevel
+
+
+MemoryValueV2Schema = (
+    MemoryValue
+    | ExplanationPace
+    | LearningApproach
+    | list[AccessibilitySupport]
+    | list[DevelopmentEnvironment]
+    | list[DomainExperienceEntry]
+)
+
+
+class MemorySourceProvenanceV2(StrictModel):
+    source_message_id: IdentifierStr
+    evidence_message_id: IdentifierStr
+    clarification_id: IdentifierStr | None = None
+
+    @model_validator(mode="after")
+    def validate_direct_or_clarified_provenance(self) -> Self:
+        if self.clarification_id is None:
+            if self.evidence_message_id != self.source_message_id:
+                raise ValueError(
+                    "Direct memory evidence must match the source message."
+                )
+        elif self.evidence_message_id == self.source_message_id:
+            raise ValueError(
+                "Clarified memory evidence must precede the source message."
+            )
+        return self
+
+
+class MemoryProposalV2(StrictModel):
+    proposal_id: IdentifierStr
+    category: MemoryCategoryV2
+    proposed_value: MemoryValueV2Schema
+    expected_signal_id: IdentifierStr | None
+    policy_version: Literal["2.0"] = MEMORY_POLICY_VERSION_V2
+    status: Literal["pending", "approved", "rejected"]
+    source_session_id: IdentifierStr
+    source_message_id: IdentifierStr
+    evidence_message_id: IdentifierStr
+    clarification_id: IdentifierStr | None = None
+    created_at: datetime
+    expires_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_proposed_value(cls, data: object) -> object:
+        return _normalize_memory_model_value_for_policy(
+            data,
+            "proposed_value",
+            MEMORY_POLICY_VERSION_V2,
+        )
+
+    @model_validator(mode="after")
+    def validate_evidence_provenance(self) -> Self:
+        MemorySourceProvenanceV2(
+            source_message_id=self.source_message_id,
+            evidence_message_id=self.evidence_message_id,
+            clarification_id=self.clarification_id,
+        )
+        return self
+
+
+class ActiveMemorySignalV2(StrictModel):
+    signal_id: IdentifierStr
+    category: MemoryCategoryV2
+    value: MemoryValueV2Schema
+    policy_version: Literal["2.0"] = MEMORY_POLICY_VERSION_V2
+    source_event_id: IdentifierStr
+    approved_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_value(cls, data: object) -> object:
+        return _normalize_memory_model_value_for_policy(
+            data,
+            "value",
+            MEMORY_POLICY_VERSION_V2,
+        )
+
+
+VersionedActiveMemorySignal = Annotated[
+    ActiveMemorySignal | ActiveMemorySignalV2,
+    Field(discriminator="policy_version"),
+]
+
+
+class CollaborationProfileV2(StrictModel):
+    memory_schema_version: Literal["2.0"] = MEMORY_SCHEMA_VERSION_V2
+    memory_revision: int = Field(default=0, ge=0)
+    identity_context: dict[
+        IdentityContextCategoryV2,
+        VersionedActiveMemorySignal,
+    ] = Field(default_factory=dict, max_length=3)
+    active_preferences: dict[
+        PreferenceCategoryV2,
+        VersionedActiveMemorySignal,
+    ] = Field(default_factory=dict, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_projection_keys_and_capacity(self) -> Self:
+        for key, signal in self.identity_context.items():
+            if key != signal.category:
+                raise ValueError(
+                    "Identity-context key must match signal category."
+                )
+        for key, signal in self.active_preferences.items():
+            if key != signal.category:
+                raise ValueError(
+                    "Preference key must match signal category."
+                )
+        if len(self.identity_context) + len(self.active_preferences) > 10:
+            raise ValueError(
+                "A collaboration profile may contain at most 10 signals."
+            )
+        return self
+
+
+class MemoryEventV2(StrictModel):
+    event_id: IdentifierStr
+    event_type: MemoryEventType
+    signal_id: IdentifierStr
+    category: MemoryCategoryV2
+    value: MemoryValueV2Schema
+    policy_version: Literal["2.0"] = MEMORY_POLICY_VERSION_V2
+    source_type: Literal["explicit_user_feedback"]
+    source_session_id: IdentifierStr
+    source_message_id: IdentifierStr
+    evidence_message_id: IdentifierStr
+    clarification_id: IdentifierStr | None = None
+    confirmation_channel: ConfirmationChannel
+    confirmation_session_id: IdentifierStr | None
+    confirmation_message_id: IdentifierStr | None
+    related_signal_id: IdentifierStr | None
+    memory_revision: int = Field(ge=1)
+    created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_value(cls, data: object) -> object:
+        return _normalize_memory_model_value_for_policy(
+            data,
+            "value",
+            MEMORY_POLICY_VERSION_V2,
+        )
+
+    @model_validator(mode="after")
+    def validate_event_provenance(self) -> Self:
+        MemorySourceProvenanceV2(
+            source_message_id=self.source_message_id,
+            evidence_message_id=self.evidence_message_id,
+            clarification_id=self.clarification_id,
+        )
+        if self.confirmation_channel == "chat_decision":
+            valid_confirmation = (
+                self.confirmation_session_id is not None
+                and self.confirmation_message_id is not None
+            )
+        else:
+            valid_confirmation = (
+                self.confirmation_session_id is None
+                and self.confirmation_message_id is None
+            )
+        if not valid_confirmation:
+            raise ValueError(
+                "Confirmation identifiers do not match the channel."
+            )
+        return self
+
+
+VersionedMemoryProposal = Annotated[
+    MemoryProposal | MemoryProposalV2,
+    Field(discriminator="policy_version"),
+]
+VersionedMemoryEvent = Annotated[
+    MemoryEvent | MemoryEventV2,
+    Field(discriminator="policy_version"),
+]
+VersionedCollaborationProfile = CollaborationProfile | CollaborationProfileV2
+
+MEMORY_SCHEMA_REGISTRY = MappingProxyType(
+    {
+        MEMORY_SCHEMA_VERSION: CollaborationProfile,
+        MEMORY_SCHEMA_VERSION_V2: CollaborationProfileV2,
+    }
+)
+
+
+def parse_collaboration_profile(
+    document: object,
+) -> VersionedCollaborationProfile:
+    if not isinstance(document, Mapping):
+        raise ValueError("Stored collaboration profile is invalid.")
+    schema_version = document.get(
+        "memory_schema_version",
+        MEMORY_SCHEMA_VERSION,
+    )
+    if type(schema_version) is not str or schema_version not in (
+        MEMORY_SCHEMA_REGISTRY
+    ):
+        raise ValueError("Unsupported memory schema version.")
+    model = MEMORY_SCHEMA_REGISTRY[schema_version]
+    return model.model_validate(dict(document))
+
+
+def project_collaboration_profile_v2(
+    profile: VersionedCollaborationProfile,
+) -> CollaborationProfileV2:
+    if isinstance(profile, CollaborationProfileV2):
+        return profile.model_copy(deep=True)
+    if not isinstance(profile, CollaborationProfile):
+        raise TypeError("profile must be a versioned collaboration profile.")
+    projected = profile.model_dump(mode="python")
+    projected["memory_schema_version"] = MEMORY_SCHEMA_VERSION_V2
+    return CollaborationProfileV2.model_validate(projected)
 
 
 class MemoryInspectionResponse(StrictModel):
