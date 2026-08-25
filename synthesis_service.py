@@ -82,6 +82,8 @@ class SynthesisApplicationService:
             self._database.get_chat_history(
                 command.session_id,
                 limit=SYNTHESIS_HISTORY_LIMIT,
+                user_id=command.user_id,
+                project_id=command.project_id,
             ),
         )
         return await self._blueprint_generator(
@@ -122,6 +124,8 @@ class SynthesisApplicationService:
             self._database.get_chat_history(
                 command.session_id,
                 limit=SYNTHESIS_HISTORY_LIMIT,
+                user_id=command.user_id,
+                project_id=command.project_id,
             ),
         )
         projection = SynthesisPersonalizationAdapter.project(profile)

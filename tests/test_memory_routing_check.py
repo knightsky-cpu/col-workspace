@@ -642,7 +642,7 @@ async def test_live_fixture_prepares_state_and_closes_owned_manager(
     import memory_routing_check as module
     import trusted_memory_service as service_module
 
-    prepared: list[tuple[str, str, str]] = []
+    prepared: list[tuple[str, str, str, str]] = []
     requests: list[dict[str, object]] = []
     close_calls = 0
 
@@ -652,9 +652,12 @@ async def test_live_fixture_prepares_state_and_closes_owned_manager(
             scenario: MemoryRoutingScenario,
             *,
             user_id: str,
+            project_id: str,
             session_id: str,
         ) -> MemoryDecisionRequest:
-            prepared.append((scenario.scenario_id, user_id, session_id))
+            prepared.append(
+                (scenario.scenario_id, user_id, project_id, session_id)
+            )
             return MemoryDecisionRequest(
                 proposal_id=(
                     "response_length--1234567890abcdef1234567890abcdef"
@@ -723,7 +726,12 @@ async def test_live_fixture_prepares_state_and_closes_owned_manager(
     expected_id = "m7-5a-stateful-live-structured-memory-decision-1"
     assert exit_code == 0
     assert prepared == [
-        ("structured-memory-decision", expected_id, expected_id)
+        (
+            "structured-memory-decision",
+            expected_id,
+            "agent-col",
+            expected_id,
+        )
     ]
     assert requests[0]["memory_decision"] == {
         "proposal_id": (

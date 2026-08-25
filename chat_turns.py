@@ -44,6 +44,10 @@ class ChatTurnOwnershipError(RuntimeError):
     """Raised when a worker no longer owns a chat turn lease."""
 
 
+class ChatSessionOwnershipError(RuntimeError):
+    """Raised when request identity does not own an existing session."""
+
+
 class ChatTurnStateError(RuntimeError):
     """Raised when durable chat-turn state is internally inconsistent."""
 

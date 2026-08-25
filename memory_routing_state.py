@@ -30,6 +30,9 @@ class _DatabaseHandle(Protocol):
         session_id: str,
         role: str,
         text: str,
+        *,
+        project_id: str,
+        user_id: str,
     ) -> Awaitable[str]: ...
 
     def close(self) -> None: ...
@@ -80,6 +83,7 @@ class MemoryRoutingStateManager:
         scenario: MemoryRoutingScenario,
         *,
         user_id: str,
+        project_id: str,
         session_id: str,
     ) -> MemoryDecisionRequest | None:
         """Persist one real provenance chain and return target decision data."""
@@ -94,6 +98,8 @@ class MemoryRoutingStateManager:
                 setup_session_id,
                 "user",
                 setup.proposal_source_message,
+                project_id=project_id,
+                user_id=user_id,
             )
             proposal_result = (
                 await self._memory_service.propose_memory_signal(

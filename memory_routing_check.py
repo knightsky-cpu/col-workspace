@@ -290,6 +290,7 @@ async def run_live_routing_fixture(
                 return await state_manager.prepare(
                     scenario,
                     user_id=user_id,
+                    project_id=PROJECT_ID,
                     session_id=session_id,
                 )
 

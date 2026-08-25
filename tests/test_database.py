@@ -7,6 +7,8 @@ import pytest
 from google.api_core.exceptions import ServiceUnavailable
 from google.cloud import firestore
 
+import database
+from chat_turns import ChatSessionOwnershipError, ChatTurnStateError
 from database import MemoryEngine, MemoryEngineError
 from schemas import AdaptationReceipt, WorkspaceCreateRequest
 
@@ -26,21 +28,103 @@ class AsyncSnapshotStream:
             raise StopAsyncIteration from exc
 
 
+def install_transaction_runner(monkeypatch: pytest.MonkeyPatch) -> None:
+    def run_without_sdk_retry(callback):
+        async def run(transaction, *args, **kwargs):
+            return await callback(transaction, *args, **kwargs)
+
+        return run
+
+    monkeypatch.setattr(
+        database.firestore,
+        "async_transactional",
+        run_without_sdk_retry,
+    )
+
+
+def document_snapshot(*, exists: bool, data: object = None) -> SimpleNamespace:
+    return SimpleNamespace(exists=exists, to_dict=lambda: data)
+
+
 @pytest.mark.asyncio
-async def test_save_message_commits_parent_and_message_atomically() -> None:
+@pytest.mark.parametrize(
+    "stored_session",
+    (
+        {"project_id": "project-1", "user_id": "other-user"},
+        {"project_id": "other-project", "user_id": "user-1"},
+    ),
+)
+async def test_save_message_rejects_session_ownership_mismatch_without_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_session: dict[str, object],
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    session = client.collection.return_value.document.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(exists=True, data=stored_session)
+    )
+    transaction = client.transaction.return_value
+
+    with pytest.raises(ChatSessionOwnershipError):
+        await MemoryEngine(client).save_message(
+            "session-1",
+            "user",
+            "hello",
+            project_id="project-1",
+            user_id="user-1",
+        )
+
+    transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_save_message_rejects_malformed_session_ownership_without_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    session = client.collection.return_value.document.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(
+            exists=True,
+            data={"project_id": "project-1"},
+        )
+    )
+    transaction = client.transaction.return_value
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(client).save_message(
+            "session-1",
+            "user",
+            "hello",
+            project_id="project-1",
+            user_id="user-1",
+        )
+
+    transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_save_message_commits_parent_and_message_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
     client = MagicMock()
     sessions = MagicMock()
     session = MagicMock()
     messages = MagicMock()
     message = MagicMock(id="message-1")
-    batch = MagicMock()
-    batch.commit = AsyncMock(return_value=[])
+    transaction = MagicMock()
 
     client.collection.return_value = sessions
     sessions.document.return_value = session
     session.collection.return_value = messages
     messages.document.return_value = message
-    client.batch.return_value = batch
+    client.transaction.return_value = transaction
+    session.get = AsyncMock(
+        return_value=document_snapshot(exists=False)
+    )
 
     engine = MemoryEngine(client=client)
     message_id = await engine.save_message(
@@ -56,7 +140,8 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
     sessions.document.assert_called_once_with("session-1")
     session.collection.assert_called_once_with("messages")
     messages.document.assert_called_once_with()
-    assert batch.set.call_args_list == [
+    session.get.assert_awaited_once_with(transaction=transaction)
+    assert transaction.set.call_args_list == [
         call(
             session,
             {
@@ -77,7 +162,42 @@ async def test_save_message_commits_parent_and_message_atomically() -> None:
             },
         ),
     ]
-    batch.commit.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_save_message_preserves_matching_existing_session_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    session = client.collection.return_value.document.return_value
+    message = session.collection.return_value.document.return_value
+    message.id = "message-1"
+    transaction = client.transaction.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(
+            exists=True,
+            data={"project_id": "project-1", "user_id": "user-1"},
+        )
+    )
+
+    await MemoryEngine(client).save_message(
+        "session-1",
+        "model",
+        "answer",
+        project_id="project-1",
+        user_id="user-1",
+    )
+
+    session_write = transaction.set.call_args_list[0]
+    assert session_write.args[0] is session
+    assert session_write.args[1] == {
+        "updated_at": firestore.SERVER_TIMESTAMP,
+        "last_message_preview": "answer",
+        "last_message_role": "model",
+    }
+    assert "project_id" not in session_write.args[1]
+    assert "user_id" not in session_write.args[1]
 
 
 @pytest.mark.asyncio
@@ -750,12 +870,22 @@ async def test_get_chat_history_orders_by_timestamp() -> None:
 
     client.collection.return_value = sessions
     sessions.document.return_value = session
+    session.get = AsyncMock(
+        return_value=document_snapshot(
+            exists=True,
+            data={"project_id": "project-1", "user_id": "user-1"},
+        )
+    )
     session.collection.return_value = messages
     messages.order_by.return_value = query
     query.stream.return_value = snapshot_stream()
 
     engine = MemoryEngine(client=client)
-    history = await engine.get_chat_history("session-1")
+    history = await engine.get_chat_history(
+        "session-1",
+        user_id="user-1",
+        project_id="project-1",
+    )
 
     messages.order_by.assert_called_once_with(
         "timestamp",
@@ -765,6 +895,72 @@ async def test_get_chat_history_orders_by_timestamp() -> None:
         {"role": "user", "text": "first"},
         {"role": "model", "text": "second"},
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_chat_history_returns_empty_for_missing_session_without_querying() -> None:
+    client = MagicMock()
+    session = client.collection.return_value.document.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(exists=False)
+    )
+
+    history = await MemoryEngine(client).get_chat_history(
+        "session-1",
+        user_id="user-1",
+        project_id="project-1",
+    )
+
+    assert history == []
+    session.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_session",
+    (
+        {"project_id": "project-1", "user_id": "other-user"},
+        {"project_id": "other-project", "user_id": "user-1"},
+    ),
+)
+async def test_get_chat_history_rejects_session_ownership_mismatch_before_query(
+    stored_session: dict[str, object],
+) -> None:
+    client = MagicMock()
+    session = client.collection.return_value.document.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(exists=True, data=stored_session)
+    )
+
+    with pytest.raises(ChatSessionOwnershipError):
+        await MemoryEngine(client).get_chat_history(
+            "session-1",
+            user_id="user-1",
+            project_id="project-1",
+        )
+
+    session.collection.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_chat_history_rejects_malformed_session_ownership_before_query() -> None:
+    client = MagicMock()
+    session = client.collection.return_value.document.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(
+            exists=True,
+            data={"project_id": "project-1", "user_id": ""},
+        )
+    )
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(client).get_chat_history(
+            "session-1",
+            user_id="user-1",
+            project_id="project-1",
+        )
+
+    session.collection.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -825,6 +1021,12 @@ async def test_get_chat_history_returns_newest_limit_chronologically() -> None:
         ]
     )
     session = client.collection.return_value.document.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(
+            exists=True,
+            data={"project_id": "project-1", "user_id": "user-1"},
+        )
+    )
     session.collection.return_value = messages
     messages.order_by.return_value = query
     query.limit.return_value = limited_query
@@ -832,6 +1034,8 @@ async def test_get_chat_history_returns_newest_limit_chronologically() -> None:
     history = await MemoryEngine(client).get_chat_history(
         "session-1",
         limit=20,
+        user_id="user-1",
+        project_id="project-1",
     )
 
     messages.order_by.assert_called_once_with(
@@ -875,6 +1079,12 @@ async def test_bounded_history_excludes_current_message_and_keeps_limit() -> Non
 
     limited_query.stream.return_value = stream_snapshots()
     session = client.collection.return_value.document.return_value
+    session.get = AsyncMock(
+        return_value=document_snapshot(
+            exists=True,
+            data={"project_id": "project-1", "user_id": "user-1"},
+        )
+    )
     session.collection.return_value = messages
     messages.order_by.return_value = query
     query.limit.return_value = limited_query
@@ -882,6 +1092,8 @@ async def test_bounded_history_excludes_current_message_and_keeps_limit() -> Non
     history = await MemoryEngine(client).get_chat_history(
         "session-1",
         limit=20,
+        user_id="user-1",
+        project_id="project-1",
         exclude_message_id=current_id,
     )
 
@@ -904,6 +1116,8 @@ async def test_get_chat_history_rejects_invalid_limit_before_access(
         await MemoryEngine(client).get_chat_history(
             "session-1",
             limit=invalid_limit,
+            user_id="user-1",
+            project_id="project-1",
         )
 
     client.collection.assert_not_called()
@@ -959,18 +1173,34 @@ async def test_invalid_inputs_fail_before_firestore_access() -> None:
     client = MagicMock()
     engine = MemoryEngine(client=client)
     invalid_calls = (
-        (engine.save_message, ("", "user", "text")),
-        (engine.save_message, ("session", " ", "text")),
-        (engine.save_message, ("session", "user", " ")),
-        (engine.get_chat_history, (" ",)),
-        (engine.update_user_profile, ("", {"tone": "direct"})),
-        (engine.update_user_profile, ("user", {})),
-        (engine.get_user_profile, ("",)),
+        (
+            engine.save_message,
+            ("", "user", "text"),
+            {"project_id": "project-1", "user_id": "user-1"},
+        ),
+        (
+            engine.save_message,
+            ("session", " ", "text"),
+            {"project_id": "project-1", "user_id": "user-1"},
+        ),
+        (
+            engine.save_message,
+            ("session", "user", " "),
+            {"project_id": "project-1", "user_id": "user-1"},
+        ),
+        (
+            engine.get_chat_history,
+            (" ",),
+            {"project_id": "project-1", "user_id": "user-1"},
+        ),
+        (engine.update_user_profile, ("", {"tone": "direct"}), {}),
+        (engine.update_user_profile, ("user", {}), {}),
+        (engine.get_user_profile, ("",), {}),
     )
 
-    for operation, arguments in invalid_calls:
+    for operation, arguments, keywords in invalid_calls:
         with pytest.raises(ValueError):
-            await operation(*arguments)
+            await operation(*arguments, **keywords)
 
     client.collection.assert_not_called()
 

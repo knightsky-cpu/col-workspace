@@ -29,6 +29,7 @@ from chat_turns import (
     ChatTurnReplay,
     ChatTurnRequest,
     ChatTurnStateError,
+    ChatSessionOwnershipError,
     derive_chat_turn_ids,
 )
 from memory_policy import (
@@ -264,48 +265,68 @@ class MemoryEngine:
         role: str,
         text: str,
         *,
-        project_id: str | None = None,
-        user_id: str | None = None,
+        project_id: str,
+        user_id: str,
     ) -> str:
         """Atomically persist a session update and a new chat message."""
         self._validate_string(session_id, "session_id")
         self._validate_string(role, "role")
         self._validate_string(text, "text")
-        if project_id is not None:
-            self._validate_string(project_id, "project_id")
-        if user_id is not None:
-            self._validate_string(user_id, "user_id")
-        session_document: dict[str, object] = {
-            "updated_at": firestore.SERVER_TIMESTAMP,
-            "last_message_preview": self._chat_preview(text),
-            "last_message_role": role,
-        }
-        if project_id is not None:
-            session_document["project_id"] = project_id
-        if user_id is not None:
-            session_document["user_id"] = user_id
+        self._validate_string(project_id, "project_id")
+        self._validate_string(user_id, "user_id")
 
         try:
             session_ref = self._client.collection("sessions").document(
                 session_id
             )
             message_ref = session_ref.collection("messages").document()
-            batch = self._client.batch()
-            batch.set(
-                session_ref,
-                session_document,
-                merge=True,
+            transaction = self._client.transaction()
+
+            async def save_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> None:
+                session_snapshot = await session_ref.get(
+                    transaction=transaction
+                )
+                session_document: dict[str, object] = {
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                    "last_message_preview": self._chat_preview(text),
+                    "last_message_role": role,
+                }
+                if session_snapshot.exists:
+                    self._validate_chat_session_owner(
+                        session_snapshot.to_dict(),
+                        user_id=user_id,
+                        project_id=project_id,
+                    )
+                else:
+                    session_document.update(
+                        {
+                            "project_id": project_id,
+                            "user_id": user_id,
+                        }
+                    )
+                transaction.set(
+                    session_ref,
+                    session_document,
+                    merge=True,
+                )
+                transaction.set(
+                    message_ref,
+                    {
+                        "role": role,
+                        "text": text,
+                        "timestamp": firestore.SERVER_TIMESTAMP,
+                    },
+                )
+
+            run_transaction = firestore.async_transactional(
+                save_in_transaction
             )
-            batch.set(
-                message_ref,
-                {
-                    "role": role,
-                    "text": text,
-                    "timestamp": firestore.SERVER_TIMESTAMP,
-                },
-            )
-            await batch.commit()
+            await run_transaction(transaction)
             return message_ref.id
+        except (ChatSessionOwnershipError, ChatTurnStateError):
+            raise
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_message", exc)
 
@@ -626,10 +647,23 @@ class MemoryEngine:
         async def claim_in_transaction(
             transaction: AsyncTransaction,
         ) -> ChatTurnClaim | ChatTurnReplay:
+            session_snapshot = await session_ref.get(
+                transaction=transaction
+            )
+            if session_snapshot.exists:
+                self._validate_chat_session_owner(
+                    session_snapshot.to_dict(),
+                    user_id=request.user_id,
+                    project_id=request.project_id,
+                )
             turn_snapshot = await turn_ref.get(transaction=transaction)
             user_snapshot = await user_message_ref.get(
                 transaction=transaction
             )
+            if not session_snapshot.exists and turn_snapshot.exists:
+                raise ChatTurnStateError(
+                    "Stored chat turn has no parent session."
+                )
             if turn_snapshot.exists != user_snapshot.exists:
                 raise ChatTurnStateError(
                     "Stored chat turn has incomplete message state."
@@ -718,19 +752,21 @@ class MemoryEngine:
                     merge=True,
                 )
                 return resumed_claim
-            transaction.set(
-                session_ref,
-                {
-                    "project_id": request.project_id,
-                    "user_id": request.user_id,
-                    "updated_at": firestore.SERVER_TIMESTAMP,
-                    "last_message_preview": self._chat_preview(
-                        request.message
-                    ),
-                    "last_message_role": "user",
-                },
-                merge=True,
-            )
+            session_update: dict[str, object] = {
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "last_message_preview": self._chat_preview(
+                    request.message
+                ),
+                "last_message_role": "user",
+            }
+            if not session_snapshot.exists:
+                session_update.update(
+                    {
+                        "project_id": request.project_id,
+                        "user_id": request.user_id,
+                    }
+                )
+            transaction.set(session_ref, session_update, merge=True)
             feedback_decision = request.artifact_feedback_decision
             transaction.set(
                 turn_ref,
@@ -1862,8 +1898,6 @@ class MemoryEngine:
             transaction.set(
                 session_ref,
                 {
-                    "project_id": claim.request.project_id,
-                    "user_id": claim.request.user_id,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                     "last_message_preview": self._chat_preview(
                         response.response
@@ -1951,12 +1985,39 @@ class MemoryEngine:
             set(user_message_data)
             != {"role", "text", "timestamp"}
             or user_message_data.get("role") != "user"
-            or not self._is_aware_datetime(user_message_data.get("timestamp"))
+            or not self._is_aware_datetime(
+                user_message_data.get("timestamp")
+            )
         ):
             raise ChatTurnStateError("Stored user message is invalid.")
         if user_message_data.get("text") != request.message:
             raise ChatTurnConflictError(
                 "Idempotency key conflicts with a different chat request."
+            )
+
+    @staticmethod
+    def _validate_chat_session_owner(
+        document: object,
+        *,
+        user_id: str,
+        project_id: str,
+    ) -> None:
+        if not isinstance(document, Mapping):
+            raise ChatTurnStateError("Stored chat session is invalid.")
+        stored_user_id = document.get("user_id")
+        stored_project_id = document.get("project_id")
+        if (
+            not isinstance(stored_user_id, str)
+            or not stored_user_id
+            or not isinstance(stored_project_id, str)
+            or not stored_project_id
+        ):
+            raise ChatTurnStateError(
+                "Stored chat session ownership is invalid."
+            )
+        if stored_user_id != user_id or stored_project_id != project_id:
+            raise ChatSessionOwnershipError(
+                "Chat session is unavailable."
             )
 
     def _validate_chat_turn_claim(self, claim: object) -> None:
@@ -3299,10 +3360,14 @@ class MemoryEngine:
         session_id: str,
         limit: int | None = None,
         *,
+        user_id: str,
+        project_id: str,
         exclude_message_id: str | None = None,
     ) -> list[dict[str, object]]:
         """Return all or the newest session messages chronologically."""
         self._validate_string(session_id, "session_id")
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
         if limit is not None and (
             isinstance(limit, bool)
             or not isinstance(limit, int)
@@ -3320,11 +3385,18 @@ class MemoryEngine:
                 )
 
         try:
-            messages_ref = (
-                self._client.collection("sessions")
-                .document(session_id)
-                .collection("messages")
+            session_ref = self._client.collection("sessions").document(
+                session_id
             )
+            session_snapshot = await session_ref.get()
+            if not session_snapshot.exists:
+                return []
+            self._validate_chat_session_owner(
+                session_snapshot.to_dict(),
+                user_id=user_id,
+                project_id=project_id,
+            )
+            messages_ref = session_ref.collection("messages")
             direction = (
                 firestore.Query.ASCENDING
                 if limit is None
@@ -3356,6 +3428,8 @@ class MemoryEngine:
                 history.reverse()
 
             return history
+        except (ChatSessionOwnershipError, ChatTurnStateError):
+            raise
         except GoogleAPIError as exc:
             self._raise_firestore_error("get_chat_history", exc)
 

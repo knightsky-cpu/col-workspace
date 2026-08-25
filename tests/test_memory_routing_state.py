@@ -50,7 +50,9 @@ def make_stateful_scenario(
 
 @dataclass
 class RecordingDatabase:
-    saved_messages: list[tuple[str, str, str]] = field(default_factory=list)
+    saved_messages: list[tuple[str, str, str, str, str]] = field(
+        default_factory=list
+    )
     closed: bool = False
 
     async def save_message(
@@ -58,8 +60,13 @@ class RecordingDatabase:
         session_id: str,
         role: str,
         text: str,
+        *,
+        project_id: str,
+        user_id: str,
     ) -> str:
-        self.saved_messages.append((session_id, role, text))
+        self.saved_messages.append(
+            (session_id, role, text, project_id, user_id)
+        )
         return "setup-source-message"
 
     def close(self) -> None:
@@ -130,6 +137,7 @@ async def test_state_manager_establishes_active_identical_preference() -> None:
             target_decision="none",
         ),
         user_id="stateful-user",
+        project_id="stateful-project",
         session_id="stateful-session",
     )
 
@@ -139,6 +147,8 @@ async def test_state_manager_establishes_active_identical_preference() -> None:
             "stateful-session-setup",
             "user",
             "Please remember that I prefer concise responses.",
+            "stateful-project",
+            "stateful-user",
         )
     ]
     assert len(service.proposal_commands) == 1
@@ -175,6 +185,7 @@ async def test_state_manager_returns_pending_structured_decision() -> None:
             target_decision="approve",
         ),
         user_id="stateful-user",
+        project_id="stateful-project",
         session_id="stateful-session",
     )
 
@@ -200,6 +211,9 @@ async def test_state_manager_translates_database_failure_without_content(
             session_id: str,
             role: str,
             text: str,
+            *,
+            project_id: str,
+            user_id: str,
         ) -> str:
             raise MemoryEngineError(private_detail)
 
@@ -215,6 +229,7 @@ async def test_state_manager_translates_database_failure_without_content(
                 target_decision="approve",
             ),
             user_id="stateful-user",
+            project_id="stateful-project",
             session_id="stateful-session",
         )
 

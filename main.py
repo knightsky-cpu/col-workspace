@@ -79,6 +79,7 @@ from artifact_feedback_service import (
     ListArtifactFeedbackCommand,
 )
 from chat_turns import (
+    ChatSessionOwnershipError,
     ChatTurnClaim,
     ChatTurnConflictError,
     ChatTurnInProgressError,
@@ -355,6 +356,19 @@ def _raise_chat_turn_operation_http_error(
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Chat turn state is invalid.",
+    ) from exc
+
+
+def _raise_chat_session_unavailable(
+    exc: ChatSessionOwnershipError,
+) -> NoReturn:
+    logger.warning(
+        "Chat session ownership check failed (%s).",
+        type(exc).__name__,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Chat session is unavailable.",
     ) from exc
 
 
@@ -1581,6 +1595,17 @@ async def chat(
     )
 
     if (
+        _get_authenticator(request).settings.mode == "google_oidc"
+        and idempotency_key is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Google-authenticated chat requires an idempotency key."
+            ),
+        )
+
+    if (
         payload.artifact_feedback_decision is not None
         and idempotency_key is None
     ):
@@ -1630,6 +1655,8 @@ async def chat(
                     "Retry-After": str(exc.retry_after_seconds),
                 },
             ) from exc
+        except ChatSessionOwnershipError as exc:
+            _raise_chat_session_unavailable(exc)
         except ChatTurnStateError as exc:
             logger.error(
                 "Chat turn claim failed (%s).",
@@ -1651,11 +1678,15 @@ async def chat(
                 history_operation = database.get_chat_history(
                     payload.session_id,
                     limit=20,
+                    user_id=effective_user_id,
+                    project_id=effective_project_id,
                 )
             else:
                 history_operation = database.get_chat_history(
                     payload.session_id,
                     limit=20,
+                    user_id=effective_user_id,
+                    project_id=effective_project_id,
                     exclude_message_id=(
                         chat_turn_claim.ids.user_message_id
                     ),
@@ -1664,6 +1695,8 @@ async def chat(
                 database.get_collaboration_profile(effective_user_id),
                 history_operation,
             )
+        except ChatSessionOwnershipError as exc:
+            _raise_chat_session_unavailable(exc)
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
     else:
@@ -1672,15 +1705,21 @@ async def chat(
                 history = await database.get_chat_history(
                     payload.session_id,
                     limit=20,
+                    user_id=effective_user_id,
+                    project_id=effective_project_id,
                 )
             else:
                 history = await database.get_chat_history(
                     payload.session_id,
                     limit=20,
+                    user_id=effective_user_id,
+                    project_id=effective_project_id,
                     exclude_message_id=(
                         chat_turn_claim.ids.user_message_id
                     ),
                 )
+        except ChatSessionOwnershipError as exc:
+            _raise_chat_session_unavailable(exc)
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
 
@@ -1721,6 +1760,8 @@ async def chat(
                 project_id=effective_project_id,
                 user_id=effective_user_id,
             )
+        except ChatSessionOwnershipError as exc:
+            _raise_chat_session_unavailable(exc)
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
     else:
@@ -1933,6 +1974,8 @@ async def chat(
                 project_id=effective_project_id,
                 user_id=effective_user_id,
             )
+        except ChatSessionOwnershipError as exc:
+            _raise_chat_session_unavailable(exc)
         except MemoryEngineError as exc:
             _raise_database_http_error(exc)
     else:

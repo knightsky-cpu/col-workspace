@@ -88,6 +88,12 @@ class ChatTurnStore:
         self.turns.document.return_value = self.turn_ref
         self.messages.document.side_effect = message_document
         self.client.transaction.return_value = self.transaction
+        self.session_ref.get = AsyncMock(
+            return_value=snapshot(
+                exists=True,
+                data={"project_id": "agent-col", "user_id": "user-1"},
+            )
+        )
 
 
 class ArtifactEffectStore(ChatTurnStore):
@@ -705,6 +711,9 @@ async def test_claim_chat_turn_atomically_creates_turn_and_user_message(
     install_transaction_runner(monkeypatch)
     ids = derive_chat_turn_ids("request-1")
     store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
     store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
     store.user_message_ref.get = AsyncMock(
         return_value=snapshot(exists=False)
@@ -737,7 +746,13 @@ async def test_claim_chat_turn_atomically_creates_turn_and_user_message(
     assert store.transaction.set.call_args_list == [
         call(
             store.session_ref,
-            {"updated_at": firestore.SERVER_TIMESTAMP},
+            {
+                "project_id": "agent-col",
+                "user_id": "user-1",
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "last_message_preview": "Remember one logical turn.",
+                "last_message_role": "user",
+            },
             merge=True,
         ),
         call(
@@ -768,12 +783,178 @@ async def test_claim_chat_turn_atomically_creates_turn_and_user_message(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_session",
+    (
+        {"project_id": "agent-col", "user_id": "different-user"},
+        {"project_id": "different-project", "user_id": "user-1"},
+    ),
+)
+async def test_claim_chat_turn_rejects_session_ownership_mismatch_without_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_session: dict[str, object],
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_session)
+    )
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Remember one logical turn.",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await MemoryEngine(store.client).claim_chat_turn(
+            request,
+            idempotency_key="request-1",
+            observed_at=NOW,
+        )
+
+    assert type(exc_info.value).__name__ == "ChatSessionOwnershipError"
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stored_session",
+    (
+        None,
+        {},
+        {"project_id": "agent-col", "user_id": ""},
+        {"project_id": 7, "user_id": "user-1"},
+    ),
+)
+async def test_claim_chat_turn_rejects_malformed_session_ownership_state(
+    monkeypatch: pytest.MonkeyPatch,
+    stored_session: object,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_session)
+    )
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Remember one logical turn.",
+    )
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(store.client).claim_chat_turn(
+            request,
+            idempotency_key="request-1",
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_claim_chat_turn_preserves_matching_existing_session_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"project_id": "agent-col", "user_id": "user-1"},
+        )
+    )
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Remember one logical turn.",
+    )
+
+    await MemoryEngine(store.client).claim_chat_turn(
+        request,
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    store.session_ref.get.assert_awaited_once_with(
+        transaction=store.transaction
+    )
+    session_write = store.transaction.set.call_args_list[0]
+    assert session_write.args[0] is store.session_ref
+    assert "project_id" not in session_write.args[1]
+    assert "user_id" not in session_write.args[1]
+
+
+@pytest.mark.asyncio
+async def test_claim_chat_turn_establishes_new_session_owner_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Remember one logical turn.",
+    )
+
+    await MemoryEngine(store.client).claim_chat_turn(
+        request,
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    store.session_ref.get.assert_awaited_once_with(
+        transaction=store.transaction
+    )
+    assert store.transaction.set.call_args_list[0] == call(
+        store.session_ref,
+        {
+            "project_id": "agent-col",
+            "user_id": "user-1",
+            "updated_at": firestore.SERVER_TIMESTAMP,
+            "last_message_preview": "Remember one logical turn.",
+            "last_message_role": "user",
+        },
+        merge=True,
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_persists_structured_feedback_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install_transaction_runner(monkeypatch)
     ids = derive_chat_turn_ids("artifact-feedback-request-1")
     store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
     store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
     store.user_message_ref.get = AsyncMock(
         return_value=snapshot(exists=False)
@@ -1777,9 +1958,10 @@ async def test_record_chat_turn_single_file_artifact_effect_writes_artifact_and_
                 "originating_turn_id": ids.turn_id,
                 "user_id": "user-1",
                 "model_name": "gemini-3.6-flash",
-                "schema_version": "1.0",
-                "display_label": "Password Generator",
-                "filename": "password_generator.py",
+                    "schema_version": "1.0",
+                    "display_label": "Password Generator",
+                    "lifecycle_status": "active",
+                    "filename": "password_generator.py",
                 "artifact_family": "code",
                 "format": "python",
                 "byte_size": 48,
@@ -2103,7 +2285,11 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
     assert store.transaction.set.call_args_list == [
         call(
             store.session_ref,
-            {"updated_at": firestore.SERVER_TIMESTAMP},
+            {
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "last_message_preview": "A durable answer.",
+                "last_message_role": "model",
+            },
             merge=True,
         ),
         call(

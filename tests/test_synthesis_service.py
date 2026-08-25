@@ -101,11 +101,16 @@ class FakeDatabase:
         self,
         session_id: str,
         limit: int | None = None,
+        *,
+        user_id: str,
+        project_id: str,
     ) -> list[dict[str, object]]:
         if self.fail_on == "history":
             assert self.error is not None
             raise self.error
-        self.events.append(("history", session_id, limit))
+        self.events.append(
+            ("history", session_id, limit, user_id, project_id)
+        )
         return self.history
 
     async def save_blueprint(
@@ -194,8 +199,13 @@ class BlockingDatabase(FakeDatabase):
         self,
         session_id: str,
         limit: int | None = None,
+        *,
+        user_id: str,
+        project_id: str,
     ) -> list[dict[str, object]]:
-        self.events.append(("history", session_id, limit))
+        self.events.append(
+            ("history", session_id, limit, user_id, project_id)
+        )
         self.history_started.set()
         await self.release_reads.wait()
         return self.history
@@ -245,7 +255,7 @@ async def test_generate_blueprint_builds_context_without_persisting(
     assert generated is blueprint
     assert set(events[:2]) == {
         ("profile", "user-1"),
-        ("history", "session-1", 20),
+        ("history", "session-1", 20, "user-1", "project-1"),
     }
     assert events[2:] == [("generate",)]
     assert generator.calls == [
@@ -349,7 +359,7 @@ async def test_governed_generation_projects_memory_and_derives_receipt(
     ]
     assert set(events[:2]) == {
         ("collaboration_profile", "user-1"),
-        ("history", "session-1", 20),
+        ("history", "session-1", 20, "user-1", "project-1"),
     }
     assert events[2:] == [("generate",)]
     assert generator.calls == [
@@ -508,7 +518,7 @@ async def test_service_generates_and_persists_project_blueprint(
     assert result.blueprint is blueprint
     assert set(events[:2]) == {
         ("collaboration_profile", "user-1"),
-        ("history", "session-1", 20),
+        ("history", "session-1", 20, "user-1", "project-1"),
     }
     assert events[2:] == [
         ("generate",),

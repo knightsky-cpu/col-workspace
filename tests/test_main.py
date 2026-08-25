@@ -61,6 +61,7 @@ from chat_turns import (
     ChatTurnOwnershipError,
     ChatTurnReplay,
     ChatTurnRequest,
+    ChatSessionOwnershipError,
     ChatTurnStateError,
 )
 from database import (
@@ -267,6 +268,13 @@ class FakeMemoryEngine:
     released_claim: ChatTurnClaim | None = None
     release_error: Exception | None = None
     complete_error: Exception | None = None
+    session_ownership_error_at: str | None = None
+    history_calls: list[tuple[str, int | None, str, str, str | None]] = field(
+        default_factory=list
+    )
+    save_calls: list[tuple[str, str, str, str, str]] = field(
+        default_factory=list
+    )
     claim_calls: list[tuple[ChatTurnRequest, str, datetime]] = field(
         default_factory=list
     )
@@ -333,8 +341,23 @@ class FakeMemoryEngine:
         session_id: str,
         limit: int | None = None,
         *,
+        user_id: str,
+        project_id: str,
         exclude_message_id: str | None = None,
     ) -> list[dict[str, object]]:
+        self.history_calls.append(
+            (
+                session_id,
+                limit,
+                user_id,
+                project_id,
+                exclude_message_id,
+            )
+        )
+        if self.session_ownership_error_at == "history":
+            raise ChatSessionOwnershipError(
+                "private-history-ownership-marker"
+            )
         if self.fail_on == "history":
             raise main.MemoryEngineError("history read failed")
         if exclude_message_id is None:
@@ -356,9 +379,16 @@ class FakeMemoryEngine:
         role: str,
         text: str,
         *,
-        project_id: str | None = None,
-        user_id: str | None = None,
+        project_id: str,
+        user_id: str,
     ) -> str:
+        self.save_calls.append(
+            (session_id, role, text, project_id, user_id)
+        )
+        if self.session_ownership_error_at == f"save_{role}":
+            raise ChatSessionOwnershipError(
+                f"private-{role}-save-ownership-marker"
+            )
         if self.fail_on == f"save_{role}":
             raise main.MemoryEngineError(f"{role} save failed")
         self.events.append(("save", session_id, role, text))
@@ -3560,6 +3590,39 @@ async def test_chat_rejects_invalid_idempotency_key_before_service_access(
 
 
 @pytest.mark.asyncio
+async def test_google_chat_requires_idempotency_key_before_service_access(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Authorization": "Bearer token-abc"},
+        json={
+            "project_id": google_subject_to_workspace_project_id(subject),
+            "session_id": "private-google-session",
+            "user_id": f"google--{subject}",
+            "message": "private-google-message",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Google-authenticated chat requires an idempotency key."
+    }
+    assert service_state.events == []
+    assert service_state.database.history_calls == []
+    assert service_state.database.save_calls == []
+    assert service_state.memory_service.decision_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_chat_rejects_oversized_message_before_service_access(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -3739,6 +3802,141 @@ async def test_chat_translates_idempotent_claim_errors_without_downstream_access
         "private-database-marker",
     ):
         assert private_marker not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "failure_operation",
+    ("claim", "history", "save_user", "save_model"),
+)
+@pytest.mark.asyncio
+async def test_chat_translates_session_ownership_errors_to_uniform_not_found(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+    failure_operation: str,
+) -> None:
+    headers: dict[str, str] = {}
+    if failure_operation == "claim":
+        headers["Idempotency-Key"] = "private-ownership-key"
+        service_state.database.chat_turn_error = ChatSessionOwnershipError(
+            "private-claim-ownership-marker"
+        )
+    else:
+        service_state.database.session_ownership_error_at = failure_operation
+
+    response = await client.post(
+        "/api/chat",
+        headers=headers,
+        json={
+            "project_id": "private-project",
+            "session_id": "private-session",
+            "user_id": "private-user",
+            "message": "private-message-marker",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Chat session is unavailable."}
+    if failure_operation in {"claim", "history", "save_user"}:
+        assert service_state.turn_service.calls == []
+    if failure_operation == "claim":
+        assert service_state.database.history_calls == []
+        assert service_state.database.save_calls == []
+    if failure_operation == "history":
+        assert service_state.database.save_calls == []
+    if failure_operation == "save_user":
+        assert service_state.database.save_calls[-1][1] == "user"
+    if failure_operation == "save_model":
+        assert [call[1] for call in service_state.database.save_calls] == [
+            "user",
+            "model",
+        ]
+    for private_marker in (
+        "private-ownership-key",
+        "private-project",
+        "private-session",
+        "private-user",
+        "private-message-marker",
+        "private-claim-ownership-marker",
+        "private-history-ownership-marker",
+        "private-user-save-ownership-marker",
+        "private-model-save-ownership-marker",
+    ):
+        assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_headerless_local_chat_propagates_session_owner_to_all_io(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.database.history_calls == [
+        ("session-1", 20, "user-1", "project-1", None)
+    ]
+    assert service_state.database.save_calls == [
+        ("session-1", "user", "New question", "project-1", "user-1"),
+        (
+            "session-1",
+            "model",
+            "Generated answer",
+            "project-1",
+            "user-1",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_chat_propagates_verified_owner_to_claim_and_history(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    user_id = f"google--{subject}"
+    project_id = google_subject_to_workspace_project_id(subject)
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+
+    response = await client.post(
+        "/api/chat",
+        headers={
+            "Authorization": "Bearer token-abc",
+            "Idempotency-Key": "google-owned-key-1",
+        },
+        json={
+            "project_id": project_id,
+            "session_id": "google-session-1",
+            "user_id": user_id,
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.database.claim_calls[0][0].user_id == user_id
+    assert service_state.database.claim_calls[0][0].project_id == project_id
+    assert service_state.database.history_calls == [
+        (
+            "google-session-1",
+            20,
+            user_id,
+            project_id,
+            f"turn--{DEFAULT_TURN_ID}--user",
+        )
+    ]
+    assert service_state.database.save_calls == []
 
 
 @pytest.mark.asyncio
@@ -4547,10 +4745,14 @@ async def test_chat_claimed_turn_starts_context_reads_concurrently(
         session_id: str,
         limit: int | None = None,
         *,
+        user_id: str,
+        project_id: str,
         exclude_message_id: str | None = None,
     ) -> list[dict[str, object]]:
         assert session_id == "session-1"
         assert limit == 20
+        assert user_id == "user-1"
+        assert project_id == "project-1"
         assert exclude_message_id == f"turn--{DEFAULT_TURN_ID}--user"
         history_started.set()
         await release.wait()
@@ -5294,9 +5496,14 @@ async def test_chat_starts_context_reads_concurrently(
     async def blocked_history(
         session_id: str,
         limit: int | None = None,
+        *,
+        user_id: str,
+        project_id: str,
     ) -> list[dict[str, object]]:
         assert session_id == "session-1"
         assert limit == 20
+        assert user_id == "user-1"
+        assert project_id == "project-1"
         history_started.set()
         await release.wait()
         return []
