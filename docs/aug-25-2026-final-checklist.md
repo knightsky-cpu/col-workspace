@@ -75,9 +75,9 @@ source baseline produced by the preceding phase.
      [Phase 1 Remaining Work](superpowers/plans/2026-08-25-winning-core-phase-1-remaining-work.md)
    - Status: Pass 1A accepted for checkpoint; Passes 1B-1D pending approval.
 2. **Phase 2 - Governed Workspace Notes**
-   - Planned file:
-     `docs/superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md`
-   - Status: not created; pending Phase 1 acceptance and planning approval.
+   - Pending implementation plan:
+     [Phase 2 Governed Workspace Notes](superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md)
+   - Status: plan created; pending approval and documentation checkpoint.
 3. **Phase 3 - Durable Asynchronous Artifact Work**
    - Planned file:
      `docs/superpowers/plans/2026-08-25-winning-core-phase-3-async-artifact-work.md`
