@@ -11,7 +11,8 @@ from schemas import (
     ArtifactReference,
     ChatResponse,
     MemoryDecisionRequest,
-    MemoryProposalReceipt,
+    MemoryClarificationReceipt,
+    VersionedMemoryProposalReceipt,
 )
 
 
@@ -77,7 +78,12 @@ class ChatTurnClaim:
     lease_expires_at: datetime
     resumed: bool
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
-    precompleted_memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
+    precompleted_memory_proposals: tuple[
+        VersionedMemoryProposalReceipt, ...
+    ] = ()
+    precompleted_memory_clarifications: tuple[
+        MemoryClarificationReceipt, ...
+    ] = ()
     precompleted_artifacts: tuple[ArtifactReference, ...] = ()
     precompleted_artifact_feedback: tuple[
         ArtifactFeedbackReference, ...

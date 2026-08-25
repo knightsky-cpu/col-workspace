@@ -107,26 +107,37 @@ def test_supervisor_requires_clarification_for_multiple_memory_candidates(
 
     normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
 
-    assert "more than one eligible memory candidate" in normalized_instruction
-    assert "do not choose between them" in normalized_instruction
-    assert "do not call propose_memory_signal" in normalized_instruction
-    assert "which single candidate" in normalized_instruction
+    assert "more than one supported profile candidate" in normalized_instruction
+    assert "submit a clarify decision" in normalized_instruction
+    assert "do not choose for the user" in normalized_instruction
 
 
-def test_supervisor_requires_current_message_value_after_memory_clarification(
+def test_supervisor_allows_semantic_selection_after_memory_clarification(
 ) -> None:
     from supervisor import SUPERVISOR_INSTRUCTION
 
     normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
 
     assert "prior clarification" in normalized_instruction
-    assert "current message does not restate the exact value" in (
+    assert "semantic selection" in normalized_instruction
+    assert "does not need to restate the exact value" in normalized_instruction
+    assert "clarification_selection" in normalized_instruction
+    assert "ask the user to restate that exact value" not in (
         normalized_instruction
     )
-    assert "ask the user to restate that exact value" in (
-        normalized_instruction
-    )
-    assert "do not call propose_memory_signal" in normalized_instruction
+
+
+def test_supervisor_instruction_requires_receipt_driven_memory_truth() -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+
+    assert "completed proposal receipt" in normalized_instruction
+    assert "proposal was not created" in normalized_instruction
+    assert "session_only" in normalized_instruction
+    assert "workspace_note" in normalized_instruction
+    assert "unsupported" in normalized_instruction
+    assert "prohibited" in normalized_instruction
 
 
 def test_create_supervisor_app_registers_only_bounded_research_expert(

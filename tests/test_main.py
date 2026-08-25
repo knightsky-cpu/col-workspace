@@ -104,6 +104,8 @@ from schemas import (
     CitationReference,
     CollaborationProfile,
     MemoryDecisionRequest,
+    MemoryClarificationChoice,
+    MemoryClarificationReceipt,
     MemoryEvent,
     MemoryProposal,
     MemoryProposalReceipt,
@@ -245,6 +247,25 @@ def make_memory_proposal_receipt() -> MemoryProposalReceipt:
         category="response_length",
         proposed_value="concise",
         expires_at=MEMORY_NOW + timedelta(hours=24),
+    )
+
+
+def make_memory_clarification_receipt() -> MemoryClarificationReceipt:
+    return MemoryClarificationReceipt(
+        clarification_id="memory-clarification--clarification-1",
+        choices=[
+            MemoryClarificationChoice(
+                candidate_index=0,
+                category_label="Response length",
+                value_label="detailed",
+            ),
+            MemoryClarificationChoice(
+                candidate_index=1,
+                category_label="Explanation structure",
+                value_label="step by step",
+            ),
+        ],
+        expires_at=MEMORY_NOW + timedelta(minutes=15),
     )
 
 
@@ -3242,6 +3263,7 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
             "artifact_feedback": [],
             "citations": [],
             "memory_proposals": [],
+            "memory_clarifications": [],
             "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
@@ -3466,6 +3488,7 @@ async def test_chat_builds_turn_command_and_persists_both_messages(
             "artifact_feedback": [],
             "citations": [],
         "memory_proposals": [],
+        "memory_clarifications": [],
         "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
@@ -3552,6 +3575,33 @@ async def test_headerless_chat_returns_proposal_from_persisted_source_message(
     assert context.turn_lease is None
     assert context.precompleted_actions == ()
     assert context.precompleted_memory_proposals == ()
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_authoritative_memory_clarification_receipt(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    clarification = make_memory_clarification_receipt()
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="Which preference did you mean?",
+        memory_clarifications=(clarification,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Please remember that I prefer detailed guidance.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["memory_clarifications"] == [
+        clarification.model_dump(mode="json")
+    ]
 
 
 @pytest.mark.parametrize(
@@ -5117,6 +5167,36 @@ async def test_headerless_chat_returns_completed_effects_on_provider_failure(
         event[0] == "save" and event[2] == "model"
         for event in service_state.events
     )
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_clarification_on_responder_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    clarification = make_memory_clarification_receipt()
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private provider failure",
+        memory_clarifications=(clarification,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Please remember that I prefer detailed guidance.",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Agent_Col response failed after a completed action.",
+        "actions": [],
+        "memory_proposals": [],
+        "memory_clarifications": [clarification.model_dump(mode="json")],
+    }
 
 
 @pytest.mark.asyncio

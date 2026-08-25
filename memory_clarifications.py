@@ -10,7 +10,12 @@ from memory_policy import (
     MemoryCategoryV2,
     validate_memory_value_for_policy,
 )
-from schemas import IdentifierStr, StrictModel
+from schemas import (
+    IdentifierStr,
+    MemoryClarificationChoice,
+    MemoryClarificationReceipt,
+    StrictModel,
+)
 
 
 CLARIFICATION_SCHEMA_VERSION = "1.0"
@@ -137,21 +142,6 @@ class MemoryClarificationEnvelope(StrictModel):
 
 class MemoryClarificationSelection(StrictModel):
     selected_candidate_index: int = Field(ge=0, le=4)
-
-
-class MemoryClarificationChoice(StrictModel):
-    candidate_index: int = Field(ge=0, le=4)
-    category_label: str = Field(min_length=1, max_length=80)
-    value_label: str = Field(min_length=1, max_length=240)
-
-
-class MemoryClarificationReceipt(StrictModel):
-    clarification_id: IdentifierStr
-    choices: list[MemoryClarificationChoice] = Field(
-        min_length=2,
-        max_length=5,
-    )
-    expires_at: datetime
 
 
 def derive_memory_clarification_id(

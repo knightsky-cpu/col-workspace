@@ -13,6 +13,11 @@ from schemas import (
     ArtifactReference,
     ChatResponse,
     MemoryProposalReceipt,
+    MemoryProposalReceiptV2,
+)
+from memory_clarifications import (
+    MemoryClarificationChoice,
+    MemoryClarificationReceipt,
 )
 
 
@@ -149,6 +154,110 @@ def test_chat_turn_replay_carries_validated_response() -> None:
     replay = chat_turns.ChatTurnReplay(response=response)
 
     assert replay.response is response
+
+
+def test_chat_turn_contract_preserves_version_two_memory_receipts() -> None:
+    proposal = MemoryProposalReceiptV2(
+        proposal_id="development_environments--proposal-2",
+        category="development_environments",
+        proposed_value=["macos", "linux"],
+        policy_version="2.0",
+        expires_at=datetime(2026, 8, 26, 12, 0, tzinfo=UTC),
+    )
+    request = chat_turns.ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-2",
+        user_id="user-1",
+        message="Remember that I prefer macOS and Linux environments.",
+    )
+    claim = chat_turns.ChatTurnClaim(
+        request=request,
+        ids=derive_chat_turn_ids("request-2"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 25, 12, 2, tzinfo=UTC),
+        resumed=True,
+        precompleted_memory_proposals=(proposal,),
+    )
+    response = ChatResponse(
+        response="The proposal is pending your approval.",
+        actions=[
+            AgentActionReceipt(
+                action_name="propose_memory_signal",
+                status="completed",
+            )
+        ],
+        memory_proposals=[proposal],
+    )
+
+    assert claim.precompleted_memory_proposals == (proposal,)
+    assert response.memory_proposals == [proposal]
+    assert response.model_dump(mode="json")["memory_proposals"] == [
+        {
+            "proposal_id": "development_environments--proposal-2",
+            "category": "development_environments",
+            "proposed_value": ["macos", "linux"],
+            "policy_version": "2.0",
+            "expires_at": "2026-08-26T12:00:00Z",
+        }
+    ]
+
+
+def test_chat_turn_contract_preserves_memory_clarification_receipt() -> None:
+    clarification = MemoryClarificationReceipt(
+        clarification_id="memory-clarification--clarification-1",
+        choices=[
+            MemoryClarificationChoice(
+                candidate_index=0,
+                category_label="Response length",
+                value_label="detailed",
+            ),
+            MemoryClarificationChoice(
+                candidate_index=1,
+                category_label="Explanation structure",
+                value_label="step by step",
+            ),
+        ],
+        expires_at=datetime(2026, 8, 25, 12, 15, tzinfo=UTC),
+    )
+    request = chat_turns.ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-3",
+        user_id="user-1",
+        message="Remember that I prefer detailed explanations.",
+    )
+    claim = chat_turns.ChatTurnClaim(
+        request=request,
+        ids=derive_chat_turn_ids("request-3"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 25, 12, 2, tzinfo=UTC),
+        resumed=True,
+        precompleted_memory_clarifications=(clarification,),
+    )
+    response = ChatResponse(
+        response="Which preference did you mean?",
+        memory_clarifications=[clarification],
+    )
+
+    assert claim.precompleted_memory_clarifications == (clarification,)
+    assert response.memory_clarifications == [clarification]
+    assert response.model_dump(mode="json")["memory_clarifications"] == [
+        {
+            "clarification_id": "memory-clarification--clarification-1",
+            "choices": [
+                {
+                    "candidate_index": 0,
+                    "category_label": "Response length",
+                    "value_label": "detailed",
+                },
+                {
+                    "candidate_index": 1,
+                    "category_label": "Explanation structure",
+                    "value_label": "step by step",
+                },
+            ],
+            "expires_at": "2026-08-25T12:15:00Z",
+        }
+    ]
 
 
 def test_chat_turn_errors_have_distinct_runtime_types() -> None:

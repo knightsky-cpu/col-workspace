@@ -77,7 +77,8 @@ from schemas import (
     ArtifactReference,
     ArtifactFeedbackReference,
     CitationReference,
-    MemoryProposalReceipt,
+    MemoryClarificationReceipt,
+    VersionedMemoryProposalReceipt,
 )
 from source_expert import SourceExpertResult
 from supervisor_runtime import (
@@ -161,7 +162,12 @@ class AgentColTurnCommand:
     artifact_feedback_decision_present: bool = False
     turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
-    precompleted_memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
+    precompleted_memory_proposals: tuple[
+        VersionedMemoryProposalReceipt, ...
+    ] = ()
+    precompleted_memory_clarifications: tuple[
+        MemoryClarificationReceipt, ...
+    ] = ()
     precompleted_artifact_feedback: tuple[
         ArtifactFeedbackReference, ...
     ] = ()
@@ -175,7 +181,8 @@ class AgentColTurnResult:
     artifacts: tuple[ArtifactReference, ...] = ()
     artifact_feedback: tuple[ArtifactFeedbackReference, ...] = ()
     citations: tuple[CitationReference, ...] = ()
-    memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
+    memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = ()
+    memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
     adaptations: tuple[AdaptationReceipt, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
@@ -190,7 +197,8 @@ class AgentColTurnServiceError(RuntimeError):
         actions: tuple[AgentActionReceipt, ...] = (),
         artifacts: tuple[ArtifactReference, ...] = (),
         artifact_feedback: tuple[ArtifactFeedbackReference, ...] = (),
-        memory_proposals: tuple[MemoryProposalReceipt, ...] = (),
+        memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = (),
+        memory_clarifications: tuple[MemoryClarificationReceipt, ...] = (),
         adaptations: tuple[AdaptationReceipt, ...] = (),
         chat_turn_claim: ChatTurnClaim | None = None,
     ) -> None:
@@ -199,6 +207,7 @@ class AgentColTurnServiceError(RuntimeError):
         self.artifacts = artifacts
         self.artifact_feedback = artifact_feedback
         self.memory_proposals = memory_proposals
+        self.memory_clarifications = memory_clarifications
         self.adaptations = adaptations
         self.chat_turn_claim = chat_turn_claim
 
@@ -316,6 +325,9 @@ class AgentColTurnService:
                     else command.precompleted_artifact_feedback
                 ),
                 memory_proposals=command.precompleted_memory_proposals,
+                memory_clarifications=(
+                    command.precompleted_memory_clarifications
+                ),
                 chat_turn_claim=command.chat_turn_claim,
             ) from exc
 
@@ -353,6 +365,9 @@ class AgentColTurnService:
                 actions=claim.precompleted_actions,
                 artifact_feedback=claim.precompleted_artifact_feedback,
                 memory_proposals=claim.precompleted_memory_proposals,
+                memory_clarifications=(
+                    claim.precompleted_memory_clarifications
+                ),
                 chat_turn_claim=claim,
             ) from exc
         model_input_context = (
@@ -382,6 +397,9 @@ class AgentColTurnService:
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals
                         ),
+                        precompleted_memory_clarifications=(
+                            command.precompleted_memory_clarifications
+                        ),
                     )
                 )
         except SupervisorTimeoutError as exc:
@@ -392,6 +410,10 @@ class AgentColTurnService:
                 memory_proposals=_stable_merge(
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
+                ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
                 ),
                 chat_turn_claim=execution.claim,
             ) from exc
@@ -404,6 +426,10 @@ class AgentColTurnService:
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
                 ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
                 chat_turn_claim=execution.claim,
             ) from exc
         return AgentColTurnResult(
@@ -414,6 +440,10 @@ class AgentColTurnService:
             memory_proposals=_stable_merge(
                 command.precompleted_memory_proposals,
                 result.memory_proposals,
+            ),
+            memory_clarifications=_stable_merge(
+                command.precompleted_memory_clarifications,
+                result.memory_clarifications,
             ),
             chat_turn_claim=execution.claim,
         )
@@ -436,6 +466,8 @@ class AgentColTurnService:
             or claim.precompleted_actions != command.precompleted_actions
             or claim.precompleted_memory_proposals
             != command.precompleted_memory_proposals
+            or claim.precompleted_memory_clarifications
+            != command.precompleted_memory_clarifications
             or claim.precompleted_artifact_feedback
             != command.precompleted_artifact_feedback
         ):
@@ -500,6 +532,9 @@ class AgentColTurnService:
                 actions=claim.precompleted_actions,
                 artifacts=claim.precompleted_artifacts,
                 memory_proposals=claim.precompleted_memory_proposals,
+                memory_clarifications=(
+                    claim.precompleted_memory_clarifications
+                ),
                 chat_turn_claim=claim,
             ) from exc
         except (
@@ -511,6 +546,9 @@ class AgentColTurnService:
                 actions=claim.precompleted_actions,
                 artifacts=claim.precompleted_artifacts,
                 memory_proposals=claim.precompleted_memory_proposals,
+                memory_clarifications=(
+                    claim.precompleted_memory_clarifications
+                ),
                 chat_turn_claim=claim,
             ) from exc
 
@@ -574,6 +612,9 @@ class AgentColTurnService:
                 actions=claim.precompleted_actions,
                 artifacts=claim.precompleted_artifacts,
                 memory_proposals=claim.precompleted_memory_proposals,
+                memory_clarifications=(
+                    claim.precompleted_memory_clarifications
+                ),
                 chat_turn_claim=claim,
             ) from exc
 
@@ -603,6 +644,9 @@ class AgentColTurnService:
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals
                         ),
+                        precompleted_memory_clarifications=(
+                            command.precompleted_memory_clarifications
+                        ),
                     )
                 )
         except SupervisorTimeoutError as exc:
@@ -616,6 +660,10 @@ class AgentColTurnService:
                 memory_proposals=_stable_merge(
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
+                ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
                 ),
                 adaptations=execution.adaptations,
                 chat_turn_claim=execution.claim,
@@ -632,6 +680,10 @@ class AgentColTurnService:
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
                 ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
                 adaptations=execution.adaptations,
                 chat_turn_claim=execution.claim,
             ) from exc
@@ -643,6 +695,10 @@ class AgentColTurnService:
             memory_proposals=_stable_merge(
                 command.precompleted_memory_proposals,
                 result.memory_proposals,
+            ),
+            memory_clarifications=_stable_merge(
+                command.precompleted_memory_clarifications,
+                result.memory_clarifications,
             ),
             adaptations=execution.adaptations,
             chat_turn_claim=execution.claim,
@@ -665,6 +721,8 @@ class AgentColTurnService:
             != command.precompleted_actions
             or claim.precompleted_memory_proposals
             != command.precompleted_memory_proposals
+            or claim.precompleted_memory_clarifications
+            != command.precompleted_memory_clarifications
         ):
             raise AgentColTurnServiceError(
                 "Agent_Col artifact claim is inconsistent."
@@ -721,6 +779,9 @@ class AgentColTurnService:
                     memory_proposals=(
                         command.precompleted_memory_proposals
                     ),
+                    memory_clarifications=(
+                        command.precompleted_memory_clarifications
+                    ),
                 ) from exc
             except (
                 AgentColRoutingV3ProviderError,
@@ -740,6 +801,9 @@ class AgentColTurnService:
                     actions=command.precompleted_actions,
                     memory_proposals=(
                         command.precompleted_memory_proposals
+                    ),
+                    memory_clarifications=(
+                        command.precompleted_memory_clarifications
                     ),
                 ) from exc
         expert_routes = {
@@ -786,6 +850,9 @@ class AgentColTurnService:
                         memory_proposals=(
                             command.precompleted_memory_proposals
                         ),
+                        memory_clarifications=(
+                            command.precompleted_memory_clarifications
+                        ),
                     ) from exc
         else:
             try:
@@ -806,6 +873,9 @@ class AgentColTurnService:
                     actions=command.precompleted_actions,
                     memory_proposals=(
                         command.precompleted_memory_proposals
+                    ),
+                    memory_clarifications=(
+                        command.precompleted_memory_clarifications
                     ),
                 ) from exc
         model_input_context = (
@@ -830,6 +900,9 @@ class AgentColTurnService:
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals
                         ),
+                        precompleted_memory_clarifications=(
+                            command.precompleted_memory_clarifications
+                        ),
                     )
                 )
         except SupervisorTimeoutError as exc:
@@ -848,6 +921,10 @@ class AgentColTurnService:
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
                 ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
             ) from exc
         except SupervisorRuntimeError as exc:
             logger.error(
@@ -865,6 +942,10 @@ class AgentColTurnService:
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
                 ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
             ) from exc
         return AgentColTurnResult(
             response=result.response,
@@ -881,6 +962,10 @@ class AgentColTurnService:
             memory_proposals=_stable_merge(
                 command.precompleted_memory_proposals,
                 result.memory_proposals,
+            ),
+            memory_clarifications=_stable_merge(
+                command.precompleted_memory_clarifications,
+                result.memory_clarifications,
             ),
         )
 

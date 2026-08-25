@@ -65,6 +65,53 @@ def pending_function_response(
     )
 
 
+def pending_v2_function_response() -> types.FunctionResponse:
+    return types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "pending",
+            "action": {
+                "action_name": "propose_memory_signal",
+                "status": "completed",
+            },
+            "memory_proposal": {
+                "proposal_id": "development_environments--proposal-2",
+                "category": "development_environments",
+                "proposed_value": ["macos", "linux"],
+                "policy_version": "2.0",
+                "expires_at": "2026-08-26T16:00:00Z",
+            },
+        },
+    )
+
+
+def clarification_function_response() -> types.FunctionResponse:
+    return types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "clarification_required",
+            "memory_clarification": {
+                "clarification_id": (
+                    "memory-clarification--clarification-1"
+                ),
+                "choices": [
+                    {
+                        "candidate_index": 0,
+                        "category_label": "Response length",
+                        "value_label": "detailed",
+                    },
+                    {
+                        "candidate_index": 1,
+                        "category_label": "Explanation structure",
+                        "value_label": "step by step",
+                    },
+                ],
+                "expires_at": "2026-08-25T16:15:00Z",
+            },
+        },
+    )
+
+
 @dataclass
 class FakeRunner:
     events: list[object]
@@ -171,6 +218,7 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
         "session_id": "session-1",
         "user_id": "user-1",
         "memory_user_id": "user-1",
+        "memory_workspace_id": "project-1",
         "memory_session_id": "session-1",
         "memory_source_message_id": "turn--source-message--user",
         "memory_source_message_text": (
@@ -180,6 +228,90 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
             "artifact_feedback_decision_present": False,
             "memory_turn_id": "a" * 64,
         "memory_turn_owner_token": "owner-token-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_turn_collects_version_two_proposal_receipt_truthfully(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [pending_v2_function_response()]),
+                FakeEvent(
+                    "That preference is pending your approval.",
+                    True,
+                ),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember that I prefer macOS and Linux environments.",
+        )
+    )
+
+    assert result.response == "That preference is pending your approval."
+    assert result.memory_proposals[0].model_dump(mode="json") == {
+        "proposal_id": "development_environments--proposal-2",
+        "category": "development_environments",
+        "proposed_value": ["macos", "linux"],
+        "policy_version": "2.0",
+        "expires_at": "2026-08-26T16:00:00Z",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_turn_collects_memory_clarification_receipt_truthfully(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [clarification_function_response()]),
+                FakeEvent(
+                    "Which preference would you like me to remember?",
+                    True,
+                ),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember that I prefer detailed explanations.",
+        )
+    )
+
+    assert result.memory_proposals == ()
+    assert len(result.memory_clarifications) == 1
+    assert result.memory_clarifications[0].model_dump(mode="json") == {
+        "clarification_id": "memory-clarification--clarification-1",
+        "choices": [
+            {
+                "candidate_index": 0,
+                "category_label": "Response length",
+                "value_label": "detailed",
+            },
+            {
+                "candidate_index": 1,
+                "category_label": "Explanation structure",
+                "value_label": "step by step",
+            },
+        ],
+        "expires_at": "2026-08-25T16:15:00Z",
     }
 
 

@@ -1,13 +1,28 @@
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from database import MemoryEngine
+from memory_candidate_decisions import (
+    ClarifyDecision,
+    NaturalMemoryDecision,
+    NoMemoryDecision,
+    ProfileCandidateDecision,
+    validate_decision_evidence,
+)
+from memory_clarifications import (
+    MemoryClarificationEnvelope,
+    MemoryClarificationReceipt,
+    MemoryClarificationSelection,
+    clarification_receipt,
+    derive_memory_clarification_id,
+)
 from memory_proposals import (
     ProposalTurnLease,
     derive_proposal_origin_ids,
+    derive_proposal_origin_ids_v2,
 )
 from memory_policy import (
     MEMORY_CATEGORY_ORDER,
@@ -23,6 +38,7 @@ from schemas import (
     MemoryEvent,
     MemoryProposal,
     MemoryProposalReceipt,
+    MemoryProposalReceiptV2,
 )
 
 
@@ -77,6 +93,21 @@ class ProposeMemorySignalCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class NaturalMemoryCommand:
+    """Describe one semantic memory decision with server-owned provenance."""
+
+    user_id: str
+    workspace_id: str
+    session_id: str
+    source_message_id: str
+    source_message_text: str
+    memory_decision_present: bool
+    decision: NaturalMemoryDecision
+    clarification_selection: MemoryClarificationSelection | None = None
+    turn_lease: ProposalTurnLease | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TrustedMemoryMutationResult:
     """Return a completed deterministic memory action and profile."""
 
@@ -90,6 +121,30 @@ class TrustedMemoryProposalResult:
 
     action: AgentActionReceipt
     proposal: MemoryProposalReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class NaturalMemoryProposalResult:
+    """Return an application-owned pending version-2 proposal receipt."""
+
+    status: str
+    action: AgentActionReceipt
+    proposal: MemoryProposalReceiptV2
+
+
+@dataclass(frozen=True, slots=True)
+class NaturalMemoryClarificationResult:
+    """Return an application-owned clarification receipt."""
+
+    status: str
+    clarification: MemoryClarificationReceipt
+
+
+@dataclass(frozen=True, slots=True)
+class NaturalMemoryNoEffectResult:
+    """Return a truthful non-persistent semantic memory outcome."""
+
+    status: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +262,147 @@ class TrustedMemoryService:
                 expires_at=stored.expires_at,
             ),
         )
+
+    async def handle_natural_memory_decision(
+        self,
+        command: NaturalMemoryCommand,
+    ) -> (
+        NaturalMemoryProposalResult
+        | NaturalMemoryClarificationResult
+        | NaturalMemoryNoEffectResult
+    ):
+        """Validate one semantic decision before its version-2 effect."""
+        self._validate_identifier(command.user_id, "user_id")
+        self._validate_identifier(command.workspace_id, "workspace_id")
+        self._validate_identifier(command.session_id, "session_id")
+        self._validate_identifier(
+            command.source_message_id,
+            "source_message_id",
+        )
+        if (
+            not isinstance(command.source_message_text, str)
+            or not command.source_message_text.strip()
+        ):
+            raise ValueError("source_message_text must be non-empty.")
+        if type(command.memory_decision_present) is not bool:
+            raise ValueError("memory_decision_present must be a boolean.")
+        if command.memory_decision_present:
+            raise ValueError(
+                "A memory-decision turn cannot create a new proposal."
+            )
+        if command.clarification_selection is not None:
+            if not isinstance(command.decision, NoMemoryDecision):
+                raise ValueError(
+                    "A clarification selection cannot create another "
+                    "memory decision."
+                )
+            if command.turn_lease is None:
+                raise ValueError(
+                    "A clarification selection requires retry-safe turn "
+                    "ownership."
+                )
+            observed_at = self._clock()
+            stored = (
+                await self._database
+                .consume_memory_clarification_to_proposal_v2(
+                    user_id=command.user_id,
+                    workspace_id=command.workspace_id,
+                    session_id=command.session_id,
+                    source_message_id=command.source_message_id,
+                    selection=command.clarification_selection,
+                    observed_at=observed_at,
+                    turn_lease=command.turn_lease,
+                )
+            )
+            return NaturalMemoryProposalResult(
+                status="pending",
+                action=AgentActionReceipt(
+                    action_name="propose_memory_signal",
+                    status="completed",
+                ),
+                proposal=MemoryProposalReceiptV2(
+                    proposal_id=stored.proposal_id,
+                    category=stored.category,
+                    proposed_value=stored.proposed_value,
+                    expires_at=stored.expires_at,
+                ),
+            )
+        validate_decision_evidence(
+            command.decision,
+            command.source_message_text,
+        )
+        if isinstance(command.decision, ProfileCandidateDecision):
+            origin_ids = derive_proposal_origin_ids_v2(
+                command.user_id,
+                command.session_id,
+                command.source_message_id,
+                command.decision.category,
+            )
+            observed_at = self._clock()
+            stored = await self._database.create_guarded_memory_proposal_v2(
+                user_id=command.user_id,
+                session_id=command.session_id,
+                source_message_id=command.source_message_id,
+                evidence_message_id=command.source_message_id,
+                clarification_id=None,
+                origin_ids=origin_ids,
+                category=command.decision.category,
+                proposed_value=command.decision.canonical_value,
+                observed_at=observed_at,
+                turn_lease=command.turn_lease,
+            )
+            return NaturalMemoryProposalResult(
+                status="pending",
+                action=AgentActionReceipt(
+                    action_name="propose_memory_signal",
+                    status="completed",
+                ),
+                proposal=MemoryProposalReceiptV2(
+                    proposal_id=stored.proposal_id,
+                    category=stored.category,
+                    proposed_value=stored.proposed_value,
+                    expires_at=stored.expires_at,
+                ),
+            )
+        if isinstance(command.decision, ClarifyDecision):
+            if command.turn_lease is None:
+                raise ValueError(
+                    "A clarification requires retry-safe turn ownership."
+                )
+            observed_at = self._clock()
+            envelope = MemoryClarificationEnvelope(
+                clarification_id=derive_memory_clarification_id(
+                    user_id=command.user_id,
+                    session_id=command.session_id,
+                    evidence_message_id=command.source_message_id,
+                    clarification_turn_id=command.turn_lease.turn_id,
+                ),
+                user_id=command.user_id,
+                session_id=command.session_id,
+                workspace_id=command.workspace_id,
+                evidence_message_id=command.source_message_id,
+                clarification_turn_id=command.turn_lease.turn_id,
+                candidates=[
+                    {
+                        "category": candidate.category,
+                        "canonical_value": candidate.canonical_value,
+                    }
+                    for candidate in command.decision.candidates
+                ],
+                created_at=observed_at,
+                expires_at=observed_at + timedelta(minutes=15),
+                status="open",
+            )
+            stored = await self._database.create_memory_clarification(
+                envelope=envelope,
+                observed_at=observed_at,
+                turn_lease=command.turn_lease,
+            )
+            return NaturalMemoryClarificationResult(
+                status="clarification_required",
+                clarification=clarification_receipt(stored),
+            )
+        return NaturalMemoryNoEffectResult(status=command.decision.kind)
 
     async def decide_memory_proposal(
         self,

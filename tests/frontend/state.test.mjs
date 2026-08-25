@@ -481,7 +481,7 @@ test("receipt refresh selector is driven by structured fields", () => {
     selectNeedsReceiptRefresh({ response: "I created a blueprint in prose." }),
     {
       work: false,
-      memory: false,
+      memory: true,
     },
   );
 });

@@ -16,6 +16,7 @@ from expert_delegation import (
 )
 from memory_proposals import ProposalTurnLease
 from memory_proposal_tool import (
+    ClarificationMemoryProposalToolResponse,
     PendingMemoryProposalToolResponse,
     parse_memory_proposal_tool_response,
 )
@@ -24,7 +25,8 @@ from schemas import (
     AgentActionReceipt,
     ArtifactReference,
     CitationReference,
-    MemoryProposalReceipt,
+    MemoryClarificationReceipt,
+    VersionedMemoryProposalReceipt,
 )
 from supervisor import SUPERVISOR_APP_NAME
 from source_expert_runtime import SourceExpertTurnTracker
@@ -43,11 +45,13 @@ class SupervisorRuntimeError(RuntimeError):
         message: str,
         *,
         actions: tuple[AgentActionReceipt, ...] = (),
-        memory_proposals: tuple[MemoryProposalReceipt, ...] = (),
+        memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = (),
+        memory_clarifications: tuple[MemoryClarificationReceipt, ...] = (),
     ) -> None:
         super().__init__(message)
         self.actions = actions
         self.memory_proposals = memory_proposals
+        self.memory_clarifications = memory_clarifications
 
 
 class SupervisorTimeoutError(SupervisorRuntimeError):
@@ -66,7 +70,12 @@ class SupervisorTurnContext:
     artifact_feedback_decision_present: bool = False
     turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
-    precompleted_memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
+    precompleted_memory_proposals: tuple[
+        VersionedMemoryProposalReceipt, ...
+    ] = ()
+    precompleted_memory_clarifications: tuple[
+        MemoryClarificationReceipt, ...
+    ] = ()
 
 
 @dataclass(frozen=True)
@@ -75,7 +84,8 @@ class SupervisorTurnResult:
     actions: tuple[AgentActionReceipt, ...] = ()
     artifacts: tuple[ArtifactReference, ...] = ()
     citations: tuple[CitationReference, ...] = ()
-    memory_proposals: tuple[MemoryProposalReceipt, ...] = ()
+    memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = ()
+    memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
 
 
 class SupervisorRuntime:
@@ -116,6 +126,9 @@ class SupervisorRuntime:
         actions = list(context.precompleted_actions)
         citations: list[CitationReference] = []
         memory_proposals = list(context.precompleted_memory_proposals)
+        memory_clarifications = list(
+            context.precompleted_memory_clarifications
+        )
         delegation_budget = ExpertDelegationBudget()
         delegation_token = self._delegation_registry.register_turn(
             budget=delegation_budget,
@@ -125,7 +138,11 @@ class SupervisorRuntime:
             budget=delegation_budget
         )
         source_tracker = SourceExpertTurnTracker()
-        self._validate_proposal_effects(actions, memory_proposals)
+        self._validate_memory_effects(
+            actions,
+            memory_proposals,
+            memory_clarifications,
+        )
         try:
             async with asyncio.timeout(SUPERVISOR_TIMEOUT_SECONDS):
                 session_state: dict[str, object] = {
@@ -138,6 +155,7 @@ class SupervisorRuntime:
                     session_state.update(
                         {
                             "memory_user_id": context.user_id,
+                            "memory_workspace_id": context.project_id,
                             "memory_session_id": context.session_id,
                             "memory_source_message_id": (
                                 context.source_message_id
@@ -171,6 +189,7 @@ class SupervisorRuntime:
                 operational_context = self._precompleted_effect_context(
                     actions,
                     memory_proposals,
+                    memory_clarifications,
                 )
                 if operational_context is not None:
                     model_input_context.append(operational_context)
@@ -221,6 +240,38 @@ class SupervisorRuntime:
                                     "proposal receipts.",
                                     actions=tuple(actions),
                                     memory_proposals=tuple(memory_proposals),
+                                    memory_clarifications=tuple(
+                                        memory_clarifications
+                                    ),
+                                )
+                        elif isinstance(
+                            parsed,
+                            ClarificationMemoryProposalToolResponse,
+                        ):
+                            if memory_proposals:
+                                raise SupervisorRuntimeError(
+                                    "Agent_Col produced conflicting memory "
+                                    "proposal and clarification receipts.",
+                                    actions=tuple(actions),
+                                    memory_proposals=tuple(memory_proposals),
+                                    memory_clarifications=tuple(
+                                        memory_clarifications
+                                    ),
+                                )
+                            if not memory_clarifications:
+                                memory_clarifications.append(
+                                    parsed.memory_clarification
+                                )
+                            elif memory_clarifications != [
+                                parsed.memory_clarification
+                            ]:
+                                raise SupervisorRuntimeError(
+                                    "Agent_Col produced conflicting memory "
+                                    "clarification receipts.",
+                                    actions=tuple(actions),
+                                    memory_clarifications=tuple(
+                                        memory_clarifications
+                                    ),
                                 )
                     if (
                         getattr(event, "author", "Agent_Col") == "Agent_Col"
@@ -240,12 +291,14 @@ class SupervisorRuntime:
                         "Agent_Col did not produce exactly one final response.",
                         actions=tuple(actions),
                         memory_proposals=tuple(memory_proposals),
+                        memory_clarifications=tuple(memory_clarifications),
                     )
                 return SupervisorTurnResult(
                     response=final_responses[0],
                     actions=tuple(actions),
                     citations=tuple(citations),
                     memory_proposals=tuple(memory_proposals),
+                    memory_clarifications=tuple(memory_clarifications),
                 )
         except TimeoutError as exc:
             logger.error(
@@ -256,6 +309,7 @@ class SupervisorRuntime:
                 "Agent_Col invocation timed out.",
                 actions=tuple(actions),
                 memory_proposals=tuple(memory_proposals),
+                memory_clarifications=tuple(memory_clarifications),
             ) from exc
         except SupervisorRuntimeError:
             raise
@@ -268,6 +322,7 @@ class SupervisorRuntime:
                 "Agent_Col invocation failed.",
                 actions=tuple(actions),
                 memory_proposals=tuple(memory_proposals),
+                memory_clarifications=tuple(memory_clarifications),
             ) from exc
         finally:
             try:
@@ -283,9 +338,10 @@ class SupervisorRuntime:
                 )
 
     @staticmethod
-    def _validate_proposal_effects(
+    def _validate_memory_effects(
         actions: list[AgentActionReceipt],
-        memory_proposals: list[MemoryProposalReceipt],
+        memory_proposals: list[VersionedMemoryProposalReceipt],
+        memory_clarifications: list[MemoryClarificationReceipt],
     ) -> None:
         proposal_actions = [
             action
@@ -294,6 +350,8 @@ class SupervisorRuntime:
         ]
         if (
             len(memory_proposals) > 1
+            or len(memory_clarifications) > 1
+            or bool(memory_proposals) and bool(memory_clarifications)
             or bool(proposal_actions) != bool(memory_proposals)
             or (memory_proposals and len(proposal_actions) != 1)
         ):
@@ -304,9 +362,10 @@ class SupervisorRuntime:
     @staticmethod
     def _precompleted_effect_context(
         actions: list[AgentActionReceipt],
-        memory_proposals: list[MemoryProposalReceipt],
+        memory_proposals: list[VersionedMemoryProposalReceipt],
+        memory_clarifications: list[MemoryClarificationReceipt],
     ) -> types.Content | None:
-        if not actions:
+        if not actions and not memory_clarifications:
             return None
         payload = {
             "actions": [
@@ -315,6 +374,10 @@ class SupervisorRuntime:
             "memory_proposals": [
                 proposal.model_dump(mode="json")
                 for proposal in memory_proposals
+            ],
+            "memory_clarifications": [
+                clarification.model_dump(mode="json")
+                for clarification in memory_clarifications
             ],
         }
         text = (

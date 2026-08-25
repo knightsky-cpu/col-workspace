@@ -8,7 +8,11 @@ from google.api_core.exceptions import ServiceUnavailable
 from google.cloud import firestore
 
 from database import MemoryEngine, MemoryEngineError
-from memory_proposals import ProposalTurnLease, derive_proposal_origin_ids
+from memory_proposals import (
+    ProposalTurnLease,
+    derive_proposal_origin_ids,
+    derive_proposal_origin_ids_v2,
+)
 
 
 NOW = datetime(2026, 8, 21, 15, 0, tzinfo=UTC)
@@ -642,6 +646,109 @@ async def test_guarded_proposal_records_owned_turn_effect_atomically(
         },
         merge=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_guarded_v2_proposal_persists_provenance_and_turn_effect_atomically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store = guarded_store()
+    turn_id = "b" * 64
+    source_message_id = f"turn--{turn_id}--user"
+    store.origin.get = AsyncMock(return_value=snapshot(exists=False))
+    store.proposal.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user.get = AsyncMock(return_value=snapshot(exists=False))
+    store.turn.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=stored_turn_document(
+                turn_id=turn_id,
+                source_message_id=source_message_id,
+            ),
+        )
+    )
+    ids = derive_proposal_origin_ids_v2(
+        "user-1",
+        "session-1",
+        source_message_id,
+        "development_environments",
+    )
+
+    result = await MemoryEngine(
+        store.client
+    ).create_guarded_memory_proposal_v2(
+        user_id="user-1",
+        session_id="session-1",
+        source_message_id=source_message_id,
+        evidence_message_id=source_message_id,
+        clarification_id=None,
+        origin_ids=ids,
+        category="development_environments",
+        proposed_value=["linux", "macos"],
+        observed_at=NOW,
+        turn_lease=ProposalTurnLease(
+            turn_id=turn_id,
+            owner_token="owner-1",
+        ),
+    )
+
+    assert result.policy_version == "2.0"
+    assert result.evidence_message_id == source_message_id
+    assert store.transaction.set.call_args_list == [
+        call(
+            store.proposal,
+            {
+                "proposal_id": ids.proposal_id,
+                "category": "development_environments",
+                "proposed_value": ["macos", "linux"],
+                "expected_signal_id": None,
+                "policy_version": "2.0",
+                "status": "pending",
+                "source_session_id": "session-1",
+                "source_message_id": source_message_id,
+                "evidence_message_id": source_message_id,
+                "clarification_id": None,
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "expires_at": NOW + timedelta(hours=24),
+            },
+        ),
+        call(
+            store.origin,
+            {
+                "schema_version": "2.0",
+                "proposal_id": ids.proposal_id,
+                "category": "development_environments",
+                "source_session_id": "session-1",
+                "source_message_id": source_message_id,
+                "evidence_message_id": source_message_id,
+                "clarification_id": None,
+                "created_at": firestore.SERVER_TIMESTAMP,
+            },
+        ),
+        call(
+            store.turn,
+            {
+                "actions": [
+                    {
+                        "action_name": "propose_memory_signal",
+                        "status": "completed",
+                    }
+                ],
+                "memory_proposals": [
+                    {
+                        "proposal_id": ids.proposal_id,
+                        "category": "development_environments",
+                        "proposed_value": ["macos", "linux"],
+                        "policy_version": "2.0",
+                        "expires_at": NOW + timedelta(hours=24),
+                    }
+                ],
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        ),
+    ]
 
 
 @pytest.mark.asyncio

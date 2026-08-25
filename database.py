@@ -34,22 +34,30 @@ from chat_turns import (
 )
 from memory_policy import (
     MEMORY_CATEGORY_ORDER,
+    MEMORY_CATEGORY_ORDER_V2,
     ConfirmationChannel,
     MemoryCategory,
+    MemoryCategoryV2,
     MemoryValue,
     validate_memory_value,
+    validate_memory_value_for_policy,
 )
 from memory_clarifications import (
     MemoryClarificationEnvelope,
     MemoryClarificationReceipt,
+    MemoryClarificationSelection,
     clarification_receipt,
     derive_memory_clarification_id,
+    validate_memory_clarification_selection,
 )
 from memory_proposals import (
     PROPOSAL_ORIGIN_SCHEMA_VERSION,
+    PROPOSAL_ORIGIN_SCHEMA_VERSION_V2,
     ProposalOriginIds,
     ProposalTurnLease,
     derive_proposal_origin_ids,
+    derive_proposal_origin_ids_v2,
+    parse_proposal_origin,
     proposal_origin_id_from_signal_id,
 )
 from schemas import (
@@ -68,14 +76,22 @@ from schemas import (
     ChatSessionListResponse,
     ChatSessionSummary,
     CollaborationProfile,
+    CollaborationProfileV2,
     MemoryEvent,
     MemoryDecisionRequest,
     MemoryProposal,
     MemoryProposalReceipt,
+    MemoryProposalReceiptV2,
+    MemoryProposalV2,
     SingleFileArtifact,
     WorkspaceCreateRequest,
     WorkspaceListResponse,
     WorkspaceSummary,
+    VersionedCollaborationProfile,
+    VersionedMemoryProposal,
+    VersionedMemoryProposalReceipt,
+    parse_collaboration_profile,
+    project_collaboration_profile_v2,
 )
 
 
@@ -743,6 +759,9 @@ class MemoryEngine:
                         precompleted_actions,
                     )
                 )
+                precompleted_clarifications = (
+                    self._chat_turn_memory_clarifications(turn_data)
+                )
                 resumed_claim = ChatTurnClaim(
                     request=request,
                     ids=ids,
@@ -751,6 +770,9 @@ class MemoryEngine:
                     resumed=True,
                     precompleted_actions=precompleted_actions,
                     precompleted_memory_proposals=precompleted_proposals,
+                    precompleted_memory_clarifications=(
+                        precompleted_clarifications
+                    ),
                     precompleted_artifacts=precompleted_artifacts,
                     precompleted_artifact_feedback=(
                         precompleted_feedback
@@ -1028,11 +1050,15 @@ class MemoryEngine:
                 turn_data,
                 stored_actions,
             )
+            stored_clarifications = (
+                self._chat_turn_memory_clarifications(turn_data)
+            )
             released_claim = replace(
                 claim,
                 lease_expires_at=min(stored_expiry, observed_at),
                 precompleted_actions=stored_actions,
                 precompleted_memory_proposals=stored_proposals,
+                precompleted_memory_clarifications=stored_clarifications,
                 precompleted_artifacts=stored_artifacts,
                 precompleted_artifact_feedback=stored_feedback,
             )
@@ -1917,6 +1943,7 @@ class MemoryEngine:
                         response.response
                     ),
                     "last_message_role": "model",
+                    "last_completed_turn_id": claim.ids.turn_id,
                 },
                 merge=True,
             )
@@ -2075,6 +2102,7 @@ class MemoryEngine:
             raise ValueError("claim metadata is invalid.")
         actions = claim.precompleted_actions
         proposals = claim.precompleted_memory_proposals
+        clarifications = claim.precompleted_memory_clarifications
         artifacts = claim.precompleted_artifacts
         feedback = claim.precompleted_artifact_feedback
         if (
@@ -2084,7 +2112,10 @@ class MemoryEngine:
             )
             or not isinstance(proposals, tuple)
             or not all(
-                isinstance(proposal, MemoryProposalReceipt)
+                isinstance(
+                    proposal,
+                    (MemoryProposalReceipt, MemoryProposalReceiptV2),
+                )
                 for proposal in proposals
             )
             or not isinstance(artifacts, tuple)
@@ -2097,6 +2128,11 @@ class MemoryEngine:
                 isinstance(item, ArtifactFeedbackReference)
                 for item in feedback
             )
+            or not isinstance(clarifications, tuple)
+            or not all(
+                isinstance(item, MemoryClarificationReceipt)
+                for item in clarifications
+            )
         ):
             raise ValueError("claim effects are invalid.")
         proposal_actions = tuple(
@@ -2106,6 +2142,8 @@ class MemoryEngine:
         )
         if (
             len(proposals) > 1
+            or len(clarifications) > 1
+            or bool(proposals) and bool(clarifications)
             or bool(proposal_actions) != bool(proposals)
             or (proposals and len(proposal_actions) != 1)
         ):
@@ -2214,6 +2252,9 @@ class MemoryEngine:
         actions, memory_proposals, artifacts = self._chat_turn_effects(
             turn_data
         )
+        memory_clarifications = self._chat_turn_memory_clarifications(
+            turn_data
+        )
         artifact_feedback = self._chat_turn_feedback_effects(
             turn_data,
             actions,
@@ -2226,6 +2267,7 @@ class MemoryEngine:
                 artifact_feedback=list(artifact_feedback),
                 citations=turn_data.get("citations", []),
                 memory_proposals=list(memory_proposals),
+                memory_clarifications=list(memory_clarifications),
                 adaptations=turn_data.get("adaptations", []),
             )
         except (ValidationError, TypeError, ValueError) as exc:
@@ -2239,7 +2281,7 @@ class MemoryEngine:
         turn_data: Mapping[str, object],
     ) -> tuple[
         tuple[AgentActionReceipt, ...],
-        tuple[MemoryProposalReceipt, ...],
+        tuple[VersionedMemoryProposalReceipt, ...],
         tuple[ArtifactReference, ...],
     ]:
         stored_actions = turn_data.get("actions", [])
@@ -2256,7 +2298,7 @@ class MemoryEngine:
                 for item in stored_actions
             )
             proposals = tuple(
-                MemoryProposalReceipt.model_validate(item)
+                MemoryEngine._proposal_receipt_from_document(item)
                 for item in stored_proposals
             )
             artifacts = tuple(
@@ -2312,6 +2354,38 @@ class MemoryEngine:
         ):
             raise ChatTurnStateError("Stored chat turn effects are invalid.")
         return actions, proposals, artifacts
+
+    @staticmethod
+    def _chat_turn_memory_clarifications(
+        turn_data: Mapping[str, object],
+    ) -> tuple[MemoryClarificationReceipt, ...]:
+        stored_clarifications = turn_data.get(
+            "memory_clarifications",
+            [],
+        )
+        if not isinstance(stored_clarifications, list):
+            raise ChatTurnStateError(
+                "Stored chat turn clarification effects are invalid."
+            )
+        try:
+            clarifications = tuple(
+                MemoryClarificationReceipt.model_validate(item)
+                for item in stored_clarifications
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn clarification effects are invalid."
+            ) from exc
+        if len(clarifications) > 1:
+            raise ChatTurnStateError(
+                "Stored chat turn clarification effects are invalid."
+            )
+        stored_proposals = turn_data.get("memory_proposals", [])
+        if clarifications and stored_proposals:
+            raise ChatTurnStateError(
+                "Stored chat turn contains conflicting memory effects."
+            )
+        return clarifications
 
     @staticmethod
     def _artifact_matches_chat_turn_effect(
@@ -2416,10 +2490,14 @@ class MemoryEngine:
             turn_data,
             stored_actions,
         )
+        stored_clarifications = cls._chat_turn_memory_clarifications(
+            turn_data
+        )
         response_actions = tuple(response.actions)
         response_proposals = tuple(response.memory_proposals)
         response_artifacts = tuple(response.artifacts)
         response_feedback = tuple(response.artifact_feedback)
+        response_clarifications = tuple(response.memory_clarifications)
         stored_proposal_actions = tuple(
             action
             for action in stored_actions
@@ -2435,6 +2513,7 @@ class MemoryEngine:
             or stored_proposals != response_proposals
             or stored_artifacts != response_artifacts
             or stored_feedback != response_feedback
+            or stored_clarifications != response_clarifications
         ):
             raise ChatTurnStateError(
                 "Completed response conflicts with stored turn effects."
@@ -4007,6 +4086,507 @@ class MemoryEngine:
                 exc,
             )
 
+    async def create_guarded_memory_proposal_v2(
+        self,
+        *,
+        user_id: str,
+        session_id: str,
+        source_message_id: str,
+        evidence_message_id: str,
+        clarification_id: str | None,
+        origin_ids: ProposalOriginIds,
+        category: MemoryCategoryV2,
+        proposed_value: object,
+        observed_at: datetime,
+        turn_lease: ProposalTurnLease | None,
+    ) -> MemoryProposalV2:
+        """Atomically create one version-2 source-grounded proposal."""
+        self._validate_memory_user_id(user_id)
+        for field_name, value in (
+            ("session_id", session_id),
+            ("source_message_id", source_message_id),
+            ("evidence_message_id", evidence_message_id),
+        ):
+            self._validate_memory_identifier(value, field_name)
+        if clarification_id is not None:
+            self._validate_memory_identifier(clarification_id, "clarification_id")
+        if category not in MEMORY_CATEGORY_ORDER_V2:
+            raise ValueError("category must be a governed memory category.")
+        normalized_value = validate_memory_value_for_policy(
+            "2.0", category, proposed_value
+        )
+        expected_ids = derive_proposal_origin_ids_v2(
+            user_id, session_id, source_message_id, category
+        )
+        if origin_ids != expected_ids:
+            raise ValueError("origin_ids must match the proposal source.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        if clarification_id is None:
+            if evidence_message_id != source_message_id:
+                raise ValueError(
+                    "Direct memory evidence must match the source message."
+                )
+        elif evidence_message_id == source_message_id:
+            raise ValueError(
+                "Clarified memory evidence must precede the source message."
+            )
+        if turn_lease is not None and not isinstance(turn_lease, ProposalTurnLease):
+            raise ValueError("turn_lease is invalid.")
+
+        user_ref = self._client.collection("users").document(user_id)
+        origin_ref = user_ref.collection("memory_proposal_origins").document(
+            origin_ids.origin_id
+        )
+        proposal_ref = user_ref.collection("memory_proposals").document(category)
+        turn_ref = None
+        if turn_lease is not None:
+            turn_ref = (
+                self._client.collection("sessions")
+                .document(session_id)
+                .collection("turns")
+                .document(turn_lease.turn_id)
+            )
+        transaction = self._client.transaction()
+
+        async def create_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryProposalV2:
+            origin_snapshot = await origin_ref.get(transaction=transaction)
+            proposal_snapshot = await proposal_ref.get(transaction=transaction)
+            profile_snapshot = await user_ref.get(transaction=transaction)
+            turn_snapshot = (
+                await turn_ref.get(transaction=transaction)
+                if turn_ref is not None
+                else None
+            )
+            profile = (
+                self._versioned_profile_from_document(profile_snapshot.to_dict())
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+            active_signal = self._versioned_active_signal_for_category(
+                profile, category
+            )
+            expected_signal_id = (
+                active_signal.signal_id if active_signal is not None else None
+            )
+            if origin_snapshot.exists:
+                try:
+                    origin = parse_proposal_origin(origin_snapshot.to_dict())
+                except ValueError as exc:
+                    raise MemoryProposalStateError(
+                        "Stored proposal origin is invalid."
+                    ) from exc
+                expected_origin = {
+                    "schema_version": PROPOSAL_ORIGIN_SCHEMA_VERSION_V2,
+                    "proposal_id": origin_ids.proposal_id,
+                    "category": category,
+                    "source_session_id": session_id,
+                    "source_message_id": source_message_id,
+                    "evidence_message_id": evidence_message_id,
+                    "clarification_id": clarification_id,
+                }
+                if any(
+                    getattr(origin, name) != value
+                    for name, value in expected_origin.items()
+                ):
+                    raise MemoryProposalOriginConflictError(
+                        "Stored proposal origin conflicts with this source."
+                    )
+                if not proposal_snapshot.exists:
+                    raise MemoryProposalStateError(
+                        "Stored proposal origin has no category proposal."
+                    )
+                stored = self._versioned_proposal_from_document(
+                    proposal_snapshot.to_dict()
+                )
+                expected = {
+                    "proposal_id": origin_ids.proposal_id,
+                    "category": category,
+                    "proposed_value": normalized_value,
+                    "expected_signal_id": expected_signal_id,
+                    "policy_version": "2.0",
+                    "status": "pending",
+                    "source_session_id": session_id,
+                    "source_message_id": source_message_id,
+                    "evidence_message_id": evidence_message_id,
+                    "clarification_id": clarification_id,
+                }
+                if not isinstance(stored, MemoryProposalV2) or any(
+                    getattr(stored, name) != value
+                    for name, value in expected.items()
+                ):
+                    raise MemoryProposalOriginConflictError(
+                        "Stored proposal conflicts with this source."
+                    )
+                if turn_ref is not None:
+                    effect = self._proposal_turn_effect_update(
+                        turn_snapshot=turn_snapshot,
+                        user_id=user_id,
+                        source_message_id=source_message_id,
+                        turn_lease=turn_lease,
+                        observed_at=observed_at,
+                        proposal=stored,
+                    )
+                    if effect is not None:
+                        transaction.set(turn_ref, effect, merge=True)
+                return stored
+
+            if active_signal is not None and active_signal.value == normalized_value:
+                raise MemorySignalAlreadyActiveError(
+                    "The proposed memory value is already active."
+                )
+            if proposal_snapshot.exists:
+                stored_slot = self._versioned_proposal_from_document(
+                    proposal_snapshot.to_dict()
+                )
+                if (
+                    stored_slot.status == "pending"
+                    and stored_slot.expires_at > observed_at
+                ):
+                    raise MemoryProposalConflictError(
+                        "An unexpired memory proposal already occupies this category."
+                    )
+            proposal = MemoryProposalV2(
+                proposal_id=origin_ids.proposal_id,
+                category=category,
+                proposed_value=normalized_value,
+                expected_signal_id=expected_signal_id,
+                status="pending",
+                source_session_id=session_id,
+                source_message_id=source_message_id,
+                evidence_message_id=evidence_message_id,
+                clarification_id=clarification_id,
+                created_at=observed_at,
+                expires_at=observed_at + timedelta(hours=24),
+            )
+            effect = None
+            if turn_ref is not None:
+                effect = self._proposal_turn_effect_update(
+                    turn_snapshot=turn_snapshot,
+                    user_id=user_id,
+                    source_message_id=source_message_id,
+                    turn_lease=turn_lease,
+                    observed_at=observed_at,
+                    proposal=proposal,
+                )
+            proposal_document = proposal.model_dump(mode="python")
+            proposal_document["created_at"] = firestore.SERVER_TIMESTAMP
+            transaction.set(proposal_ref, proposal_document)
+            transaction.set(
+                origin_ref,
+                {
+                    "schema_version": PROPOSAL_ORIGIN_SCHEMA_VERSION_V2,
+                    "proposal_id": proposal.proposal_id,
+                    "category": proposal.category,
+                    "source_session_id": proposal.source_session_id,
+                    "source_message_id": proposal.source_message_id,
+                    "evidence_message_id": proposal.evidence_message_id,
+                    "clarification_id": proposal.clarification_id,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            if turn_ref is not None and effect is not None:
+                transaction.set(turn_ref, effect, merge=True)
+            return proposal
+
+        run_transaction = firestore.async_transactional(create_in_transaction)
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValueError) as exc:
+            self._raise_firestore_error("create_guarded_memory_proposal_v2", exc)
+
+    async def consume_memory_clarification_to_proposal_v2(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        session_id: str,
+        source_message_id: str,
+        selection: MemoryClarificationSelection,
+        observed_at: datetime,
+        turn_lease: ProposalTurnLease,
+    ) -> MemoryProposalV2:
+        """Consume the first subsequent clarification turn into one proposal."""
+        self._validate_memory_user_id(user_id)
+        for field_name, value in (
+            ("workspace_id", workspace_id),
+            ("session_id", session_id),
+            ("source_message_id", source_message_id),
+        ):
+            self._validate_memory_identifier(value, field_name)
+        if not isinstance(selection, MemoryClarificationSelection):
+            raise ValueError("selection must be a memory clarification selection.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        if not isinstance(turn_lease, ProposalTurnLease):
+            raise ValueError("turn_lease must be valid.")
+
+        session_ref = self._client.collection("sessions").document(session_id)
+        clarifications_ref = session_ref.collection("memory_clarifications")
+        turn_ref = session_ref.collection("turns").document(turn_lease.turn_id)
+        user_ref = self._client.collection("users").document(user_id)
+        transaction = self._client.transaction()
+
+        async def consume_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryProposalV2:
+            session_snapshot = await session_ref.get(transaction=transaction)
+            if not session_snapshot.exists:
+                raise ChatTurnOwnershipError(
+                    "Stored chat session cannot own a clarification selection."
+                )
+            session_document = session_snapshot.to_dict()
+            self._validate_chat_session_owner(
+                session_document,
+                user_id=user_id,
+                project_id=workspace_id,
+            )
+            if not isinstance(session_document, Mapping):
+                raise MemoryClarificationStateError(
+                    "Stored clarification session is invalid."
+                )
+            clarification_id = session_document.get(
+                "active_memory_clarification_id"
+            )
+            if clarification_id is None:
+                clarification_id = session_document.get(
+                    "last_consumed_memory_clarification_id"
+                )
+                if (
+                    clarification_id is None
+                    or session_document.get("last_consuming_memory_turn_id")
+                    != turn_lease.turn_id
+                ):
+                    raise MemoryClarificationStateError(
+                        "No active memory clarification can be selected."
+                    )
+            self._validate_memory_identifier(
+                clarification_id,
+                "clarification_id",
+            )
+            clarification_ref = clarifications_ref.document(clarification_id)
+            clarification_snapshot = await clarification_ref.get(
+                transaction=transaction
+            )
+            if not clarification_snapshot.exists:
+                raise MemoryClarificationStateError(
+                    "Active clarification pointer has no document."
+                )
+            envelope = self._memory_clarification_from_document(
+                clarification_snapshot.to_dict()
+            )
+
+            is_exact_retry = (
+                envelope.status == "consumed"
+                and envelope.consuming_turn_id == turn_lease.turn_id
+                and envelope.consuming_message_id == source_message_id
+                and envelope.selected_candidate_index
+                == selection.selected_candidate_index
+            )
+            if is_exact_retry:
+                candidate = envelope.candidates[
+                    selection.selected_candidate_index
+                ]
+            else:
+                try:
+                    candidate = validate_memory_clarification_selection(
+                        envelope=envelope,
+                        selection=selection,
+                        user_id=user_id,
+                        session_id=session_id,
+                        workspace_id=workspace_id,
+                        selecting_turn_id=turn_lease.turn_id,
+                        selecting_message_id=source_message_id,
+                        is_first_subsequent_turn=(
+                            session_document.get("last_completed_turn_id")
+                            == envelope.clarification_turn_id
+                        ),
+                        observed_at=observed_at,
+                    )
+                except ValueError as exc:
+                    raise MemoryClarificationStateError(str(exc)) from exc
+
+            origin_ids = derive_proposal_origin_ids_v2(
+                user_id,
+                session_id,
+                source_message_id,
+                candidate.category,
+            )
+            origin_ref = user_ref.collection(
+                "memory_proposal_origins"
+            ).document(origin_ids.origin_id)
+            proposal_ref = user_ref.collection("memory_proposals").document(
+                candidate.category
+            )
+            origin_snapshot = await origin_ref.get(transaction=transaction)
+            proposal_snapshot = await proposal_ref.get(transaction=transaction)
+            profile_snapshot = await user_ref.get(transaction=transaction)
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+
+            profile = (
+                self._versioned_profile_from_document(profile_snapshot.to_dict())
+                if profile_snapshot.exists
+                else CollaborationProfile()
+            )
+            active_signal = self._versioned_active_signal_for_category(
+                profile,
+                candidate.category,
+            )
+            expected_signal_id = (
+                active_signal.signal_id if active_signal is not None else None
+            )
+            normalized_value = validate_memory_value_for_policy(
+                "2.0",
+                candidate.category,
+                candidate.canonical_value,
+            )
+
+            if origin_snapshot.exists:
+                try:
+                    origin = parse_proposal_origin(origin_snapshot.to_dict())
+                except ValueError as exc:
+                    raise MemoryProposalStateError(
+                        "Stored proposal origin is invalid."
+                    ) from exc
+                expected_origin = {
+                    "schema_version": PROPOSAL_ORIGIN_SCHEMA_VERSION_V2,
+                    "proposal_id": origin_ids.proposal_id,
+                    "category": candidate.category,
+                    "source_session_id": session_id,
+                    "source_message_id": source_message_id,
+                    "evidence_message_id": envelope.evidence_message_id,
+                    "clarification_id": envelope.clarification_id,
+                }
+                if any(
+                    getattr(origin, name) != value
+                    for name, value in expected_origin.items()
+                ):
+                    raise MemoryProposalOriginConflictError(
+                        "Stored proposal origin conflicts with this selection."
+                    )
+                if not proposal_snapshot.exists:
+                    raise MemoryProposalStateError(
+                        "Stored proposal origin has no category proposal."
+                    )
+                stored = self._versioned_proposal_from_document(
+                    proposal_snapshot.to_dict()
+                )
+                if (
+                    not isinstance(stored, MemoryProposalV2)
+                    or stored.proposal_id != origin_ids.proposal_id
+                    or stored.category != candidate.category
+                    or stored.proposed_value != normalized_value
+                    or stored.source_session_id != session_id
+                    or stored.source_message_id != source_message_id
+                    or stored.evidence_message_id != envelope.evidence_message_id
+                    or stored.clarification_id != envelope.clarification_id
+                ):
+                    raise MemoryProposalOriginConflictError(
+                        "Stored proposal conflicts with this selection."
+                    )
+                effect = self._proposal_turn_effect_update(
+                    turn_snapshot=turn_snapshot,
+                    user_id=user_id,
+                    source_message_id=source_message_id,
+                    turn_lease=turn_lease,
+                    observed_at=observed_at,
+                    proposal=stored,
+                )
+                if effect is not None:
+                    transaction.set(turn_ref, effect, merge=True)
+                return stored
+
+            if active_signal is not None and active_signal.value == normalized_value:
+                raise MemorySignalAlreadyActiveError(
+                    "The selected memory value is already active."
+                )
+            if proposal_snapshot.exists:
+                stored_slot = self._versioned_proposal_from_document(
+                    proposal_snapshot.to_dict()
+                )
+                if (
+                    stored_slot.status == "pending"
+                    and stored_slot.expires_at > observed_at
+                ):
+                    raise MemoryProposalConflictError(
+                        "An unexpired memory proposal already occupies this category."
+                    )
+            proposal = MemoryProposalV2(
+                proposal_id=origin_ids.proposal_id,
+                category=candidate.category,
+                proposed_value=normalized_value,
+                expected_signal_id=expected_signal_id,
+                status="pending",
+                source_session_id=session_id,
+                source_message_id=source_message_id,
+                evidence_message_id=envelope.evidence_message_id,
+                clarification_id=envelope.clarification_id,
+                created_at=observed_at,
+                expires_at=observed_at + timedelta(hours=24),
+            )
+            effect = self._proposal_turn_effect_update(
+                turn_snapshot=turn_snapshot,
+                user_id=user_id,
+                source_message_id=source_message_id,
+                turn_lease=turn_lease,
+                observed_at=observed_at,
+                proposal=proposal,
+            )
+            proposal_document = proposal.model_dump(mode="python")
+            proposal_document["created_at"] = firestore.SERVER_TIMESTAMP
+            transaction.set(proposal_ref, proposal_document)
+            transaction.set(
+                origin_ref,
+                {
+                    "schema_version": PROPOSAL_ORIGIN_SCHEMA_VERSION_V2,
+                    "proposal_id": proposal.proposal_id,
+                    "category": proposal.category,
+                    "source_session_id": proposal.source_session_id,
+                    "source_message_id": proposal.source_message_id,
+                    "evidence_message_id": proposal.evidence_message_id,
+                    "clarification_id": proposal.clarification_id,
+                    "created_at": firestore.SERVER_TIMESTAMP,
+                },
+            )
+            if effect is not None:
+                transaction.set(turn_ref, effect, merge=True)
+            transaction.set(
+                clarification_ref,
+                {
+                    "status": "consumed",
+                    "consuming_turn_id": turn_lease.turn_id,
+                    "consuming_message_id": source_message_id,
+                    "selected_candidate_index": (
+                        selection.selected_candidate_index
+                    ),
+                },
+                merge=True,
+            )
+            transaction.set(
+                session_ref,
+                {
+                    "active_memory_clarification_id": firestore.DELETE_FIELD,
+                    "last_consumed_memory_clarification_id": (
+                        envelope.clarification_id
+                    ),
+                    "last_consuming_memory_turn_id": turn_lease.turn_id,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return proposal
+
+        run_transaction = firestore.async_transactional(consume_in_transaction)
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "consume_memory_clarification_to_proposal_v2",
+                exc,
+            )
+
     async def approve_memory_proposal(
         self,
         user_id: str,
@@ -5251,7 +5831,7 @@ class MemoryEngine:
         source_message_id: str,
         turn_lease: ProposalTurnLease | None,
         observed_at: datetime,
-        proposal: MemoryProposal,
+        proposal: VersionedMemoryProposal,
     ) -> dict[str, object] | None:
         if turn_lease is None:
             raise ValueError("turn_lease is required for a turn effect.")
@@ -5282,12 +5862,9 @@ class MemoryEngine:
             action_name="propose_memory_signal",
             status="completed",
         ).model_dump(mode="python")
-        receipt = MemoryProposalReceipt(
-            proposal_id=proposal.proposal_id,
-            category=proposal.category,
-            proposed_value=proposal.proposed_value,
-            expires_at=proposal.expires_at,
-        ).model_dump(mode="python")
+        receipt = MemoryEngine._proposal_receipt(proposal).model_dump(
+            mode="python"
+        )
         existing_actions = turn_data.get("actions", [])
         existing_proposals = turn_data.get("memory_proposals", [])
         if not isinstance(existing_actions, list) or not isinstance(
@@ -5303,7 +5880,7 @@ class MemoryEngine:
                 for item in existing_actions
             ]
             validated_proposals = [
-                MemoryProposalReceipt.model_validate(item).model_dump(
+                MemoryEngine._proposal_receipt_from_document(item).model_dump(
                     mode="python"
                 )
                 for item in existing_proposals
@@ -5331,6 +5908,33 @@ class MemoryEngine:
             "memory_proposals": [receipt],
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
+
+    @staticmethod
+    def _proposal_receipt(
+        proposal: VersionedMemoryProposal,
+    ) -> VersionedMemoryProposalReceipt:
+        fields = {
+            "proposal_id": proposal.proposal_id,
+            "category": proposal.category,
+            "proposed_value": proposal.proposed_value,
+            "expires_at": proposal.expires_at,
+        }
+        if isinstance(proposal, MemoryProposalV2):
+            return MemoryProposalReceiptV2(
+                **fields,
+                policy_version="2.0",
+            )
+        return MemoryProposalReceipt(**fields)
+
+    @staticmethod
+    def _proposal_receipt_from_document(
+        document: object,
+    ) -> VersionedMemoryProposalReceipt:
+        if not isinstance(document, Mapping):
+            raise ValueError("Stored memory proposal receipt is invalid.")
+        if document.get("policy_version") == "2.0":
+            return MemoryProposalReceiptV2.model_validate(document)
+        return MemoryProposalReceipt.model_validate(document)
 
     @staticmethod
     def _validate_memory_approval_inputs(
@@ -5418,6 +6022,20 @@ class MemoryEngine:
         return MemoryProposal.model_validate(proposal_fields)
 
     @staticmethod
+    def _versioned_proposal_from_document(
+        document: object,
+    ) -> VersionedMemoryProposal:
+        if not isinstance(document, Mapping):
+            raise ValueError("Stored memory proposal is invalid.")
+        if document.get("policy_version", "1.0") == "2.0":
+            fields = {
+                field_name: document.get(field_name)
+                for field_name in MemoryProposalV2.model_fields
+            }
+            return MemoryProposalV2.model_validate(fields)
+        return MemoryEngine._proposal_from_document(dict(document))
+
+    @staticmethod
     def _collaboration_profile_from_document(
         document: object,
     ) -> CollaborationProfile:
@@ -5429,6 +6047,30 @@ class MemoryEngine:
             if field_name in document
         }
         return CollaborationProfile.model_validate(profile_fields)
+
+    @staticmethod
+    def _versioned_profile_from_document(
+        document: object,
+    ) -> VersionedCollaborationProfile:
+        if not isinstance(document, Mapping):
+            raise ValueError("Stored collaboration profile is invalid.")
+        governed_fields = {
+            field_name: document[field_name]
+            for field_name in CollaborationProfileV2.model_fields
+            if field_name in document
+        }
+        return parse_collaboration_profile(governed_fields)
+
+    @staticmethod
+    def _versioned_active_signal_for_category(
+        profile: VersionedCollaborationProfile,
+        category: MemoryCategoryV2,
+    ) -> object | None:
+        if category in profile.identity_context:
+            return profile.identity_context[category]
+        if category in profile.active_preferences:
+            return profile.active_preferences[category]
+        return None
 
     @staticmethod
     def _proposals_are_identical(

@@ -5,11 +5,18 @@ from typing import Literal, Self
 from google.adk.tools import FunctionTool, ToolContext
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from memory_candidate_decisions import NaturalMemoryDecision
+from memory_clarifications import (
+    MemoryClarificationReceipt,
+    MemoryClarificationSelection,
+)
 from memory_proposals import ProposalTurnLease
-from memory_policy import BroadRole, MemoryCategory
-from schemas import AgentActionReceipt, MemoryProposalReceipt
+from schemas import AgentActionReceipt, MemoryProposalReceiptV2
 from trusted_memory_service import (
-    ProposeMemorySignalCommand,
+    NaturalMemoryClarificationResult,
+    NaturalMemoryCommand,
+    NaturalMemoryNoEffectResult,
+    NaturalMemoryProposalResult,
     TrustedMemoryService,
 )
 
@@ -32,7 +39,7 @@ class _StrictToolResponse(BaseModel):
 class PendingMemoryProposalToolResponse(_StrictToolResponse):
     status: Literal["pending"]
     action: AgentActionReceipt
-    memory_proposal: MemoryProposalReceipt
+    memory_proposal: MemoryProposalReceiptV2
 
     @model_validator(mode="after")
     def require_proposal_action(self) -> Self:
@@ -46,8 +53,26 @@ class RejectedMemoryProposalToolResponse(_StrictToolResponse):
     error_code: Literal["invalid_memory_candidate"]
 
 
+class ClarificationMemoryProposalToolResponse(_StrictToolResponse):
+    status: Literal["clarification_required"]
+    memory_clarification: MemoryClarificationReceipt
+
+
+class NoEffectMemoryProposalToolResponse(_StrictToolResponse):
+    status: Literal[
+        "no_memory",
+        "session_only",
+        "workspace_note",
+        "unsupported",
+        "prohibited",
+    ]
+
+
 MemoryProposalToolResponse = (
-    PendingMemoryProposalToolResponse | RejectedMemoryProposalToolResponse
+    PendingMemoryProposalToolResponse
+    | ClarificationMemoryProposalToolResponse
+    | NoEffectMemoryProposalToolResponse
+    | RejectedMemoryProposalToolResponse
 )
 
 
@@ -60,6 +85,18 @@ def parse_memory_proposal_tool_response(
             raise ValueError("Response must be a mapping.")
         if value.get("status") == "pending":
             return PendingMemoryProposalToolResponse.model_validate(value)
+        if value.get("status") == "clarification_required":
+            return ClarificationMemoryProposalToolResponse.model_validate(
+                value
+            )
+        if value.get("status") in {
+            "no_memory",
+            "session_only",
+            "workspace_note",
+            "unsupported",
+            "prohibited",
+        }:
+            return NoEffectMemoryProposalToolResponse.model_validate(value)
         if value.get("status") == "rejected":
             return RejectedMemoryProposalToolResponse.model_validate(value)
         raise ValueError("Response status is invalid.")
@@ -71,10 +108,10 @@ def parse_memory_proposal_tool_response(
 
 def _server_command(
     *,
-    category: MemoryCategory,
-    proposed_value: str | list[BroadRole],
+    decision: NaturalMemoryDecision,
+    clarification_selection: MemoryClarificationSelection | None,
     tool_context: ToolContext,
-) -> ProposeMemorySignalCommand:
+) -> NaturalMemoryCommand:
     state = getattr(tool_context, "state", None)
     if not callable(getattr(state, "get", None)):
         raise MemoryProposalToolConfigurationError(
@@ -82,6 +119,7 @@ def _server_command(
         )
     try:
         user_id = state["memory_user_id"]
+        workspace_id = state["memory_workspace_id"]
         session_id = state["memory_session_id"]
         source_message_id = state["memory_source_message_id"]
         source_message_text = state["memory_source_message_text"]
@@ -96,7 +134,7 @@ def _server_command(
     if any(
         not isinstance(value, str)
         or _IDENTIFIER_PATTERN.fullmatch(value) is None
-        for value in (user_id, session_id, source_message_id)
+        for value in (user_id, workspace_id, session_id, source_message_id)
     ):
         raise MemoryProposalToolConfigurationError(
             "Memory proposal tool context is invalid."
@@ -130,14 +168,15 @@ def _server_command(
         raise MemoryProposalToolConfigurationError(
             "Memory proposal tool context is invalid."
         ) from exc
-    return ProposeMemorySignalCommand(
+    return NaturalMemoryCommand(
         user_id=user_id,
+        workspace_id=workspace_id,
         session_id=session_id,
         source_message_id=source_message_id,
         source_message_text=source_message_text,
         memory_decision_present=memory_decision_present,
-        category=category,
-        proposed_value=proposed_value,
+        decision=decision,
+        clarification_selection=clarification_selection,
         turn_lease=turn_lease,
     )
 
@@ -148,27 +187,42 @@ def create_propose_memory_signal_tool(
     """Create the governed pending-memory proposal tool."""
 
     async def propose_memory_signal(
-        category: MemoryCategory,
-        proposed_value: str | list[BroadRole],
+        decision: NaturalMemoryDecision,
         tool_context: ToolContext,
+        clarification_selection: MemoryClarificationSelection | None = None,
     ) -> dict[str, object]:
         """Create a pending user-reviewable proposal; never activate memory."""
         try:
             command = _server_command(
-                category=category,
-                proposed_value=proposed_value,
+                decision=decision,
+                clarification_selection=clarification_selection,
                 tool_context=tool_context,
             )
-            result = await memory_service.propose_memory_signal(command)
+            result = await memory_service.handle_natural_memory_decision(
+                command
+            )
         except ValueError:
             return {
                 "status": "rejected",
                 "error_code": "invalid_memory_candidate",
             }
-        return {
-            "status": "pending",
-            "action": result.action.model_dump(mode="json"),
-            "memory_proposal": result.proposal.model_dump(mode="json"),
-        }
+        if isinstance(result, NaturalMemoryProposalResult):
+            return {
+                "status": "pending",
+                "action": result.action.model_dump(mode="json"),
+                "memory_proposal": result.proposal.model_dump(mode="json"),
+            }
+        if isinstance(result, NaturalMemoryClarificationResult):
+            return {
+                "status": "clarification_required",
+                "memory_clarification": result.clarification.model_dump(
+                    mode="json"
+                ),
+            }
+        if isinstance(result, NaturalMemoryNoEffectResult):
+            return {"status": result.status}
+        raise MemoryProposalToolResponseError(
+            "Memory proposal service result is invalid."
+        )
 
     return FunctionTool(propose_memory_signal)

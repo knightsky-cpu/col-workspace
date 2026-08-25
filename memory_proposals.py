@@ -132,6 +132,34 @@ def derive_proposal_origin_ids(
     )
 
 
+def derive_proposal_origin_ids_v2(
+    user_id: str,
+    session_id: str,
+    source_message_id: str,
+    category: MemoryCategoryV2,
+) -> ProposalOriginIds:
+    """Derive version-2 IDs without changing version-1 identity."""
+    _validate_identifier(user_id, "user_id")
+    _validate_identifier(session_id, "session_id")
+    _validate_identifier(source_message_id, "source_message_id")
+    if category not in MEMORY_CATEGORY_ORDER_V2:
+        raise ValueError("category must be a governed memory category.")
+    validated_category = cast(MemoryCategoryV2, category)
+    digest_input = "\0".join(
+        (
+            "memory-proposal-origin-v2",
+            user_id,
+            session_id,
+            source_message_id,
+        )
+    )
+    origin_id = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:32]
+    return ProposalOriginIds(
+        origin_id=origin_id,
+        proposal_id=f"{validated_category}--{origin_id}",
+    )
+
+
 def parse_proposal_origin(
     document: object,
 ) -> ProposalOriginV1 | ProposalOriginV2:

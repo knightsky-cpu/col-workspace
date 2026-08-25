@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import ANY, AsyncMock, MagicMock, call
 
 import pytest
 from google.cloud import firestore
@@ -8,10 +8,14 @@ from google.cloud import firestore
 from database import MemoryEngine
 from memory_clarifications import (
     MemoryClarificationEnvelope,
+    MemoryClarificationSelection,
     clarification_receipt,
     derive_memory_clarification_id,
 )
-from memory_proposals import ProposalTurnLease
+from memory_proposals import (
+    ProposalTurnLease,
+    derive_proposal_origin_ids_v2,
+)
 
 
 NOW = datetime(2026, 8, 24, 19, 0, tzinfo=UTC)
@@ -137,6 +141,45 @@ def clarification_store() -> SimpleNamespace:
     )
 
 
+def clarification_consumption_store() -> SimpleNamespace:
+    store = clarification_store()
+    users = MagicMock(name="users")
+    user = MagicMock(name="user")
+    origins = MagicMock(name="origins")
+    origin = MagicMock(name="origin")
+    proposals = MagicMock(name="proposals")
+    proposal = MagicMock(name="proposal")
+
+    def root_collection(name: str):
+        if name == "sessions":
+            return store.client.collection.return_value
+        if name == "users":
+            return users
+        raise AssertionError(f"unexpected root collection: {name}")
+
+    sessions = store.client.collection.return_value
+    store.client.collection.side_effect = root_collection
+    users.document.return_value = user
+
+    def user_collection(name: str):
+        if name == "memory_proposal_origins":
+            return origins
+        if name == "memory_proposals":
+            return proposals
+        raise AssertionError(f"unexpected user collection: {name}")
+
+    user.collection.side_effect = user_collection
+    origins.document.return_value = origin
+    proposals.document.return_value = proposal
+    return SimpleNamespace(
+        **store.__dict__,
+        sessions=sessions,
+        user=user,
+        origin=origin,
+        proposal=proposal,
+    )
+
+
 def lease() -> ProposalTurnLease:
     return ProposalTurnLease(turn_id=TURN_ID, owner_token="owner-1")
 
@@ -253,6 +296,111 @@ async def test_clarification_exact_retry_returns_existing_without_write(
 
     assert result == envelope()
     store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_clarification_selection_atomically_consumes_and_creates_proposal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store = clarification_consumption_store()
+    selecting_turn_id = "c" * 64
+    selecting_message_id = f"turn--{selecting_turn_id}--user"
+    ids = derive_proposal_origin_ids_v2(
+        "user-1",
+        "session-1",
+        selecting_message_id,
+        "development_environments",
+    )
+    store.session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "user_id": "user-1",
+                "project_id": "workspace-1",
+                "active_memory_clarification_id": envelope().clarification_id,
+                "last_completed_turn_id": TURN_ID,
+            },
+        )
+    )
+    store.clarification.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=envelope().model_dump(mode="python"),
+        )
+    )
+    store.origin.get = AsyncMock(return_value=snapshot(exists=False))
+    store.proposal.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user.get = AsyncMock(return_value=snapshot(exists=False))
+    store.turn.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "schema_version": "1.0",
+                "status": "in_progress",
+                "project_id": "workspace-1",
+                "user_id": "user-1",
+                "user_message_id": selecting_message_id,
+                "lease_owner": "owner-2",
+                "lease_expires_at": NOW + timedelta(minutes=2),
+            },
+        )
+    )
+
+    result = await MemoryEngine(
+        store.client
+    ).consume_memory_clarification_to_proposal_v2(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_message_id=selecting_message_id,
+        selection=MemoryClarificationSelection(
+            selected_candidate_index=1,
+        ),
+        observed_at=NOW + timedelta(minutes=1),
+        turn_lease=ProposalTurnLease(
+            turn_id=selecting_turn_id,
+            owner_token="owner-2",
+        ),
+    )
+
+    assert result.proposal_id == ids.proposal_id
+    assert result.category == "development_environments"
+    assert result.proposed_value == ["macos", "linux"]
+    assert result.evidence_message_id == "message-1"
+    assert result.clarification_id == envelope().clarification_id
+    writes = store.transaction.set.call_args_list
+    assert call(
+        store.clarification,
+        {
+            "status": "consumed",
+            "consuming_turn_id": selecting_turn_id,
+            "consuming_message_id": selecting_message_id,
+            "selected_candidate_index": 1,
+        },
+        merge=True,
+    ) in writes
+    assert call(
+        store.session,
+        {
+            "active_memory_clarification_id": firestore.DELETE_FIELD,
+            "last_consumed_memory_clarification_id": (
+                envelope().clarification_id
+            ),
+            "last_consuming_memory_turn_id": selecting_turn_id,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    ) in writes
+    assert call(store.proposal, ANY) in writes
+    assert call(store.origin, ANY) in writes
+    assert any(
+        write.args[0] is store.turn
+        and write.kwargs == {"merge": True}
+        and write.args[1]["memory_proposals"][0]["proposal_id"]
+        == ids.proposal_id
+        for write in writes
+    )
 
 
 @pytest.mark.asyncio

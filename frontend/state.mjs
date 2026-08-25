@@ -369,10 +369,16 @@ export function selectCanSubmit(state) {
 
 export function selectNeedsReceiptRefresh(response) {
   const actions = Array.isArray(response.actions) ? response.actions : [];
+  const hasSuccessfulChatResponse = (
+    response !== null
+    && typeof response === "object"
+    && typeof response.response === "string"
+  );
   return {
     work: Array.isArray(response.artifacts) && response.artifacts.length > 0,
     memory: (
-      (
+      hasSuccessfulChatResponse
+      || (
         Array.isArray(response.memory_proposals)
         && response.memory_proposals.length > 0
       )

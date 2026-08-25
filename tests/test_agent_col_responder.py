@@ -121,10 +121,17 @@ def test_responder_instruction_preserves_governed_memory_restraint() -> None:
         "sensitive",
         "structured memory decision",
         "more than one eligible memory candidate",
-        "do not call propose_memory_signal",
+        "submit a clarify decision",
         "at most one memory proposal",
         "approve or reject",
         "never active until",
+        "semantic selection",
+        "completed proposal receipt",
+        "proposal was not created",
+        "session_only",
+        "workspace_note",
+        "unsupported",
+        "prohibited",
     ):
         assert required_rule in normalized
 

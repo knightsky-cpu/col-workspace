@@ -9,7 +9,12 @@ from agent_col_responder_context_v3 import (
 )
 from agent_col_routing_v3 import AgentColRoutingDirective
 from memory_proposals import ProposalTurnLease
-from schemas import AgentActionReceipt, MemoryProposalReceipt
+from schemas import (
+    AgentActionReceipt,
+    MemoryClarificationChoice,
+    MemoryClarificationReceipt,
+    MemoryProposalReceipt,
+)
 from supervisor_runtime import SupervisorTurnResult
 
 
@@ -82,6 +87,25 @@ class RecordingResponder:
         if self.error is not None:
             raise self.error
         return self.result
+
+
+def memory_clarification_receipt() -> MemoryClarificationReceipt:
+    return MemoryClarificationReceipt(
+        clarification_id="memory-clarification--clarification-1",
+        choices=[
+            MemoryClarificationChoice(
+                candidate_index=0,
+                category_label="Response length",
+                value_label="detailed",
+            ),
+            MemoryClarificationChoice(
+                candidate_index=1,
+                category_label="Explanation structure",
+                value_label="step by step",
+            ),
+        ],
+        expires_at=datetime(2026, 8, 25, 12, 15, tzinfo=UTC),
+    )
 
 
 class RecordingArtifactExecutor:
@@ -1083,6 +1107,37 @@ async def test_turn_service_stably_merges_authoritative_receipts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_service_preserves_memory_clarification_receipt() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    clarification = memory_clarification_receipt()
+    responder = RecordingResponder(
+        SupervisorTurnResult(
+            response="Please choose which preference you meant.",
+            memory_clarifications=(clarification,),
+        )
+    )
+    directive = AgentColRoutingDirective(route="direct")
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(directive),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Please remember that I prefer detailed guidance.",
+        )
+    )
+
+    assert result.memory_clarifications == (clarification,)
+
+
+@pytest.mark.asyncio
 async def test_failed_expert_context_adds_no_cognitive_receipt() -> None:
     from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
 
@@ -1252,6 +1307,46 @@ async def test_responder_failure_preserves_only_trusted_partial_effects(
     ):
         assert secret not in str(captured.value)
         assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_responder_failure_preserves_memory_clarification_receipt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnResponderError,
+        AgentColTurnService,
+    )
+    from supervisor_runtime import SupervisorRuntimeError
+
+    clarification = memory_clarification_receipt()
+    runtime_error = SupervisorRuntimeError(
+        "private-responder-output",
+        memory_clarifications=(clarification,),
+    )
+    responder = RecordingResponder(error=runtime_error)
+    directive = AgentColRoutingDirective(route="direct")
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(directive),
+    )
+
+    with pytest.raises(AgentColTurnResponderError) as captured:
+        await service.run_turn(
+            AgentColTurnCommand(
+                project_id="private-project",
+                session_id="private-session",
+                user_id="private-user",
+                message="private-message",
+            )
+        )
+
+    assert captured.value.memory_clarifications == (clarification,)
+    assert "private-responder-output" not in str(captured.value)
+    assert "private-responder-output" not in caplog.text
 
 
 @pytest.mark.asyncio

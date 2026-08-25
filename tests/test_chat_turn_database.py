@@ -29,6 +29,7 @@ from schemas import (
     ArtifactReference,
     ChatResponse,
     MemoryDecisionRequest,
+    MemoryClarificationReceipt,
     MemoryProposalReceipt,
 )
 
@@ -202,6 +203,7 @@ def turn_document(
                 "artifact_feedback": [],
                 "citations": [],
                 "memory_proposals": [],
+                "memory_clarifications": [],
                 "adaptations": [],
                 "completed_at": NOW - timedelta(seconds=1),
             }
@@ -228,6 +230,25 @@ def proposal_receipt_document() -> dict[str, object]:
         "category": "response_length",
         "proposed_value": "concise",
         "expires_at": NOW + timedelta(hours=24),
+    }
+
+
+def clarification_receipt_document() -> dict[str, object]:
+    return {
+        "clarification_id": "memory-clarification--clarification-1",
+        "choices": [
+            {
+                "candidate_index": 0,
+                "category_label": "Response length",
+                "value_label": "detailed",
+            },
+            {
+                "candidate_index": 1,
+                "category_label": "Explanation structure",
+                "value_label": "step by step",
+            },
+        ],
+        "expires_at": NOW + timedelta(minutes=15),
     }
 
 
@@ -1174,6 +1195,46 @@ async def test_reclaimed_chat_turn_recovers_precompleted_proposal_effect(
 
 
 @pytest.mark.asyncio
+async def test_reclaimed_chat_turn_recovers_precompleted_clarification_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(
+        ids,
+        lease_expires_at=NOW - timedelta(seconds=1),
+    )
+    stored_turn["memory_clarifications"] = [
+        clarification_receipt_document()
+    ]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    monkeypatch.setattr(database.secrets, "token_hex", lambda _: "new-owner")
+
+    claim = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert claim.precompleted_memory_clarifications == (
+        MemoryClarificationReceipt.model_validate(
+            clarification_receipt_document()
+        ),
+    )
+
+
+@pytest.mark.asyncio
 async def test_reclaimed_chat_turn_recovers_precompleted_artifact_effect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1390,6 +1451,54 @@ async def test_completed_chat_turn_replay_preserves_memory_proposal_receipt(
     ]
     assert result.response.memory_proposals == [
         MemoryProposalReceipt.model_validate(proposal_receipt_document())
+    ]
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_completed_chat_turn_replay_preserves_clarification_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(ids, status="completed")
+    stored_turn["memory_clarifications"] = [
+        clarification_receipt_document()
+    ]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "role": "model",
+                "text": "Which preference did you mean?",
+                "timestamp": NOW,
+            },
+        )
+    )
+
+    result = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert isinstance(result, ChatTurnReplay)
+    assert result.response.memory_clarifications == [
+        MemoryClarificationReceipt.model_validate(
+            clarification_receipt_document()
+        )
     ]
     store.transaction.set.assert_not_called()
 
@@ -2289,6 +2398,7 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
                 "updated_at": firestore.SERVER_TIMESTAMP,
                 "last_message_preview": "A durable answer.",
                 "last_message_role": "model",
+                "last_completed_turn_id": claim.ids.turn_id,
             },
             merge=True,
         ),
@@ -2309,6 +2419,7 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
                 "artifact_feedback": [],
                 "citations": [],
                 "memory_proposals": [],
+                "memory_clarifications": [],
                 "adaptations": [],
                 "completed_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,

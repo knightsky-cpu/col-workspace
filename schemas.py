@@ -671,7 +671,11 @@ class ChatResponse(StrictModel):
         max_length=1,
     )
     citations: list[CitationReference] = Field(default_factory=list)
-    memory_proposals: list[MemoryProposalReceipt] = Field(
+    memory_proposals: list[VersionedMemoryProposalReceipt] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+    memory_clarifications: list[MemoryClarificationReceipt] = Field(
         default_factory=list,
         max_length=1,
     )
@@ -746,7 +750,11 @@ class ChatPartialFailureResponse(StrictModel):
         default_factory=list,
         max_length=1,
     )
-    memory_proposals: list[MemoryProposalReceipt] = Field(
+    memory_proposals: list[VersionedMemoryProposalReceipt] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+    memory_clarifications: list[MemoryClarificationReceipt] = Field(
         default_factory=list,
         max_length=1,
     )
@@ -869,6 +877,41 @@ MemoryValueV2Schema = (
     | list[DevelopmentEnvironment]
     | list[DomainExperienceEntry]
 )
+
+
+class MemoryProposalReceiptV2(StrictModel):
+    proposal_id: IdentifierStr
+    category: MemoryCategoryV2
+    proposed_value: MemoryValueV2Schema
+    policy_version: Literal["2.0"] = MEMORY_POLICY_VERSION_V2
+    expires_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_proposed_value(cls, data: object) -> object:
+        return _normalize_memory_model_value_for_policy(
+            data,
+            "proposed_value",
+            MEMORY_POLICY_VERSION_V2,
+        )
+
+
+VersionedMemoryProposalReceipt = MemoryProposalReceipt | MemoryProposalReceiptV2
+
+
+class MemoryClarificationChoice(StrictModel):
+    candidate_index: int = Field(ge=0, le=4)
+    category_label: str = Field(min_length=1, max_length=80)
+    value_label: str = Field(min_length=1, max_length=240)
+
+
+class MemoryClarificationReceipt(StrictModel):
+    clarification_id: IdentifierStr
+    choices: list[MemoryClarificationChoice] = Field(
+        min_length=2,
+        max_length=5,
+    )
+    expires_at: datetime
 
 
 class MemorySourceProvenanceV2(StrictModel):

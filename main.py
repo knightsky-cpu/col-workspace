@@ -423,6 +423,11 @@ def _partial_failure_response(
         if released_claim is not None
         else ()
     )
+    released_clarifications = (
+        released_claim.precompleted_memory_clarifications
+        if released_claim is not None
+        else ()
+    )
     released_artifacts = (
         released_claim.precompleted_artifacts
         if released_claim is not None
@@ -442,6 +447,10 @@ def _partial_failure_response(
         runtime_error.memory_proposals,
         released_proposals,
     )
+    clarifications = _merge_receipts(
+        runtime_error.memory_clarifications,
+        released_clarifications,
+    )
     artifacts = _merge_receipts(
         runtime_error.artifacts,
         released_artifacts,
@@ -450,7 +459,12 @@ def _partial_failure_response(
         runtime_error.artifact_feedback,
         released_feedback,
     )
-    if not actions and not artifacts and not artifact_feedback:
+    if (
+        not actions
+        and not artifacts
+        and not artifact_feedback
+        and not clarifications
+    ):
         return None
     proposal_actions = tuple(
         action
@@ -459,6 +473,8 @@ def _partial_failure_response(
     )
     if (
         len(proposals) > 1
+        or len(clarifications) > 1
+        or bool(proposals) and bool(clarifications)
         or bool(proposal_actions) != bool(proposals)
         or (proposals and len(proposal_actions) != 1)
     ):
@@ -473,6 +489,7 @@ def _partial_failure_response(
         artifacts=list(artifacts),
         artifact_feedback=list(artifact_feedback),
         memory_proposals=list(proposals),
+        memory_clarifications=list(clarifications),
         adaptations=list(runtime_error.adaptations),
     )
     content = response.model_dump(mode="json")
@@ -482,6 +499,8 @@ def _partial_failure_response(
         content.pop("artifact_feedback")
     if not response.adaptations:
         content.pop("adaptations")
+    if not response.memory_clarifications:
+        content.pop("memory_clarifications")
     return JSONResponse(
         status_code=status_code,
         content=content,
@@ -500,6 +519,7 @@ def _log_chat_turn_timeout(exc: AgentColTurnServiceError) -> None:
             "Agent_Col chat turn timed out "
             "(stage=%s completed_actions=%d completed_artifacts=%d "
             "completed_feedback=%d completed_memory_proposals=%d "
+            "completed_memory_clarifications=%d "
             "completed_adaptations=%d)."
         ),
         _timeout_stage(exc),
@@ -507,6 +527,7 @@ def _log_chat_turn_timeout(exc: AgentColTurnServiceError) -> None:
         len(exc.artifacts),
         len(exc.artifact_feedback),
         len(exc.memory_proposals),
+        len(exc.memory_clarifications),
         len(exc.adaptations),
     )
 
@@ -1891,6 +1912,11 @@ async def chat(
                     if chat_turn_claim is not None
                     else ()
                 ),
+                precompleted_memory_clarifications=(
+                    chat_turn_claim.precompleted_memory_clarifications
+                    if chat_turn_claim is not None
+                    else ()
+                ),
                 precompleted_artifact_feedback=(
                     chat_turn_claim.precompleted_artifact_feedback
                     if chat_turn_claim is not None
@@ -1961,6 +1987,7 @@ async def chat(
         artifact_feedback=list(result.artifact_feedback),
         citations=list(result.citations),
         memory_proposals=list(result.memory_proposals),
+        memory_clarifications=list(result.memory_clarifications),
         adaptations=list(
             _merge_receipts(adaptations, result.adaptations)
         ),
