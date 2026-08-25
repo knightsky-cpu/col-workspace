@@ -16,6 +16,7 @@ from memory_proposals import (
     ProposalTurnLease,
     derive_proposal_origin_ids_v2,
 )
+from schemas import MemoryProposalV2
 
 
 NOW = datetime(2026, 8, 24, 19, 0, tzinfo=UTC)
@@ -357,6 +358,7 @@ async def test_clarification_selection_atomically_consumes_and_creates_proposal(
         selection=MemoryClarificationSelection(
             selected_candidate_index=1,
         ),
+        expected_clarification_id=envelope().clarification_id,
         observed_at=NOW + timedelta(minutes=1),
         turn_lease=ProposalTurnLease(
             turn_id=selecting_turn_id,
@@ -400,6 +402,172 @@ async def test_clarification_selection_atomically_consumes_and_creates_proposal(
         and write.args[1]["memory_proposals"][0]["proposal_id"]
         == ids.proposal_id
         for write in writes
+    )
+
+
+@pytest.mark.asyncio
+async def test_clarification_selection_rejects_a_different_public_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from database import MemoryClarificationSelectionError
+
+    install_transaction_runner(monkeypatch)
+    store = clarification_consumption_store()
+    selecting_turn_id = "c" * 64
+    selecting_message_id = f"turn--{selecting_turn_id}--user"
+    store.session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "user_id": "user-1",
+                "project_id": "workspace-1",
+                "active_memory_clarification_id": (
+                    envelope().clarification_id
+                ),
+                "last_completed_turn_id": TURN_ID,
+            },
+        )
+    )
+
+    with pytest.raises(
+        MemoryClarificationSelectionError,
+        match="does not match",
+    ):
+        await MemoryEngine(
+            store.client
+        ).consume_memory_clarification_to_proposal_v2(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-1",
+            source_message_id=selecting_message_id,
+            selection=MemoryClarificationSelection(
+                selected_candidate_index=1,
+            ),
+            expected_clarification_id=(
+                "memory-clarification--different-clarification"
+            ),
+            observed_at=NOW + timedelta(minutes=1),
+            turn_lease=ProposalTurnLease(
+                turn_id=selecting_turn_id,
+                owner_token="owner-2",
+            ),
+        )
+
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_clarification_selection_exact_retry_reuses_proposal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store = clarification_consumption_store()
+    selecting_turn_id = "c" * 64
+    selecting_message_id = f"turn--{selecting_turn_id}--user"
+    origin_ids = derive_proposal_origin_ids_v2(
+        "user-1",
+        "session-1",
+        selecting_message_id,
+        "development_environments",
+    )
+    consumed = envelope(
+        status="consumed",
+        consuming_turn_id=selecting_turn_id,
+        consuming_message_id=selecting_message_id,
+        selected_candidate_index=1,
+    )
+    proposal = MemoryProposalV2(
+        proposal_id=origin_ids.proposal_id,
+        category="development_environments",
+        proposed_value=["macos", "linux"],
+        expected_signal_id=None,
+        status="pending",
+        source_session_id="session-1",
+        source_message_id=selecting_message_id,
+        evidence_message_id="message-1",
+        clarification_id=consumed.clarification_id,
+        created_at=NOW + timedelta(minutes=1),
+        expires_at=NOW + timedelta(hours=24),
+    )
+    store.session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "user_id": "user-1",
+                "project_id": "workspace-1",
+                "last_consumed_memory_clarification_id": (
+                    consumed.clarification_id
+                ),
+                "last_consuming_memory_turn_id": selecting_turn_id,
+                "last_completed_turn_id": TURN_ID,
+            },
+        )
+    )
+    store.clarification.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=consumed.model_dump(mode="python"),
+        )
+    )
+    store.origin.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "schema_version": "2.0",
+                "proposal_id": proposal.proposal_id,
+                "category": proposal.category,
+                "source_session_id": proposal.source_session_id,
+                "source_message_id": proposal.source_message_id,
+                "evidence_message_id": proposal.evidence_message_id,
+                "clarification_id": proposal.clarification_id,
+                "created_at": NOW + timedelta(minutes=1),
+            },
+        )
+    )
+    store.proposal.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=proposal.model_dump(mode="python"),
+        )
+    )
+    store.user.get = AsyncMock(return_value=snapshot(exists=False))
+    store.turn.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "schema_version": "1.0",
+                "status": "in_progress",
+                "project_id": "workspace-1",
+                "user_id": "user-1",
+                "user_message_id": selecting_message_id,
+                "lease_owner": "owner-2",
+                "lease_expires_at": NOW + timedelta(minutes=3),
+            },
+        )
+    )
+
+    result = await MemoryEngine(
+        store.client
+    ).consume_memory_clarification_to_proposal_v2(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_message_id=selecting_message_id,
+        selection=MemoryClarificationSelection(
+            selected_candidate_index=1,
+        ),
+        expected_clarification_id=consumed.clarification_id,
+        observed_at=NOW + timedelta(minutes=2),
+        turn_lease=ProposalTurnLease(
+            turn_id=selecting_turn_id,
+            owner_token="owner-2",
+        ),
+    )
+
+    assert result == proposal
+    assert all(
+        write.args[0] not in (store.clarification, store.session)
+        for write in store.transaction.set.call_args_list
     )
 
 

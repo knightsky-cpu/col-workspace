@@ -553,6 +553,11 @@ class MemoryDecisionRequest(StrictModel):
     decision: MemoryDecision
 
 
+class MemoryClarificationSelectionRequest(StrictModel):
+    clarification_id: IdentifierStr
+    selected_candidate_index: int = Field(strict=True, ge=0, le=4)
+
+
 class CollaborativeNoteProposal(StrictModel):
     proposal_id: IdentifierStr
     note_kind: CollaborativeNoteKind
@@ -648,16 +653,21 @@ class ChatRequest(StrictModel):
     user_id: IdentifierStr
     message: ChatMessageText
     memory_decision: MemoryDecisionRequest | None = None
+    memory_clarification_selection: (
+        MemoryClarificationSelectionRequest | None
+    ) = None
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
 
     @model_validator(mode="after")
     def allow_only_one_structured_decision(self) -> Self:
-        if (
-            self.memory_decision is not None
-            and self.artifact_feedback_decision is not None
-        ):
+        decisions = (
+            self.memory_decision,
+            self.memory_clarification_selection,
+            self.artifact_feedback_decision,
+        )
+        if sum(item is not None for item in decisions) > 1:
             raise ValueError(
-                "Memory and artifact feedback decisions are mutually exclusive."
+                "Structured decisions are mutually exclusive."
             )
         return self
 
@@ -715,6 +725,7 @@ class ChatSessionDetailResponse(StrictModel):
     project_id: IdentifierStr
     user_id: IdentifierStr
     messages: list[ChatMessageRecord] = Field(max_length=100)
+    active_memory_clarification: MemoryClarificationReceipt | None = None
 
 
 class WorkspaceSummary(StrictModel):

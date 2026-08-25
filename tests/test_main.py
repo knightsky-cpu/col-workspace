@@ -79,6 +79,8 @@ from database import (
     MemoryProposalNotFoundError,
     MemoryProposalOriginConflictError,
     MemoryProposalStateError,
+    MemoryClarificationSelectionError,
+    MemoryClarificationStateError,
     MemorySignalConflictError,
     MemorySignalNotFoundError,
 )
@@ -106,9 +108,11 @@ from schemas import (
     MemoryDecisionRequest,
     MemoryClarificationChoice,
     MemoryClarificationReceipt,
+    MemoryClarificationSelectionRequest,
     MemoryEvent,
     MemoryProposal,
     MemoryProposalReceipt,
+    MemoryProposalReceiptV2,
     SingleFileArtifact,
     SingleFileArtifactCreateResponse,
     SingleFileArtifactDetailResponse,
@@ -137,7 +141,9 @@ from trusted_memory_service import (
     DeleteMemorySignalCommand,
     InspectMemoryCommand,
     MemoryDecisionCommand,
+    NaturalMemoryProposalResult,
     RevokeMemorySignalCommand,
+    SelectMemoryClarificationCommand,
     TrustedMemoryInspectionResult,
     TrustedMemoryMutationResult,
 )
@@ -217,6 +223,9 @@ DEFAULT_TURN_ID = "b" * 64
 def make_chat_turn_claim(
     *,
     memory_decision: MemoryDecisionRequest | None = None,
+    memory_clarification_selection: (
+        MemoryClarificationSelectionRequest | None
+    ) = None,
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None,
     owner_token: str = "owner-token-1",
     resumed: bool = False,
@@ -228,6 +237,7 @@ def make_chat_turn_claim(
             user_id="user-1",
             message="New question",
             memory_decision=memory_decision,
+            memory_clarification_selection=memory_clarification_selection,
             artifact_feedback_decision=artifact_feedback_decision,
         ),
         ids=ChatTurnIds(
@@ -324,7 +334,7 @@ class FakeMemoryEngine:
         tuple[str, str, int]
     ] = field(default_factory=list)
     chat_session_detail_calls: list[
-        tuple[str, str, str, int]
+        tuple[str, str, str, int, datetime]
     ] = field(default_factory=list)
     workspace_list_result: WorkspaceListResponse = field(
         default_factory=lambda: WorkspaceListResponse(workspaces=[])
@@ -435,9 +445,10 @@ class FakeMemoryEngine:
         project_id: str,
         session_id: str,
         limit: int,
+        observed_at: datetime,
     ) -> ChatSessionDetailResponse:
         self.chat_session_detail_calls.append(
-            (user_id, project_id, session_id, limit)
+            (user_id, project_id, session_id, limit, observed_at)
         )
         self.events.append(
             ("chat_session_detail", user_id, project_id, session_id, limit)
@@ -645,6 +656,7 @@ class FakeTrustedMemoryService:
     revoke_result: TrustedMemoryMutationResult | None = None
     delete_result: TrustedMemoryMutationResult | None = None
     decision_result: TrustedMemoryMutationResult | None = None
+    selection_result: NaturalMemoryProposalResult | None = None
     calls: list[InspectMemoryCommand] = field(default_factory=list)
     revoke_calls: list[RevokeMemorySignalCommand] = field(
         default_factory=list
@@ -653,6 +665,9 @@ class FakeTrustedMemoryService:
         default_factory=list
     )
     decision_calls: list[MemoryDecisionCommand] = field(
+        default_factory=list
+    )
+    selection_calls: list[SelectMemoryClarificationCommand] = field(
         default_factory=list
     )
 
@@ -677,6 +692,18 @@ class FakeTrustedMemoryService:
         if self.decision_result is None:
             raise AssertionError("Missing fake decision result.")
         return self.decision_result
+
+    async def select_memory_clarification(
+        self,
+        command: SelectMemoryClarificationCommand,
+    ) -> NaturalMemoryProposalResult:
+        self.selection_calls.append(command)
+        self.events.append(("memory_clarification_selection",))
+        if self.error is not None:
+            raise self.error
+        if self.selection_result is None:
+            raise AssertionError("Missing fake clarification result.")
+        return self.selection_result
 
     async def revoke_memory_signal(
         self,
@@ -1040,6 +1067,19 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 status="completed",
             ),
             profile=approved_profile,
+        ),
+        selection_result=NaturalMemoryProposalResult(
+            status="pending",
+            action=AgentActionReceipt(
+                action_name="propose_memory_signal",
+                status="completed",
+            ),
+            proposal=MemoryProposalReceiptV2(
+                proposal_id="response_length--clarified-proposal-1",
+                category="response_length",
+                proposed_value="detailed",
+                expires_at=MEMORY_NOW + timedelta(hours=24),
+            ),
         ),
     )
     artifact_metadata = BlueprintArtifactMetadata(
@@ -1731,6 +1771,9 @@ async def test_get_chat_session_detail_returns_chronological_messages(
                     timestamp=MEMORY_NOW,
                 ),
             ],
+            active_memory_clarification=(
+                make_memory_clarification_receipt()
+            ),
         )
     )
 
@@ -1745,9 +1788,15 @@ async def test_get_chat_session_detail_returns_chronological_messages(
             mode="json"
         )
     )
-    assert service_state.database.chat_session_detail_calls == [
-        ("user-1", "project-1", "session-1", 50)
-    ]
+    assert len(service_state.database.chat_session_detail_calls) == 1
+    detail_call = service_state.database.chat_session_detail_calls[0]
+    assert detail_call[:4] == (
+        "user-1",
+        "project-1",
+        "session-1",
+        50,
+    )
+    assert detail_call[4].tzinfo is not None
 
 
 @pytest.mark.asyncio
@@ -3363,6 +3412,277 @@ async def test_chat_rejection_returns_action_without_adaptation(
     assert service_state.memory_service.decision_calls[0].decision == (
         "reject"
     )
+
+
+@pytest.mark.asyncio
+async def test_chat_clarification_selection_requires_idempotency_key(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "memory_clarification_selection": {
+                "clarification_id": (
+                    "memory-clarification--clarification-1"
+                ),
+                "selected_candidate_index": 0,
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Memory clarification selection requires an idempotency key."
+    }
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_chat_clarification_selection_returns_and_replays_proposal(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    selection = MemoryClarificationSelectionRequest(
+        clarification_id="memory-clarification--clarification-1",
+        selected_candidate_index=0,
+    )
+    claim = make_chat_turn_claim(
+        memory_clarification_selection=selection
+    )
+    service_state.database.chat_turn_result = claim
+    headers = {"Idempotency-Key": "clarification-selection-key-1"}
+    payload = {
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "message": "New question",
+        "memory_clarification_selection": selection.model_dump(mode="json"),
+    }
+
+    response = await client.post(
+        "/api/chat",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["actions"] == [
+        {
+            "action_name": "propose_memory_signal",
+            "status": "completed",
+        }
+    ]
+    assert response.json()["memory_proposals"] == [
+        {
+            "proposal_id": "response_length--clarified-proposal-1",
+            "category": "response_length",
+            "proposed_value": "detailed",
+            "policy_version": "2.0",
+            "expires_at": "2026-08-21T23:00:00Z",
+        }
+    ]
+    assert service_state.database.claim_calls[0][0] == claim.request
+    assert service_state.memory_service.selection_calls == [
+        SelectMemoryClarificationCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            session_id="session-1",
+            source_message_id=f"turn--{DEFAULT_TURN_ID}--user",
+            clarification_id=(
+                "memory-clarification--clarification-1"
+            ),
+            selected_candidate_index=0,
+            turn_lease=ProposalTurnLease(
+                turn_id=DEFAULT_TURN_ID,
+                owner_token="owner-token-1",
+            ),
+        )
+    ]
+    turn_command = service_state.turn_service.calls[0]
+    assert turn_command.memory_decision_present is True
+    assert turn_command.precompleted_actions == (
+        service_state.memory_service.selection_result.action,
+    )
+    assert turn_command.precompleted_memory_proposals == (
+        service_state.memory_service.selection_result.proposal,
+    )
+
+    stored_response = service_state.database.complete_calls[0][1]
+    service_state.database.chat_turn_result = ChatTurnReplay(
+        response=stored_response
+    )
+    event_count = len(service_state.events)
+
+    replay = await client.post(
+        "/api/chat",
+        headers=headers,
+        json=payload,
+    )
+
+    assert replay.status_code == 200
+    assert replay.json() == response.json()
+    assert service_state.events[event_count:] == [("claim_chat_turn",)]
+    assert len(service_state.memory_service.selection_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_clarification_selection_preserves_receipt_on_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    selection = MemoryClarificationSelectionRequest(
+        clarification_id="memory-clarification--clarification-1",
+        selected_candidate_index=0,
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        memory_clarification_selection=selection
+    )
+    service_state.turn_service.error = AgentColTurnServiceError(
+        "private responder failure"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "clarification-failure-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "memory_clarification_selection": selection.model_dump(
+                mode="json"
+            ),
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["actions"] == [
+        {
+            "action_name": "propose_memory_signal",
+            "status": "completed",
+        }
+    ]
+    assert response.json()["memory_proposals"][0]["proposal_id"] == (
+        "response_length--clarified-proposal-1"
+    )
+    assert len(service_state.database.release_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_clarification_selection_maps_stale_state_to_conflict(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    selection = MemoryClarificationSelectionRequest(
+        clarification_id="memory-clarification--clarification-1",
+        selected_candidate_index=0,
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        memory_clarification_selection=selection
+    )
+    service_state.memory_service.error = MemoryClarificationSelectionError(
+        "private stale selection"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "clarification-conflict-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "memory_clarification_selection": selection.model_dump(
+                mode="json"
+            ),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Memory clarification cannot be selected."
+    }
+    assert len(service_state.database.release_calls) == 1
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_clarification_selection_maps_corrupt_state_safely(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    selection = MemoryClarificationSelectionRequest(
+        clarification_id="memory-clarification--clarification-1",
+        selected_candidate_index=0,
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        memory_clarification_selection=selection
+    )
+    service_state.memory_service.error = ChatTurnStateError(
+        "private corrupt turn state"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "clarification-state-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "memory_clarification_selection": selection.model_dump(
+                mode="json"
+            ),
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Chat turn state is invalid."}
+    assert "private corrupt turn state" not in response.text
+    assert len(service_state.database.release_calls) == 1
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_clarification_selection_hides_ownership_mismatch(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    selection = MemoryClarificationSelectionRequest(
+        clarification_id="memory-clarification--clarification-1",
+        selected_candidate_index=0,
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        memory_clarification_selection=selection
+    )
+    service_state.memory_service.error = ChatSessionOwnershipError(
+        "private clarification owner"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "clarification-owner-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+            "memory_clarification_selection": selection.model_dump(
+                mode="json"
+            ),
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Chat session is unavailable."}
+    assert "private clarification owner" not in response.text
+    assert len(service_state.database.release_calls) == 1
+    assert service_state.turn_service.calls == []
 
 
 @pytest.mark.parametrize(

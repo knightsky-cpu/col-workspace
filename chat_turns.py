@@ -12,6 +12,7 @@ from schemas import (
     ChatResponse,
     MemoryDecisionRequest,
     MemoryClarificationReceipt,
+    MemoryClarificationSelectionRequest,
     VersionedMemoryProposalReceipt,
 )
 
@@ -67,6 +68,9 @@ class ChatTurnRequest:
     user_id: str
     message: str
     memory_decision: MemoryDecisionRequest | None = None
+    memory_clarification_selection: (
+        MemoryClarificationSelectionRequest | None
+    ) = None
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
 
 

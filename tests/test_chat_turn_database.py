@@ -21,6 +21,10 @@ from chat_turns import (
     derive_chat_turn_ids,
 )
 from database import MemoryEngine, MemoryEngineError
+from memory_clarifications import (
+    MemoryClarificationEnvelope,
+    derive_memory_clarification_id,
+)
 from schemas import (
     AdaptationReceipt,
     AdaptationReceiptV2,
@@ -31,6 +35,7 @@ from schemas import (
     ChatResponse,
     MemoryDecisionRequest,
     MemoryClarificationReceipt,
+    MemoryClarificationSelectionRequest,
     MemoryProposalReceipt,
 )
 
@@ -267,6 +272,146 @@ def clarification_receipt_document() -> dict[str, object]:
         ],
         "expires_at": NOW + timedelta(minutes=15),
     }
+
+
+def active_clarification_envelope_document(
+    *, status: str = "open", expires_at: datetime | None = None
+) -> dict[str, object]:
+    return MemoryClarificationEnvelope.model_validate(
+        {
+            "clarification_id": derive_memory_clarification_id(
+                user_id="user-1",
+                session_id="session-1",
+                evidence_message_id="message-1",
+                clarification_turn_id="a" * 64,
+            ),
+            "user_id": "user-1",
+            "session_id": "session-1",
+            "workspace_id": "agent-col",
+            "evidence_message_id": "message-1",
+            "clarification_turn_id": "a" * 64,
+            "candidates": [
+                {
+                    "category": "response_length",
+                    "canonical_value": "detailed",
+                },
+                {
+                    "category": "explanation_structure",
+                    "canonical_value": "step_by_step",
+                },
+            ],
+            "created_at": NOW - timedelta(minutes=5),
+            "expires_at": expires_at or NOW + timedelta(minutes=10),
+            "status": status,
+            **(
+                {
+                    "consuming_turn_id": "b" * 64,
+                    "consuming_message_id": "message-2",
+                    "selected_candidate_index": 0,
+                }
+                if status == "consumed"
+                else {}
+            ),
+        }
+    ).model_dump(mode="python", exclude_none=True)
+
+
+def chat_session_detail_store(
+    *, clarification_document: dict[str, object]
+) -> SimpleNamespace:
+    client = MagicMock()
+    sessions = MagicMock()
+    session = MagicMock()
+    messages = MagicMock()
+    query = MagicMock()
+    clarifications = MagicMock()
+    clarification = MagicMock()
+    client.collection.return_value = sessions
+    sessions.document.return_value = session
+
+    def session_collection(name: str) -> MagicMock:
+        if name == "messages":
+            return messages
+        if name == "memory_clarifications":
+            return clarifications
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    async def empty_stream():
+        if False:
+            yield None
+
+    session.collection.side_effect = session_collection
+    session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "user_id": "user-1",
+                "project_id": "agent-col",
+                "active_memory_clarification_id": (
+                    clarification_document["clarification_id"]
+                ),
+            },
+        )
+    )
+    messages.order_by.return_value = query
+    query.limit.return_value = query
+    query.stream.side_effect = empty_stream
+    clarifications.document.return_value = clarification
+    clarification.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=clarification_document,
+        )
+    )
+    return SimpleNamespace(
+        client=client,
+        clarification=clarification,
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_session_detail_recovers_owned_active_clarification(
+) -> None:
+    store = chat_session_detail_store(
+        clarification_document=active_clarification_envelope_document()
+    )
+
+    result = await MemoryEngine(store.client).get_chat_session_detail(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+        limit=100,
+        observed_at=NOW,
+    )
+
+    expected = clarification_receipt_document()
+    expected["clarification_id"] = active_clarification_envelope_document()[
+        "clarification_id"
+    ]
+    expected["expires_at"] = NOW + timedelta(minutes=10)
+    assert result.active_memory_clarification == MemoryClarificationReceipt(
+        **expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_session_detail_omits_expired_active_clarification(
+) -> None:
+    store = chat_session_detail_store(
+        clarification_document=active_clarification_envelope_document(
+            expires_at=NOW - timedelta(minutes=1)
+        )
+    )
+
+    result = await MemoryEngine(store.client).get_chat_session_detail(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+        limit=100,
+        observed_at=NOW,
+    )
+
+    assert result.active_memory_clarification is None
 
 
 def blueprint_action_document() -> dict[str, str]:
@@ -1019,6 +1164,44 @@ async def test_claim_chat_turn_persists_structured_feedback_identity(
 
 
 @pytest.mark.asyncio
+async def test_claim_chat_turn_persists_clarification_selection_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("clarification-selection-request-1")
+    store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    selection = MemoryClarificationSelectionRequest(
+        clarification_id="memory-clarification--clarification-1",
+        selected_candidate_index=1,
+    )
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Save the explanation structure preference.",
+        memory_clarification_selection=selection,
+    )
+
+    await MemoryEngine(store.client).claim_chat_turn(
+        request,
+        idempotency_key="clarification-selection-request-1",
+        observed_at=NOW,
+    )
+
+    stored_turn = store.transaction.set.call_args_list[1].args[1]
+    assert stored_turn["memory_clarification_selection"] == (
+        selection.model_dump(mode="json")
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_rejects_request_mismatch_without_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1080,6 +1263,48 @@ async def test_claim_chat_turn_rejects_changed_feedback_with_same_key(
                 user_id="user-1",
                 message="Remember one logical turn.",
                 artifact_feedback_decision=changed,
+            ),
+            idempotency_key="request-1",
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_claim_chat_turn_rejects_changed_clarification_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(ids)
+    stored_turn["memory_clarification_selection"] = {
+        "clarification_id": "memory-clarification--clarification-1",
+        "selected_candidate_index": 0,
+    }
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+
+    with pytest.raises(ChatTurnConflictError):
+        await MemoryEngine(store.client).claim_chat_turn(
+            ChatTurnRequest(
+                project_id="agent-col",
+                session_id="session-1",
+                user_id="user-1",
+                message="Remember one logical turn.",
+                memory_clarification_selection=(
+                    MemoryClarificationSelectionRequest(
+                        clarification_id=(
+                            "memory-clarification--clarification-1"
+                        ),
+                        selected_candidate_index=1,
+                    )
+                ),
             ),
             idempotency_key="request-1",
             observed_at=NOW,

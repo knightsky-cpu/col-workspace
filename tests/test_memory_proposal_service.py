@@ -284,6 +284,90 @@ async def test_natural_clarification_selection_uses_server_owned_envelope(
 
 
 @pytest.mark.asyncio
+async def test_explicit_clarification_selection_binds_public_id() -> None:
+    from memory_clarifications import MemoryClarificationSelection
+    from memory_proposals import ProposalTurnLease
+    from trusted_memory_service import (
+        NaturalMemoryProposalResult,
+        SelectMemoryClarificationCommand,
+        TrustedMemoryService,
+    )
+
+    database = FakeProposalDatabase()
+    turn_lease = ProposalTurnLease(
+        turn_id="b" * 64,
+        owner_token="owner-2",
+    )
+    result = await TrustedMemoryService(
+        database=database,
+        clock=lambda: NOW,
+    ).select_memory_clarification(
+        SelectMemoryClarificationCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-1",
+            source_message_id="message-2",
+            clarification_id="memory-clarification--clarify-1",
+            selected_candidate_index=1,
+            turn_lease=turn_lease,
+        )
+    )
+
+    assert isinstance(result, NaturalMemoryProposalResult)
+    assert result.status == "pending"
+    assert result.proposal.category == "development_environments"
+    assert database.calls == [
+        {
+            "user_id": "user-1",
+            "workspace_id": "workspace-1",
+            "session_id": "session-1",
+            "source_message_id": "message-2",
+            "selection": MemoryClarificationSelection(
+                selected_candidate_index=1,
+            ),
+            "expected_clarification_id": (
+                "memory-clarification--clarify-1"
+            ),
+            "observed_at": NOW,
+            "turn_lease": turn_lease,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_explicit_clarification_selection_rejects_boolean_index(
+) -> None:
+    from memory_proposals import ProposalTurnLease
+    from trusted_memory_service import (
+        SelectMemoryClarificationCommand,
+        TrustedMemoryService,
+    )
+
+    database = FakeProposalDatabase()
+
+    with pytest.raises(ValueError, match="candidate index"):
+        await TrustedMemoryService(
+            database=database,
+            clock=lambda: NOW,
+        ).select_memory_clarification(
+            SelectMemoryClarificationCommand(
+                user_id="user-1",
+                workspace_id="workspace-1",
+                session_id="session-1",
+                source_message_id="message-2",
+                clarification_id="memory-clarification--clarify-1",
+                selected_candidate_index=True,
+                turn_lease=ProposalTurnLease(
+                    turn_id="b" * 64,
+                    owner_token="owner-2",
+                ),
+            )
+        )
+
+    assert database.calls == []
+
+
+@pytest.mark.asyncio
 async def test_natural_clarification_persists_with_observed_timestamp() -> None:
     from memory_candidate_decisions import (
         ClarifyDecision,

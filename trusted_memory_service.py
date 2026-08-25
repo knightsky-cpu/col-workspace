@@ -114,6 +114,19 @@ class NaturalMemoryCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class SelectMemoryClarificationCommand:
+    """Describe one explicit selection from a public clarification receipt."""
+
+    user_id: str
+    workspace_id: str
+    session_id: str
+    source_message_id: str
+    clarification_id: str
+    selected_candidate_index: int
+    turn_lease: ProposalTurnLease
+
+
+@dataclass(frozen=True, slots=True)
 class TrustedMemoryMutationResult:
     """Return a completed deterministic memory action and profile."""
 
@@ -424,6 +437,64 @@ class TrustedMemoryService:
                 clarification=clarification_receipt(stored),
             )
         return NaturalMemoryNoEffectResult(status=command.decision.kind)
+
+    async def select_memory_clarification(
+        self,
+        command: SelectMemoryClarificationCommand,
+    ) -> NaturalMemoryProposalResult:
+        """Select one server-owned candidate from a public clarification."""
+        self._validate_identifier(command.user_id, "user_id")
+        self._validate_identifier(command.workspace_id, "workspace_id")
+        self._validate_identifier(command.session_id, "session_id")
+        self._validate_identifier(
+            command.source_message_id,
+            "source_message_id",
+        )
+        self._validate_identifier(
+            command.clarification_id,
+            "clarification_id",
+        )
+        if not isinstance(command.turn_lease, ProposalTurnLease):
+            raise ValueError(
+                "A clarification selection requires retry-safe turn "
+                "ownership."
+            )
+        if (
+            type(command.selected_candidate_index) is not int
+            or not 0 <= command.selected_candidate_index <= 4
+        ):
+            raise ValueError(
+                "selected candidate index must be an integer from 0 to 4."
+            )
+        selection = MemoryClarificationSelection(
+            selected_candidate_index=command.selected_candidate_index,
+        )
+        observed_at = self._clock()
+        stored = (
+            await self._database.consume_memory_clarification_to_proposal_v2(
+                user_id=command.user_id,
+                workspace_id=command.workspace_id,
+                session_id=command.session_id,
+                source_message_id=command.source_message_id,
+                selection=selection,
+                expected_clarification_id=command.clarification_id,
+                observed_at=observed_at,
+                turn_lease=command.turn_lease,
+            )
+        )
+        return NaturalMemoryProposalResult(
+            status="pending",
+            action=AgentActionReceipt(
+                action_name="propose_memory_signal",
+                status="completed",
+            ),
+            proposal=MemoryProposalReceiptV2(
+                proposal_id=stored.proposal_id,
+                category=stored.category,
+                proposed_value=stored.proposed_value,
+                expires_at=stored.expires_at,
+            ),
+        )
 
     async def decide_memory_proposal(
         self,

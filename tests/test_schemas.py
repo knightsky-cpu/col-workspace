@@ -595,6 +595,7 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "user_id": "user-1",
         "message": "Help me plan this.",
         "memory_decision": None,
+        "memory_clarification_selection": None,
         "artifact_feedback_decision": None,
     }
     assert response.model_dump(mode="json") == {
@@ -645,6 +646,132 @@ def test_chat_request_rejects_invalid_project_owned_payloads(
 
     with pytest.raises(ValidationError):
         ChatRequest.model_validate(payload)
+
+
+def test_chat_request_accepts_memory_clarification_selection() -> None:
+    from schemas import ChatRequest, MemoryClarificationSelectionRequest
+
+    selection = MemoryClarificationSelectionRequest(
+        clarification_id="memory-clarification--clarify-1",
+        selected_candidate_index=1,
+    )
+
+    request = ChatRequest(
+        project_id="project-1",
+        session_id="session-1",
+        user_id="user-1",
+        message="Select Response length: Detailed.",
+        memory_clarification_selection=selection,
+    )
+
+    assert request.memory_clarification_selection == selection
+
+
+@pytest.mark.parametrize(
+    "selection",
+    (
+        {
+            "clarification_id": "bad/clarification",
+            "selected_candidate_index": 0,
+        },
+        {
+            "clarification_id": "memory-clarification--clarify-1",
+            "selected_candidate_index": -1,
+        },
+        {
+            "clarification_id": "memory-clarification--clarify-1",
+            "selected_candidate_index": 5,
+        },
+        {
+            "clarification_id": "memory-clarification--clarify-1",
+            "selected_candidate_index": True,
+        },
+    ),
+)
+def test_chat_request_rejects_invalid_memory_clarification_selection(
+    selection: dict[str, object],
+) -> None:
+    from schemas import ChatRequest
+
+    with pytest.raises(ValidationError):
+        ChatRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Select this preference.",
+            memory_clarification_selection=selection,
+        )
+
+
+@pytest.mark.parametrize(
+    "other_decision",
+    (
+        {
+            "memory_decision": {
+                "proposal_id": "response_length--proposal-1",
+                "decision": "approve",
+            }
+        },
+        {
+            "artifact_feedback_decision": {
+                "artifact_id": "artifact-1",
+                "target_id": "target-1",
+                "decision": "accepted",
+                "feedback_text": "Keep this.",
+                "expected_schema_version": "2.0",
+            }
+        },
+    ),
+)
+def test_chat_request_rejects_clarification_with_another_structured_decision(
+    other_decision: dict[str, object],
+) -> None:
+    from schemas import ChatRequest
+
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        ChatRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Select this preference.",
+            memory_clarification_selection={
+                "clarification_id": "memory-clarification--clarify-1",
+                "selected_candidate_index": 0,
+            },
+            **other_decision,
+        )
+
+
+def test_chat_session_detail_accepts_active_memory_clarification() -> None:
+    from schemas import ChatSessionDetailResponse
+
+    detail = ChatSessionDetailResponse.model_validate(
+        {
+            "session_id": "session-1",
+            "project_id": "project-1",
+            "user_id": "user-1",
+            "messages": [],
+            "active_memory_clarification": {
+                "clarification_id": "memory-clarification--clarify-1",
+                "choices": [
+                    {
+                        "candidate_index": 0,
+                        "category_label": "Response length",
+                        "value_label": "Detailed",
+                    },
+                    {
+                        "candidate_index": 1,
+                        "category_label": "Explanation structure",
+                        "value_label": "Step by step",
+                    },
+                ],
+                "expires_at": "2026-08-25T15:15:00Z",
+            },
+        }
+    )
+
+    assert detail.active_memory_clarification is not None
+    assert detail.active_memory_clarification.choices[1].candidate_index == 1
 
 
 @pytest.mark.parametrize(

@@ -69,9 +69,11 @@ approved one phase at a time so they can be reconciled against the accepted
 source baseline produced by the preceding phase.
 
 1. **Phase 1 - Memory Continuity Closure**
-   - Planned file:
-     `docs/superpowers/plans/2026-08-25-winning-core-phase-1-memory-continuity.md`
-   - Status: not created; pending planning approval.
+   - Accepted Pass 1A plan and implementation record:
+     [Phase 1 Memory Continuity Closure](superpowers/plans/2026-08-25-winning-core-phase-1-memory-continuity.md)
+   - Remaining implementation plan:
+     [Phase 1 Remaining Work](superpowers/plans/2026-08-25-winning-core-phase-1-remaining-work.md)
+   - Status: Pass 1A accepted for checkpoint; Passes 1B-1D pending approval.
 2. **Phase 2 - Governed Workspace Notes**
    - Planned file:
      `docs/superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md`
@@ -296,7 +298,7 @@ and checkpointed.
 
 | Phase | Status | Accepted checkpoint | Evidence location |
 | --- | --- | --- | --- |
-| 1. Memory Continuity Closure | Pending plan | - | - |
+| 1. Memory Continuity Closure | Pass 1A accepted; 1B-1D planned | - | - |
 | 2. Governed Workspace Notes | Pending plan | - | - |
 | 3. Durable Asynchronous Artifact Work | Pending plan | - | - |
 | 4. Production Hardening and Deployment | Pending plan | - | - |

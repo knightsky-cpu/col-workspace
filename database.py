@@ -82,6 +82,7 @@ from schemas import (
     MemoryEvent,
     MemoryEventV2,
     MemoryDecisionRequest,
+    MemoryClarificationSelectionRequest,
     MemoryProposal,
     MemoryProposalReceipt,
     MemoryProposalReceiptV2,
@@ -134,6 +135,10 @@ class MemoryClarificationConflictError(RuntimeError):
 
 class MemoryClarificationStateError(RuntimeError):
     """Raised when durable clarification state is internally inconsistent."""
+
+
+class MemoryClarificationSelectionError(RuntimeError):
+    """Raised when a requested clarification cannot be selected."""
 
 
 class MemorySignalAlreadyActiveError(RuntimeError):
@@ -557,12 +562,15 @@ class MemoryEngine:
         project_id: str,
         session_id: str,
         limit: int,
+        observed_at: datetime,
     ) -> ChatSessionDetailResponse:
         """Return a bounded chronological transcript for one chat session."""
         self._validate_string(user_id, "user_id")
         self._validate_string(project_id, "project_id")
         self._validate_string(session_id, "session_id")
         self._validate_limit(limit, "limit", maximum=100)
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
 
         try:
             session_ref = self._client.collection("sessions").document(
@@ -582,6 +590,44 @@ class MemoryEngine:
                     user_id=user_id,
                     messages=[],
                 )
+            active_clarification = None
+            active_clarification_id = session_data.get(
+                "active_memory_clarification_id"
+            )
+            if active_clarification_id is not None:
+                self._validate_memory_identifier(
+                    active_clarification_id,
+                    "active_memory_clarification_id",
+                )
+                clarification_ref = session_ref.collection(
+                    "memory_clarifications"
+                ).document(active_clarification_id)
+                clarification_snapshot = await clarification_ref.get()
+                if not clarification_snapshot.exists:
+                    raise MemoryClarificationStateError(
+                        "Active clarification pointer has no document."
+                    )
+                envelope = self._memory_clarification_from_document(
+                    clarification_snapshot.to_dict()
+                )
+                if envelope.clarification_id != active_clarification_id:
+                    raise MemoryClarificationStateError(
+                        "Active clarification pointer does not match its "
+                        "document."
+                    )
+                if (
+                    envelope.user_id != user_id
+                    or envelope.session_id != session_id
+                    or envelope.workspace_id != project_id
+                ):
+                    raise MemoryClarificationStateError(
+                        "Stored clarification ownership is invalid."
+                    )
+                if (
+                    envelope.status == "open"
+                    and envelope.expires_at > observed_at
+                ):
+                    active_clarification = clarification_receipt(envelope)
             messages_ref = session_ref.collection("messages")
             query = messages_ref.order_by(
                 "timestamp",
@@ -614,6 +660,7 @@ class MemoryEngine:
                 project_id=project_id,
                 user_id=user_id,
                 messages=messages,
+                active_memory_clarification=active_clarification,
             )
         except ValidationError as exc:
             raise ValueError("Stored chat session detail is invalid.") from exc
@@ -650,9 +697,24 @@ class MemoryEngine:
                 "ArtifactFeedbackDecisionRequest."
             )
         if (
-            request.memory_decision is not None
-            and request.artifact_feedback_decision is not None
+            request.memory_clarification_selection is not None
+            and not isinstance(
+                request.memory_clarification_selection,
+                MemoryClarificationSelectionRequest,
+            )
         ):
+            raise ValueError(
+                "memory_clarification_selection must be a "
+                "MemoryClarificationSelectionRequest."
+            )
+        if sum(
+            decision is not None
+            for decision in (
+                request.memory_decision,
+                request.memory_clarification_selection,
+                request.artifact_feedback_decision,
+            )
+        ) > 1:
             raise ValueError("structured decisions are mutually exclusive.")
         if (
             not isinstance(observed_at, datetime)
@@ -810,6 +872,9 @@ class MemoryEngine:
                 )
             transaction.set(session_ref, session_update, merge=True)
             feedback_decision = request.artifact_feedback_decision
+            clarification_selection = (
+                request.memory_clarification_selection
+            )
             transaction.set(
                 turn_ref,
                 {
@@ -821,6 +886,17 @@ class MemoryEngine:
                         request.memory_decision.model_dump(mode="json")
                         if request.memory_decision is not None
                         else None
+                    ),
+                    **(
+                        {
+                            "memory_clarification_selection": (
+                                clarification_selection.model_dump(
+                                    mode="json"
+                                )
+                            )
+                        }
+                        if clarification_selection is not None
+                        else {}
                     ),
                     **(
                         {
@@ -2018,10 +2094,17 @@ class MemoryEngine:
             if request.artifact_feedback_decision is not None
             else None
         )
+        expected_clarification_selection = (
+            request.memory_clarification_selection.model_dump(mode="json")
+            if request.memory_clarification_selection is not None
+            else None
+        )
         if (
             turn_data.get("project_id") != request.project_id
             or turn_data.get("user_id") != request.user_id
             or turn_data.get("memory_decision") != expected_decision
+            or turn_data.get("memory_clarification_selection")
+            != expected_clarification_selection
             or turn_data.get("artifact_feedback_decision")
             != expected_feedback_decision
         ):
@@ -2088,9 +2171,23 @@ class MemoryEngine:
         ):
             raise ValueError("claim artifact_feedback_decision is invalid.")
         if (
-            request.memory_decision is not None
-            and request.artifact_feedback_decision is not None
+            request.memory_clarification_selection is not None
+            and not isinstance(
+                request.memory_clarification_selection,
+                MemoryClarificationSelectionRequest,
+            )
         ):
+            raise ValueError(
+                "claim memory_clarification_selection is invalid."
+            )
+        if sum(
+            decision is not None
+            for decision in (
+                request.memory_decision,
+                request.memory_clarification_selection,
+                request.artifact_feedback_decision,
+            )
+        ) > 1:
             raise ValueError("claim structured decisions are invalid.")
         turn_id = claim.ids.turn_id
         if not isinstance(turn_id, str) or re.fullmatch(
@@ -2221,11 +2318,20 @@ class MemoryEngine:
             if claim.request.artifact_feedback_decision is not None
             else None
         )
+        expected_clarification_selection = (
+            claim.request.memory_clarification_selection.model_dump(
+                mode="json"
+            )
+            if claim.request.memory_clarification_selection is not None
+            else None
+        )
         if (
             turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
             or turn_data.get("project_id") != claim.request.project_id
             or turn_data.get("user_id") != claim.request.user_id
             or turn_data.get("memory_decision") != expected_decision
+            or turn_data.get("memory_clarification_selection")
+            != expected_clarification_selection
             or turn_data.get("artifact_feedback_decision")
             != expected_feedback_decision
             or turn_data.get("user_message_id")
@@ -4315,6 +4421,7 @@ class MemoryEngine:
         selection: MemoryClarificationSelection,
         observed_at: datetime,
         turn_lease: ProposalTurnLease,
+        expected_clarification_id: str | None = None,
     ) -> MemoryProposalV2:
         """Consume the first subsequent clarification turn into one proposal."""
         self._validate_memory_user_id(user_id)
@@ -4330,6 +4437,11 @@ class MemoryEngine:
             raise ValueError("observed_at must be a timezone-aware datetime.")
         if not isinstance(turn_lease, ProposalTurnLease):
             raise ValueError("turn_lease must be valid.")
+        if expected_clarification_id is not None:
+            self._validate_memory_identifier(
+                expected_clarification_id,
+                "expected_clarification_id",
+            )
 
         session_ref = self._client.collection("sessions").document(session_id)
         clarifications_ref = session_ref.collection("memory_clarifications")
@@ -4367,13 +4479,26 @@ class MemoryEngine:
                     or session_document.get("last_consuming_memory_turn_id")
                     != turn_lease.turn_id
                 ):
-                    raise MemoryClarificationStateError(
+                    error_type = (
+                        MemoryClarificationSelectionError
+                        if expected_clarification_id is not None
+                        else MemoryClarificationStateError
+                    )
+                    raise error_type(
                         "No active memory clarification can be selected."
                     )
             self._validate_memory_identifier(
                 clarification_id,
                 "clarification_id",
             )
+            if (
+                expected_clarification_id is not None
+                and clarification_id != expected_clarification_id
+            ):
+                raise MemoryClarificationSelectionError(
+                    "Selected clarification does not match the active "
+                    "clarification."
+                )
             clarification_ref = clarifications_ref.document(clarification_id)
             clarification_snapshot = await clarification_ref.get(
                 transaction=transaction
@@ -4385,6 +4510,14 @@ class MemoryEngine:
             envelope = self._memory_clarification_from_document(
                 clarification_snapshot.to_dict()
             )
+            if (
+                envelope.user_id != user_id
+                or envelope.session_id != session_id
+                or envelope.workspace_id != workspace_id
+            ):
+                raise MemoryClarificationStateError(
+                    "Stored clarification ownership is invalid."
+                )
 
             is_exact_retry = (
                 envelope.status == "consumed"
@@ -4414,7 +4547,12 @@ class MemoryEngine:
                         observed_at=observed_at,
                     )
                 except ValueError as exc:
-                    raise MemoryClarificationStateError(str(exc)) from exc
+                    error_type = (
+                        MemoryClarificationSelectionError
+                        if expected_clarification_id is not None
+                        else MemoryClarificationStateError
+                    )
+                    raise error_type(str(exc)) from exc
 
             origin_ids = derive_proposal_origin_ids_v2(
                 user_id,
