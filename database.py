@@ -39,6 +39,12 @@ from memory_policy import (
     MemoryValue,
     validate_memory_value,
 )
+from memory_clarifications import (
+    MemoryClarificationEnvelope,
+    MemoryClarificationReceipt,
+    clarification_receipt,
+    derive_memory_clarification_id,
+)
 from memory_proposals import (
     PROPOSAL_ORIGIN_SCHEMA_VERSION,
     ProposalOriginIds,
@@ -98,6 +104,14 @@ class MemoryProposalOriginConflictError(RuntimeError):
 
 class MemoryProposalStateError(RuntimeError):
     """Raised when guarded proposal state is internally inconsistent."""
+
+
+class MemoryClarificationConflictError(RuntimeError):
+    """Raised when a clarification retry differs from stored state."""
+
+
+class MemoryClarificationStateError(RuntimeError):
+    """Raised when durable clarification state is internally inconsistent."""
 
 
 class MemorySignalAlreadyActiveError(RuntimeError):
@@ -3628,6 +3642,152 @@ class MemoryEngine:
         except (GoogleAPIError, ValueError) as exc:
             self._raise_firestore_error("create_memory_proposal", exc)
 
+    async def create_memory_clarification(
+        self,
+        *,
+        envelope: MemoryClarificationEnvelope,
+        observed_at: datetime,
+        turn_lease: ProposalTurnLease | None,
+    ) -> MemoryClarificationEnvelope:
+        """Atomically persist one retry-safe clarification turn effect."""
+        self._validate_memory_clarification_creation(
+            envelope=envelope,
+            observed_at=observed_at,
+            turn_lease=turn_lease,
+        )
+        session_ref = self._client.collection("sessions").document(
+            envelope.session_id
+        )
+        clarifications_ref = session_ref.collection(
+            "memory_clarifications"
+        )
+        clarification_ref = clarifications_ref.document(
+            envelope.clarification_id
+        )
+        turn_ref = session_ref.collection("turns").document(
+            turn_lease.turn_id
+        )
+        transaction = self._client.transaction()
+
+        async def create_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> MemoryClarificationEnvelope:
+            session_snapshot = await session_ref.get(
+                transaction=transaction
+            )
+            clarification_snapshot = await clarification_ref.get(
+                transaction=transaction
+            )
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            if not session_snapshot.exists:
+                raise ChatTurnOwnershipError(
+                    "Stored chat session cannot own a clarification effect."
+                )
+            session_document = session_snapshot.to_dict()
+            self._validate_chat_session_owner(
+                session_document,
+                user_id=envelope.user_id,
+                project_id=envelope.workspace_id,
+            )
+            active_id = session_document.get(
+                "active_memory_clarification_id"
+            )
+            if active_id is not None:
+                self._validate_memory_identifier(
+                    active_id,
+                    "active_memory_clarification_id",
+                )
+
+            if clarification_snapshot.exists:
+                stored = self._memory_clarification_from_document(
+                    clarification_snapshot.to_dict()
+                )
+                if stored != envelope:
+                    raise MemoryClarificationConflictError(
+                        "Stored clarification conflicts with this turn."
+                    )
+                if active_id != envelope.clarification_id:
+                    raise MemoryClarificationStateError(
+                        "Stored clarification is not the active session "
+                        "clarification."
+                    )
+                effect = self._memory_clarification_turn_effect_update(
+                    turn_snapshot=turn_snapshot,
+                    envelope=envelope,
+                    turn_lease=turn_lease,
+                    observed_at=observed_at,
+                )
+                if effect is not None:
+                    raise MemoryClarificationStateError(
+                        "Stored clarification has no matching turn effect."
+                    )
+                return stored
+
+            prior_ref = None
+            prior = None
+            if active_id is not None:
+                prior_ref = clarifications_ref.document(active_id)
+                prior_snapshot = await prior_ref.get(
+                    transaction=transaction
+                )
+                if not prior_snapshot.exists:
+                    raise MemoryClarificationStateError(
+                        "Active clarification pointer has no document."
+                    )
+                prior = self._memory_clarification_from_document(
+                    prior_snapshot.to_dict()
+                )
+                if (
+                    prior.clarification_id != active_id
+                    or prior.user_id != envelope.user_id
+                    or prior.session_id != envelope.session_id
+                    or prior.workspace_id != envelope.workspace_id
+                    or prior.status != "open"
+                ):
+                    raise MemoryClarificationStateError(
+                        "Active clarification pointer is invalid."
+                    )
+
+            effect = self._memory_clarification_turn_effect_update(
+                turn_snapshot=turn_snapshot,
+                envelope=envelope,
+                turn_lease=turn_lease,
+                observed_at=observed_at,
+            )
+            if prior_ref is not None and prior is not None:
+                transaction.set(
+                    prior_ref,
+                    {"status": "expired"},
+                    merge=True,
+                )
+            transaction.set(
+                clarification_ref,
+                envelope.model_dump(mode="python", exclude_none=True),
+            )
+            transaction.set(turn_ref, effect, merge=True)
+            transaction.set(
+                session_ref,
+                {
+                    "active_memory_clarification_id": (
+                        envelope.clarification_id
+                    ),
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return envelope
+
+        run_transaction = firestore.async_transactional(
+            create_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "create_memory_clarification",
+                exc,
+            )
+
     async def create_guarded_memory_proposal(
         self,
         *,
@@ -4931,6 +5091,118 @@ class MemoryEngine:
             ProposalTurnLease,
         ):
             raise ValueError("turn_lease must be valid when provided.")
+
+    @staticmethod
+    def _validate_memory_clarification_creation(
+        *,
+        envelope: object,
+        observed_at: object,
+        turn_lease: object,
+    ) -> None:
+        if not isinstance(envelope, MemoryClarificationEnvelope):
+            raise ValueError("envelope must be a memory clarification.")
+        if envelope.status != "open":
+            raise ValueError("Only an open clarification can be created.")
+        if not isinstance(turn_lease, ProposalTurnLease):
+            raise ValueError("A valid turn lease is required.")
+        if turn_lease.turn_id != envelope.clarification_turn_id:
+            raise ValueError("The turn lease does not own the clarification.")
+        if not MemoryEngine._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        if not envelope.created_at <= observed_at < envelope.expires_at:
+            raise ValueError("Clarification timestamps are not currently valid.")
+        expected_id = derive_memory_clarification_id(
+            user_id=envelope.user_id,
+            session_id=envelope.session_id,
+            evidence_message_id=envelope.evidence_message_id,
+            clarification_turn_id=envelope.clarification_turn_id,
+        )
+        if envelope.clarification_id != expected_id:
+            raise ValueError("clarification_id does not match provenance.")
+
+    @staticmethod
+    def _memory_clarification_from_document(
+        document: object,
+    ) -> MemoryClarificationEnvelope:
+        if not isinstance(document, dict):
+            raise MemoryClarificationStateError(
+                "Stored clarification is invalid."
+            )
+        try:
+            envelope = MemoryClarificationEnvelope.model_validate(document)
+        except ValidationError as exc:
+            raise MemoryClarificationStateError(
+                "Stored clarification is invalid."
+            ) from exc
+        expected_id = derive_memory_clarification_id(
+            user_id=envelope.user_id,
+            session_id=envelope.session_id,
+            evidence_message_id=envelope.evidence_message_id,
+            clarification_turn_id=envelope.clarification_turn_id,
+        )
+        if envelope.clarification_id != expected_id:
+            raise MemoryClarificationStateError(
+                "Stored clarification is invalid."
+            )
+        return envelope
+
+    @staticmethod
+    def _memory_clarification_turn_effect_update(
+        *,
+        turn_snapshot: object,
+        envelope: MemoryClarificationEnvelope,
+        turn_lease: ProposalTurnLease,
+        observed_at: datetime,
+    ) -> dict[str, object] | None:
+        if not getattr(turn_snapshot, "exists", False):
+            raise ChatTurnOwnershipError(
+                "Stored chat turn cannot own a clarification effect."
+            )
+        turn_data = turn_snapshot.to_dict()
+        if not isinstance(turn_data, Mapping):
+            raise ChatTurnStateError("Stored chat turn is invalid.")
+        lease_expires_at = turn_data.get("lease_expires_at")
+        if (
+            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
+            or turn_data.get("status") != "in_progress"
+            or turn_data.get("project_id") != envelope.workspace_id
+            or turn_data.get("user_id") != envelope.user_id
+            or turn_data.get("user_message_id")
+            != envelope.evidence_message_id
+            or turn_data.get("lease_owner") != turn_lease.owner_token
+            or not MemoryEngine._is_aware_datetime(lease_expires_at)
+            or lease_expires_at <= observed_at
+        ):
+            raise ChatTurnOwnershipError(
+                "Stored chat turn cannot own a clarification effect."
+            )
+        receipt = clarification_receipt(envelope).model_dump(mode="python")
+        existing = turn_data.get("memory_clarifications", [])
+        if not isinstance(existing, list):
+            raise ChatTurnStateError(
+                "Stored clarification turn effects are invalid."
+            )
+        try:
+            validated = [
+                MemoryClarificationReceipt.model_validate(item).model_dump(
+                    mode="python"
+                )
+                for item in existing
+            ]
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored clarification turn effects are invalid."
+            ) from exc
+        if validated:
+            if validated == [receipt]:
+                return None
+            raise ChatTurnStateError(
+                "Stored chat turn has conflicting clarification effects."
+            )
+        return {
+            "memory_clarifications": [receipt],
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
 
     @staticmethod
     def _validated_proposal_origin_document(
