@@ -80,13 +80,16 @@ source baseline produced by the preceding phase.
    - Status: plan approved and checkpointed at `f7d20e0`; implementation
      remains pending completion of Phase 1.
 3. **Phase 3 - Durable Asynchronous Artifact Work**
-   - Pending implementation plan:
+   - Checkpointed implementation plan:
      [Phase 3 Durable Asynchronous Artifact Work](superpowers/plans/2026-08-25-winning-core-phase-3-async-artifact-work.md)
-   - Status: plan created; pending approval and documentation checkpoint.
+   - Status: plan checkpointed at `c889a99`; implementation remains pending
+     approval and completion of Phases 1-2.
 4. **Phase 4 - Production Hardening and Deployment**
-   - Planned file:
-     `docs/superpowers/plans/2026-08-25-winning-core-phase-4-production-deployment.md`
-   - Status: not created; pending Phase 3 acceptance and planning approval.
+   - Pending implementation plan:
+     [Phase 4 Production Hardening and Deployment](superpowers/plans/2026-08-25-winning-core-phase-4-production-deployment.md)
+   - Status: plan created from the current source baseline and Phase 4 research
+     audit; pending user approval and documentation checkpoint. Implementation
+     remains blocked on accepted Phases 1-3 and a final source re-audit.
 5. **Phase 5 - Reproducibility and Submission Evidence**
    - Planned file:
      `docs/superpowers/plans/2026-08-25-winning-core-phase-5-reproducibility-evidence.md`
