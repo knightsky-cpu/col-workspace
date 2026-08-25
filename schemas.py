@@ -1,6 +1,6 @@
 import json
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -8,11 +8,19 @@ from pydantic import (
     ConfigDict,
     Field,
     HttpUrl,
+    StrictInt,
     StringConstraints,
     field_validator,
     model_validator,
 )
 
+from collaborative_note_policy import (
+    CollaborativeNoteKind,
+    CollaborativeNoteProposalStatus,
+    CollaborativeNoteStatus,
+    normalize_note_body,
+    normalize_note_title,
+)
 from memory_policy import (
     ConfirmationChannel,
     MEMORY_POLICY_VERSION,
@@ -488,9 +496,94 @@ def _normalize_memory_model_value(
     return normalized
 
 
+def _normalize_collaborative_note_text(data: object) -> object:
+    if not isinstance(data, Mapping):
+        return data
+    normalized = dict(data)
+    if "title" in normalized:
+        normalized["title"] = normalize_note_title(normalized["title"])
+    if "body" in normalized:
+        normalized["body"] = normalize_note_body(normalized["body"])
+    return normalized
+
+
+def _require_aware_datetime(value: datetime, field_name: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone aware.")
+
+
+def _require_unique_source_message_ids(source_message_ids: list[str]) -> None:
+    if len(source_message_ids) != len(set(source_message_ids)):
+        raise ValueError("Source message IDs must be unique.")
+
+
 class MemoryDecisionRequest(StrictModel):
     proposal_id: IdentifierStr
     decision: MemoryDecision
+
+
+class CollaborativeNoteProposal(StrictModel):
+    proposal_id: IdentifierStr
+    note_kind: CollaborativeNoteKind
+    title: str
+    body: str
+    source_session_id: IdentifierStr
+    source_message_ids: list[IdentifierStr] = Field(min_length=1, max_length=5)
+    expected_note_id: IdentifierStr | None
+    expected_revision: StrictInt | None = Field(ge=1)
+    policy_version: Literal["1.0"]
+    status: CollaborativeNoteProposalStatus
+    created_at: datetime
+    expires_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, data: object) -> object:
+        return _normalize_collaborative_note_text(data)
+
+    @model_validator(mode="after")
+    def validate_proposal_invariants(self) -> Self:
+        _require_unique_source_message_ids(self.source_message_ids)
+        if (self.expected_note_id is None) != (self.expected_revision is None):
+            raise ValueError(
+                "Expected note ID and expected revision must be paired."
+            )
+        _require_aware_datetime(self.created_at, "created_at")
+        _require_aware_datetime(self.expires_at, "expires_at")
+        elapsed = self.expires_at.astimezone(UTC) - self.created_at.astimezone(UTC)
+        if elapsed != timedelta(hours=24):
+            raise ValueError("Proposal timestamps must be exactly 24 elapsed hours apart.")
+        return self
+
+
+class CollaborativeNote(StrictModel):
+    note_id: IdentifierStr
+    owner_user_id: IdentifierStr
+    workspace_id: IdentifierStr
+    note_kind: CollaborativeNoteKind
+    title: str
+    body: str
+    status: CollaborativeNoteStatus
+    revision: StrictInt = Field(ge=1)
+    source_session_id: IdentifierStr
+    source_message_ids: list[IdentifierStr] = Field(min_length=1, max_length=5)
+    source_event_id: IdentifierStr
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, data: object) -> object:
+        return _normalize_collaborative_note_text(data)
+
+    @model_validator(mode="after")
+    def validate_active_note_invariants(self) -> Self:
+        _require_unique_source_message_ids(self.source_message_ids)
+        _require_aware_datetime(self.created_at, "created_at")
+        _require_aware_datetime(self.updated_at, "updated_at")
+        if self.updated_at.astimezone(UTC) < self.created_at.astimezone(UTC):
+            raise ValueError("updated_at must not be earlier than created_at.")
+        return self
 
 
 class AdaptationReceipt(StrictModel):
