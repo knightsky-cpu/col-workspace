@@ -48,7 +48,10 @@ Do not propose memory when the current turn carries a structured memory
 decision, when the same value is already active, or when a matching pending
 proposal already exists. When the current message contains more than one
 eligible memory candidate, submit a clarify decision and do not choose between
-them. When the user answers a prior clarification, their semantic selection
+them. Multiple values in one list-valued category are one list-valued candidate,
+not separate clarification choices. For example, macOS and Linux development
+environments are one profile candidate with canonical value ["macos", "linux"].
+When the user answers a prior clarification, their semantic selection
 does not need to restate the exact value; call propose_memory_signal with the
 clarification_selection represented by that answer. Make at most one memory
 proposal call per turn. After a completed proposal receipt, explain that it is

@@ -110,6 +110,8 @@ def test_supervisor_requires_clarification_for_multiple_memory_candidates(
     assert "more than one supported profile candidate" in normalized_instruction
     assert "submit a clarify decision" in normalized_instruction
     assert "do not choose for the user" in normalized_instruction
+    assert "one list-valued candidate" in normalized_instruction
+    assert "macOS and Linux" in normalized_instruction
 
 
 def test_supervisor_allows_semantic_selection_after_memory_clarification(

@@ -10,6 +10,7 @@ from memory_candidate_decisions import (
     NaturalMemoryDecision,
     NoMemoryDecision,
     ProfileCandidateDecision,
+    is_natural_memory_decision,
     validate_decision_evidence,
 )
 from memory_clarifications import (
@@ -272,6 +273,21 @@ class TrustedMemoryService:
         | NaturalMemoryNoEffectResult
     ):
         """Validate one semantic decision before its version-2 effect."""
+        if not is_natural_memory_decision(command.decision):
+            raise ValueError(
+                "Natural memory command requires a canonical decision."
+            )
+        if (
+            command.clarification_selection is not None
+            and not isinstance(
+                command.clarification_selection,
+                MemoryClarificationSelection,
+            )
+        ):
+            raise ValueError(
+                "Natural memory command requires a canonical clarification "
+                "selection."
+            )
         self._validate_identifier(command.user_id, "user_id")
         self._validate_identifier(command.workspace_id, "workspace_id")
         self._validate_identifier(command.session_id, "session_id")

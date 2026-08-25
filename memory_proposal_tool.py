@@ -3,9 +3,19 @@ from collections.abc import Mapping
 from typing import Literal, Self
 
 from google.adk.tools import FunctionTool, ToolContext
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    TypeAdapter,
+    ValidationError,
+    model_validator,
+)
 
-from memory_candidate_decisions import NaturalMemoryDecision
+from memory_candidate_decisions import (
+    NaturalMemoryDecision,
+    ProviderNaturalMemoryDecision,
+    validate_provider_natural_memory_decision,
+)
 from memory_clarifications import (
     MemoryClarificationReceipt,
     MemoryClarificationSelection,
@@ -22,6 +32,7 @@ from trusted_memory_service import (
 
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_CLARIFICATION_SELECTION_ADAPTER = TypeAdapter(MemoryClarificationSelection)
 
 
 class MemoryProposalToolConfigurationError(RuntimeError):
@@ -187,15 +198,25 @@ def create_propose_memory_signal_tool(
     """Create the governed pending-memory proposal tool."""
 
     async def propose_memory_signal(
-        decision: NaturalMemoryDecision,
+        decision: ProviderNaturalMemoryDecision,
         tool_context: ToolContext,
         clarification_selection: MemoryClarificationSelection | None = None,
     ) -> dict[str, object]:
         """Create a pending user-reviewable proposal; never activate memory."""
         try:
+            validated_decision = validate_provider_natural_memory_decision(
+                decision
+            )
+            validated_selection = (
+                None
+                if clarification_selection is None
+                else _CLARIFICATION_SELECTION_ADAPTER.validate_python(
+                    clarification_selection
+                )
+            )
             command = _server_command(
-                decision=decision,
-                clarification_selection=clarification_selection,
+                decision=validated_decision,
+                clarification_selection=validated_selection,
                 tool_context=tool_context,
             )
             result = await memory_service.handle_natural_memory_decision(

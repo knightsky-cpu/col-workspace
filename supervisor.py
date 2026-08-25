@@ -62,6 +62,9 @@ non-governed durable profile details are unsupported.
 
 When one message contains more than one supported profile candidate, submit a
 clarify decision containing all bounded candidates; do not choose for the user.
+Multiple values in one list-valued category are one list-valued candidate, not
+separate clarification choices. For example, macOS and Linux development
+environments are one profile candidate with canonical value ["macos", "linux"].
 When the user answers a prior clarification, their semantic selection does not
 need to restate the exact value. Call propose_memory_signal with the
 clarification_selection supplied by that answer. Never invent candidate values

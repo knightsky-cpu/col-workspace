@@ -95,6 +95,34 @@ def test_proposal_tool_exposes_only_natural_decision_fields_to_model() -> None:
         assert server_owned_name not in rendered
 
 
+@pytest.mark.filterwarnings(
+    "ignore:\\[EXPERIMENTAL\\].*JSON_SCHEMA_FOR_FUNC_DECL.*:UserWarning"
+)
+def test_proposal_tool_declares_development_environments_as_an_array() -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    tool = create_propose_memory_signal_tool(NoopMemoryService())
+    declaration = tool._get_declaration()
+
+    assert declaration is not None
+    schema = declaration.parameters_json_schema
+    assert schema is not None
+    candidate_schema = schema["$defs"][
+        "DevelopmentEnvironmentsProviderCandidate"
+    ]
+    assert candidate_schema["properties"]["category"]["const"] == (
+        "development_environments"
+    )
+    canonical_schema = candidate_schema["properties"]["canonical_value"]
+    assert canonical_schema["type"] == "array"
+    assert canonical_schema["minItems"] == 1
+    assert canonical_schema["maxItems"] == 3
+    assert canonical_schema["items"] == {
+        "enum": ["macos", "linux", "windows"],
+        "type": "string",
+    }
+
+
 @pytest.mark.asyncio
 async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
     from memory_proposal_tool import create_propose_memory_signal_tool
@@ -145,6 +173,105 @@ async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
     assert command.clarification_selection is None
     assert command.turn_lease.turn_id == "a" * 64
     assert command.turn_lease.owner_token == "owner-1"
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_preserves_one_list_valued_environment_candidate(
+) -> None:
+    from memory_candidate_decisions import ProfileCandidateDecision
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    state = tool_context_state()
+    state["memory_source_message_text"] = (
+        "Please remember that I prefer macOS and Linux development environments."
+    )
+    service = RecordingMemoryService()
+    tool = create_propose_memory_signal_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "development_environments",
+                "canonical_value": ["macos", "linux"],
+                "evidence_text": (
+                    "macOS and Linux development environments"
+                ),
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=state, delta={})
+        ),
+    )
+
+    assert result["status"] == "pending"
+    assert len(service.commands) == 1
+    decision = service.commands[0].decision
+    assert isinstance(decision, ProfileCandidateDecision)
+    assert decision.category == "development_environments"
+    assert decision.canonical_value == ["macos", "linux"]
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_rejects_live_malformed_clarification_before_service(
+) -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    service = RecordingMemoryService()
+    tool = create_propose_memory_signal_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "clarify",
+                "candidates": [
+                    {
+                        "kind": "profile_candidate",
+                        "category": "development_environments",
+                        "canonical_value": "macos",
+                        "evidence_text": "macOS",
+                    },
+                    {
+                        "kind": "profile_candidate",
+                        "category": "development_environments",
+                        "canonical_value": "linux",
+                        "evidence_text": "Linux",
+                    },
+                ],
+            },
+        },
+        tool_context=SimpleNamespace(state=tool_context_state()),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": "invalid_memory_candidate",
+    }
+    assert service.commands == []
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_rejects_malformed_selection_before_service() -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    service = RecordingMemoryService()
+    tool = create_propose_memory_signal_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "decision": {"kind": "no_memory"},
+            "clarification_selection": {
+                "selected_candidate_index": "first",
+            },
+        },
+        tool_context=SimpleNamespace(state=tool_context_state()),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": "invalid_memory_candidate",
+    }
+    assert service.commands == []
 
 
 @pytest.mark.asyncio

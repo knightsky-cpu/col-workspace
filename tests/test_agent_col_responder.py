@@ -122,6 +122,8 @@ def test_responder_instruction_preserves_governed_memory_restraint() -> None:
         "structured memory decision",
         "more than one eligible memory candidate",
         "submit a clarify decision",
+        "one list-valued candidate",
+        "macos and linux",
         "at most one memory proposal",
         "approve or reject",
         "never active until",

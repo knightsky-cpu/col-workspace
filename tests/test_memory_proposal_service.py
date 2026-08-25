@@ -194,6 +194,44 @@ async def test_natural_profile_candidate_rejects_non_source_evidence() -> None:
 
 
 @pytest.mark.asyncio
+async def test_natural_memory_service_rejects_raw_decision_before_effects() -> None:
+    from trusted_memory_service import TrustedMemoryService
+
+    database = FakeProposalDatabase()
+
+    with pytest.raises(ValueError, match="canonical decision"):
+        await TrustedMemoryService(
+            database=database,
+            clock=lambda: NOW,
+        ).handle_natural_memory_decision(
+            natural_command(decision={"kind": "no_memory"})
+        )
+
+    assert database.calls == []
+
+
+@pytest.mark.asyncio
+async def test_natural_memory_service_rejects_raw_selection_before_effects() -> None:
+    from memory_candidate_decisions import NoMemoryDecision
+    from trusted_memory_service import TrustedMemoryService
+
+    database = FakeProposalDatabase()
+
+    with pytest.raises(ValueError, match="canonical clarification selection"):
+        await TrustedMemoryService(
+            database=database,
+            clock=lambda: NOW,
+        ).handle_natural_memory_decision(
+            natural_command(
+                decision=NoMemoryDecision(),
+                clarification_selection={"selected_candidate_index": 0},
+            )
+        )
+
+    assert database.calls == []
+
+
+@pytest.mark.asyncio
 async def test_natural_clarification_selection_uses_server_owned_envelope(
 ) -> None:
     from memory_candidate_decisions import NoMemoryDecision
