@@ -140,6 +140,68 @@ test("renderMemoryPanel renders active preferences, proposals, and events safely
   }]);
 });
 
+test("renderMemoryPanel renders and approves list-valued V2 memory", () => {
+  const approvals = [];
+  const container = node();
+  const v2Memory = {
+    status: "ready",
+    profile: {
+      memory_schema_version: "2.0",
+      memory_revision: 1,
+      identity_context: {},
+      active_preferences: {
+        development_environments: {
+          signal_id: "development_environments--active-v2",
+          value: ["macos", "linux"],
+          policy_version: "2.0",
+          source_event_id: "development_environments--active-v2--approved",
+        },
+      },
+    },
+    unresolvedProposals: [{
+      proposal_id: "development_environments--proposal-v2",
+      category: "development_environments",
+      proposed_value: ["macos", "linux"],
+      policy_version: "2.0",
+      status: "pending",
+    }],
+    events: [{
+      event_id: "development_environments--active-v2--approved",
+      event_type: "approved",
+      category: "development_environments",
+      value: ["macos", "linux"],
+      policy_version: "2.0",
+    }],
+    next_event_id: null,
+    error: null,
+  };
+
+  renderMemoryPanel(container, v2Memory, {
+    onSubmitDecision: (decision) => approvals.push(decision),
+    onRevokeSignal: () => {},
+    onDeleteSignal: () => {},
+  });
+
+  const text = textTree(container);
+  assert.equal(text.includes("Development environments"), true);
+  assert.equal(text.includes("macos, linux"), true);
+  assert.equal(text.includes("development_environments"), false);
+  const proposalCard = findTree(container, (child) => (
+    child.attributes["data-memory-proposal"] === (
+      "development_environments--proposal-v2"
+    )
+  ));
+  const approveButton = findTree(proposalCard, (child) => (
+    child.attributes["data-memory-decision"] === "approve"
+  ));
+  approveButton.onclick();
+
+  assert.deepEqual(approvals, [{
+    proposal_id: "development_environments--proposal-v2",
+    decision: "approve",
+  }]);
+});
+
 test("renderMemoryPanel orders pending proposals before active preferences and events", () => {
   const container = node();
 

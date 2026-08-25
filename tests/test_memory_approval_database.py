@@ -58,6 +58,30 @@ def pending_proposal_document(
     }
 
 
+def pending_v2_proposal_document(
+    *,
+    proposal_id: str = "development_environments--proposal-v2",
+    value: object = ("linux", "macos"),
+    expected_signal_id: str | None = None,
+    status: str = "pending",
+) -> dict[str, object]:
+    return {
+        "proposal_id": proposal_id,
+        "category": "development_environments",
+        "proposed_value": list(value) if isinstance(value, tuple) else value,
+        "expected_signal_id": expected_signal_id,
+        "policy_version": "2.0",
+        "status": status,
+        "source_session_id": "source-session",
+        "source_message_id": "source-message",
+        "evidence_message_id": "source-message",
+        "clarification_id": None,
+        "created_at": NOW,
+        "expires_at": NOW + timedelta(hours=24),
+        "resolved_at": None,
+    }
+
+
 def active_signal_document(
     *,
     signal_id: str = "response_length--proposal-1",
@@ -91,6 +115,25 @@ def governed_profile_document(
     }
 
 
+def governed_v2_profile_document() -> dict[str, object]:
+    signal_id = "development_environments--proposal-v1"
+    return {
+        "memory_schema_version": "2.0",
+        "memory_revision": 1,
+        "identity_context": {},
+        "active_preferences": {
+            "development_environments": {
+                "signal_id": signal_id,
+                "category": "development_environments",
+                "value": ["macos", "linux"],
+                "policy_version": "2.0",
+                "source_event_id": f"{signal_id}--approved",
+                "approved_at": NOW,
+            }
+        },
+    }
+
+
 def lifecycle_event_document(
     *,
     event_type: str = "approved",
@@ -119,6 +162,27 @@ def lifecycle_event_document(
         "related_signal_id": related_signal_id,
         "memory_revision": revision,
         "created_at": created_at,
+    }
+
+
+def v2_lifecycle_event_document() -> dict[str, object]:
+    return {
+        "event_type": "approved",
+        "signal_id": "development_environments--proposal-v1",
+        "category": "development_environments",
+        "value": ["macos", "linux"],
+        "policy_version": "2.0",
+        "source_type": "explicit_user_feedback",
+        "source_session_id": "source-session",
+        "source_message_id": "source-message",
+        "evidence_message_id": "source-message",
+        "clarification_id": None,
+        "confirmation_channel": "chat_decision",
+        "confirmation_session_id": "confirmation-session",
+        "confirmation_message_id": "confirmation-message",
+        "related_signal_id": None,
+        "memory_revision": 1,
+        "created_at": NOW,
     }
 
 
@@ -244,15 +308,27 @@ async def test_get_collaboration_profile_returns_only_governed_signals() -> None
 
 
 @pytest.mark.asyncio
+async def test_get_collaboration_profile_returns_v2_profile() -> None:
+    client, _, user = profile_store()
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=governed_v2_profile_document,
+        )
+    )
+
+    result = await MemoryEngine(client).get_collaboration_profile("user-1")
+
+    assert result.memory_schema_version == "2.0"
+    signal = result.active_preferences["development_environments"]
+    assert signal.policy_version == "2.0"
+    assert signal.value == ["macos", "linux"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "document",
     (
-        {
-            "memory_schema_version": "2.0",
-            "memory_revision": 0,
-            "identity_context": {},
-            "active_preferences": {},
-        },
         {
             "memory_schema_version": "1.0",
             "memory_revision": 1,
@@ -435,6 +511,75 @@ async def test_approve_memory_proposal_atomically_creates_event_and_projection(
             merge=True,
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_approve_v2_memory_proposal_creates_v2_event_and_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client, _, user, _, proposal_ref, _, event_refs = approval_store()
+    transaction = MagicMock()
+    client.transaction.return_value = transaction
+    proposal_id = "development_environments--proposal-v2"
+    approved_event_id = f"{proposal_id}--approved"
+    corrected_event_id = f"{proposal_id}--corrected"
+    proposal_ref.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=pending_v2_proposal_document,
+        )
+    )
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=False,
+            to_dict=lambda: None,
+        )
+    )
+    for event_id in (approved_event_id, corrected_event_id):
+        event_refs.setdefault(event_id, MagicMock())
+        event_refs[event_id].get = AsyncMock(
+            return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+        )
+
+    result = await MemoryEngine(client).approve_memory_proposal(
+        "user-1",
+        "development_environments",
+        proposal_id,
+        confirmation_channel="chat_decision",
+        confirmation_session_id="confirmation-session",
+        confirmation_message_id="confirmation-message",
+        observed_at=NOW,
+    )
+
+    assert result.profile.memory_schema_version == "2.0"
+    signal = result.profile.active_preferences["development_environments"]
+    assert signal.policy_version == "2.0"
+    assert signal.value == ["macos", "linux"]
+    assert result.event.policy_version == "2.0"
+    assert result.event.evidence_message_id == "source-message"
+    assert result.event.clarification_id is None
+    assert transaction.set.call_args_list[0] == call(
+        event_refs[approved_event_id],
+        {
+            "event_type": "approved",
+            "signal_id": proposal_id,
+            "category": "development_environments",
+            "value": ["macos", "linux"],
+            "policy_version": "2.0",
+            "source_type": "explicit_user_feedback",
+            "source_session_id": "source-session",
+            "source_message_id": "source-message",
+            "evidence_message_id": "source-message",
+            "clarification_id": None,
+            "confirmation_channel": "chat_decision",
+            "confirmation_session_id": "confirmation-session",
+            "confirmation_message_id": "confirmation-message",
+            "related_signal_id": None,
+            "memory_revision": 1,
+            "created_at": firestore.SERVER_TIMESTAMP,
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -1374,3 +1519,73 @@ async def test_approve_memory_proposal_rejects_oversized_stored_event_path(
 
     assert isinstance(caught.value.__cause__, ValueError)
     transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_approve_v2_memory_correction_preserves_v2_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client, _, user, _, proposal_ref, _, event_refs = approval_store()
+    transaction = MagicMock()
+    client.transaction.return_value = transaction
+    old_signal_id = "development_environments--proposal-v1"
+    new_signal_id = "development_environments--proposal-v2"
+    approved_event_id = f"{new_signal_id}--approved"
+    corrected_event_id = f"{new_signal_id}--corrected"
+    source_event_id = f"{old_signal_id}--approved"
+    superseded_event_id = f"{old_signal_id}--superseded"
+    proposal_ref.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=lambda: pending_v2_proposal_document(
+                value=("windows",),
+                expected_signal_id=old_signal_id,
+            ),
+        )
+    )
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=governed_v2_profile_document,
+        )
+    )
+    for event_id in (approved_event_id, corrected_event_id):
+        event_refs.setdefault(event_id, MagicMock())
+        event_refs[event_id].get = AsyncMock(
+            return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+        )
+    event_refs.setdefault(source_event_id, MagicMock())
+    event_refs[source_event_id].get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=v2_lifecycle_event_document,
+        )
+    )
+    event_refs.setdefault(superseded_event_id, MagicMock())
+    event_refs[superseded_event_id].get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+
+    result = await MemoryEngine(client).approve_memory_proposal(
+        "user-1",
+        "development_environments",
+        new_signal_id,
+        confirmation_channel="chat_decision",
+        confirmation_session_id="correction-session",
+        confirmation_message_id="correction-message",
+        observed_at=NOW + timedelta(hours=1),
+    )
+
+    assert result.profile.memory_schema_version == "2.0"
+    assert result.profile.memory_revision == 2
+    assert result.event.event_type == "corrected"
+    assert result.event.policy_version == "2.0"
+    assert result.event.evidence_message_id == "source-message"
+    assert result.superseded_event is not None
+    assert result.superseded_event.event_type == "superseded"
+    assert result.superseded_event.policy_version == "2.0"
+    assert result.superseded_event.evidence_message_id == "source-message"
+    active = result.profile.active_preferences["development_environments"]
+    assert active.signal_id == new_signal_id
+    assert active.value == ["windows"]

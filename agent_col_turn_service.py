@@ -72,12 +72,12 @@ from memory_proposals import ProposalTurnLease
 from research_expert import ResearchExpertResult
 from requirements_verification import RequirementsVerificationResult
 from schemas import (
-    AdaptationReceipt,
     AgentActionReceipt,
     ArtifactReference,
     ArtifactFeedbackReference,
     CitationReference,
     MemoryClarificationReceipt,
+    VersionedAdaptationReceipt,
     VersionedMemoryProposalReceipt,
 )
 from source_expert import SourceExpertResult
@@ -183,7 +183,7 @@ class AgentColTurnResult:
     citations: tuple[CitationReference, ...] = ()
     memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = ()
     memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
-    adaptations: tuple[AdaptationReceipt, ...] = ()
+    adaptations: tuple[VersionedAdaptationReceipt, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
 
@@ -199,7 +199,7 @@ class AgentColTurnServiceError(RuntimeError):
         artifact_feedback: tuple[ArtifactFeedbackReference, ...] = (),
         memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = (),
         memory_clarifications: tuple[MemoryClarificationReceipt, ...] = (),
-        adaptations: tuple[AdaptationReceipt, ...] = (),
+        adaptations: tuple[VersionedAdaptationReceipt, ...] = (),
         chat_turn_claim: ChatTurnClaim | None = None,
     ) -> None:
         super().__init__(message)

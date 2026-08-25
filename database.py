@@ -63,7 +63,9 @@ from memory_proposals import (
 from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     ActiveMemorySignal,
+    ActiveMemorySignalV2,
     AdaptationReceipt,
+    AdaptationReceiptV2,
     AgentActionReceipt,
     ArtifactFeedbackCounts,
     ArtifactFeedbackDecisionRequest,
@@ -78,6 +80,7 @@ from schemas import (
     CollaborationProfile,
     CollaborationProfileV2,
     MemoryEvent,
+    MemoryEventV2,
     MemoryDecisionRequest,
     MemoryProposal,
     MemoryProposalReceipt,
@@ -88,6 +91,9 @@ from schemas import (
     WorkspaceListResponse,
     WorkspaceSummary,
     VersionedCollaborationProfile,
+    VersionedActiveMemorySignal,
+    VersionedAdaptationReceipt,
+    VersionedMemoryEvent,
     VersionedMemoryProposal,
     VersionedMemoryProposalReceipt,
     parse_collaboration_profile,
@@ -178,24 +184,24 @@ class BlueprintFeedbackStateError(RuntimeError):
 class MemoryApprovalResult:
     """Return the governed state created by a memory approval."""
 
-    profile: CollaborationProfile
-    event: MemoryEvent
-    superseded_event: MemoryEvent | None = None
+    profile: VersionedCollaborationProfile
+    event: VersionedMemoryEvent
+    superseded_event: VersionedMemoryEvent | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryRevocationResult:
     """Return the governed state created by a memory revocation."""
 
-    profile: CollaborationProfile
-    event: MemoryEvent
+    profile: VersionedCollaborationProfile
+    event: VersionedMemoryEvent
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryDeletionResult:
     """Return the governed state after bounded hard deletion."""
 
-    profile: CollaborationProfile
+    profile: VersionedCollaborationProfile
     artifacts_deleted: bool
 
 
@@ -203,17 +209,17 @@ class MemoryDeletionResult:
 class MemoryRejectionResult:
     """Return governed state after rejecting a pending proposal."""
 
-    profile: CollaborationProfile
-    proposal: MemoryProposal
+    profile: VersionedCollaborationProfile
+    proposal: VersionedMemoryProposal
 
 
 @dataclass(frozen=True, slots=True)
 class MemoryInspectionPage:
     """Return one bounded page of governed collaboration memory."""
 
-    profile: CollaborationProfile
-    unresolved_proposals: tuple[MemoryProposal, ...]
-    events: tuple[MemoryEvent, ...]
+    profile: VersionedCollaborationProfile
+    unresolved_proposals: tuple[VersionedMemoryProposal, ...]
+    events: tuple[VersionedMemoryEvent, ...]
     next_event_id: str | None
 
 
@@ -1091,7 +1097,7 @@ class MemoryEngine:
         blueprint: dict[str, object],
         display_label: str,
         observed_at: datetime,
-        adaptations: tuple[AdaptationReceipt, ...] = (),
+        adaptations: tuple[VersionedAdaptationReceipt, ...] = (),
     ) -> ChatTurnArtifactEffectResult:
         """Atomically persist one blueprint and its owned turn receipts."""
         self._validate_chat_turn_claim(claim)
@@ -2544,7 +2550,7 @@ class MemoryEngine:
         schema_version: str,
         blueprint: dict[str, object],
         *,
-        adaptations: tuple[AdaptationReceipt, ...] = (),
+        adaptations: tuple[VersionedAdaptationReceipt, ...] = (),
     ) -> str:
         """Atomically persist a project update and generated blueprint."""
         self._validate_string(project_id, "project_id")
@@ -3557,7 +3563,7 @@ class MemoryEngine:
     async def get_collaboration_profile(
         self,
         user_id: str,
-    ) -> CollaborationProfile:
+    ) -> VersionedCollaborationProfile:
         """Load only the governed active-memory projection."""
         self._validate_memory_user_id(user_id)
 
@@ -3566,7 +3572,7 @@ class MemoryEngine:
             snapshot = await user_ref.get()
             if not snapshot.exists:
                 return CollaborationProfile()
-            return self._collaboration_profile_from_document(
+            return self._versioned_profile_from_document(
                 snapshot.to_dict()
             )
         except (GoogleAPIError, ValueError) as exc:
@@ -3599,7 +3605,7 @@ class MemoryEngine:
             user_ref = self._client.collection("users").document(user_id)
             profile_snapshot = await user_ref.get()
             profile = (
-                self._collaboration_profile_from_document(
+                self._versioned_profile_from_document(
                     profile_snapshot.to_dict()
                 )
                 if profile_snapshot.exists
@@ -3609,13 +3615,15 @@ class MemoryEngine:
             proposal_collection = user_ref.collection("memory_proposals")
             proposal_refs = [
                 proposal_collection.document(category)
-                for category in MEMORY_CATEGORY_ORDER
+                for category in MEMORY_CATEGORY_ORDER_V2
             ]
-            unresolved_by_category: dict[str, MemoryProposal] = {}
+            unresolved_by_category: dict[str, VersionedMemoryProposal] = {}
             async for snapshot in self._client.get_all(proposal_refs):
                 if not snapshot.exists:
                     continue
-                proposal = self._proposal_from_document(snapshot.to_dict())
+                proposal = self._versioned_proposal_from_document(
+                    snapshot.to_dict()
+                )
                 if (
                     proposal.status == "pending"
                     and observed_at < proposal.expires_at
@@ -3623,7 +3631,7 @@ class MemoryEngine:
                     unresolved_by_category[proposal.category] = proposal
             unresolved_proposals = tuple(
                 unresolved_by_category[category]
-                for category in MEMORY_CATEGORY_ORDER
+                for category in MEMORY_CATEGORY_ORDER_V2
                 if category in unresolved_by_category
             )
 
@@ -3643,7 +3651,7 @@ class MemoryEngine:
                     raise MemoryEventCursorNotFoundError(
                         "Memory event cursor was not found."
                     )
-                self._memory_event_from_document(
+                self._versioned_memory_event_from_document(
                     after_event_id,
                     cursor_snapshot.to_dict(),
                 )
@@ -3651,7 +3659,7 @@ class MemoryEngine:
             query = query.limit(51)
             event_snapshots = [snapshot async for snapshot in query.stream()]
             events = tuple(
-                self._memory_event_from_document(
+                self._versioned_memory_event_from_document(
                     snapshot.id,
                     snapshot.to_dict(),
                 )
@@ -4590,7 +4598,7 @@ class MemoryEngine:
     async def approve_memory_proposal(
         self,
         user_id: str,
-        category: MemoryCategory,
+        category: MemoryCategoryV2,
         proposal_id: str,
         *,
         confirmation_channel: ConfirmationChannel,
@@ -4635,7 +4643,7 @@ class MemoryEngine:
                 raise MemoryProposalNotFoundError(
                     "Memory proposal does not exist."
                 )
-            proposal = self._proposal_from_document(
+            proposal = self._versioned_proposal_from_document(
                 proposal_snapshot.to_dict()
             )
             if (
@@ -4646,7 +4654,7 @@ class MemoryEngine:
                     "Memory proposal no longer occupies this category."
                 )
             profile = (
-                self._collaboration_profile_from_document(
+                self._versioned_profile_from_document(
                     profile_snapshot.to_dict()
                 )
                 if profile_snapshot.exists
@@ -4667,7 +4675,7 @@ class MemoryEngine:
                     confirmation_message_id,
                 )
             if corrected_snapshot.exists:
-                corrected_event = self._memory_event_from_document(
+                corrected_event = self._versioned_memory_event_from_document(
                     corrected_event_id,
                     corrected_snapshot.to_dict(),
                 )
@@ -4689,7 +4697,7 @@ class MemoryEngine:
                     raise ValueError(
                         "Stored correction has no superseded event."
                     )
-                superseded_event = self._memory_event_from_document(
+                superseded_event = self._versioned_memory_event_from_document(
                     superseded_event_id,
                     superseded_snapshot.to_dict(),
                 )
@@ -4713,7 +4721,10 @@ class MemoryEngine:
             if proposal.expires_at <= observed_at:
                 raise MemoryProposalExpiredError("Memory proposal has expired.")
 
-            active_signal = self._active_signal_for_category(profile, category)
+            active_signal = self._versioned_active_signal_for_category(
+                profile,
+                category,
+            )
             if active_signal is not None:
                 if proposal.expected_signal_id != active_signal.signal_id:
                     raise MemoryProposalConflictError(
@@ -4796,7 +4807,7 @@ class MemoryEngine:
     async def reject_memory_proposal(
         self,
         user_id: str,
-        category: MemoryCategory,
+        category: MemoryCategoryV2,
         proposal_id: str,
         *,
         observed_at: datetime,
@@ -4831,7 +4842,7 @@ class MemoryEngine:
                 raise MemoryProposalNotFoundError(
                     "Memory proposal does not exist."
                 )
-            proposal = self._proposal_from_document(
+            proposal = self._versioned_proposal_from_document(
                 proposal_snapshot.to_dict()
             )
             if (
@@ -4842,7 +4853,7 @@ class MemoryEngine:
                     "Memory proposal no longer occupies this category."
                 )
             profile = (
-                self._collaboration_profile_from_document(
+                self._versioned_profile_from_document(
                     profile_snapshot.to_dict()
                 )
                 if profile_snapshot.exists
@@ -4889,7 +4900,7 @@ class MemoryEngine:
     async def revoke_memory_signal(
         self,
         user_id: str,
-        category: MemoryCategory,
+        category: MemoryCategoryV2,
         signal_id: str,
         *,
         confirmation_channel: ConfirmationChannel,
@@ -4921,19 +4932,19 @@ class MemoryEngine:
                 transaction=transaction
             )
             profile = (
-                self._collaboration_profile_from_document(
+                self._versioned_profile_from_document(
                     profile_snapshot.to_dict()
                 )
                 if profile_snapshot.exists
                 else CollaborationProfile()
             )
-            active_signal = self._active_signal_for_category(
+            active_signal = self._versioned_active_signal_for_category(
                 profile,
                 category,
             )
             if active_signal is None or active_signal.signal_id != signal_id:
                 if revoked_snapshot.exists:
-                    revoked_event = self._memory_event_from_document(
+                    revoked_event = self._versioned_memory_event_from_document(
                         revoked_event_id,
                         revoked_snapshot.to_dict(),
                     )
@@ -4978,38 +4989,35 @@ class MemoryEngine:
             )
             if not source_snapshot.exists:
                 raise ValueError("Active memory source event does not exist.")
-            source_event = self._memory_event_from_document(
+            source_event = self._versioned_memory_event_from_document(
                 active_signal.source_event_id,
                 source_snapshot.to_dict(),
             )
             self._validate_active_signal_source(active_signal, source_event)
 
             revision = profile.memory_revision + 1
-            revoked_event = MemoryEvent.model_validate(
-                {
-                    "event_id": revoked_event_id,
-                    "event_type": "revoked",
-                    "signal_id": active_signal.signal_id,
-                    "category": active_signal.category,
-                    "value": active_signal.value,
-                    "policy_version": active_signal.policy_version,
-                    "source_type": source_event.source_type,
-                    "source_session_id": source_event.source_session_id,
-                    "source_message_id": source_event.source_message_id,
-                    "confirmation_channel": confirmation_channel,
-                    "confirmation_session_id": confirmation_session_id,
-                    "confirmation_message_id": confirmation_message_id,
-                    "related_signal_id": None,
-                    "memory_revision": revision,
-                    "created_at": observed_at,
-                }
+            revoked_event = self._signal_memory_event(
+                active_signal,
+                source_event=source_event,
+                event_id=revoked_event_id,
+                event_type="revoked",
+                confirmation_channel=confirmation_channel,
+                confirmation_session_id=confirmation_session_id,
+                confirmation_message_id=confirmation_message_id,
+                related_signal_id=None,
+                memory_revision=revision,
+                created_at=observed_at,
             )
             identity_context = dict(profile.identity_context)
             active_preferences = dict(profile.active_preferences)
             identity_context.pop(category, None)
             active_preferences.pop(category, None)
-            updated_profile = CollaborationProfile(
-                memory_schema_version="1.0",
+            profile_type = (
+                CollaborationProfileV2
+                if isinstance(profile, CollaborationProfileV2)
+                else CollaborationProfile
+            )
+            updated_profile = profile_type(
                 memory_revision=revision,
                 identity_context=identity_context,
                 active_preferences=active_preferences,
@@ -5042,7 +5050,7 @@ class MemoryEngine:
     async def delete_memory_signal(
         self,
         user_id: str,
-        category: MemoryCategory,
+        category: MemoryCategoryV2,
         signal_id: str,
     ) -> MemoryDeletionResult:
         """Atomically remove every bounded artifact owned by a signal."""
@@ -5084,7 +5092,7 @@ class MemoryEngine:
                 for event_type in event_types
             }
             profile = (
-                self._collaboration_profile_from_document(
+                self._versioned_profile_from_document(
                     profile_snapshot.to_dict()
                 )
                 if profile_snapshot.exists
@@ -5092,7 +5100,7 @@ class MemoryEngine:
             )
             identity_context = dict(profile.identity_context)
             active_preferences = dict(profile.active_preferences)
-            active_signal = self._active_signal_for_category(
+            active_signal = self._versioned_active_signal_for_category(
                 profile,
                 category,
             )
@@ -5106,7 +5114,7 @@ class MemoryEngine:
 
             proposal_owned = False
             if proposal_snapshot.exists:
-                proposal = self._proposal_from_document(
+                proposal = self._versioned_proposal_from_document(
                     proposal_snapshot.to_dict()
                 )
                 proposal_owned = proposal.proposal_id == signal_id
@@ -5114,18 +5122,16 @@ class MemoryEngine:
             origin_owned = False
             if origin_snapshot is not None and origin_snapshot.exists:
                 try:
-                    origin_document = (
-                        self._validated_proposal_origin_document(
-                            origin_snapshot.to_dict()
-                        )
+                    origin = parse_proposal_origin(
+                        origin_snapshot.to_dict()
                     )
-                except MemoryProposalStateError as exc:
+                except ValueError as exc:
                     raise ValueError(
                         "Stored proposal origin does not match its path."
                     ) from exc
                 if (
-                    origin_document["proposal_id"] != signal_id
-                    or origin_document["category"] != category
+                    origin.proposal_id != signal_id
+                    or origin.category != category
                 ):
                     raise ValueError(
                         "Stored proposal origin does not match its path."
@@ -5137,7 +5143,7 @@ class MemoryEngine:
                 if not snapshot.exists:
                     continue
                 event_id = f"{signal_id}--{event_type}"
-                event = self._memory_event_from_document(
+                event = self._versioned_memory_event_from_document(
                     event_id,
                     snapshot.to_dict(),
                 )
@@ -5163,8 +5169,12 @@ class MemoryEngine:
                     artifacts_deleted=False,
                 )
 
-            updated_profile = CollaborationProfile(
-                memory_schema_version="1.0",
+            profile_type = (
+                CollaborationProfileV2
+                if isinstance(profile, CollaborationProfileV2)
+                else CollaborationProfile
+            )
+            updated_profile = profile_type(
                 memory_revision=profile.memory_revision + 1,
                 identity_context=identity_context,
                 active_preferences=active_preferences,
@@ -5242,37 +5252,32 @@ class MemoryEngine:
     @classmethod
     def _existing_initial_approval_result(
         cls,
-        proposal: MemoryProposal,
-        profile: CollaborationProfile,
+        proposal: VersionedMemoryProposal,
+        profile: VersionedCollaborationProfile,
         event_id: str,
         event_document: object,
         confirmation_channel: ConfirmationChannel,
         confirmation_session_id: str | None,
         confirmation_message_id: str | None,
     ) -> MemoryApprovalResult:
-        event = cls._memory_event_from_document(event_id, event_document)
-        active_signal = cls._active_signal_for_category(
+        event = cls._versioned_memory_event_from_document(
+            event_id,
+            event_document,
+        )
+        active_signal = cls._versioned_active_signal_for_category(
             profile,
             proposal.category,
         )
-        expected_event = MemoryEvent.model_validate(
-            {
-                "event_id": event_id,
-                "event_type": "approved",
-                "signal_id": proposal.proposal_id,
-                "category": proposal.category,
-                "value": proposal.proposed_value,
-                "policy_version": proposal.policy_version,
-                "source_type": "explicit_user_feedback",
-                "source_session_id": proposal.source_session_id,
-                "source_message_id": proposal.source_message_id,
-                "confirmation_channel": confirmation_channel,
-                "confirmation_session_id": confirmation_session_id,
-                "confirmation_message_id": confirmation_message_id,
-                "related_signal_id": None,
-                "memory_revision": profile.memory_revision,
-                "created_at": event.created_at,
-            }
+        expected_event = cls._proposal_memory_event(
+            proposal,
+            event_id=event_id,
+            event_type="approved",
+            confirmation_channel=confirmation_channel,
+            confirmation_session_id=confirmation_session_id,
+            confirmation_message_id=confirmation_message_id,
+            related_signal_id=None,
+            memory_revision=profile.memory_revision,
+            created_at=event.created_at,
         )
         valid_signal = (
             active_signal is not None
@@ -5300,9 +5305,9 @@ class MemoryEngine:
         corrected_event_ref: AsyncDocumentReference,
         user_ref: AsyncDocumentReference,
         proposal_ref: AsyncDocumentReference,
-        proposal: MemoryProposal,
-        profile: CollaborationProfile,
-        active_signal: ActiveMemorySignal,
+        proposal: VersionedMemoryProposal,
+        profile: VersionedCollaborationProfile,
+        active_signal: VersionedActiveMemorySignal,
         corrected_event_id: str,
         confirmation_channel: ConfirmationChannel,
         confirmation_session_id: str | None,
@@ -5320,7 +5325,7 @@ class MemoryEngine:
         )
         if not source_snapshot.exists:
             raise ValueError("Active memory source event does not exist.")
-        source_event = self._memory_event_from_document(
+        source_event = self._versioned_memory_event_from_document(
             active_signal.source_event_id,
             source_snapshot.to_dict(),
         )
@@ -5342,24 +5347,17 @@ class MemoryEngine:
             memory_revision=revision,
             created_at=observed_at,
         )
-        superseded_event = MemoryEvent.model_validate(
-            {
-                "event_id": superseded_event_id,
-                "event_type": "superseded",
-                "signal_id": active_signal.signal_id,
-                "category": active_signal.category,
-                "value": active_signal.value,
-                "policy_version": active_signal.policy_version,
-                "source_type": source_event.source_type,
-                "source_session_id": source_event.source_session_id,
-                "source_message_id": source_event.source_message_id,
-                "confirmation_channel": confirmation_channel,
-                "confirmation_session_id": confirmation_session_id,
-                "confirmation_message_id": confirmation_message_id,
-                "related_signal_id": proposal.proposal_id,
-                "memory_revision": revision,
-                "created_at": observed_at,
-            }
+        superseded_event = self._signal_memory_event(
+            active_signal,
+            source_event=source_event,
+            event_id=superseded_event_id,
+            event_type="superseded",
+            confirmation_channel=confirmation_channel,
+            confirmation_session_id=confirmation_session_id,
+            confirmation_message_id=confirmation_message_id,
+            related_signal_id=proposal.proposal_id,
+            memory_revision=revision,
+            created_at=observed_at,
         )
         signal = self._active_signal_from_event(
             proposal,
@@ -5401,16 +5399,16 @@ class MemoryEngine:
     @classmethod
     def _existing_correction_result(
         cls,
-        proposal: MemoryProposal,
-        profile: CollaborationProfile,
-        corrected_event: MemoryEvent,
-        superseded_event: MemoryEvent,
+        proposal: VersionedMemoryProposal,
+        profile: VersionedCollaborationProfile,
+        corrected_event: VersionedMemoryEvent,
+        superseded_event: VersionedMemoryEvent,
         confirmation_channel: ConfirmationChannel,
         confirmation_session_id: str | None,
         confirmation_message_id: str | None,
     ) -> MemoryApprovalResult:
         prior_signal_id = corrected_event.related_signal_id
-        active_signal = cls._active_signal_for_category(
+        active_signal = cls._versioned_active_signal_for_category(
             profile,
             proposal.category,
         )
@@ -5440,7 +5438,6 @@ class MemoryEngine:
             and superseded_event.event_type == "superseded"
             and superseded_event.signal_id == prior_signal_id
             and superseded_event.category == proposal.category
-            and superseded_event.policy_version == proposal.policy_version
             and superseded_event.confirmation_channel == confirmation_channel
             and superseded_event.confirmation_session_id
             == confirmation_session_id
@@ -5467,7 +5464,7 @@ class MemoryEngine:
 
     @staticmethod
     def _proposal_memory_event(
-        proposal: MemoryProposal,
+        proposal: VersionedMemoryProposal,
         *,
         event_id: str,
         event_type: str,
@@ -5477,48 +5474,93 @@ class MemoryEngine:
         related_signal_id: str | None,
         memory_revision: int,
         created_at: datetime,
-    ) -> MemoryEvent:
-        return MemoryEvent.model_validate(
-            {
-                "event_id": event_id,
-                "event_type": event_type,
-                "signal_id": proposal.proposal_id,
-                "category": proposal.category,
-                "value": proposal.proposed_value,
-                "policy_version": proposal.policy_version,
-                "source_type": "explicit_user_feedback",
-                "source_session_id": proposal.source_session_id,
-                "source_message_id": proposal.source_message_id,
-                "confirmation_channel": confirmation_channel,
-                "confirmation_session_id": confirmation_session_id,
-                "confirmation_message_id": confirmation_message_id,
-                "related_signal_id": related_signal_id,
-                "memory_revision": memory_revision,
-                "created_at": created_at,
-            }
-        )
+    ) -> VersionedMemoryEvent:
+        fields = {
+            "event_id": event_id,
+            "event_type": event_type,
+            "signal_id": proposal.proposal_id,
+            "category": proposal.category,
+            "value": proposal.proposed_value,
+            "policy_version": proposal.policy_version,
+            "source_type": "explicit_user_feedback",
+            "source_session_id": proposal.source_session_id,
+            "source_message_id": proposal.source_message_id,
+            "confirmation_channel": confirmation_channel,
+            "confirmation_session_id": confirmation_session_id,
+            "confirmation_message_id": confirmation_message_id,
+            "related_signal_id": related_signal_id,
+            "memory_revision": memory_revision,
+            "created_at": created_at,
+        }
+        if isinstance(proposal, MemoryProposalV2):
+            fields["evidence_message_id"] = proposal.evidence_message_id
+            fields["clarification_id"] = proposal.clarification_id
+            return MemoryEventV2.model_validate(fields)
+        return MemoryEvent.model_validate(fields)
+
+    @staticmethod
+    def _signal_memory_event(
+        signal: VersionedActiveMemorySignal,
+        *,
+        source_event: VersionedMemoryEvent,
+        event_id: str,
+        event_type: str,
+        confirmation_channel: ConfirmationChannel,
+        confirmation_session_id: str | None,
+        confirmation_message_id: str | None,
+        related_signal_id: str | None,
+        memory_revision: int,
+        created_at: datetime,
+    ) -> VersionedMemoryEvent:
+        fields = {
+            "event_id": event_id,
+            "event_type": event_type,
+            "signal_id": signal.signal_id,
+            "category": signal.category,
+            "value": signal.value,
+            "policy_version": signal.policy_version,
+            "source_type": source_event.source_type,
+            "source_session_id": source_event.source_session_id,
+            "source_message_id": source_event.source_message_id,
+            "confirmation_channel": confirmation_channel,
+            "confirmation_session_id": confirmation_session_id,
+            "confirmation_message_id": confirmation_message_id,
+            "related_signal_id": related_signal_id,
+            "memory_revision": memory_revision,
+            "created_at": created_at,
+        }
+        if isinstance(signal, ActiveMemorySignalV2):
+            if not isinstance(source_event, MemoryEventV2):
+                raise ValueError(
+                    "Version-2 signal source event has the wrong policy."
+                )
+            fields["evidence_message_id"] = source_event.evidence_message_id
+            fields["clarification_id"] = source_event.clarification_id
+            return MemoryEventV2.model_validate(fields)
+        return MemoryEvent.model_validate(fields)
 
     @staticmethod
     def _active_signal_from_event(
-        proposal: MemoryProposal,
-        event: MemoryEvent,
+        proposal: VersionedMemoryProposal,
+        event: VersionedMemoryEvent,
         approved_at: datetime,
-    ) -> ActiveMemorySignal:
-        return ActiveMemorySignal.model_validate(
-            {
-                "signal_id": proposal.proposal_id,
-                "category": proposal.category,
-                "value": proposal.proposed_value,
-                "policy_version": proposal.policy_version,
-                "source_event_id": event.event_id,
-                "approved_at": approved_at,
-            }
-        )
+    ) -> VersionedActiveMemorySignal:
+        fields = {
+            "signal_id": proposal.proposal_id,
+            "category": proposal.category,
+            "value": proposal.proposed_value,
+            "policy_version": proposal.policy_version,
+            "source_event_id": event.event_id,
+            "approved_at": approved_at,
+        }
+        if isinstance(proposal, MemoryProposalV2):
+            return ActiveMemorySignalV2.model_validate(fields)
+        return ActiveMemorySignal.model_validate(fields)
 
     @staticmethod
     def _validate_active_signal_source(
-        signal: ActiveMemorySignal,
-        event: MemoryEvent,
+        signal: VersionedActiveMemorySignal,
+        event: VersionedMemoryEvent,
     ) -> None:
         valid = (
             event.event_id == signal.source_event_id
@@ -5535,25 +5577,36 @@ class MemoryEngine:
 
     @staticmethod
     def _profile_with_signal(
-        profile: CollaborationProfile,
-        signal: ActiveMemorySignal,
+        profile: VersionedCollaborationProfile,
+        signal: VersionedActiveMemorySignal,
         revision: int,
-    ) -> CollaborationProfile:
+    ) -> VersionedCollaborationProfile:
+        if isinstance(profile, CollaborationProfileV2) or isinstance(
+            signal,
+            ActiveMemorySignalV2,
+        ):
+            profile = project_collaboration_profile_v2(profile)
         identity_context = dict(profile.identity_context)
         active_preferences = dict(profile.active_preferences)
         if signal.category in ("preferred_name", "broad_roles"):
             identity_context[signal.category] = signal
         else:
             active_preferences[signal.category] = signal
-        return CollaborationProfile(
-            memory_schema_version="1.0",
+        profile_type = (
+            CollaborationProfileV2
+            if isinstance(profile, CollaborationProfileV2)
+            else CollaborationProfile
+        )
+        return profile_type(
             memory_revision=revision,
             identity_context=identity_context,
             active_preferences=active_preferences,
         )
 
     @staticmethod
-    def _memory_event_document(event: MemoryEvent) -> dict[str, object]:
+    def _memory_event_document(
+        event: VersionedMemoryEvent,
+    ) -> dict[str, object]:
         document = event.model_dump(mode="python")
         document.pop("event_id")
         document["created_at"] = firestore.SERVER_TIMESTAMP
@@ -5575,8 +5628,28 @@ class MemoryEngine:
         return MemoryEvent.model_validate(event_fields)
 
     @staticmethod
+    def _versioned_memory_event_from_document(
+        event_id: str,
+        document: object,
+    ) -> VersionedMemoryEvent:
+        if not isinstance(document, Mapping):
+            raise ValueError("Stored memory event is invalid.")
+        if document.get("policy_version", "1.0") == "2.0":
+            fields = {
+                field_name: document.get(field_name)
+                for field_name in MemoryEventV2.model_fields
+                if field_name != "event_id"
+            }
+            fields["event_id"] = event_id
+            return MemoryEventV2.model_validate(fields)
+        return MemoryEngine._memory_event_from_document(
+            event_id,
+            dict(document),
+        )
+
+    @staticmethod
     def _collaboration_profile_document(
-        profile: CollaborationProfile,
+        profile: VersionedCollaborationProfile,
         *,
         refresh_approved_at: bool = True,
     ) -> dict[str, object]:
@@ -5947,7 +6020,7 @@ class MemoryEngine:
         observed_at: object,
     ) -> None:
         MemoryEngine._validate_memory_user_id(user_id)
-        if category not in MEMORY_CATEGORY_ORDER:
+        if category not in MEMORY_CATEGORY_ORDER_V2:
             raise ValueError("category must be a governed memory category.")
         if not isinstance(proposal_id, str) or re.fullmatch(
             r"[A-Za-z0-9_-]{1,128}", proposal_id
@@ -5991,7 +6064,7 @@ class MemoryEngine:
         signal_id: object,
     ) -> None:
         MemoryEngine._validate_memory_user_id(user_id)
-        if category not in MEMORY_CATEGORY_ORDER:
+        if category not in MEMORY_CATEGORY_ORDER_V2:
             raise ValueError("category must be a governed memory category.")
         if not isinstance(signal_id, str) or re.fullmatch(
             r"[A-Za-z0-9_-]{1,128}",
@@ -6131,7 +6204,10 @@ class MemoryEngine:
             not isinstance(adaptations, tuple)
             or len(adaptations) > 8
             or not all(
-                isinstance(receipt, AdaptationReceipt)
+                isinstance(
+                    receipt,
+                    (AdaptationReceipt, AdaptationReceiptV2),
+                )
                 for receipt in adaptations
             )
         ):

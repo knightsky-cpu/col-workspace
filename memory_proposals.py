@@ -193,11 +193,11 @@ def parse_proposal_origin(
 
 
 def proposal_origin_id_from_signal_id(
-    category: MemoryCategory,
+    category: MemoryCategoryV2,
     signal_id: str,
 ) -> str | None:
-    """Return the origin ID only for a version-1 guarded signal ID."""
-    if category not in MEMORY_CATEGORY_ORDER:
+    """Return the origin ID for a guarded versioned signal ID."""
+    if category not in MEMORY_CATEGORY_ORDER_V2:
         raise ValueError("category must be a governed memory category.")
     _validate_identifier(signal_id, "signal_id")
     prefix = f"{category}--"

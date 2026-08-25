@@ -27,9 +27,11 @@ from memory_proposals import (
 )
 from memory_policy import (
     MEMORY_CATEGORY_ORDER,
+    MEMORY_CATEGORY_ORDER_V2,
     ConfirmationChannel,
     IdentityContextPolicy,
     MemoryCategory,
+    MemoryCategoryV2,
     MemoryDecision,
     validate_memory_value,
 )
@@ -40,6 +42,9 @@ from schemas import (
     MemoryProposal,
     MemoryProposalReceipt,
     MemoryProposalReceiptV2,
+    VersionedCollaborationProfile,
+    VersionedMemoryEvent,
+    VersionedMemoryProposal,
 )
 
 
@@ -113,7 +118,7 @@ class TrustedMemoryMutationResult:
     """Return a completed deterministic memory action and profile."""
 
     action: AgentActionReceipt
-    profile: CollaborationProfile
+    profile: VersionedCollaborationProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,9 +157,9 @@ class NaturalMemoryNoEffectResult:
 class TrustedMemoryInspectionResult:
     """Return a bounded governed-memory inspection page."""
 
-    profile: CollaborationProfile
-    unresolved_proposals: tuple[MemoryProposal, ...]
-    events: tuple[MemoryEvent, ...]
+    profile: VersionedCollaborationProfile
+    unresolved_proposals: tuple[VersionedMemoryProposal, ...]
+    events: tuple[VersionedMemoryEvent, ...]
     next_event_id: str | None
 
 
@@ -500,15 +505,15 @@ class TrustedMemoryService:
         )
 
     @staticmethod
-    def _category_from_identifier(identifier: object) -> MemoryCategory:
+    def _category_from_identifier(identifier: object) -> MemoryCategoryV2:
         if not isinstance(identifier, str) or re.fullmatch(
             r"[A-Za-z0-9_-]{1,128}",
             identifier,
         ) is None:
             raise ValueError("Memory identifier must be valid.")
-        for category in MEMORY_CATEGORY_ORDER:
+        for category in MEMORY_CATEGORY_ORDER_V2:
             if identifier.startswith(f"{category}--"):
-                return cast(MemoryCategory, category)
+                return cast(MemoryCategoryV2, category)
         raise ValueError("Memory identifier has no governed category.")
 
     @staticmethod

@@ -7,8 +7,8 @@ from google import genai
 from database import MemoryEngine
 from schemas import (
     SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
-    AdaptationReceipt,
     SynthesisBlueprint,
+    VersionedAdaptationReceipt,
 )
 from synthesis import (
     SYNTHESIS_MODEL_NAME,
@@ -47,13 +47,13 @@ class SynthesisCommand:
 class SynthesisResult:
     blueprint_id: str
     blueprint: SynthesisBlueprint
-    adaptations: tuple[AdaptationReceipt, ...] = ()
+    adaptations: tuple[VersionedAdaptationReceipt, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class GovernedSynthesisGenerationResult:
     blueprint: SynthesisBlueprint
-    adaptations: tuple[AdaptationReceipt, ...]
+    adaptations: tuple[VersionedAdaptationReceipt, ...]
 
 
 class SynthesisApplicationService:

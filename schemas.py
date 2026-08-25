@@ -476,7 +476,7 @@ class BlueprintArtifactMetadata(StrictModel):
     feedback_counts: ArtifactFeedbackCounts = Field(
         default_factory=ArtifactFeedbackCounts
     )
-    adaptation_categories: list[PreferenceCategory] = Field(
+    adaptation_categories: list[PreferenceCategoryV2] = Field(
         default_factory=list,
         max_length=8,
     )
@@ -679,7 +679,7 @@ class ChatResponse(StrictModel):
         default_factory=list,
         max_length=1,
     )
-    adaptations: list[AdaptationReceipt] = Field(
+    adaptations: list[VersionedAdaptationReceipt] = Field(
         default_factory=list,
         max_length=10,
     )
@@ -758,7 +758,7 @@ class ChatPartialFailureResponse(StrictModel):
         default_factory=list,
         max_length=1,
     )
-    adaptations: list[AdaptationReceipt] = Field(
+    adaptations: list[VersionedAdaptationReceipt] = Field(
         default_factory=list,
         max_length=10,
     )
@@ -896,6 +896,25 @@ class MemoryProposalReceiptV2(StrictModel):
         )
 
 
+class AdaptationReceiptV2(StrictModel):
+    signal_id: IdentifierStr
+    category: MemoryCategoryV2
+    value: MemoryValueV2Schema
+    policy_version: Literal["2.0"] = MEMORY_POLICY_VERSION_V2
+    source_event_id: IdentifierStr
+    status: Literal["provided_to_model"]
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_value(cls, data: object) -> object:
+        return _normalize_memory_model_value_for_policy(
+            data,
+            "value",
+            MEMORY_POLICY_VERSION_V2,
+        )
+
+
+VersionedAdaptationReceipt = AdaptationReceipt | AdaptationReceiptV2
 VersionedMemoryProposalReceipt = MemoryProposalReceipt | MemoryProposalReceiptV2
 
 
@@ -1121,15 +1140,15 @@ def project_collaboration_profile_v2(
 
 
 class MemoryInspectionResponse(StrictModel):
-    profile: CollaborationProfile
-    unresolved_proposals: list[MemoryProposal] = Field(max_length=10)
-    events: list[MemoryEvent] = Field(max_length=50)
+    profile: VersionedCollaborationProfile
+    unresolved_proposals: list[VersionedMemoryProposal] = Field(max_length=10)
+    events: list[VersionedMemoryEvent] = Field(max_length=50)
     next_event_id: IdentifierStr | None
 
 
 class MemoryMutationResponse(StrictModel):
     action: AgentActionReceipt
-    profile: CollaborationProfile
+    profile: VersionedCollaborationProfile
 
 
 class ConceptualModel(StrictModel):
@@ -1316,7 +1335,7 @@ class BlueprintArtifactDetailResponse(StrictModel):
     metadata: BlueprintArtifactMetadata
     blueprint: SynthesisBlueprint
     feedback_targets: list[ArtifactFeedbackTarget] = Field(max_length=32)
-    adaptations: list[AdaptationReceipt] = Field(
+    adaptations: list[VersionedAdaptationReceipt] = Field(
         default_factory=list,
         max_length=8,
     )

@@ -53,6 +53,27 @@ def pending_proposal_document(
     }
 
 
+def pending_v2_proposal_document(
+    *,
+    status: str = "pending",
+) -> dict[str, object]:
+    return {
+        "proposal_id": "development_environments--proposal-v2",
+        "category": "development_environments",
+        "proposed_value": ["linux", "macos"],
+        "expected_signal_id": None,
+        "policy_version": "2.0",
+        "status": status,
+        "source_session_id": "source-session",
+        "source_message_id": "source-message",
+        "evidence_message_id": "source-message",
+        "clarification_id": None,
+        "created_at": NOW,
+        "expires_at": NOW + timedelta(hours=24),
+        "resolved_at": None,
+    }
+
+
 def rejection_store() -> tuple[
     MagicMock,
     MagicMock,
@@ -130,6 +151,53 @@ async def test_reject_memory_proposal_resolves_without_activating_memory(
     transaction.delete.assert_not_called()
     user.set.assert_not_called()
     assert call("memory_events") not in user.collection.call_args_list
+
+
+@pytest.mark.asyncio
+async def test_reject_v2_memory_proposal_without_activating_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client, user, proposal_ref, _ = rejection_store()
+    transaction = MagicMock()
+    client.transaction.return_value = transaction
+    proposal_ref.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=pending_v2_proposal_document,
+        )
+    )
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=lambda: {
+                "memory_schema_version": "2.0",
+                "memory_revision": 0,
+                "identity_context": {},
+                "active_preferences": {},
+            },
+        )
+    )
+
+    result = await MemoryEngine(client).reject_memory_proposal(
+        "user-1",
+        "development_environments",
+        "development_environments--proposal-v2",
+        observed_at=NOW,
+    )
+
+    assert result.profile.memory_schema_version == "2.0"
+    assert result.profile.active_preferences == {}
+    assert result.proposal.policy_version == "2.0"
+    assert result.proposal.status == "rejected"
+    transaction.set.assert_called_once_with(
+        proposal_ref,
+        {
+            "status": "rejected",
+            "resolved_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
 
 
 @pytest.mark.asyncio

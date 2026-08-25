@@ -23,6 +23,7 @@ from chat_turns import (
 from database import MemoryEngine, MemoryEngineError
 from schemas import (
     AdaptationReceipt,
+    AdaptationReceiptV2,
     AgentActionReceipt,
     ArtifactFeedbackDecisionRequest,
     ArtifactFeedbackReference,
@@ -35,6 +36,22 @@ from schemas import (
 
 
 NOW = datetime(2026, 8, 20, 15, 0, tzinfo=UTC)
+
+
+def test_adaptation_receipt_documents_accept_v2_receipts() -> None:
+    receipt = AdaptationReceiptV2(
+        signal_id="development_environments--signal-v2",
+        category="development_environments",
+        value=["linux", "macos"],
+        source_event_id=(
+            "development_environments--signal-v2--approved"
+        ),
+        status="provided_to_model",
+    )
+
+    documents = MemoryEngine._adaptation_receipt_documents((receipt,))
+
+    assert documents == [receipt.model_dump(mode="python")]
 
 
 def install_transaction_runner(monkeypatch: pytest.MonkeyPatch) -> None:

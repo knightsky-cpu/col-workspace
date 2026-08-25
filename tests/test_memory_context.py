@@ -13,6 +13,73 @@ def test_renderer_returns_empty_result_for_empty_profile() -> None:
     assert rendered.adaptations == ()
 
 
+def test_renderer_adapts_from_v2_development_environments() -> None:
+    from memory_context import MemoryContextRenderer
+    from schemas import ActiveMemorySignalV2, CollaborationProfileV2
+
+    now = datetime(2026, 8, 20, tzinfo=UTC)
+    signal = ActiveMemorySignalV2(
+        signal_id="development_environments--signal-v2",
+        category="development_environments",
+        value=["linux", "macos"],
+        source_event_id=(
+            "development_environments--signal-v2--approved"
+        ),
+        approved_at=now,
+    )
+    profile = CollaborationProfileV2(
+        memory_revision=1,
+        active_preferences={"development_environments": signal},
+    )
+
+    rendered = MemoryContextRenderer.render(profile)
+
+    assert (
+        "development_environments=[macos, linux]" in rendered.instruction_text
+    )
+    assert "prefer guidance compatible with macOS and Linux" in (
+        rendered.instruction_text
+    )
+    assert len(rendered.adaptations) == 1
+    assert rendered.adaptations[0].category == "development_environments"
+    assert rendered.adaptations[0].value == ["macos", "linux"]
+    assert rendered.adaptations[0].policy_version == "2.0"
+
+
+def test_renderer_adapts_from_v2_domain_experience_models() -> None:
+    from memory_context import MemoryContextRenderer
+    from schemas import ActiveMemorySignalV2, CollaborationProfileV2
+
+    signal = ActiveMemorySignalV2(
+        signal_id="domain_experience--signal-v2",
+        category="domain_experience",
+        value=[
+            {
+                "domain": "software_development",
+                "level": "experienced",
+            }
+        ],
+        source_event_id="domain_experience--signal-v2--approved",
+        approved_at=datetime(2026, 8, 20, tzinfo=UTC),
+    )
+    profile = CollaborationProfileV2(
+        memory_revision=1,
+        identity_context={"domain_experience": signal},
+    )
+
+    rendered = MemoryContextRenderer.render(profile)
+
+    assert "domain_experience=[software_development:experienced]" in (
+        rendered.instruction_text
+    )
+    assert "explicitly self-reported Experienced experience" in (
+        rendered.instruction_text
+    )
+    assert rendered.adaptations[0].value[0].domain == (
+        "software_development"
+    )
+
+
 def test_renderer_orders_sections_and_builds_matching_receipts() -> None:
     from memory_context import MemoryContextRenderer
     from schemas import ActiveMemorySignal, CollaborationProfile

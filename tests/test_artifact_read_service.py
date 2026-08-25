@@ -257,6 +257,50 @@ async def test_service_projects_only_verified_canonical_adaptations() -> None:
 
 
 @pytest.mark.asyncio
+async def test_service_projects_v2_adaptation_receipts() -> None:
+    from artifact_read_service import (
+        ArtifactReadService,
+        GetBlueprintArtifactCommand,
+    )
+    from database import BlueprintDocumentPage, BlueprintDocumentRecord
+
+    document = current_contract_document()
+    document["adaptation_receipts"] = [
+        {
+            "signal_id": "development_environments--signal-v2",
+            "category": "development_environments",
+            "value": ["linux", "macos"],
+            "policy_version": "2.0",
+            "source_event_id": (
+                "development_environments--signal-v2--approved"
+            ),
+            "status": "provided_to_model",
+        }
+    ]
+    record = BlueprintDocumentRecord(
+        artifact_id="blueprint-v2",
+        document=document,
+    )
+    database = FakeArtifactDatabase(
+        page=BlueprintDocumentPage(records=(), next_before=None),
+        detail_record=record,
+    )
+
+    detail = await ArtifactReadService(database=database).get_blueprint(
+        GetBlueprintArtifactCommand(
+            project_id="project-1",
+            blueprint_id="blueprint-v2",
+        )
+    )
+
+    assert detail.metadata.adaptation_categories == [
+        "development_environments"
+    ]
+    assert detail.adaptations[0].policy_version == "2.0"
+    assert detail.adaptations[0].value == ["macos", "linux"]
+
+
+@pytest.mark.asyncio
 async def test_service_rejects_corrupt_stored_artifact() -> None:
     from artifact_read_service import (
         ArtifactReadService,

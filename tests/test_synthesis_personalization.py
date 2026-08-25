@@ -172,6 +172,45 @@ def test_matching_trace_derives_receipt_from_approved_signal() -> None:
     ]
 
 
+def test_v2_planning_signal_derives_v2_adaptation_receipt() -> None:
+    from schemas import ActiveMemorySignalV2, CollaborationProfileV2
+    from synthesis_personalization import SynthesisPersonalizationAdapter
+
+    signal = ActiveMemorySignalV2(
+        signal_id="planning-granularity-signal-v2",
+        category="planning_granularity",
+        value="micro_steps",
+        source_event_id="planning-granularity-signal-v2--approved",
+        approved_at=NOW,
+    )
+    projection = SynthesisPersonalizationAdapter.project(
+        CollaborationProfileV2(
+            memory_revision=1,
+            active_preferences={"planning_granularity": signal},
+        )
+    )
+    blueprint = blueprint_with_adaptations(
+        [
+            {
+                "profile_key": "planning_granularity",
+                "architecture_change": (
+                    "The roadmap uses smaller sequenced actions."
+                ),
+                "reason": "The supplied preference favors micro-steps.",
+            }
+        ]
+    )
+
+    receipts = SynthesisPersonalizationAdapter.validate_and_derive_receipts(
+        projection,
+        blueprint,
+    )
+
+    assert len(receipts) == 1
+    assert receipts[0].category == "planning_granularity"
+    assert receipts[0].policy_version == "2.0"
+
+
 def test_trace_rejects_category_not_supplied_by_adapter() -> None:
     from schemas import CollaborationProfile
     from synthesis_personalization import (

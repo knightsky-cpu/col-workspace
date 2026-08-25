@@ -8,6 +8,7 @@ from database import BlueprintDocumentRecord, MemoryEngine
 from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     AdaptationReceipt,
+    AdaptationReceiptV2,
     ArtifactFeedbackCounts,
     ArtifactFeedbackTarget,
     ArtifactReference,
@@ -15,6 +16,7 @@ from schemas import (
     BlueprintArtifactListResponse,
     BlueprintArtifactMetadata,
     SynthesisBlueprint,
+    VersionedAdaptationReceipt,
 )
 
 
@@ -46,7 +48,7 @@ class GetBlueprintArtifactCommand:
 class _ProjectedArtifact:
     metadata: BlueprintArtifactMetadata
     blueprint: SynthesisBlueprint
-    adaptations: tuple[AdaptationReceipt, ...]
+    adaptations: tuple[VersionedAdaptationReceipt, ...]
     applied_feedback_ids: tuple[str, ...]
 
 
@@ -146,7 +148,12 @@ class ArtifactReadService:
                 document.get("blueprint")
             )
             adaptations = tuple(
-                AdaptationReceipt.model_validate(item)
+                (
+                    AdaptationReceiptV2.model_validate(item)
+                    if isinstance(item, dict)
+                    and item.get("policy_version") == "2.0"
+                    else AdaptationReceipt.model_validate(item)
+                )
                 for item in cls._list_field(document, "adaptation_receipts")
             )
             adaptation_categories = list(

@@ -3,12 +3,18 @@
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from memory_policy import PREFERENCE_INSTRUCTIONS
+from memory_policy import memory_instruction_for_policy
 from schemas import (
     ActiveMemorySignal,
+    ActiveMemorySignalV2,
     AdaptationReceipt,
+    AdaptationReceiptV2,
     CollaborationProfile,
+    CollaborationProfileV2,
     SynthesisBlueprint,
+    VersionedActiveMemorySignal,
+    VersionedAdaptationReceipt,
+    VersionedCollaborationProfile,
 )
 
 
@@ -29,7 +35,7 @@ class SynthesisPersonalizationInstruction:
 @dataclass(frozen=True, slots=True)
 class SynthesisPersonalizationProjection:
     instructions: tuple[SynthesisPersonalizationInstruction, ...]
-    supplied_signals: tuple[ActiveMemorySignal, ...]
+    supplied_signals: tuple[VersionedActiveMemorySignal, ...]
 
     def __post_init__(self) -> None:
         if (
@@ -45,15 +51,25 @@ class SynthesisPersonalizationProjection:
             return
         instruction = self.instructions[0]
         signal = self.supplied_signals[0]
-        expected_instruction = PREFERENCE_INSTRUCTIONS.get(
-            ("planning_granularity", instruction.value)
-        )
+        try:
+            expected_instruction = memory_instruction_for_policy(
+                signal.policy_version,
+                "planning_granularity",
+                instruction.value,
+            )
+        except ValueError as exc:
+            raise SynthesisPersonalizationError(
+                "Synthesis personalization projection is invalid."
+            ) from exc
         if (
             not isinstance(
                 instruction,
                 SynthesisPersonalizationInstruction,
             )
-            or not isinstance(signal, ActiveMemorySignal)
+            or not isinstance(
+                signal,
+                (ActiveMemorySignal, ActiveMemorySignalV2),
+            )
             or instruction.category != "planning_granularity"
             or signal.category != "planning_granularity"
             or instruction.value != signal.value
@@ -80,17 +96,22 @@ class SynthesisPersonalizationAdapter:
 
     @staticmethod
     def project(
-        profile: CollaborationProfile,
+        profile: VersionedCollaborationProfile,
     ) -> SynthesisPersonalizationProjection:
-        if not isinstance(profile, CollaborationProfile):
+        if not isinstance(
+            profile,
+            (CollaborationProfile, CollaborationProfileV2),
+        ):
             raise TypeError("profile must be a CollaborationProfile.")
         signal = profile.active_preferences.get("planning_granularity")
         if signal is None:
             return SynthesisPersonalizationProjection((), ())
         value = cast(PlanningGranularity, signal.value)
-        instruction = PREFERENCE_INSTRUCTIONS[
-            ("planning_granularity", value)
-        ]
+        instruction = memory_instruction_for_policy(
+            signal.policy_version,
+            "planning_granularity",
+            value,
+        )
         return SynthesisPersonalizationProjection(
             instructions=(
                 SynthesisPersonalizationInstruction(
@@ -106,7 +127,7 @@ class SynthesisPersonalizationAdapter:
     def validate_and_derive_receipts(
         projection: SynthesisPersonalizationProjection,
         blueprint: SynthesisBlueprint,
-    ) -> tuple[AdaptationReceipt, ...]:
+    ) -> tuple[VersionedAdaptationReceipt, ...]:
         if not isinstance(projection, SynthesisPersonalizationProjection):
             raise TypeError(
                 "projection must be a SynthesisPersonalizationProjection."
@@ -117,7 +138,7 @@ class SynthesisPersonalizationAdapter:
             signal.category: signal
             for signal in projection.supplied_signals
         }
-        receipts: list[AdaptationReceipt] = []
+        receipts: list[VersionedAdaptationReceipt] = []
         seen_categories: set[str] = set()
         for adaptation in blueprint.personalization_trace.adaptations:
             if adaptation.profile_key in seen_categories:
@@ -130,13 +151,15 @@ class SynthesisPersonalizationAdapter:
                 raise SynthesisPersonalizationError(
                     "Blueprint claims an unsupplied synthesis adaptation."
                 )
-            receipts.append(
-                AdaptationReceipt(
-                    signal_id=signal.signal_id,
-                    category=signal.category,
-                    value=signal.value,
-                    source_event_id=signal.source_event_id,
-                    status="provided_to_model",
-                )
-            )
+            receipt_fields = {
+                "signal_id": signal.signal_id,
+                "category": signal.category,
+                "value": signal.value,
+                "source_event_id": signal.source_event_id,
+                "status": "provided_to_model",
+            }
+            if isinstance(signal, ActiveMemorySignalV2):
+                receipts.append(AdaptationReceiptV2(**receipt_fields))
+            else:
+                receipts.append(AdaptationReceipt(**receipt_fields))
         return tuple(receipts)

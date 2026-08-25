@@ -21,12 +21,12 @@ from generic_artifact_generation import (
 from generic_artifact_service import GetGenericArtifactCommand
 from schemas import (
     SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
-    AdaptationReceipt,
     AgentActionReceipt,
     ArtifactReference,
     BlueprintArtifactDetailResponse,
     SingleFileArtifact,
     SingleFileArtifactDetailResponse,
+    VersionedAdaptationReceipt,
 )
 from synthesis import SYNTHESIS_MODEL_NAME
 from synthesis_service import (
@@ -65,7 +65,7 @@ class ArtifactEffectLedger(Protocol):
         blueprint: dict[str, object],
         display_label: str,
         observed_at: datetime,
-        adaptations: tuple[AdaptationReceipt, ...],
+        adaptations: tuple[VersionedAdaptationReceipt, ...],
     ) -> ChatTurnArtifactEffectResult: ...
 
     async def record_chat_turn_single_file_artifact_effect(
@@ -125,7 +125,9 @@ class AgentColArtifactResponderProjection(BaseModel):
         max_length=1_500,
     )
     socratic_questions: tuple[str, ...] = Field(max_length=5)
-    adaptations: tuple[AdaptationReceipt, ...] = Field(default_factory=tuple)
+    adaptations: tuple[VersionedAdaptationReceipt, ...] = Field(
+        default_factory=tuple
+    )
     limitations: tuple[str, ...] = Field(default_factory=tuple, max_length=8)
     artifact_family: str | None = Field(default=None, min_length=1, max_length=40)
     format: str | None = Field(default=None, min_length=1, max_length=40)
@@ -146,7 +148,7 @@ class AgentColArtifactExecutionResult:
     claim: ChatTurnClaim
     actions: tuple[AgentActionReceipt, ...]
     artifacts: tuple[ArtifactReference, ...]
-    adaptations: tuple[AdaptationReceipt, ...]
+    adaptations: tuple[VersionedAdaptationReceipt, ...]
     projection: AgentColArtifactResponderProjection
 
 

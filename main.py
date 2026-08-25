@@ -114,7 +114,6 @@ from memory_proposals import ProposalTurnLease
 from research_expert_service import ResearchExpertService
 from requirements_verification_service import RequirementsVerificationService
 from schemas import (
-    AdaptationReceipt,
     AgentActionReceipt,
     BlueprintArtifactDetailResponse,
     BlueprintArtifactFeedbackListResponse,
@@ -124,7 +123,6 @@ from schemas import (
     ChatSessionListResponse,
     ChatRequest,
     ChatResponse,
-    CollaborationProfile,
     IdentifierStr,
     MemoryInspectionResponse,
     MemoryMutationResponse,
@@ -133,6 +131,8 @@ from schemas import (
     SynthesisResponse,
     SingleFileArtifactCreateRequest,
     SingleFileArtifactCreateResponse,
+    VersionedAdaptationReceipt,
+    VersionedCollaborationProfile,
     SingleFileArtifactDetailResponse,
     SingleFileArtifactEditRequest,
     SingleFileArtifactLifecycleResponse,
@@ -188,9 +188,12 @@ def _validate_chat_history(
 
 
 def _build_model_input_context(
-    profile: CollaborationProfile,
+    profile: VersionedCollaborationProfile,
     history: list[dict[str, str]],
-) -> tuple[tuple[types.Content, ...], tuple[AdaptationReceipt, ...]]:
+) -> tuple[
+    tuple[types.Content, ...],
+    tuple[VersionedAdaptationReceipt, ...],
+]:
     rendered_memory = MemoryContextRenderer.render(profile)
 
     if not rendered_memory.instruction_text and not history:

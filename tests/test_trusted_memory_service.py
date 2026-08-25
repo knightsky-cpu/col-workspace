@@ -13,8 +13,10 @@ from database import (
 from schemas import (
     AgentActionReceipt,
     CollaborationProfile,
+    CollaborationProfileV2,
     MemoryEvent,
     MemoryProposal,
+    MemoryProposalV2,
 )
 from trusted_memory_service import (
     DeleteMemorySignalCommand,
@@ -97,6 +99,50 @@ async def test_decide_memory_proposal_dispatches_rejection_once() -> None:
         observed_at=NOW,
     )
     database.approve_memory_proposal.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_decide_memory_proposal_dispatches_v2_category() -> None:
+    proposal_id = "development_environments--proposal-v2"
+    proposal = MemoryProposalV2(
+        proposal_id=proposal_id,
+        category="development_environments",
+        proposed_value=["linux", "macos"],
+        expected_signal_id=None,
+        status="rejected",
+        source_session_id="source-session",
+        source_message_id="source-message",
+        evidence_message_id="source-message",
+        created_at=NOW,
+        expires_at=NOW + timedelta(hours=24),
+    )
+    database = MagicMock()
+    database.reject_memory_proposal = AsyncMock(
+        return_value=MemoryRejectionResult(
+            profile=CollaborationProfileV2(),
+            proposal=proposal,
+        )
+    )
+    service = TrustedMemoryService(database=database, clock=lambda: NOW)
+
+    result = await service.decide_memory_proposal(
+        MemoryDecisionCommand(
+            user_id="user-1",
+            proposal_id=proposal_id,
+            decision="reject",
+            confirmation_channel="chat_decision",
+            confirmation_session_id="confirmation-session",
+            confirmation_message_id="confirmation-message",
+        )
+    )
+
+    assert result.profile == CollaborationProfileV2()
+    database.reject_memory_proposal.assert_awaited_once_with(
+        "user-1",
+        "development_environments",
+        proposal_id,
+        observed_at=NOW,
+    )
 
 
 @pytest.mark.asyncio

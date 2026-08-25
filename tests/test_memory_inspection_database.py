@@ -12,8 +12,13 @@ from database import (
     MemoryEngineError,
     MemoryEventCursorNotFoundError,
 )
-from memory_policy import MEMORY_CATEGORY_ORDER
-from schemas import CollaborationProfile, MemoryProposal
+from memory_policy import MEMORY_CATEGORY_ORDER, MEMORY_CATEGORY_ORDER_V2
+from schemas import (
+    CollaborationProfile,
+    MemoryEventV2,
+    MemoryProposal,
+    MemoryProposalV2,
+)
 
 
 NOW = datetime(2026, 8, 20, 21, 0, tzinfo=UTC)
@@ -66,6 +71,45 @@ def event_document(*, event_number: int) -> dict[str, object]:
     }
 
 
+def v2_proposal_document() -> dict[str, object]:
+    return {
+        "proposal_id": "development_environments--proposal-v2",
+        "category": "development_environments",
+        "proposed_value": ["linux", "macos"],
+        "expected_signal_id": None,
+        "policy_version": "2.0",
+        "status": "pending",
+        "source_session_id": "source-session",
+        "source_message_id": "source-message",
+        "evidence_message_id": "source-message",
+        "clarification_id": None,
+        "created_at": NOW - timedelta(hours=1),
+        "expires_at": NOW + timedelta(hours=1),
+        "resolved_at": None,
+    }
+
+
+def v2_event_document() -> dict[str, object]:
+    return {
+        "event_type": "approved",
+        "signal_id": "development_environments--proposal-v2",
+        "category": "development_environments",
+        "value": ["linux", "macos"],
+        "policy_version": "2.0",
+        "source_type": "explicit_user_feedback",
+        "source_session_id": "source-session",
+        "source_message_id": "source-message",
+        "evidence_message_id": "source-message",
+        "clarification_id": None,
+        "confirmation_channel": "memory_api",
+        "confirmation_session_id": None,
+        "confirmation_message_id": None,
+        "related_signal_id": None,
+        "memory_revision": 1,
+        "created_at": NOW,
+    }
+
+
 async def snapshot_stream(items: list[SimpleNamespace]):
     for item in items:
         yield item
@@ -93,6 +137,85 @@ def inspection_store() -> tuple[
 
 
 @pytest.mark.asyncio
+async def test_memory_inspection_returns_pending_v2_proposal() -> None:
+    client, _, user, proposals, events = inspection_store()
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+    proposal_refs = {
+        category: MagicMock(name=f"proposal-{category}")
+        for category in MEMORY_CATEGORY_ORDER_V2
+    }
+    proposals.document.side_effect = proposal_refs.__getitem__
+    client.get_all.return_value = snapshot_stream(
+        [
+            SimpleNamespace(
+                exists=True,
+                to_dict=v2_proposal_document,
+            )
+        ]
+    )
+    first_order = MagicMock()
+    second_order = MagicMock()
+    limited_query = MagicMock()
+    events.order_by.return_value = first_order
+    first_order.order_by.return_value = second_order
+    second_order.limit.return_value = limited_query
+    limited_query.stream.return_value = snapshot_stream([])
+
+    result = await MemoryEngine(client).get_memory_inspection(
+        "user-1",
+        observed_at=NOW,
+    )
+
+    expected_document = v2_proposal_document()
+    expected_document.pop("resolved_at")
+    assert result.unresolved_proposals == (
+        MemoryProposalV2.model_validate(expected_document),
+    )
+    proposals.document.assert_has_calls(
+        [call(category) for category in MEMORY_CATEGORY_ORDER_V2]
+    )
+    assert proposals.document.call_count == len(MEMORY_CATEGORY_ORDER_V2)
+    client.get_all.assert_called_once_with(
+        [proposal_refs[category] for category in MEMORY_CATEGORY_ORDER_V2]
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_inspection_returns_v2_events() -> None:
+    client, _, user, proposals, events = inspection_store()
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+    proposals.document.side_effect = lambda category: MagicMock(
+        name=f"proposal-{category}"
+    )
+    client.get_all.return_value = snapshot_stream([])
+    event_id = "development_environments--proposal-v2--approved"
+    event_snapshot = SimpleNamespace(
+        id=event_id,
+        to_dict=v2_event_document,
+    )
+    first_order = MagicMock()
+    second_order = MagicMock()
+    limited_query = MagicMock()
+    events.order_by.return_value = first_order
+    first_order.order_by.return_value = second_order
+    second_order.limit.return_value = limited_query
+    limited_query.stream.return_value = snapshot_stream([event_snapshot])
+
+    result = await MemoryEngine(client).get_memory_inspection(
+        "user-1",
+        observed_at=NOW,
+    )
+
+    assert result.events == (
+        MemoryEventV2(event_id=event_id, **v2_event_document()),
+    )
+
+
+@pytest.mark.asyncio
 async def test_memory_inspection_reads_only_governed_pending_slots() -> None:
     client, users, user, proposals, events = inspection_store()
     user.get = AsyncMock(
@@ -108,7 +231,7 @@ async def test_memory_inspection_reads_only_governed_pending_slots() -> None:
     )
     proposal_refs = {
         category: MagicMock(name=f"proposal-{category}")
-        for category in MEMORY_CATEGORY_ORDER
+        for category in MEMORY_CATEGORY_ORDER_V2
     }
     proposals.document.side_effect = proposal_refs.__getitem__
     client.get_all.return_value = snapshot_stream(
@@ -194,11 +317,11 @@ async def test_memory_inspection_reads_only_governed_pending_slots() -> None:
     client.collection.assert_called_once_with("users")
     users.document.assert_called_once_with("user-1")
     proposals.document.assert_has_calls(
-        [call(category) for category in MEMORY_CATEGORY_ORDER]
+        [call(category) for category in MEMORY_CATEGORY_ORDER_V2]
     )
-    assert proposals.document.call_count == len(MEMORY_CATEGORY_ORDER)
+    assert proposals.document.call_count == len(MEMORY_CATEGORY_ORDER_V2)
     client.get_all.assert_called_once_with(
-        [proposal_refs[category] for category in MEMORY_CATEGORY_ORDER]
+        [proposal_refs[category] for category in MEMORY_CATEGORY_ORDER_V2]
     )
     events.order_by.assert_called_once_with(
         "created_at",

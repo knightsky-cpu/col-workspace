@@ -19,6 +19,9 @@ NOW = datetime(2026, 8, 20, 18, 0, tzinfo=UTC)
 SIGNAL_ID = "response_length--proposal-1"
 APPROVED_EVENT_ID = f"{SIGNAL_ID}--approved"
 REVOKED_EVENT_ID = f"{SIGNAL_ID}--revoked"
+V2_SIGNAL_ID = "development_environments--proposal-v2"
+V2_APPROVED_EVENT_ID = f"{V2_SIGNAL_ID}--approved"
+V2_REVOKED_EVENT_ID = f"{V2_SIGNAL_ID}--revoked"
 
 
 def install_transaction_runner(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,6 +87,45 @@ def revoked_event_document() -> dict[str, object]:
         }
     )
     return document
+
+
+def active_v2_profile_document() -> dict[str, object]:
+    return {
+        "memory_schema_version": "2.0",
+        "memory_revision": 1,
+        "identity_context": {},
+        "active_preferences": {
+            "development_environments": {
+                "signal_id": V2_SIGNAL_ID,
+                "category": "development_environments",
+                "value": ["macos", "linux"],
+                "policy_version": "2.0",
+                "source_event_id": V2_APPROVED_EVENT_ID,
+                "approved_at": NOW,
+            }
+        },
+    }
+
+
+def approved_v2_event_document() -> dict[str, object]:
+    return {
+        "event_type": "approved",
+        "signal_id": V2_SIGNAL_ID,
+        "category": "development_environments",
+        "value": ["macos", "linux"],
+        "policy_version": "2.0",
+        "source_type": "explicit_user_feedback",
+        "source_session_id": "source-session",
+        "source_message_id": "source-message",
+        "evidence_message_id": "source-message",
+        "clarification_id": None,
+        "confirmation_channel": "memory_api",
+        "confirmation_session_id": None,
+        "confirmation_message_id": None,
+        "related_signal_id": None,
+        "memory_revision": 1,
+        "created_at": NOW,
+    }
 
 
 def lifecycle_store() -> tuple[
@@ -239,6 +281,73 @@ async def test_revoke_memory_signal_atomically_revokes_active_signal(
         ),
     ]
     transaction.delete.assert_not_called()
+    proposals.document.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_revoke_v2_memory_signal_preserves_v2_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client, user, proposals, _, event_refs = lifecycle_store()
+    transaction = MagicMock()
+    client.transaction.return_value = transaction
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=active_v2_profile_document,
+        )
+    )
+    approved_ref = event_refs.setdefault(V2_APPROVED_EVENT_ID, MagicMock())
+    approved_ref.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=approved_v2_event_document,
+        )
+    )
+    revoked_ref = event_refs.setdefault(V2_REVOKED_EVENT_ID, MagicMock())
+    revoked_ref.get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+
+    result = await MemoryEngine(client).revoke_memory_signal(
+        "user-1",
+        "development_environments",
+        V2_SIGNAL_ID,
+        confirmation_channel="memory_api",
+        confirmation_session_id=None,
+        confirmation_message_id=None,
+        observed_at=NOW,
+    )
+
+    assert result.profile.memory_schema_version == "2.0"
+    assert result.profile.memory_revision == 2
+    assert result.profile.active_preferences == {}
+    assert result.event.event_id == V2_REVOKED_EVENT_ID
+    assert result.event.policy_version == "2.0"
+    assert result.event.evidence_message_id == "source-message"
+    assert result.event.clarification_id is None
+    assert transaction.set.call_args_list[0] == call(
+        revoked_ref,
+        {
+            "event_type": "revoked",
+            "signal_id": V2_SIGNAL_ID,
+            "category": "development_environments",
+            "value": ["macos", "linux"],
+            "policy_version": "2.0",
+            "source_type": "explicit_user_feedback",
+            "source_session_id": "source-session",
+            "source_message_id": "source-message",
+            "evidence_message_id": "source-message",
+            "clarification_id": None,
+            "confirmation_channel": "memory_api",
+            "confirmation_session_id": None,
+            "confirmation_message_id": None,
+            "related_signal_id": None,
+            "memory_revision": 2,
+            "created_at": firestore.SERVER_TIMESTAMP,
+        },
+    )
     proposals.document.assert_not_called()
 
 
@@ -605,6 +714,127 @@ async def test_delete_memory_signal_removes_owned_artifacts(
     assert transaction.delete.call_args_list == [
         call(proposal_ref),
         call(event_refs[APPROVED_EVENT_ID]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_v2_memory_signal_removes_versioned_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    origin_id = "354190760312f71edeae96c0d3372634"
+    signal_id = f"development_environments--{origin_id}"
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    proposals = MagicMock()
+    proposal_ref = MagicMock(name="proposal")
+    origins = MagicMock()
+    origin_ref = MagicMock(name="origin")
+    events = MagicMock()
+    event_refs: dict[str, MagicMock] = {}
+    transaction = MagicMock()
+    client.collection.return_value = users
+    users.document.return_value = user
+    client.transaction.return_value = transaction
+    user.collection.side_effect = lambda name: {
+        "memory_proposals": proposals,
+        "memory_proposal_origins": origins,
+        "memory_events": events,
+    }[name]
+    proposals.document.return_value = proposal_ref
+    origins.document.return_value = origin_ref
+
+    def event_document(event_id: str) -> MagicMock:
+        return event_refs.setdefault(event_id, MagicMock(name=event_id))
+
+    events.document.side_effect = event_document
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=lambda: {
+                "memory_schema_version": "2.0",
+                "memory_revision": 1,
+                "identity_context": {},
+                "active_preferences": {
+                    "development_environments": {
+                        "signal_id": signal_id,
+                        "category": "development_environments",
+                        "value": ["macos", "linux"],
+                        "policy_version": "2.0",
+                        "source_event_id": f"{signal_id}--approved",
+                        "approved_at": NOW,
+                    }
+                },
+            },
+        )
+    )
+    proposal_ref.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=lambda: {
+                "proposal_id": signal_id,
+                "category": "development_environments",
+                "proposed_value": ["macos", "linux"],
+                "expected_signal_id": None,
+                "policy_version": "2.0",
+                "status": "approved",
+                "source_session_id": "source-session",
+                "source_message_id": "source-message",
+                "evidence_message_id": "source-message",
+                "clarification_id": None,
+                "created_at": NOW,
+                "expires_at": NOW,
+                "resolved_at": NOW,
+            },
+        )
+    )
+    origin_ref.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=lambda: {
+                "schema_version": "2.0",
+                "proposal_id": signal_id,
+                "category": "development_environments",
+                "source_session_id": "source-session",
+                "source_message_id": "source-message",
+                "evidence_message_id": "source-message",
+                "clarification_id": None,
+                "created_at": NOW,
+            },
+        )
+    )
+    for event_type in ("approved", "corrected", "superseded", "revoked"):
+        event_id = f"{signal_id}--{event_type}"
+        event_ref = event_document(event_id)
+        event_ref.get = AsyncMock(
+            return_value=SimpleNamespace(
+                exists=event_type == "approved",
+                to_dict=(
+                    lambda event_type=event_type: {
+                        **approved_v2_event_document(),
+                        "signal_id": signal_id,
+                    }
+                    if event_type == "approved"
+                    else None
+                ),
+            )
+        )
+
+    result = await MemoryEngine(client).delete_memory_signal(
+        "user-1",
+        "development_environments",
+        signal_id,
+    )
+
+    assert result.artifacts_deleted is True
+    assert result.profile.memory_schema_version == "2.0"
+    assert result.profile.memory_revision == 2
+    assert result.profile.active_preferences == {}
+    assert transaction.delete.call_args_list == [
+        call(proposal_ref),
+        call(origin_ref),
+        call(event_refs[f"{signal_id}--approved"]),
     ]
 
 

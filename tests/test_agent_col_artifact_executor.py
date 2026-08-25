@@ -9,6 +9,7 @@ from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
 from database import ChatTurnArtifactEffectResult
 from schemas import (
     AdaptationReceipt,
+    AdaptationReceiptV2,
     AgentActionReceipt,
     ArtifactFeedbackDecisionRequest,
     ArtifactFeedbackCounts,
@@ -28,6 +29,35 @@ SOURCE_TEXT = (
     "Create a structured blueprint for a collaborative study partner with "
     "explicit approval, bounded memory, and verifiable milestones."
 )
+
+
+def test_artifact_projection_accepts_v2_adaptation_receipt() -> None:
+    from agent_col_artifact_executor import AgentColArtifactResponderProjection
+
+    receipt = AdaptationReceiptV2(
+        signal_id="development_environments--signal-v2",
+        category="development_environments",
+        value=["linux", "macos"],
+        source_event_id=(
+            "development_environments--signal-v2--approved"
+        ),
+        status="provided_to_model",
+    )
+    artifact = ArtifactReference(
+        artifact_type="synthesis_blueprint",
+        project_id="project-1",
+        artifact_id="blueprint-v2",
+        schema_version="2.0",
+        display_label="Versioned Blueprint",
+    )
+
+    projection = AgentColArtifactResponderProjection(
+        artifact=artifact,
+        socratic_questions=(),
+        adaptations=(receipt,),
+    )
+
+    assert projection.adaptations == (receipt,)
 
 
 def blueprint() -> SynthesisBlueprint:

@@ -2,32 +2,48 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from memory_policy import (
-    IDENTITY_CONTEXT_INSTRUCTIONS,
-    IdentityContextPolicy,
-    PREFERENCE_VALUES_BY_CATEGORY,
-    PreferencePolicy,
-    memory_signal_sort_key,
+    memory_instruction_for_policy,
+    memory_signal_sort_key_for_policy,
 )
 from schemas import (
     ActiveMemorySignal,
+    ActiveMemorySignalV2,
     AdaptationReceipt,
+    AdaptationReceiptV2,
     CollaborationProfile,
+    CollaborationProfileV2,
+    VersionedActiveMemorySignal,
+    VersionedAdaptationReceipt,
+    VersionedCollaborationProfile,
 )
 
 
 @dataclass(frozen=True)
 class RenderedMemoryContext:
     instruction_text: str
-    adaptations: tuple[AdaptationReceipt, ...]
+    adaptations: tuple[VersionedAdaptationReceipt, ...]
 
 
 class MemoryContextRenderer:
     @staticmethod
-    def render(profile: CollaborationProfile) -> RenderedMemoryContext:
-        if not isinstance(profile, CollaborationProfile):
+    def _plain_value(value: object) -> object:
+        if isinstance(value, list):
+            return [MemoryContextRenderer._plain_value(item) for item in value]
+        if hasattr(value, "model_dump"):
+            return value.model_dump(mode="python")
+        return value
+
+    @staticmethod
+    def render(
+        profile: VersionedCollaborationProfile,
+    ) -> RenderedMemoryContext:
+        if not isinstance(
+            profile,
+            (CollaborationProfile, CollaborationProfileV2),
+        ):
             raise TypeError("profile must be a CollaborationProfile.")
         sections: list[str] = []
-        receipts: list[AdaptationReceipt] = []
+        receipts: list[VersionedAdaptationReceipt] = []
 
         identity_lines = MemoryContextRenderer._render_signals(
             profile.identity_context.values(),
@@ -66,41 +82,50 @@ class MemoryContextRenderer:
 
     @staticmethod
     def _render_signals(
-        signals: Iterable[ActiveMemorySignal],
-        receipts: list[AdaptationReceipt],
+        signals: Iterable[VersionedActiveMemorySignal],
+        receipts: list[VersionedAdaptationReceipt],
     ) -> list[str]:
         lines: list[str] = []
         for signal in sorted(
             signals,
-            key=lambda item: memory_signal_sort_key(item.category),
+            key=lambda item: memory_signal_sort_key_for_policy(
+                "2.0",
+                item.category,
+            ),
         ):
-            if signal.category in PREFERENCE_VALUES_BY_CATEGORY:
-                instruction = PreferencePolicy.instruction(
-                    signal.category,
-                    signal.value,
-                )
-            elif signal.category in IDENTITY_CONTEXT_INSTRUCTIONS:
-                instruction = IdentityContextPolicy.instruction(
-                    signal.category,
-                    signal.value,
-                )
-            else:
-                raise ValueError("Unknown active memory category.")
+            plain_value = MemoryContextRenderer._plain_value(signal.value)
+            instruction = memory_instruction_for_policy(
+                signal.policy_version,
+                signal.category,
+                plain_value,
+            )
 
-            if isinstance(signal.value, list):
-                formatted_value = f"[{', '.join(signal.value)}]"
+            if isinstance(plain_value, list):
+                formatted_items = []
+                for item in plain_value:
+                    if isinstance(item, str):
+                        formatted_items.append(item)
+                    elif isinstance(item, dict):
+                        formatted_items.append(
+                            ":".join(str(value) for value in item.values())
+                        )
+                    else:
+                        formatted_items.append(str(item))
+                formatted_value = f"[{', '.join(formatted_items)}]"
             else:
-                formatted_value = signal.value
+                formatted_value = plain_value
             lines.append(
                 f"- {signal.category}={formatted_value}: {instruction}"
             )
-            receipts.append(
-                AdaptationReceipt(
-                    signal_id=signal.signal_id,
-                    category=signal.category,
-                    value=signal.value,
-                    source_event_id=signal.source_event_id,
-                    status="provided_to_model",
-                )
-            )
+            receipt_fields = {
+                "signal_id": signal.signal_id,
+                "category": signal.category,
+                "value": plain_value,
+                "source_event_id": signal.source_event_id,
+                "status": "provided_to_model",
+            }
+            if isinstance(signal, ActiveMemorySignalV2):
+                receipts.append(AdaptationReceiptV2(**receipt_fields))
+            else:
+                receipts.append(AdaptationReceipt(**receipt_fields))
         return lines

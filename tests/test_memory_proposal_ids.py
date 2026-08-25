@@ -71,6 +71,17 @@ def test_proposal_origin_id_from_signal_id_recognizes_v1_ids(
     ) == expected_origin_id
 
 
+def test_proposal_origin_id_from_signal_id_recognizes_v2_ids() -> None:
+    from memory_proposals import proposal_origin_id_from_signal_id
+
+    origin_id = "354190760312f71edeae96c0d3372634"
+
+    assert proposal_origin_id_from_signal_id(
+        "development_environments",
+        f"development_environments--{origin_id}",
+    ) == origin_id
+
+
 @pytest.mark.parametrize(
     ("user_id", "session_id", "message_id", "category"),
     (
