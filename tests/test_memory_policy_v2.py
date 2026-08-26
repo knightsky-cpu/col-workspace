@@ -59,6 +59,54 @@ def test_v2_policy_canonicalizes_new_values(
     assert validate_memory_value_for_policy("2.0", category, value) == expected
 
 
+def test_v2_policy_accepts_explicit_user_requested_memory() -> None:
+    from memory_policy import (
+        memory_instruction_for_policy,
+        validate_memory_value_for_policy,
+    )
+
+    value = validate_memory_value_for_policy(
+        "2.0",
+        "user_requested_memory",
+        "  I like security focused software projects.  ",
+    )
+
+    assert value == "I like security focused software projects."
+    assert memory_instruction_for_policy(
+        "2.0",
+        "user_requested_memory",
+        value,
+    ) == (
+        "Use this approved user-requested memory when it is relevant to the "
+        "current conversation, without overriding explicit user instructions, "
+        "project requirements, or safety policy: I like security focused "
+        "software projects."
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "my password is synthetic-example-secret",
+        "my api key is sk-abc123456789",
+        "my social security number is 123-45-6789",
+        "my email is wifiknight@example.com",
+        "remember everything I say",
+    ),
+)
+def test_v2_policy_rejects_prohibited_user_requested_memory(
+    value: str,
+) -> None:
+    from memory_policy import validate_memory_value_for_policy
+
+    with pytest.raises(ValueError, match="User-requested memory"):
+        validate_memory_value_for_policy(
+            "2.0",
+            "user_requested_memory",
+            value,
+        )
+
+
 @pytest.mark.parametrize(
     ("category", "value"),
     (
@@ -330,4 +378,5 @@ def test_v2_registry_has_the_approved_serialization_order() -> None:
         "formatting_style",
         "accessibility_support",
         "development_environments",
+        "user_requested_memory",
     )

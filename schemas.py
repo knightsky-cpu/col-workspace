@@ -43,6 +43,7 @@ from memory_policy import (
     MemoryValue,
     PreferenceCategory,
     PreferenceCategoryV2,
+    UserRequestedMemoryStr,
     validate_memory_value,
     validate_memory_value_for_policy,
 )
@@ -887,6 +888,7 @@ MemoryValueV2Schema = (
     | list[AccessibilitySupport]
     | list[DevelopmentEnvironment]
     | list[DomainExperienceEntry]
+    | UserRequestedMemoryStr
 )
 
 

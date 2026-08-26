@@ -168,6 +168,48 @@ async def test_natural_profile_candidate_persists_version_2_proposal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_natural_profile_candidate_persists_user_requested_memory() -> None:
+    from memory_candidate_decisions import ProfileCandidateDecision
+    from trusted_memory_service import (
+        NaturalMemoryProposalResult,
+        TrustedMemoryService,
+    )
+
+    database = FakeProposalDatabase()
+    result = await TrustedMemoryService(
+        database=database,
+        clock=lambda: NOW,
+    ).handle_natural_memory_decision(
+        natural_command(
+            source_message_text=(
+                "Col please remember that I like security focused software "
+                "projects."
+            ),
+            decision=ProfileCandidateDecision(
+                category="user_requested_memory",
+                canonical_value=(
+                    "I like security focused software projects."
+                ),
+                evidence_text=(
+                    "I like security focused software projects."
+                ),
+            ),
+        )
+    )
+
+    assert isinstance(result, NaturalMemoryProposalResult)
+    assert result.status == "pending"
+    assert result.proposal.category == "user_requested_memory"
+    assert result.proposal.proposed_value == (
+        "I like security focused software projects."
+    )
+    assert database.calls[0]["category"] == "user_requested_memory"
+    assert database.calls[0]["proposed_value"] == (
+        "I like security focused software projects."
+    )
+
+
+@pytest.mark.asyncio
 async def test_natural_profile_candidate_rejects_non_source_evidence() -> None:
     from memory_candidate_decisions import ProfileCandidateDecision
     from trusted_memory_service import TrustedMemoryService

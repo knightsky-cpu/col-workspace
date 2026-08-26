@@ -66,6 +66,10 @@ PreferredNameStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=80),
 ]
+UserRequestedMemoryStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=240),
+]
 MemoryValue = PreferenceValue | PreferredNameStr | list[BroadRole]
 ExplanationPace = Literal["deliberate", "balanced", "brisk"]
 LearningApproach = Literal[
@@ -107,6 +111,7 @@ PreferenceCategoryV2 = PreferenceCategory | Literal[
     "learning_approach",
     "accessibility_support",
     "development_environments",
+    "user_requested_memory",
 ]
 IdentityContextCategoryV2 = IdentityContextCategory | Literal[
     "domain_experience"
@@ -350,6 +355,17 @@ MEMORY_CATEGORY_ORDER_V2: tuple[MemoryCategoryV2, ...] = (
     "formatting_style",
     "accessibility_support",
     "development_environments",
+    "user_requested_memory",
+)
+
+USER_REQUESTED_MEMORY_PROHIBITED_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bpassword\b", re.IGNORECASE),
+    re.compile(r"\b(api|access|refresh|id)\s+key\b", re.IGNORECASE),
+    re.compile(r"\b(token|credential|secret)\b", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+    re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
+    re.compile(r"\bremember\s+everything\b", re.IGNORECASE),
 )
 
 V2_SCALAR_VALUES_BY_CATEGORY = MappingProxyType(
@@ -590,6 +606,13 @@ def memory_instruction_for_policy(
                 "expertise."
             )
         return " ".join(instructions)
+    if category == "user_requested_memory":
+        return (
+            "Use this approved user-requested memory when it is relevant to "
+            "the current conversation, without overriding explicit user "
+            "instructions, project requirements, or safety policy: "
+            f"{validated}"
+        )
     raise ValueError("Unknown memory category.")
 
 
@@ -629,7 +652,31 @@ def _validate_memory_value_v2(category: object, value: object) -> object:
         )
     if category == "domain_experience":
         return _canonical_domain_experience(value)
+    if category == "user_requested_memory":
+        return _canonical_user_requested_memory(value)
     raise ValueError("Unknown memory category.")
+
+
+def _canonical_user_requested_memory(value: object) -> UserRequestedMemoryStr:
+    if type(value) is not str:
+        raise ValueError("User-requested memory must be a string.")
+    if any(
+        unicodedata.category(character).startswith("C")
+        for character in value
+    ):
+        raise ValueError("User-requested memory contains a control character.")
+    normalized = unicodedata.normalize("NFC", value)
+    normalized = " ".join(normalized.split())
+    if not 1 <= len(normalized) <= 240:
+        raise ValueError(
+            "User-requested memory must contain 1 through 240 characters."
+        )
+    if not any(character.isalpha() for character in normalized):
+        raise ValueError("User-requested memory must contain a letter.")
+    for pattern in USER_REQUESTED_MEMORY_PROHIBITED_PATTERNS:
+        if pattern.search(normalized):
+            raise ValueError("User-requested memory contains prohibited content.")
+    return cast(UserRequestedMemoryStr, normalized)
 
 
 def _canonical_string_list(

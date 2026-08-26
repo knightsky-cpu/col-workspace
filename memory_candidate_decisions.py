@@ -12,6 +12,7 @@ from memory_policy import (
     LearningApproach,
     MemoryCategoryV2,
     PreferredNameStr,
+    UserRequestedMemoryStr,
     validate_memory_value_for_policy,
 )
 from schemas import DomainExperienceEntry, StrictModel
@@ -178,6 +179,11 @@ class DomainExperienceProviderCandidate(_ProviderCandidateBase):
     )
 
 
+class UserRequestedMemoryProviderCandidate(_ProviderCandidateBase):
+    category: Literal["user_requested_memory"]
+    canonical_value: UserRequestedMemoryStr
+
+
 ProviderProfileCandidate = Annotated[
     ResponseLengthProviderCandidate
     | ExplanationStructureProviderCandidate
@@ -193,7 +199,8 @@ ProviderProfileCandidate = Annotated[
     | LearningApproachProviderCandidate
     | AccessibilitySupportProviderCandidate
     | DevelopmentEnvironmentsProviderCandidate
-    | DomainExperienceProviderCandidate,
+    | DomainExperienceProviderCandidate
+    | UserRequestedMemoryProviderCandidate,
     Field(discriminator="category"),
 ]
 

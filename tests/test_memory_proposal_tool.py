@@ -123,6 +123,70 @@ def test_proposal_tool_declares_development_environments_as_an_array() -> None:
     }
 
 
+@pytest.mark.filterwarnings(
+    "ignore:\\[EXPERIMENTAL\\].*JSON_SCHEMA_FOR_FUNC_DECL.*:UserWarning"
+)
+def test_proposal_tool_declares_user_requested_memory_as_bounded_text() -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    tool = create_propose_memory_signal_tool(NoopMemoryService())
+    declaration = tool._get_declaration()
+
+    assert declaration is not None
+    schema = declaration.parameters_json_schema
+    assert schema is not None
+    candidate_schema = schema["$defs"][
+        "UserRequestedMemoryProviderCandidate"
+    ]
+    assert candidate_schema["properties"]["category"]["const"] == (
+        "user_requested_memory"
+    )
+    canonical_schema = candidate_schema["properties"]["canonical_value"]
+    assert canonical_schema["type"] == "string"
+    assert canonical_schema["minLength"] == 1
+    assert canonical_schema["maxLength"] == 240
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_preserves_user_requested_memory_candidate() -> None:
+    from memory_candidate_decisions import ProfileCandidateDecision
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    state = tool_context_state()
+    state["memory_source_message_text"] = (
+        "Col please remember that I like security focused software projects."
+    )
+    service = RecordingMemoryService()
+    tool = create_propose_memory_signal_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "user_requested_memory",
+                "canonical_value": (
+                    "I like security focused software projects."
+                ),
+                "evidence_text": (
+                    "I like security focused software projects."
+                ),
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=state, delta={})
+        ),
+    )
+
+    assert result["status"] == "pending"
+    assert len(service.commands) == 1
+    decision = service.commands[0].decision
+    assert isinstance(decision, ProfileCandidateDecision)
+    assert decision.category == "user_requested_memory"
+    assert decision.canonical_value == (
+        "I like security focused software projects."
+    )
+
+
 @pytest.mark.asyncio
 async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
     from memory_proposal_tool import create_propose_memory_signal_tool

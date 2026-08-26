@@ -138,6 +138,47 @@ def test_synthesis_blueprint_accepts_complete_valid_payload(
     assert blueprint.model_dump(mode="json") == payload
 
 
+def test_v2_memory_models_accept_user_requested_memory_text() -> None:
+    from datetime import UTC, datetime
+
+    from schemas import (
+        ActiveMemorySignalV2,
+        AdaptationReceiptV2,
+        MemoryProposalReceiptV2,
+    )
+
+    proposed = MemoryProposalReceiptV2(
+        proposal_id="user_requested_memory--proposal-1",
+        category="user_requested_memory",
+        proposed_value=(
+            "I like security focused software projects with practical "
+            "real-world utility."
+        ),
+        expires_at=datetime(2026, 8, 26, tzinfo=UTC),
+    )
+    signal = ActiveMemorySignalV2(
+        signal_id="user_requested_memory--signal-1",
+        category="user_requested_memory",
+        value=proposed.proposed_value,
+        source_event_id="user_requested_memory--signal-1--approved",
+        approved_at=datetime(2026, 8, 26, tzinfo=UTC),
+    )
+    receipt = AdaptationReceiptV2(
+        signal_id=signal.signal_id,
+        category=signal.category,
+        value=signal.value,
+        source_event_id=signal.source_event_id,
+        status="provided_to_model",
+    )
+
+    assert proposed.proposed_value == (
+        "I like security focused software projects with practical real-world "
+        "utility."
+    )
+    assert signal.value == proposed.proposed_value
+    assert receipt.value == proposed.proposed_value
+
+
 def test_blueprint_v2_uses_architectural_decisions(
     valid_blueprint_payload: dict[str, object],
 ) -> None:

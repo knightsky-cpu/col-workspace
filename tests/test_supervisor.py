@@ -162,6 +162,25 @@ def test_supervisor_instruction_requires_receipt_driven_memory_truth() -> None:
     assert "prohibited" in normalized_instruction
 
 
+def test_supervisor_instruction_allows_explicit_user_requested_memory_fallback(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+    lower_instruction = normalized_instruction.lower()
+
+    assert (
+        "Failure to match a predefined category is not by itself unsupported"
+        in normalized_instruction
+    )
+    assert "user_requested_memory" in normalized_instruction
+    assert "explicit memory intent creates a candidate" in lower_instruction
+    assert "policy decides whether it is approvable" in lower_instruction
+    assert "Chat may not delete or revoke active durable memory" in (
+        normalized_instruction
+    )
+
+
 def test_create_supervisor_app_registers_only_bounded_research_expert(
 ) -> None:
     from research_expert import (

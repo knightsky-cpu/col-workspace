@@ -80,6 +80,37 @@ def test_renderer_adapts_from_v2_domain_experience_models() -> None:
     )
 
 
+def test_renderer_adapts_from_v2_user_requested_memory() -> None:
+    from memory_context import MemoryContextRenderer
+    from schemas import ActiveMemorySignalV2, CollaborationProfileV2
+
+    signal = ActiveMemorySignalV2(
+        signal_id="user_requested_memory--signal-v2",
+        category="user_requested_memory",
+        value="I like security focused software projects.",
+        source_event_id="user_requested_memory--signal-v2--approved",
+        approved_at=datetime(2026, 8, 26, tzinfo=UTC),
+    )
+    profile = CollaborationProfileV2(
+        memory_revision=1,
+        active_preferences={"user_requested_memory": signal},
+    )
+
+    rendered = MemoryContextRenderer.render(profile)
+
+    assert (
+        "user_requested_memory=I like security focused software projects."
+        in rendered.instruction_text
+    )
+    assert "Use this approved user-requested memory" in (
+        rendered.instruction_text
+    )
+    assert rendered.adaptations[0].category == "user_requested_memory"
+    assert rendered.adaptations[0].value == (
+        "I like security focused software projects."
+    )
+
+
 def test_renderer_orders_sections_and_builds_matching_receipts() -> None:
     from memory_context import MemoryContextRenderer
     from schemas import ActiveMemorySignal, CollaborationProfile
