@@ -823,6 +823,44 @@ test("completed note event removes matching pending note proposal", () => {
   );
 });
 
+test("notes list refresh updates selected active note detail", () => {
+  const loading = beginNotesLoad(createInitialState(), "active");
+  const staleNote = {
+    note_id: "note-1",
+    title: "Workspace Environment",
+    body: "Using a macOS environment for this workspace.",
+    status: "active",
+    revision: 2,
+  };
+  const loaded = completeNotesLoad(loading, {
+    notes: [staleNote],
+    next_note_id: null,
+  });
+  const withDetail = completeNoteDetailLoad(
+    beginNoteDetailLoad(loaded, "note-1"),
+    {
+      note: staleNote,
+      events: [{ event_id: "note-1--approved", event_type: "approved" }],
+    },
+  );
+
+  const refreshed = completeNotesLoad(withDetail, {
+    notes: [{
+      ...staleNote,
+      body: "Using a Linux environment for this workspace.",
+      revision: 3,
+    }],
+    next_note_id: null,
+  });
+
+  assert.equal(
+    refreshed.notes.detail.note.body,
+    "Using a Linux environment for this workspace.",
+  );
+  assert.equal(refreshed.notes.detail.note.revision, 3);
+  assert.deepEqual(refreshed.notes.detail.events, withDetail.notes.detail.events);
+});
+
 test("work list lifecycle stores newest-first metadata and cursor", () => {
   const loading = beginWorkListLoad(createInitialState());
   assert.equal(loading.work.list.status, "loading");

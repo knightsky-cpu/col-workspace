@@ -1021,13 +1021,23 @@ export function beginNotesLoad(state, statusFilter = state.notes.statusFilter) {
 }
 
 export function completeNotesLoad(state, response) {
+  const notes = Array.isArray(response.notes) ? response.notes : [];
+  const refreshedSelectedNote = notes.find((note) => (
+    note?.note_id === state.notes.selectedNoteId
+  ));
   return {
     ...state,
     notes: {
       ...state.notes,
       status: "ready",
-      notes: Array.isArray(response.notes) ? response.notes : [],
+      notes,
       next_note_id: response.next_note_id ?? null,
+      detail: refreshedSelectedNote
+        ? {
+          ...state.notes.detail,
+          note: refreshedSelectedNote,
+        }
+        : state.notes.detail,
       error: null,
     },
   };
