@@ -141,6 +141,7 @@ def test_deleted_note_event_omits_content_bearing_fields() -> None:
             "title": None,
             "body": None,
             "note_kind": None,
+            "source_session_id": None,
             "source_message_ids": [],
             "revision": 2,
             "previous_revision": 1,

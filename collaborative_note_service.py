@@ -4,7 +4,13 @@ from typing import Literal
 
 from database import MemoryEngine
 from collaborative_note_policy import CollaborativeNoteKind
-from schemas import CollaborativeNote, CollaborativeNoteEvent, CollaborativeNoteProposal
+from schemas import (
+    AgentActionReceipt,
+    CollaborativeNote,
+    CollaborativeNoteEvent,
+    CollaborativeNoteProposal,
+    MemoryDecision,
+)
 
 CollaborativeNoteStatusFilter = Literal["active", "archived"]
 
@@ -42,6 +48,15 @@ class CollaborativeNoteCorrectionCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class CollaborativeNoteDecisionCommand:
+    user_id: str
+    workspace_id: str
+    proposal_id: str
+    decision: MemoryDecision
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class CollaborativeNoteLifecycleCommand:
     user_id: str
     workspace_id: str
@@ -70,6 +85,13 @@ class CollaborativeNoteProposalResult:
 @dataclass(frozen=True, slots=True)
 class CollaborativeNoteLifecycleResult:
     note: CollaborativeNote
+    event: CollaborativeNoteEvent
+
+
+@dataclass(frozen=True, slots=True)
+class CollaborativeNoteDecisionResult:
+    action: AgentActionReceipt
+    note: CollaborativeNote | None
     event: CollaborativeNoteEvent
 
 
@@ -128,6 +150,38 @@ class CollaborativeNoteService:
             observed_at=command.observed_at,
         )
         return CollaborativeNoteProposalResult(proposal=proposal)
+
+    async def decide_proposal(
+        self,
+        command: CollaborativeNoteDecisionCommand,
+    ) -> CollaborativeNoteDecisionResult:
+        action = AgentActionReceipt(
+            action_name=f"{command.decision}_collaborative_note",
+            status="completed",
+        )
+        if command.decision == "approve":
+            note, event = await self._database.approve_collaborative_note_proposal(
+                user_id=command.user_id,
+                workspace_id=command.workspace_id,
+                proposal_id=command.proposal_id,
+                observed_at=command.observed_at,
+            )
+            return CollaborativeNoteDecisionResult(
+                action=action,
+                note=note,
+                event=event,
+            )
+        event = await self._database.reject_collaborative_note_proposal(
+            user_id=command.user_id,
+            workspace_id=command.workspace_id,
+            proposal_id=command.proposal_id,
+            observed_at=command.observed_at,
+        )
+        return CollaborativeNoteDecisionResult(
+            action=action,
+            note=None,
+            event=event,
+        )
 
     async def archive_note(
         self,

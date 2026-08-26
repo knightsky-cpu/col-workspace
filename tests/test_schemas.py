@@ -638,6 +638,7 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "memory_decision": None,
         "memory_clarification_selection": None,
         "artifact_feedback_decision": None,
+        "collaborative_note_decision": None,
     }
     assert response.model_dump(mode="json") == {
         "response": "Collaborative answer.",
@@ -647,6 +648,8 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "citations": [],
         "memory_proposals": [],
         "memory_clarifications": [],
+        "collaborative_note_proposals": [],
+        "collaborative_note_events": [],
         "adaptations": [],
     }
 

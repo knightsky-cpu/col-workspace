@@ -91,6 +91,7 @@ from chat_turns import (
 )
 from collaborative_note_service import (
     CollaborativeNoteCorrectionCommand,
+    CollaborativeNoteDecisionCommand,
     CollaborativeNoteLifecycleCommand,
     CollaborativeNoteService,
     GetCollaborativeNoteCommand,
@@ -584,6 +585,8 @@ def _partial_failure_response(
     decision_memory_clarifications: tuple[
         MemoryClarificationReceipt, ...
     ],
+    decision_note_proposals: tuple[CollaborativeNoteProposal, ...] = (),
+    decision_note_events: tuple[CollaborativeNoteEvent, ...] = (),
     runtime_error: AgentColTurnServiceError,
     released_claim: ChatTurnClaim | None,
 ) -> JSONResponse | None:
@@ -612,6 +615,16 @@ def _partial_failure_response(
         if released_claim is not None
         else ()
     )
+    released_note_proposals = (
+        released_claim.precompleted_collaborative_note_proposals
+        if released_claim is not None
+        else ()
+    )
+    released_note_events = (
+        released_claim.precompleted_collaborative_note_events
+        if released_claim is not None
+        else ()
+    )
     actions = _merge_receipts(
         decision_actions,
         runtime_error.actions,
@@ -635,11 +648,23 @@ def _partial_failure_response(
         runtime_error.artifact_feedback,
         released_feedback,
     )
+    note_proposals = _merge_receipts(
+        decision_note_proposals,
+        runtime_error.collaborative_note_proposals,
+        released_note_proposals,
+    )
+    note_events = _merge_receipts(
+        decision_note_events,
+        runtime_error.collaborative_note_events,
+        released_note_events,
+    )
     if (
         not actions
         and not artifacts
         and not artifact_feedback
         and not clarifications
+        and not note_proposals
+        and not note_events
     ):
         return None
     proposal_actions = tuple(
@@ -666,6 +691,8 @@ def _partial_failure_response(
         artifact_feedback=list(artifact_feedback),
         memory_proposals=list(proposals),
         memory_clarifications=list(clarifications),
+        collaborative_note_proposals=list(note_proposals),
+        collaborative_note_events=list(note_events),
         adaptations=list(runtime_error.adaptations),
     )
     content = response.model_dump(mode="json")
@@ -677,6 +704,10 @@ def _partial_failure_response(
         content.pop("adaptations")
     if not response.memory_clarifications:
         content.pop("memory_clarifications")
+    if not response.collaborative_note_proposals:
+        content.pop("collaborative_note_proposals")
+    if not response.collaborative_note_events:
+        content.pop("collaborative_note_events")
     return JSONResponse(
         status_code=status_code,
         content=content,
@@ -2179,6 +2210,8 @@ async def chat(
     decision_memory_clarifications: tuple[
         MemoryClarificationReceipt, ...
     ] = ()
+    decision_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
+    decision_note_events: tuple[CollaborativeNoteEvent, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
     effective_user_id = _resolve_effective_user_id(
         request=request,
@@ -2222,6 +2255,17 @@ async def chat(
             ),
         )
 
+    if (
+        payload.collaborative_note_decision is not None
+        and idempotency_key is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Collaborative note decision requires an idempotency key."
+            ),
+        )
+
     if idempotency_key is not None:
         try:
             validated_idempotency_key = validate_idempotency_key(
@@ -2245,6 +2289,9 @@ async def chat(
                     ),
                     artifact_feedback_decision=(
                         payload.artifact_feedback_decision
+                    ),
+                    collaborative_note_decision=(
+                        payload.collaborative_note_decision
                     ),
                 ),
                 idempotency_key=validated_idempotency_key,
@@ -2435,6 +2482,76 @@ async def chat(
                     "decision action recording",
                 )
 
+    if payload.collaborative_note_decision is not None:
+        if chat_turn_claim is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Chat turn state is invalid.",
+            )
+        note_service = request.app.state.collaborative_note_service
+        note_decision = payload.collaborative_note_decision
+        try:
+            note_decision_result = await note_service.decide_proposal(
+                CollaborativeNoteDecisionCommand(
+                    user_id=effective_user_id,
+                    workspace_id=effective_project_id,
+                    proposal_id=note_decision.proposal_id,
+                    decision=note_decision.decision,
+                    observed_at=datetime.now(UTC),
+                )
+            )
+        except MemoryEngineError as exc:
+            await _release_chat_turn_safely(database, chat_turn_claim)
+            _raise_database_http_error(exc)
+        except MemoryProposalNotFoundError as exc:
+            await _release_chat_turn_safely(database, chat_turn_claim)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Collaborative note proposal was not found.",
+            ) from exc
+        except MemoryProposalConflictError as exc:
+            await _release_chat_turn_safely(database, chat_turn_claim)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Collaborative note proposal state conflicts with this "
+                    "request."
+                ),
+            ) from exc
+        except MemoryProposalExpiredError as exc:
+            await _release_chat_turn_safely(database, chat_turn_claim)
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="Collaborative note proposal has expired.",
+            ) from exc
+        except ValueError as exc:
+            await _release_chat_turn_safely(database, chat_turn_claim)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Collaborative note decision is invalid.",
+            ) from exc
+        decision_actions = (note_decision_result.action,)
+        decision_note_events = (note_decision_result.event,)
+        try:
+            effect_result = (
+                await database
+                .record_chat_turn_collaborative_note_decision_effect(
+                    chat_turn_claim,
+                    note_decision_result.event,
+                    observed_at=datetime.now(UTC),
+                )
+            )
+        except (
+            ChatTurnOwnershipError,
+            ChatTurnStateError,
+            MemoryEngineError,
+        ) as exc:
+            _raise_chat_turn_operation_http_error(
+                exc,
+                "collaborative note decision recording",
+            )
+        chat_turn_claim = effect_result.claim
+
     if payload.memory_clarification_selection is not None:
         if chat_turn_claim is None:
             raise HTTPException(
@@ -2518,6 +2635,7 @@ async def chat(
         and payload.memory_decision is None
         and payload.memory_clarification_selection is None
         and payload.artifact_feedback_decision is None
+        and payload.collaborative_note_decision is None
         and not chat_turn_claim.precompleted_memory_proposals
         and not chat_turn_claim.precompleted_memory_clarifications
     ):
@@ -2654,6 +2772,9 @@ async def chat(
                 artifact_feedback_decision_present=(
                     payload.artifact_feedback_decision is not None
                 ),
+                collaborative_note_decision_present=(
+                    payload.collaborative_note_decision is not None
+                ),
                 turn_lease=(
                     ProposalTurnLease(
                         turn_id=chat_turn_claim.ids.turn_id,
@@ -2685,6 +2806,23 @@ async def chat(
                     chat_turn_claim.precompleted_artifact_feedback
                     if chat_turn_claim is not None
                     else ()
+                ),
+                precompleted_collaborative_note_proposals=(
+                    _merge_receipts(
+                        chat_turn_claim
+                        .precompleted_collaborative_note_proposals,
+                        decision_note_proposals,
+                    )
+                    if chat_turn_claim is not None
+                    else decision_note_proposals
+                ),
+                precompleted_collaborative_note_events=(
+                    _merge_receipts(
+                        chat_turn_claim.precompleted_collaborative_note_events,
+                        decision_note_events,
+                    )
+                    if chat_turn_claim is not None
+                    else decision_note_events
                 ),
                 chat_turn_claim=chat_turn_claim,
             )
@@ -2729,6 +2867,8 @@ async def chat(
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
             decision_memory_clarifications=decision_memory_clarifications,
+            decision_note_proposals=decision_note_proposals,
+            decision_note_events=decision_note_events,
             runtime_error=exc,
             released_claim=released_claim,
         )
@@ -2776,6 +2916,8 @@ async def chat(
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
             decision_memory_clarifications=decision_memory_clarifications,
+            decision_note_proposals=decision_note_proposals,
+            decision_note_events=decision_note_events,
             runtime_error=exc,
             released_claim=released_claim,
         )
@@ -2802,6 +2944,18 @@ async def chat(
             _merge_receipts(
                 precompleted_memory_clarifications,
                 result.memory_clarifications,
+            )
+        ),
+        collaborative_note_proposals=list(
+            _merge_receipts(
+                decision_note_proposals,
+                result.collaborative_note_proposals,
+            )
+        ),
+        collaborative_note_events=list(
+            _merge_receipts(
+                decision_note_events,
+                result.collaborative_note_events,
             )
         ),
         adaptations=list(

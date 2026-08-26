@@ -25,6 +25,7 @@ CollaborativeNoteStatus = Literal["active", "archived"]
 CollaborativeNoteEventType = Literal[
     "approved",
     "corrected",
+    "rejected",
     "superseded",
     "archived",
     "restored",
@@ -43,7 +44,15 @@ _NOTE_KINDS = frozenset(
 _PROPOSAL_STATUSES = frozenset({"pending", "approved", "rejected", "expired"})
 _ACTIVE_NOTE_STATUSES = frozenset({"active", "archived"})
 _EVENT_TYPES = frozenset(
-    {"approved", "corrected", "superseded", "archived", "restored", "deleted"}
+    {
+        "approved",
+        "corrected",
+        "rejected",
+        "superseded",
+        "archived",
+        "restored",
+        "deleted",
+    }
 )
 _NOTE_EVERYTHING_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bnote\s+everything\b", re.IGNORECASE),

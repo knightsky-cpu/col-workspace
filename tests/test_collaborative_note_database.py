@@ -418,6 +418,61 @@ async def test_approve_collaborative_note_correction_rejects_stale_revision(
     store.transaction.set.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_reject_collaborative_note_proposal_resolves_without_active_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store = NoteStore()
+    from schemas import CollaborativeNoteProposal
+
+    proposal = CollaborativeNoteProposal(
+        proposal_id="note_proposal--1",
+        note_kind="constraint",
+        title="API version",
+        body="Use API version 2.",
+        source_session_id="session-1",
+        source_message_ids=["message-1"],
+        expected_note_id=None,
+        expected_revision=None,
+        policy_version="1.0",
+        status="pending",
+        created_at=NOW,
+        expires_at=NOW + timedelta(hours=24),
+    )
+    store.proposal_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=proposal.model_dump(mode="python"))
+    )
+    engine = MemoryEngine(store.client)
+
+    event = await engine.reject_collaborative_note_proposal(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        proposal_id=proposal.proposal_id,
+        observed_at=NOW + timedelta(minutes=1),
+    )
+
+    assert event.event_type == "rejected"
+    assert event.proposal_id == proposal.proposal_id
+    assert event.title is None
+    assert event.body is None
+    store.note_ref.get.assert_not_called()
+    store.transaction.set.assert_has_calls(
+        [
+            call(
+                store.proposal_ref,
+                {
+                    **proposal.model_dump(mode="python"),
+                    "status": "rejected",
+                    "resolved_at": NOW + timedelta(minutes=1),
+                },
+                merge=False,
+            ),
+            call(store.event_ref, event.model_dump(mode="python"), merge=False),
+        ]
+    )
+
+
 @pytest.mark.parametrize(
     ("method_name", "starting_status", "ending_status", "event_type"),
     (

@@ -33,6 +33,8 @@ from schemas import (
     ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
+    CollaborativeNoteDecisionRequest,
+    CollaborativeNoteEvent,
     MemoryDecisionRequest,
     MemoryClarificationReceipt,
     MemoryClarificationSelectionRequest,
@@ -226,6 +228,8 @@ def turn_document(
                 "citations": [],
                 "memory_proposals": [],
                 "memory_clarifications": [],
+                "collaborative_note_proposals": [],
+                "collaborative_note_events": [],
                 "adaptations": [],
                 "completed_at": NOW - timedelta(seconds=1),
             }
@@ -271,6 +275,36 @@ def clarification_receipt_document() -> dict[str, object]:
             },
         ],
         "expires_at": NOW + timedelta(minutes=15),
+    }
+
+
+def note_decision_request(
+    *,
+    decision: str = "approve",
+) -> CollaborativeNoteDecisionRequest:
+    return CollaborativeNoteDecisionRequest(
+        proposal_id="note-proposal-1",
+        decision=decision,
+    )
+
+
+def note_event_document(event_type: str = "approved") -> dict[str, object]:
+    return {
+        "note_contract_version": "1.0",
+        "event_id": f"note-1--{event_type}--note-proposal-1",
+        "note_id": "note-1",
+        "proposal_id": "note-proposal-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "agent-col",
+        "event_type": event_type,
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 2.",
+        "source_session_id": "session-1",
+        "source_message_ids": ["turn-message-1"],
+        "revision": 1,
+        "previous_revision": None,
+        "created_at": NOW,
     }
 
 
@@ -1202,6 +1236,42 @@ async def test_claim_chat_turn_persists_clarification_selection_identity(
 
 
 @pytest.mark.asyncio
+async def test_claim_chat_turn_persists_collaborative_note_decision_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("note-decision-request-1")
+    store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=False)
+    )
+    monkeypatch.setattr(database.secrets, "token_hex", lambda _: "owner-token")
+    decision = note_decision_request()
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Approve that note.",
+        collaborative_note_decision=decision,
+    )
+
+    await MemoryEngine(store.client).claim_chat_turn(
+        request,
+        idempotency_key="note-decision-request-1",
+        observed_at=NOW,
+    )
+
+    stored_turn = store.transaction.set.call_args_list[1].args[1]
+    assert stored_turn["collaborative_note_decision"] == (
+        decision.model_dump(mode="json")
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_rejects_request_mismatch_without_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1746,6 +1816,62 @@ async def test_completed_chat_turn_replay_preserves_clarification_receipt(
 
 
 @pytest.mark.asyncio
+async def test_completed_chat_turn_replay_preserves_note_event_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(ids, status="completed")
+    stored_turn["collaborative_note_decision"] = (
+        note_decision_request().model_dump(mode="json")
+    )
+    stored_turn["actions"] = [
+        {
+            "action_name": "approve_collaborative_note",
+            "status": "completed",
+        }
+    ]
+    stored_turn["collaborative_note_events"] = [note_event_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"role": "model", "text": "Recorded.", "timestamp": NOW},
+        )
+    )
+
+    result = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+            collaborative_note_decision=note_decision_request(),
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert isinstance(result, ChatTurnReplay)
+    assert result.response.actions == [
+        AgentActionReceipt(
+            action_name="approve_collaborative_note",
+            status="completed",
+        )
+    ]
+    assert result.response.collaborative_note_events == [
+        CollaborativeNoteEvent.model_validate(note_event_document())
+    ]
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_rejects_orphaned_turn_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2086,6 +2212,54 @@ async def test_release_chat_turn_recovers_feedback_effect(
         ArtifactFeedbackReference.model_validate(
             feedback_reference_document(claim.ids)
         ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_release_chat_turn_recovers_note_decision_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("note-decision-request-1")
+    store = ChatTurnStore(ids)
+    decision = note_decision_request()
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Approve that note.",
+            collaborative_note_decision=decision,
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    stored_turn = turn_document(
+        ids,
+        owner=claim.owner_token,
+        lease_expires_at=claim.lease_expires_at,
+    )
+    stored_turn["collaborative_note_decision"] = decision.model_dump(mode="json")
+    stored_turn["actions"] = [
+        {
+            "action_name": "approve_collaborative_note",
+            "status": "completed",
+        }
+    ]
+    stored_turn["collaborative_note_events"] = [note_event_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+
+    released = await MemoryEngine(store.client).release_chat_turn(
+        claim,
+        observed_at=NOW,
+    )
+
+    assert released.precompleted_collaborative_note_events == (
+        CollaborativeNoteEvent.model_validate(note_event_document()),
     )
 
 
@@ -2662,6 +2836,8 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
                 "citations": [],
                 "memory_proposals": [],
                 "memory_clarifications": [],
+                "collaborative_note_proposals": [],
+                "collaborative_note_events": [],
                 "adaptations": [],
                 "completed_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,
@@ -2730,6 +2906,122 @@ async def test_record_chat_turn_decision_action_persists_before_provider(
         },
         merge=True,
     )
+
+
+@pytest.mark.asyncio
+async def test_record_chat_turn_note_decision_effect_persists_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("note-decision-request-1")
+    store = ChatTurnStore(ids)
+    decision = note_decision_request()
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Approve that note.",
+            collaborative_note_decision=decision,
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    stored_turn = turn_document(
+        ids,
+        owner="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+    )
+    stored_turn["collaborative_note_decision"] = decision.model_dump(mode="json")
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    event = CollaborativeNoteEvent.model_validate(note_event_document())
+
+    result = await MemoryEngine(
+        store.client
+    ).record_chat_turn_collaborative_note_decision_effect(
+        claim,
+        event,
+        observed_at=NOW,
+    )
+
+    expected_action = AgentActionReceipt(
+        action_name="approve_collaborative_note",
+        status="completed",
+    )
+    assert result.action == expected_action
+    assert result.event == event
+    assert result.claim.precompleted_actions == (expected_action,)
+    assert result.claim.precompleted_collaborative_note_events == (event,)
+    store.transaction.set.assert_called_once_with(
+        store.turn_ref,
+        {
+            "actions": [expected_action.model_dump(mode="python")],
+            "collaborative_note_events": [event.model_dump(mode="python")],
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_chat_turn_rejects_omitted_note_event_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    decision = note_decision_request()
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Approve that note.",
+            collaborative_note_decision=decision,
+        ),
+        ids=ids,
+        owner_token="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+        resumed=False,
+    )
+    stored_turn = turn_document(
+        ids,
+        owner="owner-token",
+        lease_expires_at=NOW + timedelta(seconds=30),
+    )
+    stored_turn["collaborative_note_decision"] = decision.model_dump(mode="json")
+    stored_turn["actions"] = [
+        {
+            "action_name": "approve_collaborative_note",
+            "status": "completed",
+        }
+    ]
+    stored_turn["collaborative_note_events"] = [note_event_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.model_message_ref.get = AsyncMock(return_value=snapshot(exists=False))
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(store.client).complete_chat_turn(
+            claim,
+            ChatResponse(
+                response="Recorded.",
+                actions=[
+                    AgentActionReceipt(
+                        action_name="approve_collaborative_note",
+                        status="completed",
+                    )
+                ],
+            ),
+            observed_at=NOW,
+        )
+
+    store.transaction.set.assert_not_called()
 
 
 @pytest.mark.parametrize("final_effect", ("omitted", "conflicting"))

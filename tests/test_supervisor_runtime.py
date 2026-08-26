@@ -232,6 +232,59 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
 
 
 @pytest.mark.asyncio
+async def test_run_turn_includes_precompleted_note_decision_context() -> None:
+    from datetime import UTC, datetime
+    from schemas import AgentActionReceipt, CollaborativeNoteEvent
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    event = CollaborativeNoteEvent(
+        event_id="note-1--approved--note-proposal-1",
+        note_id="note-1",
+        proposal_id="note-proposal-1",
+        owner_user_id="user-1",
+        workspace_id="project-1",
+        event_type="approved",
+        note_kind="constraint",
+        title="API version",
+        body="Use API version 2.",
+        source_session_id="session-1",
+        source_message_ids=["message-1"],
+        revision=1,
+        previous_revision=None,
+        created_at=datetime(2026, 8, 26, 16, 0, tzinfo=UTC),
+    )
+    action = AgentActionReceipt(
+        action_name="approve_collaborative_note",
+        status="completed",
+    )
+    runner = FakeRunner(events=[FakeEvent("Recorded.", True)])
+    runtime = SupervisorRuntime(
+        runner=runner,
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Approve that note.",
+            precompleted_actions=(action,),
+            precompleted_collaborative_note_events=(event,),
+        )
+    )
+
+    assert result.actions == (action,)
+    assert result.collaborative_note_events == (event,)
+    context_text = runner.calls[0]["run_config"].model_input_context[0].parts[
+        0
+    ].text
+    assert "SERVER_VALIDATED_PRECOMPLETED_ACTIONS" in context_text
+    assert "collaborative_note_events" in context_text
+    assert "note-proposal-1" in context_text
+
+
+@pytest.mark.asyncio
 async def test_run_turn_collects_version_two_proposal_receipt_truthfully(
 ) -> None:
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext

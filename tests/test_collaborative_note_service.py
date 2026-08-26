@@ -87,6 +87,8 @@ class FakeNoteDatabase:
     list_calls: list[dict[str, object]] = field(default_factory=list)
     detail_calls: list[dict[str, object]] = field(default_factory=list)
     proposal_calls: list[dict[str, object]] = field(default_factory=list)
+    approve_calls: list[dict[str, object]] = field(default_factory=list)
+    reject_calls: list[dict[str, object]] = field(default_factory=list)
     archive_calls: list[dict[str, object]] = field(default_factory=list)
     restore_calls: list[dict[str, object]] = field(default_factory=list)
     delete_calls: list[dict[str, object]] = field(default_factory=list)
@@ -106,6 +108,30 @@ class FakeNoteDatabase:
     async def archive_collaborative_note(self, **kwargs: object):
         self.archive_calls.append(kwargs)
         return self.note.model_copy(update={"status": "archived", "revision": 2}), self.events[0]
+
+    async def approve_collaborative_note_proposal(self, **kwargs: object):
+        self.approve_calls.append(kwargs)
+        return self.note, CollaborativeNoteEvent.model_validate(
+            {
+                **event_payload("approved"),
+                "proposal_id": "note_proposal--1",
+                "previous_revision": None,
+            }
+        )
+
+    async def reject_collaborative_note_proposal(self, **kwargs: object):
+        self.reject_calls.append(kwargs)
+        return CollaborativeNoteEvent.model_validate(
+            {
+                **event_payload("rejected"),
+                "proposal_id": "note_proposal--1",
+                "note_kind": None,
+                "title": None,
+                "body": None,
+                "source_session_id": None,
+                "source_message_ids": [],
+            }
+        )
 
     async def restore_collaborative_note(self, **kwargs: object):
         self.restore_calls.append(kwargs)
@@ -201,6 +227,51 @@ async def test_note_service_creates_correction_without_mutating_active_note() ->
             "observed_at": NOW,
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ("approve", "reject"))
+async def test_note_service_decides_pending_note_proposal(
+    decision: str,
+) -> None:
+    from collaborative_note_service import (
+        CollaborativeNoteDecisionCommand,
+        CollaborativeNoteDecisionResult,
+        CollaborativeNoteService,
+    )
+
+    database = FakeNoteDatabase()
+    service = CollaborativeNoteService(database=database)
+
+    result = await service.decide_proposal(
+        CollaborativeNoteDecisionCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            proposal_id="note_proposal--1",
+            decision=decision,
+            observed_at=NOW,
+        )
+    )
+
+    assert isinstance(result, CollaborativeNoteDecisionResult)
+    assert result.action.action_name == f"{decision}_collaborative_note"
+    assert result.event.event_type in {
+        "approved" if decision == "approve" else "rejected"
+    }
+    expected_call = {
+        "user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "proposal_id": "note_proposal--1",
+        "observed_at": NOW,
+    }
+    if decision == "approve":
+        assert database.approve_calls == [expected_call]
+        assert database.reject_calls == []
+        assert result.note == database.note
+    else:
+        assert database.reject_calls == [expected_call]
+        assert database.approve_calls == []
+        assert result.note is None
 
 
 @pytest.mark.asyncio

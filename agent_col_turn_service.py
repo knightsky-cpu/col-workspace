@@ -75,6 +75,8 @@ from schemas import (
     AgentActionReceipt,
     ArtifactReference,
     ArtifactFeedbackReference,
+    CollaborativeNoteEvent,
+    CollaborativeNoteProposal,
     CitationReference,
     MemoryClarificationReceipt,
     VersionedAdaptationReceipt,
@@ -160,6 +162,7 @@ class AgentColTurnCommand:
     source_message_id: str | None = None
     memory_decision_present: bool = False
     artifact_feedback_decision_present: bool = False
+    collaborative_note_decision_present: bool = False
     turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
     precompleted_memory_proposals: tuple[
@@ -170,6 +173,12 @@ class AgentColTurnCommand:
     ] = ()
     precompleted_artifact_feedback: tuple[
         ArtifactFeedbackReference, ...
+    ] = ()
+    precompleted_collaborative_note_proposals: tuple[
+        CollaborativeNoteProposal, ...
+    ] = ()
+    precompleted_collaborative_note_events: tuple[
+        CollaborativeNoteEvent, ...
     ] = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
@@ -183,6 +192,8 @@ class AgentColTurnResult:
     citations: tuple[CitationReference, ...] = ()
     memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = ()
     memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
+    collaborative_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
+    collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = ()
     adaptations: tuple[VersionedAdaptationReceipt, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
@@ -199,6 +210,10 @@ class AgentColTurnServiceError(RuntimeError):
         artifact_feedback: tuple[ArtifactFeedbackReference, ...] = (),
         memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = (),
         memory_clarifications: tuple[MemoryClarificationReceipt, ...] = (),
+        collaborative_note_proposals: tuple[
+            CollaborativeNoteProposal, ...
+        ] = (),
+        collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = (),
         adaptations: tuple[VersionedAdaptationReceipt, ...] = (),
         chat_turn_claim: ChatTurnClaim | None = None,
     ) -> None:
@@ -208,6 +223,8 @@ class AgentColTurnServiceError(RuntimeError):
         self.artifact_feedback = artifact_feedback
         self.memory_proposals = memory_proposals
         self.memory_clarifications = memory_clarifications
+        self.collaborative_note_proposals = collaborative_note_proposals
+        self.collaborative_note_events = collaborative_note_events
         self.adaptations = adaptations
         self.chat_turn_claim = chat_turn_claim
 
@@ -328,6 +345,15 @@ class AgentColTurnService:
                 memory_clarifications=(
                     command.precompleted_memory_clarifications
                 ),
+                collaborative_note_proposals=(
+                    command.precompleted_collaborative_note_proposals
+                ),
+                collaborative_note_events=(
+                    command.chat_turn_claim
+                    .precompleted_collaborative_note_events
+                    if command.chat_turn_claim is not None
+                    else command.precompleted_collaborative_note_events
+                ),
                 chat_turn_claim=command.chat_turn_claim,
             ) from exc
 
@@ -400,6 +426,12 @@ class AgentColTurnService:
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
                         ),
+                        precompleted_collaborative_note_proposals=(
+                            command.precompleted_collaborative_note_proposals
+                        ),
+                        precompleted_collaborative_note_events=(
+                            command.precompleted_collaborative_note_events
+                        ),
                     )
                 )
         except SupervisorTimeoutError as exc:
@@ -414,6 +446,14 @@ class AgentColTurnService:
                 memory_clarifications=_stable_merge(
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
+                ),
+                collaborative_note_proposals=_stable_merge(
+                    command.precompleted_collaborative_note_proposals,
+                    exc.collaborative_note_proposals,
+                ),
+                collaborative_note_events=_stable_merge(
+                    command.precompleted_collaborative_note_events,
+                    exc.collaborative_note_events,
                 ),
                 chat_turn_claim=execution.claim,
             ) from exc
@@ -430,6 +470,14 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                collaborative_note_proposals=_stable_merge(
+                    command.precompleted_collaborative_note_proposals,
+                    exc.collaborative_note_proposals,
+                ),
+                collaborative_note_events=_stable_merge(
+                    command.precompleted_collaborative_note_events,
+                    exc.collaborative_note_events,
+                ),
                 chat_turn_claim=execution.claim,
             ) from exc
         return AgentColTurnResult(
@@ -444,6 +492,14 @@ class AgentColTurnService:
             memory_clarifications=_stable_merge(
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
+            ),
+            collaborative_note_proposals=_stable_merge(
+                command.precompleted_collaborative_note_proposals,
+                result.collaborative_note_proposals,
+            ),
+            collaborative_note_events=_stable_merge(
+                command.precompleted_collaborative_note_events,
+                result.collaborative_note_events,
             ),
             chat_turn_claim=execution.claim,
         )
@@ -723,6 +779,10 @@ class AgentColTurnService:
             != command.precompleted_memory_proposals
             or claim.precompleted_memory_clarifications
             != command.precompleted_memory_clarifications
+            or claim.precompleted_collaborative_note_proposals
+            != command.precompleted_collaborative_note_proposals
+            or claim.precompleted_collaborative_note_events
+            != command.precompleted_collaborative_note_events
         ):
             raise AgentColTurnServiceError(
                 "Agent_Col artifact claim is inconsistent."
@@ -903,6 +963,12 @@ class AgentColTurnService:
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
                         ),
+                        precompleted_collaborative_note_proposals=(
+                            command.precompleted_collaborative_note_proposals
+                        ),
+                        precompleted_collaborative_note_events=(
+                            command.precompleted_collaborative_note_events
+                        ),
                     )
                 )
         except SupervisorTimeoutError as exc:
@@ -925,6 +991,14 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                collaborative_note_proposals=_stable_merge(
+                    command.precompleted_collaborative_note_proposals,
+                    exc.collaborative_note_proposals,
+                ),
+                collaborative_note_events=_stable_merge(
+                    command.precompleted_collaborative_note_events,
+                    exc.collaborative_note_events,
+                ),
             ) from exc
         except SupervisorRuntimeError as exc:
             logger.error(
@@ -946,6 +1020,14 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                collaborative_note_proposals=_stable_merge(
+                    command.precompleted_collaborative_note_proposals,
+                    exc.collaborative_note_proposals,
+                ),
+                collaborative_note_events=_stable_merge(
+                    command.precompleted_collaborative_note_events,
+                    exc.collaborative_note_events,
+                ),
             ) from exc
         return AgentColTurnResult(
             response=result.response,
@@ -966,6 +1048,14 @@ class AgentColTurnService:
             memory_clarifications=_stable_merge(
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
+            ),
+            collaborative_note_proposals=_stable_merge(
+                command.precompleted_collaborative_note_proposals,
+                result.collaborative_note_proposals,
+            ),
+            collaborative_note_events=_stable_merge(
+                command.precompleted_collaborative_note_events,
+                result.collaborative_note_events,
             ),
         )
 

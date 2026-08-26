@@ -107,6 +107,7 @@ from schemas import (
     CollaborationProfile,
     CollaborativeNote,
     CollaborativeNoteCorrectionRequest,
+    CollaborativeNoteDecisionRequest,
     CollaborativeNoteDetailResponse,
     CollaborativeNoteEvent,
     CollaborativeNoteLifecycleResponse,
@@ -137,6 +138,8 @@ from schemas import (
 )
 from collaborative_note_service import (
     CollaborativeNoteCorrectionCommand,
+    CollaborativeNoteDecisionCommand,
+    CollaborativeNoteDecisionResult,
     CollaborativeNoteDeletionResult,
     CollaborativeNoteDetailResult,
     CollaborativeNoteLifecycleCommand,
@@ -249,6 +252,7 @@ def make_chat_turn_claim(
         MemoryClarificationSelectionRequest | None
     ) = None,
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None,
+    collaborative_note_decision: CollaborativeNoteDecisionRequest | None = None,
     owner_token: str = "owner-token-1",
     resumed: bool = False,
 ) -> ChatTurnClaim:
@@ -261,6 +265,7 @@ def make_chat_turn_claim(
             memory_decision=memory_decision,
             memory_clarification_selection=memory_clarification_selection,
             artifact_feedback_decision=artifact_feedback_decision,
+            collaborative_note_decision=collaborative_note_decision,
         ),
         ids=ChatTurnIds(
             turn_id=DEFAULT_TURN_ID,
@@ -377,6 +382,9 @@ class FakeMemoryEngine:
     ] = field(default_factory=list)
     decision_action_calls: list[
         tuple[ChatTurnClaim, AgentActionReceipt, datetime]
+    ] = field(default_factory=list)
+    note_decision_effect_calls: list[
+        tuple[ChatTurnClaim, CollaborativeNoteEvent, datetime]
     ] = field(default_factory=list)
     closed: bool = False
 
@@ -579,6 +587,41 @@ class FakeMemoryEngine:
         return replace(
             claim,
             precompleted_actions=(*claim.precompleted_actions, action),
+        )
+
+    async def record_chat_turn_collaborative_note_decision_effect(
+        self,
+        claim: ChatTurnClaim,
+        event: CollaborativeNoteEvent,
+        *,
+        observed_at: datetime,
+    ) -> object:
+        action = AgentActionReceipt(
+            action_name=(
+                "approve_collaborative_note"
+                if claim.request.collaborative_note_decision is not None
+                and claim.request.collaborative_note_decision.decision
+                == "approve"
+                else "reject_collaborative_note"
+            ),
+            status="completed",
+        )
+        refreshed = replace(
+            claim,
+            precompleted_actions=(*claim.precompleted_actions, action),
+            precompleted_collaborative_note_events=(
+                *claim.precompleted_collaborative_note_events,
+                event,
+            ),
+        )
+        self.note_decision_effect_calls.append((claim, event, observed_at))
+        self.events.append(
+            ("record_chat_turn_collaborative_note_decision_effect",)
+        )
+        return SimpleNamespace(
+            claim=refreshed,
+            action=action,
+            event=event,
         )
 
     def close(self) -> None:
@@ -1051,10 +1094,14 @@ class FakeCollaborativeNoteService:
     proposal_result: CollaborativeNoteProposalResult
     lifecycle_result: CollaborativeNoteLifecycleResult
     deletion_result: CollaborativeNoteDeletionResult
+    decision_result: CollaborativeNoteDecisionResult | None = None
     error: Exception | None = None
     list_calls: list[ListCollaborativeNotesCommand] = field(default_factory=list)
     detail_calls: list[GetCollaborativeNoteCommand] = field(default_factory=list)
     correction_calls: list[CollaborativeNoteCorrectionCommand] = field(
+        default_factory=list
+    )
+    decision_calls: list[CollaborativeNoteDecisionCommand] = field(
         default_factory=list
     )
     archive_calls: list[CollaborativeNoteLifecycleCommand] = field(
@@ -1093,6 +1140,17 @@ class FakeCollaborativeNoteService:
         if self.error is not None:
             raise self.error
         return self.proposal_result
+
+    async def decide_proposal(
+        self,
+        command: CollaborativeNoteDecisionCommand,
+    ) -> CollaborativeNoteDecisionResult:
+        self.decision_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        if self.decision_result is None:
+            raise AssertionError("Missing fake note decision result.")
+        return self.decision_result
 
     async def archive_note(
         self,
@@ -3778,6 +3836,8 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
             "citations": [],
             "memory_proposals": [],
             "memory_clarifications": [],
+            "collaborative_note_proposals": [],
+            "collaborative_note_events": [],
             "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
@@ -4281,6 +4341,8 @@ async def test_chat_builds_turn_command_and_persists_both_messages(
             "citations": [],
         "memory_proposals": [],
         "memory_clarifications": [],
+        "collaborative_note_proposals": [],
+        "collaborative_note_events": [],
         "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
@@ -4509,6 +4571,8 @@ async def test_chat_preflight_clarification_returns_fallback_when_responder_fail
         "citations": [],
         "memory_proposals": [],
         "memory_clarifications": [clarification.model_dump(mode="json")],
+        "collaborative_note_proposals": [],
+        "collaborative_note_events": [],
         "adaptations": [],
     }
     assert len(service_state.database.complete_calls) == 1
@@ -5283,6 +5347,187 @@ async def test_feedback_responder_failure_returns_completed_receipt(
     assert response.json()["actions"] == [action.model_dump(mode="json")]
     assert response.json()["artifact_feedback"] == [
         feedback.model_dump(mode="json")
+    ]
+    assert service_state.database.complete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_requires_idempotency_key_for_collaborative_note_decision(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Approve that note.",
+            "collaborative_note_decision": {
+                "proposal_id": "note-proposal-1",
+                "decision": "approve",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Collaborative note decision requires an idempotency key."
+    }
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_chat_completes_structured_collaborative_note_decision_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = CollaborativeNoteDecisionRequest(
+        proposal_id="note-proposal-1",
+        decision="approve",
+    )
+    claim = make_chat_turn_claim(collaborative_note_decision=decision)
+    renewed_claim = replace(
+        claim,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+    )
+    action = AgentActionReceipt(
+        action_name="approve_collaborative_note",
+        status="completed",
+    )
+    event = CollaborativeNoteEvent.model_validate(
+        collaborative_note_event_payload("approved")
+    )
+    effect_claim = replace(
+        renewed_claim,
+        precompleted_actions=(action,),
+        precompleted_collaborative_note_events=(event,),
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+    service_state.collaborative_note_service.decision_result = (
+        CollaborativeNoteDecisionResult(
+            action=action,
+            note=CollaborativeNote.model_validate(
+                collaborative_note_payload()
+            ),
+            event=event,
+        )
+    )
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="I recorded that note.",
+        actions=(action,),
+        collaborative_note_events=(event,),
+        chat_turn_claim=effect_claim,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "note-decision-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Approve that note.",
+            "collaborative_note_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["actions"] == [action.model_dump(mode="json")]
+    assert response.json()["collaborative_note_events"] == [
+        event.model_dump(mode="json")
+    ]
+    assert service_state.collaborative_note_service.decision_calls == [
+        CollaborativeNoteDecisionCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            proposal_id="note-proposal-1",
+            decision="approve",
+            observed_at=service_state.collaborative_note_service.decision_calls[
+                0
+            ].observed_at,
+        )
+    ]
+    turn_request = service_state.database.claim_calls[0][0]
+    assert turn_request.collaborative_note_decision == decision
+    assert service_state.database.note_decision_effect_calls == [
+        (
+            claim,
+            event,
+            service_state.database.note_decision_effect_calls[0][2],
+        )
+    ]
+    command = service_state.turn_service.calls[0]
+    assert command.collaborative_note_decision_present is True
+    assert command.precompleted_collaborative_note_events == (event,)
+    assert service_state.database.complete_calls[0][0] is effect_claim
+    assert service_state.database.complete_calls[0][1].collaborative_note_events == [
+        event
+    ]
+
+
+@pytest.mark.asyncio
+async def test_note_decision_responder_failure_returns_completed_receipt(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = CollaborativeNoteDecisionRequest(
+        proposal_id="note-proposal-1",
+        decision="reject",
+    )
+    claim = make_chat_turn_claim(collaborative_note_decision=decision)
+    action = AgentActionReceipt(
+        action_name="reject_collaborative_note",
+        status="completed",
+    )
+    event = CollaborativeNoteEvent.model_validate(
+        {
+            **collaborative_note_event_payload("rejected"),
+            "note_kind": None,
+            "title": None,
+            "body": None,
+            "source_session_id": None,
+            "source_message_ids": [],
+        }
+    )
+    effect_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_collaborative_note_events=(event,),
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.released_claim = effect_claim
+    service_state.collaborative_note_service.decision_result = (
+        CollaborativeNoteDecisionResult(
+            action=action,
+            note=None,
+            event=event,
+        )
+    )
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private responder failure",
+        actions=(action,),
+        collaborative_note_events=(event,),
+        chat_turn_claim=effect_claim,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "note-decision-failure-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Reject that note.",
+            "collaborative_note_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["actions"] == [action.model_dump(mode="json")]
+    assert response.json()["collaborative_note_events"] == [
+        event.model_dump(mode="json")
     ]
     assert service_state.database.complete_calls == []
 

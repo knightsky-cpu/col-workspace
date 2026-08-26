@@ -10,6 +10,9 @@ from schemas import (
     ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
+    CollaborativeNoteDecisionRequest,
+    CollaborativeNoteEvent,
+    CollaborativeNoteProposal,
     MemoryDecisionRequest,
     MemoryClarificationReceipt,
     MemoryClarificationSelectionRequest,
@@ -72,6 +75,7 @@ class ChatTurnRequest:
         MemoryClarificationSelectionRequest | None
     ) = None
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
+    collaborative_note_decision: CollaborativeNoteDecisionRequest | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +95,12 @@ class ChatTurnClaim:
     precompleted_artifacts: tuple[ArtifactReference, ...] = ()
     precompleted_artifact_feedback: tuple[
         ArtifactFeedbackReference, ...
+    ] = ()
+    precompleted_collaborative_note_proposals: tuple[
+        CollaborativeNoteProposal, ...
+    ] = ()
+    precompleted_collaborative_note_events: tuple[
+        CollaborativeNoteEvent, ...
     ] = ()
 
 

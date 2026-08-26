@@ -82,6 +82,7 @@ from schemas import (
     ChatSessionDetailResponse,
     ChatSessionListResponse,
     ChatSessionSummary,
+    CollaborativeNoteDecisionRequest,
     CollaborativeNote,
     CollaborativeNoteEvent,
     CollaborativeNoteProposal,
@@ -300,6 +301,15 @@ class ChatTurnFeedbackEffectResult:
     claim: ChatTurnClaim
     action: AgentActionReceipt
     feedback: ArtifactFeedbackReference
+
+
+@dataclass(frozen=True, slots=True)
+class ChatTurnNoteDecisionEffectResult:
+    """Return one atomically persisted chat-owned note decision effect."""
+
+    claim: ChatTurnClaim
+    action: AgentActionReceipt
+    event: CollaborativeNoteEvent
 
 
 class MemoryEngine:
@@ -866,6 +876,103 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("approve_collaborative_note_proposal", exc)
 
+    async def reject_collaborative_note_proposal(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        proposal_id: str,
+        observed_at: datetime,
+    ) -> CollaborativeNoteEvent:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        self._validate_memory_identifier(proposal_id, "proposal_id")
+        try:
+            workspace_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+            )
+            proposal_ref = workspace_ref.collection("note_proposals").document(
+                proposal_id
+            )
+            transaction = self._client.transaction()
+
+            async def reject_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> CollaborativeNoteEvent:
+                proposal_snapshot = await proposal_ref.get(
+                    transaction=transaction
+                )
+                if not proposal_snapshot.exists:
+                    raise MemoryProposalNotFoundError(
+                        "Note proposal is unavailable."
+                    )
+                proposal = CollaborativeNoteProposal.model_validate(
+                    proposal_snapshot.to_dict()
+                )
+                if proposal.status != "pending":
+                    raise MemoryProposalConflictError(
+                        "Note proposal is not pending."
+                    )
+                if proposal.expires_at <= observed_at:
+                    raise MemoryProposalExpiredError(
+                        "Note proposal has expired."
+                    )
+                note_id = (
+                    proposal.expected_note_id
+                    or proposal.proposal_id.replace(
+                        "note_proposal--",
+                        "note--",
+                        1,
+                    )
+                )
+                event = CollaborativeNoteEvent(
+                    event_id=f"{note_id}--rejected--{proposal.proposal_id}",
+                    note_id=note_id,
+                    proposal_id=proposal.proposal_id,
+                    owner_user_id=user_id,
+                    workspace_id=workspace_id,
+                    event_type="rejected",
+                    note_kind=None,
+                    title=None,
+                    body=None,
+                    source_session_id=None,
+                    source_message_ids=[],
+                    revision=1,
+                    previous_revision=None,
+                    created_at=observed_at,
+                )
+                proposal_document = proposal.model_dump(mode="python")
+                proposal_document["status"] = "rejected"
+                proposal_document["resolved_at"] = observed_at
+                note_ref = workspace_ref.collection(
+                    "collaborative_notes"
+                ).document(note_id)
+                transaction.set(proposal_ref, proposal_document, merge=False)
+                transaction.set(
+                    note_ref.collection("events").document(event.event_id),
+                    event.model_dump(mode="python"),
+                    merge=False,
+                )
+                return event
+
+            run_transaction = firestore.async_transactional(
+                reject_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (
+            MemoryProposalConflictError,
+            MemoryProposalExpiredError,
+            MemoryProposalNotFoundError,
+        ):
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("reject_collaborative_note_proposal", exc)
+
     async def list_collaborative_notes(
         self,
         *,
@@ -1322,6 +1429,17 @@ class MemoryEngine:
                 "ArtifactFeedbackDecisionRequest."
             )
         if (
+            request.collaborative_note_decision is not None
+            and not isinstance(
+                request.collaborative_note_decision,
+                CollaborativeNoteDecisionRequest,
+            )
+        ):
+            raise ValueError(
+                "collaborative_note_decision must be a "
+                "CollaborativeNoteDecisionRequest."
+            )
+        if (
             request.memory_clarification_selection is not None
             and not isinstance(
                 request.memory_clarification_selection,
@@ -1338,6 +1456,7 @@ class MemoryEngine:
                 request.memory_decision,
                 request.memory_clarification_selection,
                 request.artifact_feedback_decision,
+                request.collaborative_note_decision,
             )
         ) > 1:
             raise ValueError("structured decisions are mutually exclusive.")
@@ -1446,6 +1565,10 @@ class MemoryEngine:
                 ) = (
                     self._chat_turn_effects(turn_data)
                 )
+                (
+                    precompleted_note_proposals,
+                    precompleted_note_events,
+                ) = self._chat_turn_note_effects(turn_data, precompleted_actions)
                 precompleted_feedback = (
                     self._chat_turn_feedback_effects(
                         turn_data,
@@ -1469,6 +1592,12 @@ class MemoryEngine:
                     precompleted_artifacts=precompleted_artifacts,
                     precompleted_artifact_feedback=(
                         precompleted_feedback
+                    ),
+                    precompleted_collaborative_note_proposals=(
+                        precompleted_note_proposals
+                    ),
+                    precompleted_collaborative_note_events=(
+                        precompleted_note_events
                     ),
                 )
                 transaction.set(
@@ -1497,6 +1626,7 @@ class MemoryEngine:
                 )
             transaction.set(session_ref, session_update, merge=True)
             feedback_decision = request.artifact_feedback_decision
+            note_decision = request.collaborative_note_decision
             clarification_selection = (
                 request.memory_clarification_selection
             )
@@ -1530,6 +1660,15 @@ class MemoryEngine:
                             )
                         }
                         if feedback_decision is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "collaborative_note_decision": (
+                                note_decision.model_dump(mode="json")
+                            )
+                        }
+                        if note_decision is not None
                         else {}
                     ),
                     "user_message_id": ids.user_message_id,
@@ -1710,6 +1849,141 @@ class MemoryEngine:
                 exc,
             )
 
+    async def record_chat_turn_collaborative_note_decision_effect(
+        self,
+        claim: ChatTurnClaim,
+        event: CollaborativeNoteEvent,
+        *,
+        observed_at: datetime,
+    ) -> ChatTurnNoteDecisionEffectResult:
+        """Persist one owned structured note-decision effect receipt."""
+        self._validate_chat_turn_claim(claim)
+        if not isinstance(event, CollaborativeNoteEvent):
+            raise ValueError("event must be a CollaborativeNoteEvent.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        decision = claim.request.collaborative_note_decision
+        if decision is None:
+            raise ValueError(
+                "claim must contain one collaborative note decision."
+            )
+        expected_action_name = (
+            "approve_collaborative_note"
+            if decision.decision == "approve"
+            else "reject_collaborative_note"
+        )
+        action = AgentActionReceipt(
+            action_name=expected_action_name,
+            status="completed",
+        )
+        if (
+            event.proposal_id != decision.proposal_id
+            or event.owner_user_id != claim.request.user_id
+            or event.workspace_id != claim.request.project_id
+            or (
+                decision.decision == "approve"
+                and event.event_type not in {"approved", "corrected"}
+            )
+            or (
+                decision.decision == "reject"
+                and event.event_type != "rejected"
+            )
+        ):
+            raise ValueError("event does not match the note decision.")
+        turn_ref = (
+            self._client.collection("sessions")
+            .document(claim.request.session_id)
+            .collection("turns")
+            .document(claim.ids.turn_id)
+        )
+        transaction = self._client.transaction()
+
+        async def record_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> ChatTurnNoteDecisionEffectResult:
+            turn_snapshot = await turn_ref.get(transaction=transaction)
+            turn_data = turn_snapshot.to_dict()
+            if not turn_snapshot.exists or not isinstance(
+                turn_data,
+                Mapping,
+            ):
+                raise ChatTurnStateError("Stored chat turn is invalid.")
+            self._assert_chat_turn_claim_matches_document(claim, turn_data)
+            stored_expiry = turn_data.get("lease_expires_at")
+            if (
+                turn_data.get("status") != "in_progress"
+                or turn_data.get("lease_owner") != claim.owner_token
+                or not self._is_aware_datetime(stored_expiry)
+                or stored_expiry <= observed_at
+            ):
+                raise ChatTurnOwnershipError(
+                    "Stored chat turn cannot record a note decision effect."
+                )
+            stored_actions, stored_proposals, stored_artifacts = (
+                self._chat_turn_effects(turn_data)
+            )
+            if stored_proposals or stored_artifacts:
+                raise ChatTurnStateError(
+                    "Stored note turn contains another durable effect."
+                )
+            stored_note_proposals, stored_note_events = (
+                self._chat_turn_note_effects(turn_data, stored_actions)
+            )
+            if stored_note_proposals:
+                raise ChatTurnStateError(
+                    "Stored note turn contains a proposal effect."
+                )
+            if stored_note_events:
+                if stored_note_events != (event,):
+                    raise ChatTurnStateError(
+                        "Stored note turn event is invalid."
+                    )
+                return ChatTurnNoteDecisionEffectResult(
+                    claim=replace(
+                        claim,
+                        precompleted_actions=stored_actions,
+                        precompleted_memory_proposals=stored_proposals,
+                        precompleted_artifacts=stored_artifacts,
+                        precompleted_collaborative_note_events=(
+                            stored_note_events
+                        ),
+                    ),
+                    action=action,
+                    event=event,
+                )
+            actions = (*stored_actions, action)
+            transaction.set(
+                turn_ref,
+                {
+                    "actions": [
+                        item.model_dump(mode="python") for item in actions
+                    ],
+                    "collaborative_note_events": [
+                        event.model_dump(mode="python")
+                    ],
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                },
+                merge=True,
+            )
+            return ChatTurnNoteDecisionEffectResult(
+                claim=replace(
+                    claim,
+                    precompleted_actions=actions,
+                    precompleted_collaborative_note_events=(event,),
+                ),
+                action=action,
+                event=event,
+            )
+
+        run_transaction = firestore.async_transactional(record_in_transaction)
+        try:
+            return await run_transaction(transaction)
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "record_chat_turn_collaborative_note_decision_effect",
+                exc,
+            )
+
     async def release_chat_turn(
         self,
         claim: ChatTurnClaim,
@@ -1757,6 +2031,9 @@ class MemoryEngine:
                 turn_data,
                 stored_actions,
             )
+            stored_note_proposals, stored_note_events = (
+                self._chat_turn_note_effects(turn_data, stored_actions)
+            )
             stored_clarifications = (
                 self._chat_turn_memory_clarifications(turn_data)
             )
@@ -1768,6 +2045,10 @@ class MemoryEngine:
                 precompleted_memory_clarifications=stored_clarifications,
                 precompleted_artifacts=stored_artifacts,
                 precompleted_artifact_feedback=stored_feedback,
+                precompleted_collaborative_note_proposals=(
+                    stored_note_proposals
+                ),
+                precompleted_collaborative_note_events=stored_note_events,
             )
             if stored_expiry <= observed_at:
                 return released_claim
@@ -2724,6 +3005,11 @@ class MemoryEngine:
             if request.memory_clarification_selection is not None
             else None
         )
+        expected_note_decision = (
+            request.collaborative_note_decision.model_dump(mode="json")
+            if request.collaborative_note_decision is not None
+            else None
+        )
         if (
             turn_data.get("project_id") != request.project_id
             or turn_data.get("user_id") != request.user_id
@@ -2732,6 +3018,8 @@ class MemoryEngine:
             != expected_clarification_selection
             or turn_data.get("artifact_feedback_decision")
             != expected_feedback_decision
+            or turn_data.get("collaborative_note_decision")
+            != expected_note_decision
         ):
             raise ChatTurnConflictError(
                 "Idempotency key conflicts with a different chat request."
@@ -2805,12 +3093,21 @@ class MemoryEngine:
             raise ValueError(
                 "claim memory_clarification_selection is invalid."
             )
+        if (
+            request.collaborative_note_decision is not None
+            and not isinstance(
+                request.collaborative_note_decision,
+                CollaborativeNoteDecisionRequest,
+            )
+        ):
+            raise ValueError("claim collaborative_note_decision is invalid.")
         if sum(
             decision is not None
             for decision in (
                 request.memory_decision,
                 request.memory_clarification_selection,
                 request.artifact_feedback_decision,
+                request.collaborative_note_decision,
             )
         ) > 1:
             raise ValueError("claim structured decisions are invalid.")
@@ -2833,6 +3130,8 @@ class MemoryEngine:
         clarifications = claim.precompleted_memory_clarifications
         artifacts = claim.precompleted_artifacts
         feedback = claim.precompleted_artifact_feedback
+        note_proposals = claim.precompleted_collaborative_note_proposals
+        note_events = claim.precompleted_collaborative_note_events
         if (
             not isinstance(actions, tuple)
             or not all(
@@ -2860,6 +3159,16 @@ class MemoryEngine:
             or not all(
                 isinstance(item, MemoryClarificationReceipt)
                 for item in clarifications
+            )
+            or not isinstance(note_proposals, tuple)
+            or not all(
+                isinstance(item, CollaborativeNoteProposal)
+                for item in note_proposals
+            )
+            or not isinstance(note_events, tuple)
+            or not all(
+                isinstance(item, CollaborativeNoteEvent)
+                for item in note_events
             )
         ):
             raise ValueError("claim effects are invalid.")
@@ -2896,6 +3205,29 @@ class MemoryEngine:
                 != feedback_decision.expected_schema_version
                 for item in feedback
                 if feedback_decision is not None
+            )
+        ):
+            raise ValueError("claim effects are invalid.")
+        note_actions = tuple(
+            action
+            for action in actions
+            if action.action_name
+            in {"approve_collaborative_note", "reject_collaborative_note"}
+        )
+        note_decision = request.collaborative_note_decision
+        if (
+            len(note_proposals) > 1
+            or len(note_events) > 1
+            or bool(note_proposals) and bool(note_events)
+            or bool(note_actions) != bool(note_events)
+            or (note_events and len(note_actions) != 1)
+            or (note_events and note_decision is None)
+            or any(
+                item.proposal_id != note_decision.proposal_id
+                or item.owner_user_id != request.user_id
+                or item.workspace_id != request.project_id
+                for item in note_events
+                if note_decision is not None
             )
         ):
             raise ValueError("claim effects are invalid.")
@@ -2950,6 +3282,11 @@ class MemoryEngine:
             if claim.request.memory_clarification_selection is not None
             else None
         )
+        expected_note_decision = (
+            claim.request.collaborative_note_decision.model_dump(mode="json")
+            if claim.request.collaborative_note_decision is not None
+            else None
+        )
         if (
             turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
             or turn_data.get("project_id") != claim.request.project_id
@@ -2959,6 +3296,8 @@ class MemoryEngine:
             != expected_clarification_selection
             or turn_data.get("artifact_feedback_decision")
             != expected_feedback_decision
+            or turn_data.get("collaborative_note_decision")
+            != expected_note_decision
             or turn_data.get("user_message_id")
             != claim.ids.user_message_id
             or turn_data.get("model_message_id")
@@ -2996,6 +3335,9 @@ class MemoryEngine:
             turn_data,
             actions,
         )
+        collaborative_note_proposals, collaborative_note_events = (
+            self._chat_turn_note_effects(turn_data, actions)
+        )
         try:
             response = ChatResponse(
                 response=model_message_data["text"],
@@ -3005,6 +3347,10 @@ class MemoryEngine:
                 citations=turn_data.get("citations", []),
                 memory_proposals=list(memory_proposals),
                 memory_clarifications=list(memory_clarifications),
+                collaborative_note_proposals=list(
+                    collaborative_note_proposals
+                ),
+                collaborative_note_events=list(collaborative_note_events),
                 adaptations=turn_data.get("adaptations", []),
             )
         except (ValidationError, TypeError, ValueError) as exc:
@@ -3212,6 +3558,86 @@ class MemoryEngine:
             )
         return feedback
 
+    @staticmethod
+    def _chat_turn_note_effects(
+        turn_data: Mapping[str, object],
+        actions: tuple[AgentActionReceipt, ...],
+    ) -> tuple[
+        tuple[CollaborativeNoteProposal, ...],
+        tuple[CollaborativeNoteEvent, ...],
+    ]:
+        stored_proposals = turn_data.get("collaborative_note_proposals", [])
+        stored_events = turn_data.get("collaborative_note_events", [])
+        if not isinstance(stored_proposals, list) or not isinstance(
+            stored_events,
+            list,
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn note effects are invalid."
+            )
+        try:
+            proposals = tuple(
+                CollaborativeNoteProposal.model_validate(item)
+                for item in stored_proposals
+            )
+            events = tuple(
+                CollaborativeNoteEvent.model_validate(item)
+                for item in stored_events
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn note effects are invalid."
+            ) from exc
+        note_actions = tuple(
+            action
+            for action in actions
+            if action.action_name
+            in {"approve_collaborative_note", "reject_collaborative_note"}
+        )
+        if (
+            len(proposals) > 1
+            or len(events) > 1
+            or bool(proposals) and bool(events)
+            or bool(note_actions) != bool(events)
+            or (events and len(note_actions) != 1)
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn note effects are invalid."
+            )
+        if not events:
+            return proposals, events
+        try:
+            decision = CollaborativeNoteDecisionRequest.model_validate(
+                turn_data.get("collaborative_note_decision")
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn note effects are invalid."
+            ) from exc
+        event = events[0]
+        action = note_actions[0]
+        expected_action_name = (
+            "approve_collaborative_note"
+            if decision.decision == "approve"
+            else "reject_collaborative_note"
+        )
+        expected_event_types = (
+            {"approved", "corrected"}
+            if decision.decision == "approve"
+            else {"rejected"}
+        )
+        if (
+            action.action_name != expected_action_name
+            or event.event_type not in expected_event_types
+            or event.proposal_id != decision.proposal_id
+            or event.owner_user_id != turn_data.get("user_id")
+            or event.workspace_id != turn_data.get("project_id")
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn note effects are invalid."
+            )
+        return proposals, events
+
     @classmethod
     def _assert_chat_turn_response_preserves_effects(
         cls,
@@ -3227,6 +3653,9 @@ class MemoryEngine:
             turn_data,
             stored_actions,
         )
+        stored_note_proposals, stored_note_events = (
+            cls._chat_turn_note_effects(turn_data, stored_actions)
+        )
         stored_clarifications = cls._chat_turn_memory_clarifications(
             turn_data
         )
@@ -3234,6 +3663,8 @@ class MemoryEngine:
         response_proposals = tuple(response.memory_proposals)
         response_artifacts = tuple(response.artifacts)
         response_feedback = tuple(response.artifact_feedback)
+        response_note_proposals = tuple(response.collaborative_note_proposals)
+        response_note_events = tuple(response.collaborative_note_events)
         response_clarifications = tuple(response.memory_clarifications)
         stored_proposal_actions = tuple(
             action
@@ -3250,6 +3681,8 @@ class MemoryEngine:
             or stored_proposals != response_proposals
             or stored_artifacts != response_artifacts
             or stored_feedback != response_feedback
+            or stored_note_proposals != response_note_proposals
+            or stored_note_events != response_note_events
             or stored_clarifications != response_clarifications
         ):
             raise ChatTurnStateError(

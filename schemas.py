@@ -143,6 +143,8 @@ class AgentActionReceipt(StrictModel):
         "reject_memory_signal",
         "revoke_memory_signal",
         "delete_memory_signal",
+        "approve_collaborative_note",
+        "reject_collaborative_note",
     ]
     status: Literal["completed"]
 
@@ -663,14 +665,17 @@ class CollaborativeNoteEvent(StrictModel):
     @model_validator(mode="after")
     def validate_event_invariants(self) -> Self:
         _require_aware_datetime(self.created_at, "created_at")
-        if self.event_type == "deleted":
+        if self.event_type in {"deleted", "rejected"}:
             if (
                 self.note_kind is not None
                 or self.title is not None
                 or self.body is not None
+                or self.source_session_id is not None
                 or self.source_message_ids
             ):
-                raise ValueError("Deleted note events must not retain content.")
+                raise ValueError(
+                    "Content-free note events must not retain content."
+                )
             return self
         if self.note_kind is None or self.title is None or self.body is None:
             raise ValueError("Note lifecycle events require note content.")
@@ -715,6 +720,11 @@ class CollaborativeNoteCorrectionRequest(StrictModel):
 
 class CollaborativeNoteMutationRequest(StrictModel):
     expected_revision: StrictInt = Field(ge=1)
+
+
+class CollaborativeNoteDecisionRequest(StrictModel):
+    proposal_id: IdentifierStr
+    decision: MemoryDecision
 
 
 class CollaborativeNoteProposalResponse(StrictModel):
@@ -763,6 +773,7 @@ class ChatRequest(StrictModel):
         MemoryClarificationSelectionRequest | None
     ) = None
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
+    collaborative_note_decision: CollaborativeNoteDecisionRequest | None = None
 
     @model_validator(mode="after")
     def allow_only_one_structured_decision(self) -> Self:
@@ -770,6 +781,7 @@ class ChatRequest(StrictModel):
             self.memory_decision,
             self.memory_clarification_selection,
             self.artifact_feedback_decision,
+            self.collaborative_note_decision,
         )
         if sum(item is not None for item in decisions) > 1:
             raise ValueError(
@@ -792,6 +804,14 @@ class ChatResponse(StrictModel):
         max_length=1,
     )
     memory_clarifications: list[MemoryClarificationReceipt] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+    collaborative_note_proposals: list[CollaborativeNoteProposal] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+    collaborative_note_events: list[CollaborativeNoteEvent] = Field(
         default_factory=list,
         max_length=1,
     )
@@ -872,6 +892,14 @@ class ChatPartialFailureResponse(StrictModel):
         max_length=1,
     )
     memory_clarifications: list[MemoryClarificationReceipt] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+    collaborative_note_proposals: list[CollaborativeNoteProposal] = Field(
+        default_factory=list,
+        max_length=1,
+    )
+    collaborative_note_events: list[CollaborativeNoteEvent] = Field(
         default_factory=list,
         max_length=1,
     )

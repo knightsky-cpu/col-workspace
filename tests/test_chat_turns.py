@@ -12,6 +12,9 @@ from schemas import (
     ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
+    CollaborativeNoteDecisionRequest,
+    CollaborativeNoteEvent,
+    CollaborativeNoteProposal,
     MemoryProposalReceipt,
     MemoryProposalReceiptV2,
 )
@@ -258,6 +261,81 @@ def test_chat_turn_contract_preserves_memory_clarification_receipt() -> None:
             "expires_at": "2026-08-25T12:15:00Z",
         }
     ]
+
+
+def test_chat_turn_contract_preserves_collaborative_note_decision_effects() -> None:
+    decision = CollaborativeNoteDecisionRequest(
+        proposal_id="note-proposal-1",
+        decision="approve",
+    )
+    request = chat_turns.ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-4",
+        user_id="user-1",
+        message="Approve that note.",
+        collaborative_note_decision=decision,
+    )
+    event = CollaborativeNoteEvent(
+        event_id="note-1--approved--note-proposal-1",
+        note_id="note-1",
+        proposal_id="note-proposal-1",
+        owner_user_id="user-1",
+        workspace_id="agent-col",
+        event_type="approved",
+        note_kind="constraint",
+        title="API version",
+        body="Use API version 2.",
+        source_session_id="session-4",
+        source_message_ids=["turn-message-1"],
+        revision=1,
+        previous_revision=None,
+        created_at=datetime(2026, 8, 26, 12, 0, tzinfo=UTC),
+    )
+    claim = chat_turns.ChatTurnClaim(
+        request=request,
+        ids=derive_chat_turn_ids("request-4"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 26, 12, 2, tzinfo=UTC),
+        resumed=True,
+        precompleted_collaborative_note_events=(event,),
+    )
+    response = ChatResponse(
+        response="The note approval was recorded.",
+        actions=[
+            AgentActionReceipt(
+                action_name="approve_collaborative_note",
+                status="completed",
+            )
+        ],
+        collaborative_note_events=[event],
+    )
+
+    assert claim.request.collaborative_note_decision == decision
+    assert claim.precompleted_collaborative_note_events == (event,)
+    assert response.model_dump(mode="json")["collaborative_note_events"][0][
+        "event_type"
+    ] == "approved"
+
+
+def test_chat_request_rejects_note_and_memory_decisions_together() -> None:
+    from pydantic import ValidationError
+    from schemas import ChatRequest, MemoryDecisionRequest
+
+    with pytest.raises(ValidationError):
+        ChatRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="approve both",
+            memory_decision=MemoryDecisionRequest(
+                proposal_id="response_length--proposal-1",
+                decision="approve",
+            ),
+            collaborative_note_decision=CollaborativeNoteDecisionRequest(
+                proposal_id="note-proposal-1",
+                decision="approve",
+            ),
+        )
 
 
 def test_chat_turn_errors_have_distinct_runtime_types() -> None:

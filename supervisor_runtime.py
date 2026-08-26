@@ -25,6 +25,8 @@ from schemas import (
     AgentActionReceipt,
     ArtifactReference,
     CitationReference,
+    CollaborativeNoteEvent,
+    CollaborativeNoteProposal,
     MemoryClarificationReceipt,
     VersionedMemoryProposalReceipt,
 )
@@ -47,11 +49,17 @@ class SupervisorRuntimeError(RuntimeError):
         actions: tuple[AgentActionReceipt, ...] = (),
         memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = (),
         memory_clarifications: tuple[MemoryClarificationReceipt, ...] = (),
+        collaborative_note_proposals: tuple[
+            CollaborativeNoteProposal, ...
+        ] = (),
+        collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = (),
     ) -> None:
         super().__init__(message)
         self.actions = actions
         self.memory_proposals = memory_proposals
         self.memory_clarifications = memory_clarifications
+        self.collaborative_note_proposals = collaborative_note_proposals
+        self.collaborative_note_events = collaborative_note_events
 
 
 class SupervisorTimeoutError(SupervisorRuntimeError):
@@ -76,6 +84,12 @@ class SupervisorTurnContext:
     precompleted_memory_clarifications: tuple[
         MemoryClarificationReceipt, ...
     ] = ()
+    precompleted_collaborative_note_proposals: tuple[
+        CollaborativeNoteProposal, ...
+    ] = ()
+    precompleted_collaborative_note_events: tuple[
+        CollaborativeNoteEvent, ...
+    ] = ()
 
 
 @dataclass(frozen=True)
@@ -86,6 +100,8 @@ class SupervisorTurnResult:
     citations: tuple[CitationReference, ...] = ()
     memory_proposals: tuple[VersionedMemoryProposalReceipt, ...] = ()
     memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
+    collaborative_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
+    collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = ()
 
 
 class SupervisorRuntime:
@@ -129,6 +145,12 @@ class SupervisorRuntime:
         memory_clarifications = list(
             context.precompleted_memory_clarifications
         )
+        collaborative_note_proposals = list(
+            context.precompleted_collaborative_note_proposals
+        )
+        collaborative_note_events = list(
+            context.precompleted_collaborative_note_events
+        )
         delegation_budget = ExpertDelegationBudget()
         delegation_token = self._delegation_registry.register_turn(
             budget=delegation_budget,
@@ -142,6 +164,8 @@ class SupervisorRuntime:
             actions,
             memory_proposals,
             memory_clarifications,
+            collaborative_note_proposals,
+            collaborative_note_events,
         )
         try:
             async with asyncio.timeout(SUPERVISOR_TIMEOUT_SECONDS):
@@ -190,6 +214,8 @@ class SupervisorRuntime:
                     actions,
                     memory_proposals,
                     memory_clarifications,
+                    collaborative_note_proposals,
+                    collaborative_note_events,
                 )
                 if operational_context is not None:
                     model_input_context.append(operational_context)
@@ -243,6 +269,12 @@ class SupervisorRuntime:
                                     memory_clarifications=tuple(
                                         memory_clarifications
                                     ),
+                                    collaborative_note_proposals=tuple(
+                                        collaborative_note_proposals
+                                    ),
+                                    collaborative_note_events=tuple(
+                                        collaborative_note_events
+                                    ),
                                 )
                         elif isinstance(
                             parsed,
@@ -256,6 +288,12 @@ class SupervisorRuntime:
                                     memory_proposals=tuple(memory_proposals),
                                     memory_clarifications=tuple(
                                         memory_clarifications
+                                    ),
+                                    collaborative_note_proposals=tuple(
+                                        collaborative_note_proposals
+                                    ),
+                                    collaborative_note_events=tuple(
+                                        collaborative_note_events
                                     ),
                                 )
                             if not memory_clarifications:
@@ -271,6 +309,12 @@ class SupervisorRuntime:
                                     actions=tuple(actions),
                                     memory_clarifications=tuple(
                                         memory_clarifications
+                                    ),
+                                    collaborative_note_proposals=tuple(
+                                        collaborative_note_proposals
+                                    ),
+                                    collaborative_note_events=tuple(
+                                        collaborative_note_events
                                     ),
                                 )
                     if (
@@ -292,6 +336,12 @@ class SupervisorRuntime:
                         actions=tuple(actions),
                         memory_proposals=tuple(memory_proposals),
                         memory_clarifications=tuple(memory_clarifications),
+                        collaborative_note_proposals=tuple(
+                            collaborative_note_proposals
+                        ),
+                        collaborative_note_events=tuple(
+                            collaborative_note_events
+                        ),
                     )
                 return SupervisorTurnResult(
                     response=final_responses[0],
@@ -299,6 +349,12 @@ class SupervisorRuntime:
                     citations=tuple(citations),
                     memory_proposals=tuple(memory_proposals),
                     memory_clarifications=tuple(memory_clarifications),
+                    collaborative_note_proposals=tuple(
+                        collaborative_note_proposals
+                    ),
+                    collaborative_note_events=tuple(
+                        collaborative_note_events
+                    ),
                 )
         except TimeoutError as exc:
             logger.error(
@@ -310,6 +366,10 @@ class SupervisorRuntime:
                 actions=tuple(actions),
                 memory_proposals=tuple(memory_proposals),
                 memory_clarifications=tuple(memory_clarifications),
+                collaborative_note_proposals=tuple(
+                    collaborative_note_proposals
+                ),
+                collaborative_note_events=tuple(collaborative_note_events),
             ) from exc
         except SupervisorRuntimeError:
             raise
@@ -342,6 +402,8 @@ class SupervisorRuntime:
         actions: list[AgentActionReceipt],
         memory_proposals: list[VersionedMemoryProposalReceipt],
         memory_clarifications: list[MemoryClarificationReceipt],
+        collaborative_note_proposals: list[CollaborativeNoteProposal],
+        collaborative_note_events: list[CollaborativeNoteEvent],
     ) -> None:
         proposal_actions = [
             action
@@ -358,14 +420,41 @@ class SupervisorRuntime:
             raise SupervisorRuntimeError(
                 "Agent_Col received invalid precompleted proposal effects."
             )
+        note_actions = [
+            action
+            for action in actions
+            if action.action_name
+            in {"approve_collaborative_note", "reject_collaborative_note"}
+        ]
+        if (
+            len(collaborative_note_proposals) > 1
+            or len(collaborative_note_events) > 1
+            or bool(collaborative_note_proposals)
+            and bool(collaborative_note_events)
+            or bool(note_actions) != bool(collaborative_note_events)
+            or (
+                collaborative_note_events
+                and len(note_actions) != len(collaborative_note_events)
+            )
+        ):
+            raise SupervisorRuntimeError(
+                "Agent_Col received invalid precompleted note effects."
+            )
 
     @staticmethod
     def _precompleted_effect_context(
         actions: list[AgentActionReceipt],
         memory_proposals: list[VersionedMemoryProposalReceipt],
         memory_clarifications: list[MemoryClarificationReceipt],
+        collaborative_note_proposals: list[CollaborativeNoteProposal],
+        collaborative_note_events: list[CollaborativeNoteEvent],
     ) -> types.Content | None:
-        if not actions and not memory_clarifications:
+        if (
+            not actions
+            and not memory_clarifications
+            and not collaborative_note_proposals
+            and not collaborative_note_events
+        ):
             return None
         payload = {
             "actions": [
@@ -378,6 +467,14 @@ class SupervisorRuntime:
             "memory_clarifications": [
                 clarification.model_dump(mode="json")
                 for clarification in memory_clarifications
+            ],
+            "collaborative_note_proposals": [
+                proposal.model_dump(mode="json")
+                for proposal in collaborative_note_proposals
+            ],
+            "collaborative_note_events": [
+                event.model_dump(mode="json")
+                for event in collaborative_note_events
             ],
         }
         text = (
