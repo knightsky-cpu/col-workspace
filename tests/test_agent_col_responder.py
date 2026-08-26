@@ -114,11 +114,16 @@ def test_responder_instruction_preserves_governed_memory_restraint() -> None:
 
     normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
     for required_rule in (
-        "explicit, reusable collaboration preference",
-        "allowed light identity detail",
+        "explicit memory intent creates a candidate",
+        "policy decides whether it is approvable",
+        "goals, preferences, interests, standing instructions",
+        "user_requested_memory",
+        "failure to match a predefined category is not by itself unsupported",
         "do not infer",
         "temporary",
         "sensitive",
+        "chat may not delete or revoke active durable memory",
+        "memory ui",
         "structured memory decision",
         "more than one eligible memory candidate",
         "submit a clarify decision",
@@ -136,6 +141,9 @@ def test_responder_instruction_preserves_governed_memory_restraint() -> None:
         "prohibited",
     ):
         assert required_rule in normalized
+    assert "other non-governed durable profile details are unsupported" not in (
+        normalized
+    )
 
 
 def test_responder_app_constructs_with_existing_runtime_without_network(

@@ -365,7 +365,20 @@ USER_REQUESTED_MEMORY_PROHIBITED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
     re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
     re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE),
+    re.compile(r"\b(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b"),
+    re.compile(
+        r"\b\d{1,6}\s+[\w .'-]{1,80}\s+"
+        r"(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|"
+        r"way|court|ct)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b(?:\d[ -]?){13,19}\b"),
     re.compile(r"\bremember\s+everything\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:delete|remove|erase|revoke)\s+"
+        r"(?:my\s+)?(?:saved\s+)?memory\b",
+        re.IGNORECASE,
+    ),
 )
 
 V2_SCALAR_VALUES_BY_CATEGORY = MappingProxyType(

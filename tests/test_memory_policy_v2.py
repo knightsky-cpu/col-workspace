@@ -85,13 +85,48 @@ def test_v2_policy_accepts_explicit_user_requested_memory() -> None:
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        ("  My favorite color is blue.  ", "My favorite color is blue."),
+        ("I like Thai food.", "I like Thai food."),
+        (
+            "I enjoy security-focused software projects.",
+            "I enjoy security-focused software projects.",
+        ),
+        (
+            "I am building Agent Col for a hackathon.",
+            "I am building Agent Col for a hackathon.",
+        ),
+        ("My favorite number is 12345.", "My favorite number is 12345."),
+    ),
+)
+def test_v2_policy_accepts_benign_arbitrary_user_requested_memory(
+    value: str,
+    expected: str,
+) -> None:
+    from memory_policy import validate_memory_value_for_policy
+
+    assert validate_memory_value_for_policy(
+        "2.0",
+        "user_requested_memory",
+        value,
+    ) == expected
+
+
+@pytest.mark.parametrize(
     "value",
     (
         "my password is synthetic-example-secret",
         "my api key is sk-abc123456789",
         "my social security number is 123-45-6789",
         "my email is wifiknight@example.com",
+        "my phone number is 603-446-9076",
+        "my phone number is (603) 446-9076",
+        "my address is 144 Main Street, Bradford Vermont, 05033",
+        "my credit card is 4111 1111 1111 1111",
         "remember everything I say",
+        "delete my saved memory",
+        "revoke my saved memory",
     ),
 )
 def test_v2_policy_rejects_prohibited_user_requested_memory(

@@ -39,6 +39,20 @@ globalThis.document = {
   },
 };
 
+function withConfirm(confirmHandler, callback) {
+  const previousConfirm = globalThis.confirm;
+  globalThis.confirm = confirmHandler;
+  try {
+    callback();
+  } finally {
+    if (previousConfirm === undefined) {
+      delete globalThis.confirm;
+    } else {
+      globalThis.confirm = previousConfirm;
+    }
+  }
+}
+
 function textTree(item) {
   return [
     item.textContent,
@@ -221,15 +235,15 @@ test("renderMemoryPanel orders pending proposals before active preferences and e
   assert.equal(activeIndex < recentIndex, true);
 });
 
-test("renderMemoryPanel exposes revoke and delete controls for active preferences", () => {
+test("renderMemoryPanel requires confirmation before revoking active preferences", () => {
   const revoked = [];
-  const deleted = [];
+  const confirmMessages = [];
   const container = node();
 
   renderMemoryPanel(container, memory, {
     onSubmitDecision: () => {},
     onRevokeSignal: (signal) => revoked.push(signal),
-    onDeleteSignal: (signal) => deleted.push(signal),
+    onDeleteSignal: () => {},
   });
 
   const signalCard = findTree(container, (child) => (
@@ -240,37 +254,44 @@ test("renderMemoryPanel exposes revoke and delete controls for active preference
   const revokeButton = findTree(signalCard, (child) => (
     child.attributes["data-memory-signal-action"] === "revoke"
   ));
-  const deleteButton = findTree(signalCard, (child) => (
-    child.attributes["data-memory-signal-action"] === "delete"
-  ));
   assert.notEqual(revokeButton, null);
-  assert.notEqual(deleteButton, null);
 
-  revokeButton.onclick();
-  deleteButton.onclick();
+  withConfirm((message) => {
+    confirmMessages.push(message);
+    return false;
+  }, () => {
+    revokeButton.onclick();
+  });
+  assert.deepEqual(revoked, []);
 
+  withConfirm((message) => {
+    confirmMessages.push(message);
+    return true;
+  }, () => {
+    revokeButton.onclick();
+  });
   assert.deepEqual(revoked, [{
     category: "response_length",
     signal_id: "response_length--signal-1",
     value: "concise",
     source_event_id: "response_length--signal-1--approved",
   }]);
-  assert.deepEqual(deleted, [{
-    category: "response_length",
-    signal_id: "response_length--signal-1",
-    value: "concise",
-    source_event_id: "response_length--signal-1--approved",
-  }]);
+  assert.equal(confirmMessages.length, 2);
+  assert.equal(confirmMessages[0].includes("Revoke saved memory"), true);
+  assert.equal(confirmMessages[0].includes("Response length · concise"), true);
+  assert.equal(confirmMessages[0].includes("stops being active"), true);
+  assert.equal(confirmMessages[0].includes("response_length--signal-1"), false);
+  assert.equal(confirmMessages[0].includes("response_length--signal-1--approved"), false);
 });
 
-test("renderMemoryPanel exposes revoke and delete controls for identity context", () => {
-  const revoked = [];
+test("renderMemoryPanel requires confirmation before deleting identity context", () => {
   const deleted = [];
+  const confirmMessages = [];
   const container = node();
 
   renderMemoryPanel(container, memory, {
     onSubmitDecision: () => {},
-    onRevokeSignal: (signal) => revoked.push(signal),
+    onRevokeSignal: () => {},
     onDeleteSignal: (signal) => deleted.push(signal),
   });
 
@@ -279,30 +300,84 @@ test("renderMemoryPanel exposes revoke and delete controls for identity context"
   ));
   assert.notEqual(signalCard, null);
 
-  const revokeButton = findTree(signalCard, (child) => (
-    child.attributes["data-memory-signal-action"] === "revoke"
-  ));
   const deleteButton = findTree(signalCard, (child) => (
     child.attributes["data-memory-signal-action"] === "delete"
   ));
-  assert.notEqual(revokeButton, null);
   assert.notEqual(deleteButton, null);
 
-  revokeButton.onclick();
-  deleteButton.onclick();
+  withConfirm((message) => {
+    confirmMessages.push(message);
+    return false;
+  }, () => {
+    deleteButton.onclick();
+  });
+  assert.deepEqual(deleted, []);
 
-  assert.deepEqual(revoked, [{
-    category: "preferred_name",
-    signal_id: "preferred_name--signal-1",
-    value: "wifiknight",
-    source_event_id: "preferred_name--signal-1--approved",
-  }]);
+  withConfirm((message) => {
+    confirmMessages.push(message);
+    return true;
+  }, () => {
+    deleteButton.onclick();
+  });
   assert.deepEqual(deleted, [{
     category: "preferred_name",
     signal_id: "preferred_name--signal-1",
     value: "wifiknight",
     source_event_id: "preferred_name--signal-1--approved",
   }]);
+  assert.equal(confirmMessages.length, 2);
+  assert.equal(confirmMessages[0].includes("Delete saved memory"), true);
+  assert.equal(confirmMessages[0].includes("Preferred name · wifiknight"), true);
+  assert.equal(confirmMessages[0].includes("removed from inspection"), true);
+  assert.equal(confirmMessages[0].includes("preferred_name--signal-1"), false);
+  assert.equal(confirmMessages[0].includes("preferred_name--signal-1--approved"), false);
+});
+
+test("renderMemoryPanel renders list-valued destructive confirmations cleanly", () => {
+  const deleted = [];
+  const confirmMessages = [];
+  const container = node();
+  const listMemory = {
+    status: "ready",
+    profile: {
+      identity_context: {},
+      active_preferences: {
+        development_environments: {
+          signal_id: "development_environments--active-v2",
+          value: ["macos", "linux"],
+          source_event_id: "development_environments--active-v2--approved",
+        },
+      },
+    },
+    unresolvedProposals: [],
+    events: [],
+  };
+
+  renderMemoryPanel(container, listMemory, {
+    onSubmitDecision: () => {},
+    onRevokeSignal: () => {},
+    onDeleteSignal: (signal) => deleted.push(signal),
+  });
+
+  const signalCard = findTree(container, (child) => (
+    child.attributes["data-memory-signal"] === "development_environments--active-v2"
+  ));
+  const deleteButton = findTree(signalCard, (child) => (
+    child.attributes["data-memory-signal-action"] === "delete"
+  ));
+
+  withConfirm((message) => {
+    confirmMessages.push(message);
+    return true;
+  }, () => {
+    deleteButton.onclick();
+  });
+
+  assert.equal(confirmMessages[0].includes(
+    "Development environments · macos, linux",
+  ), true);
+  assert.equal(confirmMessages[0].includes("development_environments--active-v2"), false);
+  assert.equal(deleted.length, 1);
 });
 
 test("renderMemoryPanel keeps active preference IDs secondary to human labels", () => {

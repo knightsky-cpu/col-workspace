@@ -34,6 +34,27 @@ function memorySignals(profile, key) {
     }));
 }
 
+function signalDisplayLabel(signal) {
+  return compactText([
+    humanLabel(signal.category),
+    stringValue(signal.value),
+  ]);
+}
+
+function confirmDestructiveMemoryAction(action, signal) {
+  const label = signalDisplayLabel(signal);
+  const copy = action === "revoke"
+    ? [
+      `Revoke saved memory: ${label}?`,
+      "This memory stops being active in future chats.",
+    ]
+    : [
+      `Delete saved memory: ${label}?`,
+      "This memory and owned lifecycle artifacts are removed from inspection.",
+    ];
+  return globalThis.confirm(copy.join("\n\n"));
+}
+
 function renderMemorySignals(container, title, emptyText, signals, handlers) {
   appendTextElement(container, "h3", "work-heading contain-text", title);
   if (signals.length === 0) {
@@ -43,10 +64,7 @@ function renderMemorySignals(container, title, emptyText, signals, handlers) {
   for (const signal of signals) {
     const card = element("div", "memory-card contain-text");
     card.setAttribute("data-memory-signal", signal.signal_id);
-    appendTextElement(card, "p", "work-heading contain-text", compactText([
-      humanLabel(signal.category),
-      stringValue(signal.value),
-    ]));
+    appendTextElement(card, "p", "work-heading contain-text", signalDisplayLabel(signal));
     appendTextElement(card, "p", "muted contain-text", compactText([
       "Saved memory",
     ]));
@@ -55,12 +73,18 @@ function renderMemorySignals(container, title, emptyText, signals, handlers) {
     revoke.setAttribute("type", "button");
     revoke.setAttribute("data-memory-signal-action", "revoke");
     revoke.addEventListener("click", () => {
+      if (!confirmDestructiveMemoryAction("revoke", signal)) {
+        return;
+      }
       handlers.onRevokeSignal(signal);
     });
     const deleteButton = element("button", "", "Delete");
     deleteButton.setAttribute("type", "button");
     deleteButton.setAttribute("data-memory-signal-action", "delete");
     deleteButton.addEventListener("click", () => {
+      if (!confirmDestructiveMemoryAction("delete", signal)) {
+        return;
+      }
       handlers.onDeleteSignal(signal);
     });
     actions.append(revoke, deleteButton);

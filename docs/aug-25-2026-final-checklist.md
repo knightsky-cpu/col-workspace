@@ -73,7 +73,10 @@ source baseline produced by the preceding phase.
      [Phase 1 Memory Continuity Closure](superpowers/plans/2026-08-25-winning-core-phase-1-memory-continuity.md)
    - Remaining implementation plan:
      [Phase 1 Remaining Work](superpowers/plans/2026-08-25-winning-core-phase-1-remaining-work.md)
-   - Status: Pass 1A accepted for checkpoint; Passes 1B-1D pending approval.
+   - Phase 1E closure evidence:
+     [Phase 1E Memory Lifecycle Closure Evidence](phase-1-memory-lifecycle-evidence-aug-26-2026.md)
+   - Status: Phase 1 accepted on August 26, 2026 after manual Google OIDC
+     lifecycle verification and recorded by the Phase 1 closure checkpoint.
 2. **Phase 2 - Governed Workspace Notes**
    - Approved implementation plan:
      [Phase 2 Governed Workspace Notes](superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md)
@@ -106,19 +109,26 @@ acceptance targets, exclusions, risks, stop conditions, and handoff evidence.
 
 ## Phase 1 - Memory Continuity Closure
 
-- [ ] Render durable clarification choices in the browser workspace.
-- [ ] Allow one valid choice to create exactly one pending memory proposal.
-- [ ] Prevent clarification and proposal effects from coexisting in one turn.
-- [ ] Preserve choices through retry, replay, timeout, and responder failure.
-- [ ] Approve a natural version-two proposal through the UI.
-- [ ] Begin a genuinely new chat session and demonstrate adapted behavior.
-- [ ] Display an authoritative adaptation receipt and provenance.
-- [ ] Verify rejection, correction, revocation, and deletion.
-- [ ] Capture judge-grade live evidence.
+- [x] Render durable clarification choices in the browser workspace.
+- [x] Allow one valid choice to create exactly one pending memory proposal.
+- [x] Prevent clarification and proposal effects from coexisting in one turn.
+- [x] Preserve choices through retry, replay, timeout, and responder failure.
+- [x] Approve a natural version-two proposal through the UI.
+- [x] Begin a genuinely new chat session and demonstrate adapted behavior.
+- [x] Display an authoritative adaptation receipt and provenance.
+- [x] Verify rejection, correction, revocation, and deletion in live Google OIDC
+  mode.
+- [x] Capture judge-grade live evidence.
 
 **Exit condition:** A user can teach Agent Col an eligible preference, approve
 it, observe a changed response in another session, inspect why Agent Col
 adapted, and remove or correct the preference.
+
+Source-backed Phase 1 implementation evidence is recorded in
+[`phase-1-memory-lifecycle-evidence-aug-26-2026.md`](phase-1-memory-lifecycle-evidence-aug-26-2026.md).
+Phase 1 was manually accepted from live Google OIDC screenshots and runtime
+checks supplied in the August 26, 2026 implementation conversation. Private
+screenshots are not committed to the repository.
 
 ## Phase 2 - Governed Workspace Notes
 
