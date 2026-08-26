@@ -105,6 +105,15 @@ from schemas import (
     ChatSessionSummary,
     CitationReference,
     CollaborationProfile,
+    CollaborativeNote,
+    CollaborativeNoteCorrectionRequest,
+    CollaborativeNoteDetailResponse,
+    CollaborativeNoteEvent,
+    CollaborativeNoteLifecycleResponse,
+    CollaborativeNoteListResponse,
+    CollaborativeNoteMutationRequest,
+    CollaborativeNoteProposal,
+    CollaborativeNoteProposalResponse,
     MemoryDecisionRequest,
     MemoryClarificationChoice,
     MemoryClarificationReceipt,
@@ -125,6 +134,17 @@ from schemas import (
     WorkspaceCreateRequest,
     WorkspaceListResponse,
     WorkspaceSummary,
+)
+from collaborative_note_service import (
+    CollaborativeNoteCorrectionCommand,
+    CollaborativeNoteDeletionResult,
+    CollaborativeNoteDetailResult,
+    CollaborativeNoteLifecycleCommand,
+    CollaborativeNoteLifecycleResult,
+    CollaborativeNoteListResult,
+    CollaborativeNoteProposalResult,
+    GetCollaborativeNoteCommand,
+    ListCollaborativeNotesCommand,
 )
 from supervisor_runtime import (
     SupervisorRuntimeError,
@@ -963,6 +983,145 @@ class FakeGenericArtifactCreationService:
         return self.result
 
 
+def collaborative_note_payload(
+    *, status: str = "active", revision: int = 1
+) -> dict[str, object]:
+    return {
+        "note_contract_version": "1.0",
+        "note_id": "note-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "project-1",
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 2.",
+        "status": status,
+        "revision": revision,
+        "source_session_id": "session-1",
+        "source_message_ids": ["user-message-1"],
+        "source_event_id": "event-1",
+        "created_at": MEMORY_NOW,
+        "updated_at": MEMORY_NOW,
+    }
+
+
+def collaborative_note_event_payload(
+    event_type: str = "approved",
+) -> dict[str, object]:
+    return {
+        "note_contract_version": "1.0",
+        "event_id": f"note-1--{event_type}--1",
+        "note_id": "note-1",
+        "proposal_id": "note-proposal-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "project-1",
+        "event_type": event_type,
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 2.",
+        "source_session_id": "session-1",
+        "source_message_ids": ["user-message-1"],
+        "revision": 1,
+        "previous_revision": None,
+        "created_at": MEMORY_NOW,
+    }
+
+
+def collaborative_note_proposal_payload() -> dict[str, object]:
+    return {
+        "note_contract_version": "1.0",
+        "proposal_id": "note-proposal-1",
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 3.",
+        "source_session_id": "session-2",
+        "source_message_ids": ["user-message-2"],
+        "expected_note_id": "note-1",
+        "expected_revision": 1,
+        "policy_version": "1.0",
+        "status": "pending",
+        "created_at": MEMORY_NOW,
+        "expires_at": MEMORY_NOW + timedelta(hours=24),
+    }
+
+
+@dataclass
+class FakeCollaborativeNoteService:
+    list_result: CollaborativeNoteListResult
+    detail_result: CollaborativeNoteDetailResult
+    proposal_result: CollaborativeNoteProposalResult
+    lifecycle_result: CollaborativeNoteLifecycleResult
+    deletion_result: CollaborativeNoteDeletionResult
+    error: Exception | None = None
+    list_calls: list[ListCollaborativeNotesCommand] = field(default_factory=list)
+    detail_calls: list[GetCollaborativeNoteCommand] = field(default_factory=list)
+    correction_calls: list[CollaborativeNoteCorrectionCommand] = field(
+        default_factory=list
+    )
+    archive_calls: list[CollaborativeNoteLifecycleCommand] = field(
+        default_factory=list
+    )
+    restore_calls: list[CollaborativeNoteLifecycleCommand] = field(
+        default_factory=list
+    )
+    delete_calls: list[CollaborativeNoteLifecycleCommand] = field(
+        default_factory=list
+    )
+
+    async def list_notes(
+        self,
+        command: ListCollaborativeNotesCommand,
+    ) -> CollaborativeNoteListResult:
+        self.list_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.list_result
+
+    async def get_note(
+        self,
+        command: GetCollaborativeNoteCommand,
+    ) -> CollaborativeNoteDetailResult:
+        self.detail_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.detail_result
+
+    async def create_correction(
+        self,
+        command: CollaborativeNoteCorrectionCommand,
+    ) -> CollaborativeNoteProposalResult:
+        self.correction_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.proposal_result
+
+    async def archive_note(
+        self,
+        command: CollaborativeNoteLifecycleCommand,
+    ) -> CollaborativeNoteLifecycleResult:
+        self.archive_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.lifecycle_result
+
+    async def restore_note(
+        self,
+        command: CollaborativeNoteLifecycleCommand,
+    ) -> CollaborativeNoteLifecycleResult:
+        self.restore_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.lifecycle_result
+
+    async def delete_note(
+        self,
+        command: CollaborativeNoteLifecycleCommand,
+    ) -> CollaborativeNoteDeletionResult:
+        self.delete_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.deletion_result
+
+
 @dataclass
 class ServiceState:
     events: list[tuple[Any, ...]]
@@ -977,6 +1136,7 @@ class ServiceState:
     supervisor: FakeSupervisorRuntime
     turn_service: FakeAgentColTurnService
     memory_service: FakeTrustedMemoryService
+    collaborative_note_service: FakeCollaborativeNoteService
     artifact_service: FakeArtifactReadService
     generic_artifact_service: FakeGenericArtifactReadService
     artifact_executor: object
@@ -1102,6 +1262,49 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             ),
         ),
     )
+    note = CollaborativeNote.model_validate(collaborative_note_payload())
+    note_event = CollaborativeNoteEvent.model_validate(
+        collaborative_note_event_payload()
+    )
+    note_service = FakeCollaborativeNoteService(
+        list_result=CollaborativeNoteListResult(
+            notes=[note],
+            next_note_id=None,
+        ),
+        detail_result=CollaborativeNoteDetailResult(
+            note=note,
+            events=[note_event],
+        ),
+        proposal_result=CollaborativeNoteProposalResult(
+            proposal=CollaborativeNoteProposal.model_validate(
+                collaborative_note_proposal_payload()
+            )
+        ),
+        lifecycle_result=CollaborativeNoteLifecycleResult(
+            note=note.model_copy(update={"status": "archived", "revision": 2}),
+            event=CollaborativeNoteEvent.model_validate(
+                {
+                    **collaborative_note_event_payload("archived"),
+                    "revision": 2,
+                    "previous_revision": 1,
+                }
+            ),
+        ),
+        deletion_result=CollaborativeNoteDeletionResult(
+            event=CollaborativeNoteEvent.model_validate(
+                {
+                    **collaborative_note_event_payload("deleted"),
+                    "note_kind": None,
+                    "title": None,
+                    "body": None,
+                    "source_session_id": None,
+                    "source_message_ids": [],
+                    "revision": 2,
+                    "previous_revision": 1,
+                }
+            )
+        ),
+    )
     artifact_metadata = BlueprintArtifactMetadata(
         reference=ArtifactReference(
             artifact_type="synthesis_blueprint",
@@ -1212,6 +1415,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         supervisor=supervisor,
         turn_service=turn_service,
         memory_service=memory_service,
+        collaborative_note_service=note_service,
         artifact_service=artifact_service,
         generic_artifact_service=generic_artifact_service,
         artifact_executor=artifact_executor,
@@ -1394,6 +1598,16 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             memory_service
             if database is state.database
             else pytest.fail("Unexpected memory service database.")
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "CollaborativeNoteService",
+        lambda *, database: (
+            note_service
+            if database is state.database
+            else pytest.fail("Unexpected note service database.")
         ),
         raising=False,
     )
@@ -1668,6 +1882,237 @@ async def test_google_workspace_create_uses_subject_owned_workspace_prefix(
             WorkspaceCreateRequest(display_name="Study Plans"),
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_list_uses_effective_user_and_workspace(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/notes",
+        params={"limit": 10},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == CollaborativeNoteListResponse(
+        notes=service_state.collaborative_note_service.list_result.notes,
+        next_note_id=None,
+    ).model_dump(mode="json")
+    assert service_state.collaborative_note_service.list_calls == [
+        ListCollaborativeNotesCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            status_filter="active",
+            limit=10,
+            cursor=None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_detail_returns_note_and_lifecycle_events(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/notes/note-1",
+        params={"limit": 10},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == CollaborativeNoteDetailResponse(
+        note=service_state.collaborative_note_service.detail_result.note,
+        events=service_state.collaborative_note_service.detail_result.events,
+    ).model_dump(mode="json")
+    assert service_state.collaborative_note_service.detail_calls == [
+        GetCollaborativeNoteCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            note_id="note-1",
+            limit=10,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_correction_requires_idempotency_key(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/note-1/corrections",
+        json={
+            "expected_revision": 1,
+            "note_kind": "constraint",
+            "title": "API version",
+            "body": "Use API version 3.",
+            "source_session_id": "session-2",
+            "source_message_ids": ["user-message-2"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Idempotency-Key header is required."
+    }
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_correction_returns_pending_proposal(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/note-1/corrections",
+        headers={"Idempotency-Key": "idem-note-correction-1"},
+        json={
+            "expected_revision": 1,
+            "note_kind": "constraint",
+            "title": "API version",
+            "body": "Use API version 3.",
+            "source_session_id": "session-2",
+            "source_message_ids": ["user-message-2"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == CollaborativeNoteProposalResponse(
+        proposal=service_state.collaborative_note_service.proposal_result.proposal
+    ).model_dump(mode="json")
+    assert service_state.collaborative_note_service.correction_calls == [
+        CollaborativeNoteCorrectionCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            note_id="note-1",
+            expected_revision=1,
+            note_kind="constraint",
+            title="API version",
+            body="Use API version 3.",
+            source_session_id="session-2",
+            source_message_ids=("user-message-2",),
+            idempotency_key="idem-note-correction-1",
+            observed_at=service_state.collaborative_note_service.correction_calls[
+                0
+            ].observed_at,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_archive_returns_revisioned_note_and_event(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/note-1/archive",
+        json={"expected_revision": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == CollaborativeNoteLifecycleResponse(
+        note=service_state.collaborative_note_service.lifecycle_result.note,
+        event=service_state.collaborative_note_service.lifecycle_result.event,
+    ).model_dump(mode="json")
+    assert service_state.collaborative_note_service.archive_calls == [
+        CollaborativeNoteLifecycleCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            note_id="note-1",
+            expected_revision=1,
+            observed_at=service_state.collaborative_note_service.archive_calls[
+                0
+            ].observed_at,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_restore_routes_revisioned_command(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/note-1/restore",
+        json={"expected_revision": 1},
+    )
+
+    assert response.status_code == 200
+    assert service_state.collaborative_note_service.restore_calls == [
+        CollaborativeNoteLifecycleCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            note_id="note-1",
+            expected_revision=1,
+            observed_at=service_state.collaborative_note_service.restore_calls[
+                0
+            ].observed_at,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_delete_returns_no_content(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.request(
+        "DELETE",
+        "/api/users/user-1/projects/project-1/notes/note-1",
+        json={"expected_revision": 1},
+    )
+
+    assert response.status_code == 204
+    assert response.text == ""
+    assert service_state.collaborative_note_service.delete_calls == [
+        CollaborativeNoteLifecycleCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            note_id="note-1",
+            expected_revision=1,
+            observed_at=service_state.collaborative_note_service.delete_calls[
+                0
+            ].observed_at,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_missing_maps_to_unavailable_response(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.collaborative_note_service.error = MemoryProposalNotFoundError(
+        "private note missing detail"
+    )
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/notes/note-1",
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Collaborative note was not found."}
+    assert "private note missing detail" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_conflict_maps_to_safe_response(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.collaborative_note_service.error = MemoryProposalConflictError(
+        "private stale revision detail"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/note-1/archive",
+        json={"expected_revision": 1},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Collaborative note state conflicts with this request."
+    }
+    assert "private stale revision detail" not in response.text
 
 
 @pytest.mark.asyncio

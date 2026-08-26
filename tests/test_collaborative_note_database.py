@@ -106,6 +106,7 @@ class NoteStore:
         self.notes.where.return_value.limit.return_value.stream.return_value = (
             AsyncSnapshots([])
         )
+        self.events.limit.return_value.stream.return_value = AsyncSnapshots([])
         self.note_ref.collection.side_effect = note_collection
         self.events.document.return_value = self.event_ref
         self.sessions.document.return_value = self.session_ref
@@ -515,3 +516,95 @@ async def test_delete_collaborative_note_removes_active_content_and_keeps_safe_e
         event.model_dump(mode="python"),
         merge=False,
     )
+
+
+@pytest.mark.asyncio
+async def test_list_collaborative_notes_returns_bounded_workspace_notes() -> None:
+    store = NoteStore()
+    first = {
+        "note_contract_version": "1.0",
+        "note_id": "note-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 2.",
+        "status": "active",
+        "revision": 1,
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "source_event_id": "event-1",
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    second = {**first, "note_id": "note-2", "source_event_id": "event-2"}
+    store.notes.where.return_value.limit.return_value.stream.return_value = (
+        AsyncSnapshots([first, second])
+    )
+    engine = MemoryEngine(store.client)
+
+    notes, next_note_id = await engine.list_collaborative_notes(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        status_filter="active",
+        limit=1,
+        cursor=None,
+    )
+
+    assert [note.note_id for note in notes] == ["note-1"]
+    assert next_note_id == "note-2"
+    store.notes.where.assert_called_once_with("status", "==", "active")
+    store.notes.where.return_value.limit.assert_called_once_with(2)
+
+
+@pytest.mark.asyncio
+async def test_get_collaborative_note_detail_returns_note_and_safe_events() -> None:
+    store = NoteStore()
+    note = {
+        "note_contract_version": "1.0",
+        "note_id": "note-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 2.",
+        "status": "active",
+        "revision": 1,
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "source_event_id": "event-1",
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    event = {
+        "note_contract_version": "1.0",
+        "event_id": "event-1",
+        "note_id": "note-1",
+        "proposal_id": "proposal-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "event_type": "approved",
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 2.",
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "revision": 1,
+        "previous_revision": None,
+        "created_at": NOW,
+    }
+    store.note_ref.get = AsyncMock(return_value=snapshot(exists=True, data=note))
+    store.events.limit.return_value.stream.return_value = AsyncSnapshots([event])
+    engine = MemoryEngine(store.client)
+
+    stored_note, events = await engine.get_collaborative_note_detail(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        note_id="note-1",
+        limit=10,
+    )
+
+    assert stored_note.note_id == "note-1"
+    assert [item.event_id for item in events] == ["event-1"]
+    store.note_ref.get.assert_awaited_once()
+    store.events.limit.assert_called_once_with(10)

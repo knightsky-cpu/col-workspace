@@ -866,6 +866,105 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("approve_collaborative_note_proposal", exc)
 
+    async def list_collaborative_notes(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        status_filter: str,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[tuple[CollaborativeNote, ...], str | None]:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        if status_filter not in {"active", "archived"}:
+            raise ValueError("status_filter must be active or archived.")
+        if not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50.")
+        if cursor is not None:
+            self._validate_memory_identifier(cursor, "cursor")
+        try:
+            notes_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+                .collection("collaborative_notes")
+            )
+            query = notes_ref.where("status", "==", status_filter)
+            if cursor is not None:
+                cursor_snapshot = await notes_ref.document(cursor).get()
+                if not cursor_snapshot.exists:
+                    raise MemoryProposalNotFoundError("Note cursor is unavailable.")
+                query = query.start_after(cursor_snapshot)
+            query = query.limit(limit + 1)
+            notes: list[CollaborativeNote] = []
+            async for snapshot in query.stream():
+                note = CollaborativeNote.model_validate(snapshot.to_dict())
+                if (
+                    note.owner_user_id != user_id
+                    or note.workspace_id != workspace_id
+                    or note.status != status_filter
+                ):
+                    raise ValueError("Stored collaborative note ownership is invalid.")
+                notes.append(note)
+            next_note_id = notes[limit].note_id if len(notes) > limit else None
+            return tuple(notes[:limit]), next_note_id
+        except MemoryProposalNotFoundError:
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_collaborative_notes", exc)
+
+    async def get_collaborative_note_detail(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        note_id: str,
+        limit: int,
+    ) -> tuple[CollaborativeNote, tuple[CollaborativeNoteEvent, ...]]:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        self._validate_memory_identifier(note_id, "note_id")
+        if not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50.")
+        try:
+            note_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+                .collection("collaborative_notes")
+                .document(note_id)
+            )
+            note_snapshot = await note_ref.get()
+            if not note_snapshot.exists:
+                raise MemoryProposalNotFoundError("Note is unavailable.")
+            note = CollaborativeNote.model_validate(note_snapshot.to_dict())
+            if note.owner_user_id != user_id or note.workspace_id != workspace_id:
+                raise MemoryProposalConflictError(
+                    "Note state conflicts with this request."
+                )
+            events: list[CollaborativeNoteEvent] = []
+            async for snapshot in note_ref.collection("events").limit(limit).stream():
+                event = CollaborativeNoteEvent.model_validate(snapshot.to_dict())
+                if (
+                    event.owner_user_id != user_id
+                    or event.workspace_id != workspace_id
+                    or event.note_id != note_id
+                ):
+                    raise ValueError("Stored collaborative note event is invalid.")
+                events.append(event)
+            return note, tuple(events)
+        except (MemoryProposalConflictError, MemoryProposalNotFoundError):
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("get_collaborative_note_detail", exc)
+
     async def delete_collaborative_note(
         self,
         *,

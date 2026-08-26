@@ -89,6 +89,13 @@ from chat_turns import (
     ChatTurnStateError,
     validate_idempotency_key,
 )
+from collaborative_note_service import (
+    CollaborativeNoteCorrectionCommand,
+    CollaborativeNoteLifecycleCommand,
+    CollaborativeNoteService,
+    GetCollaborativeNoteCommand,
+    ListCollaborativeNotesCommand,
+)
 from computational_expert_service import ComputationalExpertService
 from database import (
     ArtifactCursorNotFoundError,
@@ -127,6 +134,12 @@ from schemas import (
     ChatSessionListResponse,
     ChatRequest,
     ChatResponse,
+    CollaborativeNoteCorrectionRequest,
+    CollaborativeNoteDetailResponse,
+    CollaborativeNoteLifecycleResponse,
+    CollaborativeNoteListResponse,
+    CollaborativeNoteMutationRequest,
+    CollaborativeNoteProposalResponse,
     IdentifierStr,
     MemoryClarificationReceipt,
     MemoryInspectionResponse,
@@ -839,6 +852,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             feedback_ledger=database,
         )
         memory_service = TrustedMemoryService(database=database)
+        collaborative_note_service = CollaborativeNoteService(
+            database=database
+        )
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
             vertex_settings
@@ -892,6 +908,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.generic_artifact_generator = generate_generic_artifact
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
+    app.state.collaborative_note_service = collaborative_note_service
     app.state.turn_service = turn_service
     app.state.authenticator = Authenticator(load_auth_settings())
 
@@ -1084,6 +1101,338 @@ async def create_user_workspace(
             detail="Workspace request is invalid.",
         ) from exc
     return WorkspaceCreateResponse(workspace=workspace)
+
+
+def _raise_collaborative_note_http_error(exc: Exception) -> NoReturn:
+    if isinstance(exc, MemoryProposalNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Collaborative note was not found.",
+        ) from exc
+    if isinstance(exc, MemoryProposalConflictError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Collaborative note state conflicts with this request.",
+        ) from exc
+    if isinstance(exc, MemoryEngineError):
+        _raise_database_http_error(exc)
+    if isinstance(exc, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Collaborative note request is invalid.",
+        ) from exc
+    raise exc
+
+
+@app.get(
+    "/api/users/{user_id}/projects/{project_id}/notes",
+    response_model=CollaborativeNoteListResponse,
+)
+async def list_collaborative_notes(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    status_filter: Annotated[
+        Literal["active", "archived"],
+        Query(),
+    ] = "active",
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    cursor: IdentifierStr | None = None,
+) -> CollaborativeNoteListResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = await request.app.state.collaborative_note_service.list_notes(
+            ListCollaborativeNotesCommand(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                status_filter=status_filter,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
+    except (
+        MemoryProposalNotFoundError,
+        MemoryProposalConflictError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        _raise_collaborative_note_http_error(exc)
+    return CollaborativeNoteListResponse(
+        notes=result.notes,
+        next_note_id=result.next_note_id,
+    )
+
+
+@app.get(
+    "/api/users/{user_id}/projects/{project_id}/notes/{note_id}",
+    response_model=CollaborativeNoteDetailResponse,
+)
+async def get_collaborative_note(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    note_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> CollaborativeNoteDetailResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = await request.app.state.collaborative_note_service.get_note(
+            GetCollaborativeNoteCommand(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                note_id=note_id,
+                limit=limit,
+            )
+        )
+    except (
+        MemoryProposalNotFoundError,
+        MemoryProposalConflictError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        _raise_collaborative_note_http_error(exc)
+    return CollaborativeNoteDetailResponse(
+        note=result.note,
+        events=result.events,
+    )
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/notes/{note_id}/corrections",
+    response_model=CollaborativeNoteProposalResponse,
+)
+async def create_collaborative_note_correction(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    note_id: IdentifierStr,
+    payload: CollaborativeNoteCorrectionRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+) -> CollaborativeNoteProposalResponse:
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+    try:
+        validated_idempotency_key = validate_idempotency_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Idempotency key is invalid.",
+        ) from exc
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = (
+            await request.app.state.collaborative_note_service.create_correction(
+                CollaborativeNoteCorrectionCommand(
+                    user_id=effective_user_id,
+                    workspace_id=effective_project_id,
+                    note_id=note_id,
+                    expected_revision=payload.expected_revision,
+                    note_kind=payload.note_kind,
+                    title=payload.title,
+                    body=payload.body,
+                    source_session_id=payload.source_session_id,
+                    source_message_ids=tuple(payload.source_message_ids),
+                    idempotency_key=validated_idempotency_key,
+                    observed_at=datetime.now(UTC),
+                )
+            )
+        )
+    except (
+        MemoryProposalNotFoundError,
+        MemoryProposalConflictError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        _raise_collaborative_note_http_error(exc)
+    return CollaborativeNoteProposalResponse(proposal=result.proposal)
+
+
+async def _change_collaborative_note_lifecycle(
+    *,
+    user_id: str,
+    project_id: str,
+    note_id: str,
+    payload: CollaborativeNoteMutationRequest,
+    request: Request,
+    authorization: str | None,
+    operation: Literal["archive", "restore"],
+) -> CollaborativeNoteLifecycleResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    command = CollaborativeNoteLifecycleCommand(
+        user_id=effective_user_id,
+        workspace_id=effective_project_id,
+        note_id=note_id,
+        expected_revision=payload.expected_revision,
+        observed_at=datetime.now(UTC),
+    )
+    try:
+        note_service = request.app.state.collaborative_note_service
+        if operation == "archive":
+            result = await note_service.archive_note(command)
+        else:
+            result = await note_service.restore_note(command)
+    except (
+        MemoryProposalNotFoundError,
+        MemoryProposalConflictError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        _raise_collaborative_note_http_error(exc)
+    return CollaborativeNoteLifecycleResponse(
+        note=result.note,
+        event=result.event,
+    )
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/notes/{note_id}/archive",
+    response_model=CollaborativeNoteLifecycleResponse,
+)
+async def archive_collaborative_note(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    note_id: IdentifierStr,
+    payload: CollaborativeNoteMutationRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> CollaborativeNoteLifecycleResponse:
+    return await _change_collaborative_note_lifecycle(
+        user_id=user_id,
+        project_id=project_id,
+        note_id=note_id,
+        payload=payload,
+        request=request,
+        authorization=authorization,
+        operation="archive",
+    )
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/notes/{note_id}/restore",
+    response_model=CollaborativeNoteLifecycleResponse,
+)
+async def restore_collaborative_note(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    note_id: IdentifierStr,
+    payload: CollaborativeNoteMutationRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> CollaborativeNoteLifecycleResponse:
+    return await _change_collaborative_note_lifecycle(
+        user_id=user_id,
+        project_id=project_id,
+        note_id=note_id,
+        payload=payload,
+        request=request,
+        authorization=authorization,
+        operation="restore",
+    )
+
+
+@app.delete(
+    "/api/users/{user_id}/projects/{project_id}/notes/{note_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_collaborative_note(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    note_id: IdentifierStr,
+    payload: CollaborativeNoteMutationRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> Response:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        await request.app.state.collaborative_note_service.delete_note(
+            CollaborativeNoteLifecycleCommand(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                note_id=note_id,
+                expected_revision=payload.expected_revision,
+                observed_at=datetime.now(UTC),
+            )
+        )
+    except (
+        MemoryProposalNotFoundError,
+        MemoryProposalConflictError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        _raise_collaborative_note_http_error(exc)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get(

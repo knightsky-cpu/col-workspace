@@ -682,6 +682,52 @@ class CollaborativeNoteEvent(StrictModel):
         return self
 
 
+class CollaborativeNoteListResponse(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
+    notes: list[CollaborativeNote] = Field(max_length=50)
+    next_note_id: IdentifierStr | None = None
+
+
+class CollaborativeNoteDetailResponse(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
+    note: CollaborativeNote
+    events: list[CollaborativeNoteEvent] = Field(max_length=50)
+
+
+class CollaborativeNoteCorrectionRequest(StrictModel):
+    expected_revision: StrictInt = Field(ge=1)
+    note_kind: CollaborativeNoteKind
+    title: str
+    body: str
+    source_session_id: IdentifierStr
+    source_message_ids: list[IdentifierStr] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, data: object) -> object:
+        return _normalize_collaborative_note_text(data)
+
+    @model_validator(mode="after")
+    def validate_source_messages(self) -> Self:
+        _require_unique_source_message_ids(self.source_message_ids)
+        return self
+
+
+class CollaborativeNoteMutationRequest(StrictModel):
+    expected_revision: StrictInt = Field(ge=1)
+
+
+class CollaborativeNoteProposalResponse(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
+    proposal: CollaborativeNoteProposal
+
+
+class CollaborativeNoteLifecycleResponse(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
+    note: CollaborativeNote
+    event: CollaborativeNoteEvent
+
+
 class AdaptationReceipt(StrictModel):
     signal_id: IdentifierStr
     category: MemoryCategory
