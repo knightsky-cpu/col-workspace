@@ -1022,9 +1022,11 @@ export function beginNotesLoad(state, statusFilter = state.notes.statusFilter) {
 
 export function completeNotesLoad(state, response) {
   const notes = Array.isArray(response.notes) ? response.notes : [];
+  const hasSelectedNote = Boolean(state.notes.selectedNoteId);
   const refreshedSelectedNote = notes.find((note) => (
     note?.note_id === state.notes.selectedNoteId
   ));
+  const shouldClearSelectedNote = hasSelectedNote && !refreshedSelectedNote;
   return {
     ...state,
     notes: {
@@ -1032,12 +1034,20 @@ export function completeNotesLoad(state, response) {
       status: "ready",
       notes,
       next_note_id: response.next_note_id ?? null,
+      selectedNoteId: shouldClearSelectedNote ? null : state.notes.selectedNoteId,
       detail: refreshedSelectedNote
         ? {
           ...state.notes.detail,
           note: refreshedSelectedNote,
         }
-        : state.notes.detail,
+        : shouldClearSelectedNote
+          ? {
+            status: "idle",
+            note: null,
+            events: [],
+            error: null,
+          }
+          : state.notes.detail,
       error: null,
     },
   };

@@ -861,6 +861,64 @@ test("notes list refresh updates selected active note detail", () => {
   assert.deepEqual(refreshed.notes.detail.events, withDetail.notes.detail.events);
 });
 
+test("notes list refresh clears selected detail when note leaves current filter", () => {
+  const note = {
+    note_id: "note-1",
+    title: "Workspace Environment",
+    body: "Using a Linux environment for this workspace.",
+    status: "active",
+    revision: 3,
+  };
+  const withActiveDetail = completeNoteDetailLoad(
+    beginNoteDetailLoad(
+      completeNotesLoad(beginNotesLoad(createInitialState(), "active"), {
+        notes: [note],
+        next_note_id: null,
+      }),
+      "note-1",
+    ),
+    {
+      note,
+      events: [{ event_id: "note-1--approved", event_type: "approved" }],
+    },
+  );
+
+  const afterArchive = completeNotesLoad(withActiveDetail, {
+    notes: [],
+    next_note_id: null,
+  });
+
+  assert.equal(afterArchive.notes.selectedNoteId, null);
+  assert.equal(afterArchive.notes.detail.status, "idle");
+  assert.equal(afterArchive.notes.detail.note, null);
+  assert.deepEqual(afterArchive.notes.detail.events, []);
+
+  const archivedNote = { ...note, status: "archived", revision: 4 };
+  const withArchivedDetail = completeNoteDetailLoad(
+    beginNoteDetailLoad(
+      completeNotesLoad(beginNotesLoad(createInitialState(), "archived"), {
+        notes: [archivedNote],
+        next_note_id: null,
+      }),
+      "note-1",
+    ),
+    {
+      note: archivedNote,
+      events: [{ event_id: "note-1--archived", event_type: "archived" }],
+    },
+  );
+
+  const afterRestore = completeNotesLoad(withArchivedDetail, {
+    notes: [],
+    next_note_id: null,
+  });
+
+  assert.equal(afterRestore.notes.selectedNoteId, null);
+  assert.equal(afterRestore.notes.detail.status, "idle");
+  assert.equal(afterRestore.notes.detail.note, null);
+  assert.deepEqual(afterRestore.notes.detail.events, []);
+});
+
 test("work list lifecycle stores newest-first metadata and cursor", () => {
   const loading = beginWorkListLoad(createInitialState());
   assert.equal(loading.work.list.status, "loading");
