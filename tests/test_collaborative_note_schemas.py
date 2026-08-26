@@ -42,12 +42,33 @@ def active_note_payload() -> dict[str, object]:
     }
 
 
+def event_payload() -> dict[str, object]:
+    return {
+        "event_id": "event-1",
+        "note_id": "note-1",
+        "proposal_id": "proposal-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "event_type": "approved",
+        "note_kind": "constraint",
+        "title": "macOS only",
+        "body": "Use macOS for this workspace.",
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "revision": 1,
+        "previous_revision": None,
+        "created_at": NOW,
+        "note_contract_version": "1.0",
+    }
+
+
 def test_proposal_serializes_exact_normalized_public_contract() -> None:
     from schemas import CollaborativeNoteProposal
 
     proposal = CollaborativeNoteProposal.model_validate(proposal_payload())
 
     assert proposal.model_dump(mode="json") == {
+        "note_contract_version": "1.0",
         "proposal_id": "proposal-1",
         "note_kind": "decision",
         "title": "Café launch",
@@ -69,6 +90,7 @@ def test_active_note_serializes_exact_normalized_public_contract() -> None:
     note = CollaborativeNote.model_validate(active_note_payload())
 
     assert note.model_dump(mode="json") == {
+        "note_contract_version": "1.0",
         "note_id": "note-1",
         "owner_user_id": "user-1",
         "workspace_id": "workspace-1",
@@ -83,6 +105,77 @@ def test_active_note_serializes_exact_normalized_public_contract() -> None:
         "created_at": "2026-08-24T12:00:00Z",
         "updated_at": "2026-08-24T12:00:00Z",
     }
+
+
+def test_note_event_serializes_exact_public_contract() -> None:
+    from schemas import CollaborativeNoteEvent
+
+    event = CollaborativeNoteEvent.model_validate(event_payload())
+
+    assert event.model_dump(mode="json") == {
+        "note_contract_version": "1.0",
+        "event_id": "event-1",
+        "note_id": "note-1",
+        "proposal_id": "proposal-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "event_type": "approved",
+        "note_kind": "constraint",
+        "title": "macOS only",
+        "body": "Use macOS for this workspace.",
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "revision": 1,
+        "previous_revision": None,
+        "created_at": "2026-08-24T12:00:00Z",
+    }
+
+
+def test_deleted_note_event_omits_content_bearing_fields() -> None:
+    from schemas import CollaborativeNoteEvent
+
+    payload = event_payload()
+    payload.update(
+        {
+            "event_type": "deleted",
+            "title": None,
+            "body": None,
+            "note_kind": None,
+            "source_message_ids": [],
+            "revision": 2,
+            "previous_revision": 1,
+        }
+    )
+
+    event = CollaborativeNoteEvent.model_validate(payload)
+
+    assert event.title is None
+    assert event.body is None
+    assert event.note_kind is None
+    assert event.source_message_ids == []
+
+
+@pytest.mark.parametrize(
+    ("model_name", "payload_factory"),
+    (
+        ("CollaborativeNoteProposal", proposal_payload),
+        ("CollaborativeNote", active_note_payload),
+        ("CollaborativeNoteEvent", event_payload),
+    ),
+)
+def test_note_models_reject_unsafe_storage_text(
+    model_name: str,
+    payload_factory: object,
+) -> None:
+    import schemas
+
+    assert callable(payload_factory)
+    payload = payload_factory()
+    payload["body"] = "The client email is person@example.com"
+    model = getattr(schemas, model_name)
+
+    with pytest.raises(ValidationError):
+        model.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -126,7 +219,7 @@ def test_note_models_reject_unknown_fields(
 
     assert callable(payload_factory)
     payload = payload_factory()
-    payload["note_contract_version"] = "1.0"
+    payload["unexpected_note_field"] = "1.0"
     model = getattr(schemas, model_name)
 
     with pytest.raises(ValidationError):

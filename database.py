@@ -60,6 +60,11 @@ from memory_proposals import (
     parse_proposal_origin,
     proposal_origin_id_from_signal_id,
 )
+from collaborative_notes import derive_note_proposal_ids
+from collaborative_note_policy import (
+    CollaborativeNoteKind,
+    validate_note_storage_text,
+)
 from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     ActiveMemorySignal,
@@ -77,6 +82,9 @@ from schemas import (
     ChatSessionDetailResponse,
     ChatSessionListResponse,
     ChatSessionSummary,
+    CollaborativeNote,
+    CollaborativeNoteEvent,
+    CollaborativeNoteProposal,
     CollaborationProfile,
     CollaborationProfileV2,
     MemoryEvent,
@@ -554,6 +562,524 @@ class MemoryEngine:
             )
         except GoogleAPIError as exc:
             self._raise_firestore_error("create_workspace", exc)
+
+    async def create_collaborative_note_proposal(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        session_id: str,
+        source_message_ids: tuple[str, ...],
+        note_kind: CollaborativeNoteKind,
+        title: str,
+        body: str,
+        idempotency_key: str,
+        expected_note_id: str | None,
+        expected_revision: int | None,
+        observed_at: datetime,
+    ) -> CollaborativeNoteProposal:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        self._validate_memory_identifier(session_id, "session_id")
+        self._validate_memory_identifier(idempotency_key, "idempotency_key")
+        if not 1 <= len(source_message_ids) <= 5:
+            raise ValueError("source_message_ids must contain 1 through 5 IDs.")
+        for message_id in source_message_ids:
+            self._validate_memory_identifier(message_id, "source_message_id")
+        normalized_title = validate_note_storage_text(title)
+        normalized_body = validate_note_storage_text(body)
+        ids = derive_note_proposal_ids(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            source_message_ids=source_message_ids,
+            note_kind=note_kind,
+            title=normalized_title,
+            body=normalized_body,
+            idempotency_key=idempotency_key,
+            expected_note_id=expected_note_id,
+            expected_revision=expected_revision,
+        )
+        proposal = CollaborativeNoteProposal(
+            proposal_id=ids.proposal_id,
+            note_kind=note_kind,
+            title=normalized_title,
+            body=normalized_body,
+            source_session_id=session_id,
+            source_message_ids=list(source_message_ids),
+            expected_note_id=expected_note_id,
+            expected_revision=expected_revision,
+            policy_version="1.0",
+            status="pending",
+            created_at=observed_at,
+            expires_at=observed_at + timedelta(hours=24),
+        )
+
+        try:
+            workspace_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+            )
+            proposal_collection = workspace_ref.collection("note_proposals")
+            proposal_ref = proposal_collection.document(proposal.proposal_id)
+            session_ref = self._client.collection("sessions").document(session_id)
+            message_refs = [
+                session_ref.collection("messages").document(message_id)
+                for message_id in source_message_ids
+            ]
+            transaction = self._client.transaction()
+
+            async def create_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> CollaborativeNoteProposal:
+                session_snapshot = await session_ref.get(transaction=transaction)
+                if not session_snapshot.exists:
+                    raise ChatSessionOwnershipError("Chat session is unavailable.")
+                self._validate_chat_session_owner(
+                    session_snapshot.to_dict(),
+                    user_id=user_id,
+                    project_id=workspace_id,
+                )
+                for message_ref in message_refs:
+                    message_snapshot = await message_ref.get(
+                        transaction=transaction
+                    )
+                    if not message_snapshot.exists:
+                        raise ChatTurnStateError(
+                            "Source message is unavailable."
+                        )
+                proposal_snapshot = await proposal_ref.get(
+                    transaction=transaction
+                )
+                if proposal_snapshot.exists:
+                    stored = CollaborativeNoteProposal.model_validate(
+                        proposal_snapshot.to_dict()
+                    )
+                    if (
+                        stored.proposal_id != proposal.proposal_id
+                        or stored.note_kind != proposal.note_kind
+                        or stored.title != proposal.title
+                        or stored.body != proposal.body
+                        or stored.source_session_id != proposal.source_session_id
+                        or stored.source_message_ids
+                        != proposal.source_message_ids
+                        or stored.expected_note_id != proposal.expected_note_id
+                        or stored.expected_revision != proposal.expected_revision
+                        or stored.policy_version != proposal.policy_version
+                    ):
+                        raise MemoryProposalConflictError(
+                            "Note proposal conflicts with existing state."
+                        )
+                    return stored
+                pending_count = await self._count_query_results(
+                    proposal_collection.where("status", "==", "pending")
+                    .limit(10)
+                    .stream(transaction=transaction)
+                )
+                if pending_count >= 10:
+                    raise MemoryProposalConflictError(
+                        "Collaborative note proposal limit reached."
+                    )
+                transaction.set(proposal_ref, proposal.model_dump(mode="python"))
+                return proposal
+
+            run_transaction = firestore.async_transactional(
+                create_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (
+            ChatSessionOwnershipError,
+            ChatTurnStateError,
+            MemoryProposalConflictError,
+        ):
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("create_collaborative_note_proposal", exc)
+
+    async def approve_collaborative_note_proposal(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        proposal_id: str,
+        observed_at: datetime,
+    ) -> tuple[CollaborativeNote, CollaborativeNoteEvent]:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        self._validate_memory_identifier(proposal_id, "proposal_id")
+        try:
+            workspace_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+            )
+            proposal_ref = workspace_ref.collection("note_proposals").document(
+                proposal_id
+            )
+            transaction = self._client.transaction()
+
+            async def approve_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> tuple[CollaborativeNote, CollaborativeNoteEvent]:
+                proposal_snapshot = await proposal_ref.get(
+                    transaction=transaction
+                )
+                if not proposal_snapshot.exists:
+                    raise MemoryProposalNotFoundError(
+                        "Note proposal is unavailable."
+                    )
+                proposal = CollaborativeNoteProposal.model_validate(
+                    proposal_snapshot.to_dict()
+                )
+                if proposal.status != "pending":
+                    raise MemoryProposalConflictError(
+                        "Note proposal is not pending."
+                    )
+                if proposal.expires_at <= observed_at:
+                    raise MemoryProposalExpiredError(
+                        "Note proposal has expired."
+                    )
+                note_id = (
+                    proposal.expected_note_id
+                    or proposal.proposal_id.replace(
+                        "note_proposal--",
+                        "note--",
+                        1,
+                    )
+                )
+                note_collection = workspace_ref.collection("collaborative_notes")
+                note_ref = note_collection.document(note_id)
+                note_snapshot = await note_ref.get(transaction=transaction)
+                revision = 1
+                previous_revision = None
+                created_at = observed_at
+                event_type = "approved"
+                if proposal.expected_note_id is not None:
+                    if not note_snapshot.exists:
+                        raise MemoryProposalConflictError(
+                            "Expected note is unavailable."
+                        )
+                    previous = CollaborativeNote.model_validate(
+                        note_snapshot.to_dict()
+                    )
+                    if previous.revision != proposal.expected_revision:
+                        raise MemoryProposalConflictError(
+                            "Expected note revision has changed."
+                        )
+                    revision = previous.revision + 1
+                    previous_revision = previous.revision
+                    created_at = previous.created_at
+                    event_type = "corrected"
+                elif note_snapshot.exists:
+                    existing = CollaborativeNote.model_validate(
+                        note_snapshot.to_dict()
+                    )
+                    return existing, CollaborativeNoteEvent.model_validate(
+                        {
+                            "event_id": existing.source_event_id,
+                            "note_id": existing.note_id,
+                            "proposal_id": proposal.proposal_id,
+                            "owner_user_id": user_id,
+                            "workspace_id": workspace_id,
+                            "event_type": "approved",
+                            "note_kind": existing.note_kind,
+                            "title": existing.title,
+                            "body": existing.body,
+                            "source_session_id": existing.source_session_id,
+                            "source_message_ids": existing.source_message_ids,
+                            "revision": existing.revision,
+                            "previous_revision": None,
+                            "created_at": existing.updated_at,
+                        }
+                    )
+                else:
+                    active_count = await self._count_query_results(
+                        note_collection.where("status", "==", "active")
+                        .limit(50)
+                        .stream(transaction=transaction)
+                    )
+                    if active_count >= 50:
+                        raise MemoryProposalConflictError(
+                            "Collaborative note active limit reached."
+                        )
+                event_id = f"{note_id}--{event_type}--{proposal.proposal_id}"
+                note = CollaborativeNote(
+                    note_id=note_id,
+                    owner_user_id=user_id,
+                    workspace_id=workspace_id,
+                    note_kind=proposal.note_kind,
+                    title=proposal.title,
+                    body=proposal.body,
+                    status="active",
+                    revision=revision,
+                    source_session_id=proposal.source_session_id,
+                    source_message_ids=proposal.source_message_ids,
+                    source_event_id=event_id,
+                    created_at=created_at,
+                    updated_at=observed_at,
+                )
+                event = CollaborativeNoteEvent(
+                    event_id=event_id,
+                    note_id=note_id,
+                    proposal_id=proposal.proposal_id,
+                    owner_user_id=user_id,
+                    workspace_id=workspace_id,
+                    event_type=event_type,
+                    note_kind=proposal.note_kind,
+                    title=proposal.title,
+                    body=proposal.body,
+                    source_session_id=proposal.source_session_id,
+                    source_message_ids=proposal.source_message_ids,
+                    revision=revision,
+                    previous_revision=previous_revision,
+                    created_at=observed_at,
+                )
+                proposal_document = proposal.model_dump(mode="python")
+                proposal_document["status"] = "approved"
+                proposal_document["resolved_at"] = observed_at
+                transaction.set(proposal_ref, proposal_document, merge=False)
+                transaction.set(note_ref, note.model_dump(mode="python"), merge=False)
+                transaction.set(
+                    note_ref.collection("events").document(event.event_id),
+                    event.model_dump(mode="python"),
+                    merge=False,
+                )
+                return note, event
+
+            run_transaction = firestore.async_transactional(
+                approve_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (
+            MemoryProposalConflictError,
+            MemoryProposalExpiredError,
+            MemoryProposalNotFoundError,
+        ):
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("approve_collaborative_note_proposal", exc)
+
+    async def delete_collaborative_note(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        note_id: str,
+        expected_revision: int,
+        observed_at: datetime,
+    ) -> CollaborativeNoteEvent:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        self._validate_memory_identifier(note_id, "note_id")
+        if expected_revision < 1:
+            raise ValueError("expected_revision must be positive.")
+        try:
+            note_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+                .collection("collaborative_notes")
+                .document(note_id)
+            )
+            transaction = self._client.transaction()
+
+            async def delete_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> CollaborativeNoteEvent:
+                note_snapshot = await note_ref.get(transaction=transaction)
+                if not note_snapshot.exists:
+                    raise MemoryProposalNotFoundError("Note is unavailable.")
+                note = CollaborativeNote.model_validate(note_snapshot.to_dict())
+                if (
+                    note.owner_user_id != user_id
+                    or note.workspace_id != workspace_id
+                    or note.revision != expected_revision
+                ):
+                    raise MemoryProposalConflictError(
+                        "Note state conflicts with this request."
+                    )
+                event = CollaborativeNoteEvent(
+                    event_id=f"{note.note_id}--deleted--{note.revision + 1}",
+                    note_id=note.note_id,
+                    proposal_id=None,
+                    owner_user_id=user_id,
+                    workspace_id=workspace_id,
+                    event_type="deleted",
+                    note_kind=None,
+                    title=None,
+                    body=None,
+                    source_session_id=None,
+                    source_message_ids=[],
+                    revision=note.revision + 1,
+                    previous_revision=note.revision,
+                    created_at=observed_at,
+                )
+                transaction.delete(note_ref)
+                transaction.set(
+                    note_ref.collection("events").document(event.event_id),
+                    event.model_dump(mode="python"),
+                    merge=False,
+                )
+                return event
+
+            run_transaction = firestore.async_transactional(delete_in_transaction)
+            return await run_transaction(transaction)
+        except (MemoryProposalConflictError, MemoryProposalNotFoundError):
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("delete_collaborative_note", exc)
+
+    async def archive_collaborative_note(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        note_id: str,
+        expected_revision: int,
+        observed_at: datetime,
+    ) -> tuple[CollaborativeNote, CollaborativeNoteEvent]:
+        return await self._change_collaborative_note_status(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            note_id=note_id,
+            expected_revision=expected_revision,
+            observed_at=observed_at,
+            required_status="active",
+            next_status="archived",
+            event_type="archived",
+        )
+
+    async def restore_collaborative_note(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        note_id: str,
+        expected_revision: int,
+        observed_at: datetime,
+    ) -> tuple[CollaborativeNote, CollaborativeNoteEvent]:
+        return await self._change_collaborative_note_status(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            note_id=note_id,
+            expected_revision=expected_revision,
+            observed_at=observed_at,
+            required_status="archived",
+            next_status="active",
+            event_type="restored",
+        )
+
+    async def _change_collaborative_note_status(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        note_id: str,
+        expected_revision: int,
+        observed_at: datetime,
+        required_status: str,
+        next_status: str,
+        event_type: str,
+    ) -> tuple[CollaborativeNote, CollaborativeNoteEvent]:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        self._validate_memory_identifier(note_id, "note_id")
+        if expected_revision < 1:
+            raise ValueError("expected_revision must be positive.")
+        try:
+            note_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+                .collection("collaborative_notes")
+                .document(note_id)
+            )
+            transaction = self._client.transaction()
+
+            async def change_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> tuple[CollaborativeNote, CollaborativeNoteEvent]:
+                note_snapshot = await note_ref.get(transaction=transaction)
+                if not note_snapshot.exists:
+                    raise MemoryProposalNotFoundError("Note is unavailable.")
+                note = CollaborativeNote.model_validate(note_snapshot.to_dict())
+                if (
+                    note.owner_user_id != user_id
+                    or note.workspace_id != workspace_id
+                    or note.revision != expected_revision
+                    or note.status != required_status
+                ):
+                    raise MemoryProposalConflictError(
+                        "Note state conflicts with this request."
+                    )
+                updated = CollaborativeNote(
+                    note_id=note.note_id,
+                    owner_user_id=user_id,
+                    workspace_id=workspace_id,
+                    note_kind=note.note_kind,
+                    title=note.title,
+                    body=note.body,
+                    status=next_status,
+                    revision=note.revision + 1,
+                    source_session_id=note.source_session_id,
+                    source_message_ids=note.source_message_ids,
+                    source_event_id=f"{note.note_id}--{event_type}--{note.revision + 1}",
+                    created_at=note.created_at,
+                    updated_at=observed_at,
+                )
+                event = CollaborativeNoteEvent(
+                    event_id=updated.source_event_id,
+                    note_id=note.note_id,
+                    proposal_id=None,
+                    owner_user_id=user_id,
+                    workspace_id=workspace_id,
+                    event_type=event_type,
+                    note_kind=note.note_kind,
+                    title=note.title,
+                    body=note.body,
+                    source_session_id=note.source_session_id,
+                    source_message_ids=note.source_message_ids,
+                    revision=updated.revision,
+                    previous_revision=note.revision,
+                    created_at=observed_at,
+                )
+                transaction.set(note_ref, updated.model_dump(mode="python"), merge=False)
+                transaction.set(
+                    note_ref.collection("events").document(event.event_id),
+                    event.model_dump(mode="python"),
+                    merge=False,
+                )
+                return updated, event
+
+            run_transaction = firestore.async_transactional(change_in_transaction)
+            return await run_transaction(transaction)
+        except (MemoryProposalConflictError, MemoryProposalNotFoundError):
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                f"{event_type}_collaborative_note",
+                exc,
+            )
+
+    @staticmethod
+    async def _count_query_results(stream: object) -> int:
+        count = 0
+        async for _ in stream:
+            count += 1
+        return count
 
     async def get_chat_session_detail(
         self,

@@ -163,3 +163,36 @@ def test_text_normalization_is_idempotent() -> None:
 
     assert normalize_note_title(title) == title
     assert normalize_note_body(body) == body
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "Use the blue deployment checklist",
+        "Favorite editor is Vim for this workspace",
+        "The assignment prefers project examples",
+    ),
+)
+def test_note_policy_allows_benign_arbitrary_note_content(value: str) -> None:
+    from collaborative_note_policy import validate_note_storage_text
+
+    assert validate_note_storage_text(value) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "The API key is sk-123456789abcdef",
+        "Client email is person@example.com",
+        "The office address is 123 Main Street",
+        "Remember everything from every chat",
+        "Note everything the user says",
+    ),
+)
+def test_note_policy_rejects_same_unsafe_storage_classes_as_memory(
+    value: str,
+) -> None:
+    from collaborative_note_policy import validate_note_storage_text
+
+    with pytest.raises(ValueError):
+        validate_note_storage_text(value)

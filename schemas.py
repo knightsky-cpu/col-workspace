@@ -16,11 +16,15 @@ from pydantic import (
 )
 
 from collaborative_note_policy import (
+    COLLABORATIVE_NOTE_CONTRACT_VERSION,
+    CollaborativeNoteEventType,
     CollaborativeNoteKind,
     CollaborativeNoteProposalStatus,
     CollaborativeNoteStatus,
     normalize_note_body,
     normalize_note_title,
+    validate_note_contract_version,
+    validate_note_storage_text,
 )
 from memory_policy import (
     ConfirmationChannel,
@@ -532,10 +536,14 @@ def _normalize_collaborative_note_text(data: object) -> object:
     if not isinstance(data, Mapping):
         return data
     normalized = dict(data)
-    if "title" in normalized:
-        normalized["title"] = normalize_note_title(normalized["title"])
-    if "body" in normalized:
-        normalized["body"] = normalize_note_body(normalized["body"])
+    if "title" in normalized and normalized["title"] is not None:
+        normalized["title"] = normalize_note_title(
+            validate_note_storage_text(normalized["title"])
+        )
+    if "body" in normalized and normalized["body"] is not None:
+        normalized["body"] = normalize_note_body(
+            validate_note_storage_text(normalized["body"])
+        )
     return normalized
 
 
@@ -560,6 +568,7 @@ class MemoryClarificationSelectionRequest(StrictModel):
 
 
 class CollaborativeNoteProposal(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
     proposal_id: IdentifierStr
     note_kind: CollaborativeNoteKind
     title: str
@@ -594,6 +603,7 @@ class CollaborativeNoteProposal(StrictModel):
 
 
 class CollaborativeNote(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
     note_id: IdentifierStr
     owner_user_id: IdentifierStr
     workspace_id: IdentifierStr
@@ -620,6 +630,55 @@ class CollaborativeNote(StrictModel):
         _require_aware_datetime(self.updated_at, "updated_at")
         if self.updated_at.astimezone(UTC) < self.created_at.astimezone(UTC):
             raise ValueError("updated_at must not be earlier than created_at.")
+        return self
+
+
+class CollaborativeNoteEvent(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
+    event_id: IdentifierStr
+    note_id: IdentifierStr
+    proposal_id: IdentifierStr | None = None
+    owner_user_id: IdentifierStr
+    workspace_id: IdentifierStr
+    event_type: CollaborativeNoteEventType
+    note_kind: CollaborativeNoteKind | None = None
+    title: str | None = None
+    body: str | None = None
+    source_session_id: IdentifierStr | None = None
+    source_message_ids: list[IdentifierStr] = Field(default_factory=list, max_length=5)
+    revision: StrictInt = Field(ge=1)
+    previous_revision: StrictInt | None = Field(default=None, ge=1)
+    created_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, data: object) -> object:
+        return _normalize_collaborative_note_text(data)
+
+    @field_validator("note_contract_version")
+    @classmethod
+    def validate_contract_version(cls, value: str) -> str:
+        return validate_note_contract_version(value)
+
+    @model_validator(mode="after")
+    def validate_event_invariants(self) -> Self:
+        _require_aware_datetime(self.created_at, "created_at")
+        if self.event_type == "deleted":
+            if (
+                self.note_kind is not None
+                or self.title is not None
+                or self.body is not None
+                or self.source_message_ids
+            ):
+                raise ValueError("Deleted note events must not retain content.")
+            return self
+        if self.note_kind is None or self.title is None or self.body is None:
+            raise ValueError("Note lifecycle events require note content.")
+        if self.source_session_id is None:
+            raise ValueError("Note lifecycle events require a source session.")
+        if not self.source_message_ids:
+            raise ValueError("Note lifecycle events require source messages.")
+        _require_unique_source_message_ids(self.source_message_ids)
         return self
 
 
