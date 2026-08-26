@@ -80,8 +80,9 @@ source baseline produced by the preceding phase.
 2. **Phase 2 - Governed Workspace Notes**
    - Approved implementation plan:
      [Phase 2 Governed Workspace Notes](superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md)
-   - Status: plan approved and checkpointed at `f7d20e0`; implementation
-     remains pending completion of Phase 1.
+   - Status: plan approved and checkpointed at `f7d20e0`, then reconciled
+     against accepted Phase 1 memory lifecycle closure at `fca35e5`.
+     Implementation remains pending explicit Pass 2A approval.
 3. **Phase 3 - Durable Asynchronous Artifact Work**
    - Checkpointed implementation plan:
      [Phase 3 Durable Asynchronous Artifact Work](superpowers/plans/2026-08-25-winning-core-phase-3-async-artifact-work.md)

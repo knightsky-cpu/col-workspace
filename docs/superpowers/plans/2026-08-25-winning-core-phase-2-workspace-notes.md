@@ -33,16 +33,19 @@ pytest, Google OIDC.
 - `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
 - `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
 - `docs/aug-25-2026-final-checklist.md`
+- `docs/phase-1-memory-lifecycle-evidence-aug-26-2026.md`
 - `docs/superpowers/specs/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`
 - `docs/superpowers/plans/2026-08-24-m9-note-1a-collaborative-note-proposal-active-projection-models.md`
 - `docs/superpowers/plans/2026-08-25-winning-core-phase-1-remaining-work.md`
 
-**Planning baseline:** Commit `541aa87` on `main`, with a clean worktree, was
-inspected on August 25, 2026. Phase 1 Passes 1B-1D are still pending according
-to the final checklist. Phase 2 implementation must not start until every
-Phase 1 pass is accepted and checkpointed. Before approving Phase 2A for
-implementation, re-audit this plan against that final Phase 1 checkpoint and
-replace the planning baseline with the accepted commit.
+**Planning baseline:** Commit `fca35e5` on `main` was inspected on August 26,
+2026 after accepted Phase 1 memory lifecycle closure. The live source now
+contains the intent-first Phase 1 profile-memory contract: explicit benign
+memory intent can create a governed `user_requested_memory` proposal, while the
+deterministic application policy rejects unsafe PII/SPII, credentials, secrets,
+and other prohibited durable-memory content before approval. Phase 2 must build
+workspace notes as a separate durable surface without weakening or bypassing
+that accepted safety boundary.
 
 The `docs/research/*.md` material was intentionally not used to design Phase
 2. Per the repository owner's direction, Phase 2 is grounded in current source
@@ -63,7 +66,7 @@ At the end of this phase:
 5. The response visibly identifies the note or prior chat that was used.
 6. Ambiguous references produce a choice instead of a guess.
 7. Notes never become global profile preferences, and another user or
-   workspace cannot inspect or retrieve them.
+   workspace cannot inspect or retrieve workspace-scoped notes.
 
 ## Verified current source state
 
@@ -122,8 +125,20 @@ requesting approval for the next.
   explicit approval before its first RED test.
 - Stop each source-changing pass at **implemented, pending manual
   verification**. Checkpoint only after the user accepts its manual targets.
-- Profile memory remains user-global and allowlisted. Collaborative notes
-  remain private to one authenticated user and one workspace.
+- Profile memory remains user-global and follows the accepted Phase 1
+  intent-first memory contract. Explicit benign memory intent can create a
+  governed profile-memory proposal; deterministic policy, not taxonomy fit,
+  decides whether the candidate is approvable.
+- Collaborative notes are not memories or profile preferences. They remain
+  private to one authenticated user and one workspace in Phase 2.
+- User-global notes and cross-workspace note retrieval are intentionally
+  deferred. Phase 2 must not make workspace notes globally available or silently
+  treat a workspace note as a user preference.
+- The note safety gate must match the memory safety gate: benign arbitrary
+  note content is allowed to become a pending proposal, while unsafe PII/SPII,
+  credentials, secrets, payment/government identifiers, protected-class facts,
+  other people's private information, and overbroad surveillance-style
+  "remember/note everything" requests are rejected before approval.
 - Only `decision`, `requirement`, `constraint`, `task_state`, and
   `working_context` are supported note kinds.
 - Title remains 1-120 normalized Unicode characters; body remains 1-2,000;
@@ -135,6 +150,12 @@ requesting approval for the next.
   creates the active projection exactly once.
 - One ordinary turn may create at most one note proposal. A turn may not
   create both a note proposal and profile-memory proposal or clarification.
+- Current-message user wording determines the durable surface. Requests to
+  "remember" user preferences, collaboration style, goals, interests, standing
+  instructions, or light identity details follow the profile-memory pipeline.
+  Requests to "note", "record as a note", or equivalent workspace/project
+  wording for decisions, requirements, constraints, task state, or working
+  context follow the workspace-note pipeline.
 - A structured note-decision turn may not route to an expert, create an
   artifact, record artifact feedback, or create another durable proposal.
 - The current user message is the only user authority for a proposal or new
@@ -208,8 +229,11 @@ frontend files in 2A.
 - Validate that every source message exists in the claimed source session and
   that the session's stored user/workspace match before proposal persistence.
 - Enforce current-message inclusion for ordinary one-message proposals.
-- Reject prohibited obvious credential/secret patterns conservatively without
-  claiming perfect secret detection.
+- Reject the same prohibited unsafe-storage classes as profile memory,
+  including obvious credential/secret patterns, unsafe PII/SPII, payment or
+  government identifiers, protected-class facts, other people's private
+  information, and overbroad surveillance-style note requests, without
+  claiming perfect sensitive-data classification.
 - Enforce proposal and active-note limits transactionally.
 - Build atomic, idempotent primitives for proposal creation and lifecycle
   transitions; public exposure remains deferred.
@@ -261,8 +285,8 @@ ownership and Firestore transaction helpers are shared risk surfaces.
 ### Manual acceptance targets
 
 1. Inspect one serialized pending proposal, active note, and lifecycle event;
-   confirm human content, versions, provenance, revision, and timestamps are
-   exact and no Firestore path or Google subject is public.
+   confirm human content, versions, provenance, revision, workspace scope, and
+   timestamps are exact and no Firestore path or Google subject is public.
 2. Inspect the focused test output for an owned proposal, cross-user denial,
    cross-workspace denial, stale correction, and hard deletion.
 3. Confirm no `/workspace` behavior or public API changed.
@@ -479,12 +503,15 @@ Agent Col states that review is required and never claims the note is active.
   text from the current user message. Application state supplies every ID,
   owner, workspace, source message, timestamp, revision, and receipt.
 - The proposal tool is separate from profile-memory persistence. Supervisor
-  instructions distinguish global preference, session-only instruction, and
-  workspace note before calling either governed tool.
+  instructions distinguish global profile memory, session-only instruction, and
+  workspace note before calling either governed tool. A note request must not
+  become profile memory, and a memory request must not become a note merely
+  because the content is arbitrary.
 - The existing memory `workspace_note` no-effect classification remains a safe
   fallback; it must not itself claim or create a note.
 - The note tool rejects candidates not grounded in the current message,
-  credentials/secrets, retrieved context, expert output, artifact content, or
+  candidates containing the same unsafe-storage classes rejected by memory
+  policy, retrieved context, expert output, artifact content, or
   structured-decision turns.
 - Atomic chat-turn guards enforce zero-or-one durable proposal across memory,
   memory clarification, note, artifact, feedback, and expert boundaries even
@@ -493,9 +520,9 @@ Agent Col states that review is required and never claims the note is active.
   partial failure, lease reclaim, completed replay, and `ChatResponse`.
 - Agent Col can proactively offer a consequential note, but version 1 creates
   it only when the current user message explicitly adopts the content or asks
-  to note/record/retain it. Broader autonomous inference is excluded from this
-  contest build because it cannot satisfy the current-message provenance rule
-  reliably.
+  to note/record/retain it as workspace/project context. Broader autonomous
+  inference is excluded from this contest build because it cannot satisfy the
+  current-message provenance rule reliably.
 
 ### TDD tasks
 
@@ -541,14 +568,17 @@ git diff --check
 
 Use Google OIDC in a fresh chat:
 
-1. Submit `Remember that this workspace must use API version 2.` Confirm one
-   pending Working context or Constraint note with exact reviewable content,
-   no active note, and no memory proposal.
-2. Submit `Please remember that I prefer concise answers.` Confirm the existing
+1. Submit `Agent Col, note that this workspace must use API version 2.` Confirm
+   one pending Working context or Constraint note with exact reviewable content,
+   no active note, workspace-only scope, and no memory proposal.
+2. Submit `Remember that this workspace must use API version 2.` Confirm it is
+   still classified as workspace-note intent because the remembered content is a
+   workspace requirement, not a user preference.
+3. Submit `Please remember that I prefer concise answers.` Confirm the existing
    profile-memory path still creates only a memory proposal.
-3. Submit a temporary instruction and a credential example; confirm neither
+4. Submit a temporary instruction and a credential example; confirm neither
    creates a note.
-4. Trigger/retry a post-effect responder failure and confirm one durable
+5. Trigger/retry a post-effect responder failure and confirm one durable
    pending proposal with one authoritative receipt.
 
 Stop after the 2D report and wait for acceptance/checkpoint approval.
@@ -765,7 +795,10 @@ Stop after the 2F report and wait for acceptance/checkpoint approval.
 The workspace gains a Notes section distinct from Memory. Users can review
 pending notes, inspect active/archived notes, perform every lifecycle action,
 answer continuity choices, and open authorized receipt sources from the
-conversation.
+conversation. The Notes section uses the same intentional approval loop as
+Memory: Agent Col may create a pending note proposal from an explicit note
+request, but the note is not saved or eligible for continuity until the user
+manually approves it in the UI.
 
 ### Expected file boundary
 
@@ -797,8 +830,13 @@ requires a backend contract change.
   nest Notes cards inside another card.
 - Pending notes show kind, exact title/body, source chat label/availability,
   expiry, Approve, and Reject.
+- Approval in the Notes section is the only browser path that converts a
+  pending note proposal into an active saved workspace note. The UI must not use
+  language implying that pending notes are already saved.
 - Active note detail supports correction proposal, archive, and delete.
 - Archived listing is explicit and supports restore. Deleted content vanishes.
+- Delete requires explicit confirmation before the browser calls the delete
+  handler or API. Cancel leaves inspection and retrieval eligibility unchanged.
 - Correction inputs enforce title/body bounds before transport but backend
   validation remains authoritative.
 - Loading, empty, pending, active, archived, expired, conflict, and error states
@@ -824,9 +862,11 @@ requires a backend contract change.
    refresh, conflict/error preservation, workspace switch, new conversation,
    receipt source selection, and continuity choices.
 4. GREEN immutable state transitions and refresh planning.
-5. RED Notes view tests for all lifecycle states, exact content, controls,
-   disabled behavior, source availability, archived toggle, and no raw-ID
-   primacy.
+5. RED Notes view tests for all lifecycle states, exact pending-proposal
+   review, manual approve/save and reject controls, active saved-note
+   inspection, delete cancel/confirm behavior, disabled behavior, source
+   availability, archived toggle, no saved-language for pending notes, and no
+   raw-ID primacy.
 6. GREEN `notes-view.mjs` and app wiring.
 7. RED chat/layout/static tests for separate receipts, ambiguity controls,
    keyboard semantics, section registration, long-text wrapping, desktop and
@@ -863,11 +903,13 @@ builders directly consume shared FastAPI/chat schemas.
 
 Use Google OIDC at `/workspace` on desktop and a narrow mobile viewport:
 
-1. Create one natural pending note and confirm exact title/body before
-   approval.
-2. Approve it in the Notes surface and inspect source provenance.
+1. Create one natural pending note and confirm it appears in the left-drawer
+   Notes section as a pending proposal with exact title/body before approval.
+2. Approve it in the Notes surface and inspect that it becomes an active saved
+   workspace note with source provenance.
 3. Propose and approve a correction; confirm only the new revision is active.
-4. Archive, list archived, restore, and delete; confirm each visible state.
+4. Archive, list archived, restore, cancel delete, then confirm delete; confirm
+   each visible state.
 5. Trigger ambiguity, choose a source with keyboard controls, and inspect the
    resulting receipt without leaving the active chat.
 6. Use a prior-chat receipt and open its authorized chat detail without
@@ -967,21 +1009,23 @@ Phase 3 planning remains a separate approval-gated activity.
   treated as a single unlimited transaction. The implementation must fail
   closed and report incomplete deletion without restoring content to
   retrieval.
-- **Secret detection:** Obvious credentials can be rejected, but the product
-  must not claim perfect sensitive-data classification. User review and
-  deletion remain essential controls.
+- **Sensitive-data detection:** Notes use the same unsafe-storage gate as
+  profile memory. Obvious unsafe PII/SPII, credentials, and secrets can be
+  rejected, but the product must not claim perfect sensitive-data
+  classification. User review and deletion remain essential controls.
 - **Deterministic relevance:** Title/token matching is less flexible than
   embeddings, but it is inspectable, bounded, deletable, and sufficient for
   the contest proof. Arbitrary semantic recall is explicitly excluded.
-- **Plan age:** Phase 1 may alter frontend or chat contracts before Phase 2
-  starts. The mandatory baseline re-audit prevents this plan from overriding
-  accepted newer source.
+- **Cross-workspace note value:** Some notes may later be useful outside their
+  original workspace, but Phase 2 intentionally keeps notes workspace-scoped to
+  avoid confusing notes with profile memory. User-global notes and
+  cross-workspace retrieval require a separate approved storage and relevance
+  pass.
 
 ## Stop and revise conditions
 
 Stop the current pass and return with evidence plus a revised plan if:
 
-- Phase 1 is not fully accepted and checkpointed;
 - current source at pass start materially differs from this file map or
   contract baseline;
 - source provenance requires reading history before ownership validation;
@@ -1001,14 +1045,13 @@ Stop the current pass and return with evidence plus a revised plan if:
 
 ## Approval and checkpoint sequence
 
-1. Repository owner reviews and approves or revises this Phase 2 plan.
-2. After approval, checkpoint this documentation-only plan to `origin/main`.
-3. After the Phase 2 plan checkpoint is confirmed, begin the separately gated
-   Phase 3 planning workflow requested by the repository owner.
-4. Before Phase 2 implementation, complete and checkpoint all remaining Phase
-   1 passes.
-5. Re-audit Phase 2 against the accepted Phase 1 commit and present Pass 2A for
-   explicit implementation approval.
-6. For each pass 2A-2H: RED, verify RED, GREEN, verify GREEN, refactor, focused
+1. Repository owner reviews and approves or revises this reconciled Phase 2
+   plan.
+2. After approval, checkpoint this documentation-only reconciliation to
+   `origin/main`.
+3. Present Pass 2A for explicit implementation approval.
+4. For each pass 2A-2H: RED, verify RED, GREEN, verify GREEN, refactor, focused
    verification, report, manual acceptance, then explicit checkpoint approval.
-7. Mark Phase 2 complete only after 2H manual evidence is accepted and pushed.
+5. Mark Phase 2 complete only after 2H manual evidence is accepted and pushed.
+6. Phase 3 planning and any user-global note design remain separate
+   approval-gated activities.
