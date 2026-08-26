@@ -9,6 +9,7 @@ export function createInitialState() {
     pendingTurn: null,
     lastFailure: null,
     activeMemoryClarification: null,
+    activeContinuityChoices: [],
     workspaces: {
       status: "idle",
       items: [],
@@ -44,6 +45,7 @@ export function createInitialState() {
       next_event_id: null,
       error: null,
     },
+    notes: emptyNotesState(),
     chats: {
       status: "idle",
       sessions: [],
@@ -108,6 +110,25 @@ function emptyChatSessionState() {
   };
 }
 
+function emptyNotesState() {
+  return {
+    status: "idle",
+    statusFilter: "active",
+    notes: [],
+    next_note_id: null,
+    pendingProposals: [],
+    selectedNoteId: null,
+    detail: {
+      status: "idle",
+      note: null,
+      events: [],
+      error: null,
+    },
+    pendingRequest: null,
+    error: null,
+  };
+}
+
 export function beginWorkspaceListLoad(state) {
   return {
     ...state,
@@ -168,7 +189,9 @@ export function selectWorkspace(
     pendingTurn: null,
     lastFailure: null,
     activeMemoryClarification: null,
+    activeContinuityChoices: [],
     work: emptyWorkState(),
+    notes: emptyNotesState(),
     chats: emptyChatSessionState(),
     workspaces: {
       ...state.workspaces,
@@ -246,6 +269,11 @@ export function completePendingTurn(state, response) {
     response,
     completedSelection,
   );
+  const nextContinuityChoices = nextActiveContinuityChoices(
+    state.activeContinuityChoices,
+    response,
+    isContinuitySelectionRequest(state.pendingTurn),
+  );
   return {
     ...state,
     transcript: [
@@ -268,6 +296,8 @@ export function completePendingTurn(state, response) {
     pendingTurn: null,
     lastFailure: null,
     activeMemoryClarification: nextClarification,
+    activeContinuityChoices: nextContinuityChoices,
+    notes: storePendingNoteProposalsFromResponse(state.notes, response),
   };
 }
 
@@ -287,6 +317,7 @@ export function startNewConversation(state, cryptoLike = globalThis.crypto) {
     pendingTurn: null,
     lastFailure: null,
     activeMemoryClarification: null,
+    activeContinuityChoices: [],
     chats: {
       ...state.chats,
       selectedSessionId: null,
@@ -355,6 +386,7 @@ export function completeChatSessionDetailLoad(state, response) {
     activeMemoryClarification: (
       response.active_memory_clarification ?? null
     ),
+    activeContinuityChoices: [],
     chats: {
       ...state.chats,
       selectedSessionId: response.session_id,
@@ -409,6 +441,28 @@ export function selectNeedsReceiptRefresh(response) {
         && action.action_name.includes("memory")
       ))
     ),
+    notes: (
+      (
+        Array.isArray(response.collaborative_note_proposals)
+        && response.collaborative_note_proposals.length > 0
+      )
+      || (
+        Array.isArray(response.collaborative_note_events)
+        && response.collaborative_note_events.length > 0
+      )
+      || (
+        Array.isArray(response.continuity_receipts)
+        && response.continuity_receipts.some((receipt) => (
+          objectOrEmpty(receipt).source_kind === "collaborative_note"
+        ))
+      )
+      || actions.some((action) => (
+        action !== null
+        && typeof action === "object"
+        && typeof action.action_name === "string"
+        && action.action_name.includes("collaborative_note")
+      ))
+    ),
   };
 }
 
@@ -454,10 +508,15 @@ function transcriptFromMessages(messages) {
           actions: [],
           artifacts: [],
           artifact_feedback: [],
-          citations: [],
-          memory_proposals: [],
-          adaptations: [],
-        },
+            citations: [],
+            memory_proposals: [],
+            memory_clarifications: [],
+            collaborative_note_proposals: [],
+            collaborative_note_events: [],
+            continuity_receipts: [],
+            continuity_choices: [],
+            adaptations: [],
+          },
       });
       pendingUser = null;
     }
@@ -472,6 +531,11 @@ function transcriptFromMessages(messages) {
         artifact_feedback: [],
         citations: [],
         memory_proposals: [],
+        memory_clarifications: [],
+        collaborative_note_proposals: [],
+        collaborative_note_events: [],
+        continuity_receipts: [],
+        continuity_choices: [],
         adaptations: [],
       },
     });
@@ -516,6 +580,29 @@ function nextActiveMemoryClarification(current, response, completedSelection) {
     return null;
   }
   return current ?? null;
+}
+
+function nextActiveContinuityChoices(current, response, completedSelection) {
+  const choices = Array.isArray(response.continuity_choices)
+    ? response.continuity_choices
+    : [];
+  if (choices.length > 0) {
+    return choices;
+  }
+  if (completedSelection) {
+    return [];
+  }
+  return current ?? [];
+}
+
+function isContinuitySelectionRequest(request) {
+  return Boolean(
+    request
+    && typeof request === "object"
+    && request.body
+    && typeof request.body === "object"
+    && request.body.continuity_selection,
+  );
 }
 
 function activityEntriesFromResponse(response) {
@@ -566,6 +653,30 @@ function activityEntriesFromResponse(response) {
       kind: "memory",
       label: proposal.category ?? "Memory proposal",
       detail: proposal.proposal_id ?? "",
+    });
+  }
+  for (
+    const rawProposal of Array.isArray(response.collaborative_note_proposals)
+      ? response.collaborative_note_proposals
+      : []
+  ) {
+    const proposal = objectOrEmpty(rawProposal);
+    entries.push({
+      kind: "note",
+      label: proposal.title ?? "Note proposal",
+      detail: proposal.proposal_id ?? "",
+    });
+  }
+  for (
+    const rawEvent of Array.isArray(response.collaborative_note_events)
+      ? response.collaborative_note_events
+      : []
+  ) {
+    const event = objectOrEmpty(rawEvent);
+    entries.push({
+      kind: "note",
+      label: compactText(["Note", event.event_type]),
+      detail: event.note_id ?? "",
     });
   }
   for (
@@ -894,6 +1005,187 @@ export function failMemoryLoad(state, error) {
       status: "error",
       error: errorMessage(error),
     },
+  };
+}
+
+export function beginNotesLoad(state, statusFilter = state.notes.statusFilter) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      status: "loading",
+      statusFilter,
+      error: null,
+    },
+  };
+}
+
+export function completeNotesLoad(state, response) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      status: "ready",
+      notes: Array.isArray(response.notes) ? response.notes : [],
+      next_note_id: response.next_note_id ?? null,
+      error: null,
+    },
+  };
+}
+
+export function failNotesLoad(state, error) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      status: "error",
+      error: errorMessage(error),
+    },
+  };
+}
+
+export function setNotesStatusFilter(state, statusFilter) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      status: "idle",
+      statusFilter,
+      notes: [],
+      next_note_id: null,
+      selectedNoteId: null,
+      detail: {
+        status: "idle",
+        note: null,
+        events: [],
+        error: null,
+      },
+      error: null,
+    },
+  };
+}
+
+export function beginNoteDetailLoad(state, noteId) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      selectedNoteId: noteId,
+      detail: {
+        status: "loading",
+        note: null,
+        events: [],
+        error: null,
+      },
+      error: null,
+    },
+  };
+}
+
+export function completeNoteDetailLoad(state, response) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      selectedNoteId: response.note?.note_id ?? state.notes.selectedNoteId,
+      detail: {
+        status: "ready",
+        note: response.note ?? null,
+        events: Array.isArray(response.events) ? response.events : [],
+        error: null,
+      },
+    },
+  };
+}
+
+export function failNoteDetailLoad(state, error) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      detail: {
+        ...state.notes.detail,
+        status: "error",
+        error: errorMessage(error),
+      },
+    },
+  };
+}
+
+export function beginNoteRequest(state, requestId) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      pendingRequest: requestId,
+      error: null,
+    },
+  };
+}
+
+export function completeNoteRequest(state) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      pendingRequest: null,
+      error: null,
+    },
+  };
+}
+
+export function failNoteRequest(state, error) {
+  return {
+    ...state,
+    notes: {
+      ...state.notes,
+      pendingRequest: null,
+      error: errorMessage(error),
+    },
+  };
+}
+
+export function storePendingNoteProposal(state, proposal) {
+  return {
+    ...state,
+    notes: storeOnePendingNoteProposal(state.notes, proposal),
+  };
+}
+
+function storePendingNoteProposalsFromResponse(notes, response) {
+  const proposals = Array.isArray(response.collaborative_note_proposals)
+    ? response.collaborative_note_proposals
+    : [];
+  const resolvedProposalIds = new Set(
+    (Array.isArray(response.collaborative_note_events)
+      ? response.collaborative_note_events
+      : [])
+      .map((event) => event?.proposal_id)
+      .filter((proposalId) => typeof proposalId === "string" && proposalId),
+  );
+  const reconciledNotes = resolvedProposalIds.size === 0
+    ? notes
+    : {
+      ...notes,
+      pendingProposals: notes.pendingProposals.filter((proposal) => (
+        !resolvedProposalIds.has(proposal.proposal_id)
+      )),
+    };
+  return proposals.reduce(storeOnePendingNoteProposal, reconciledNotes);
+}
+
+function storeOnePendingNoteProposal(notes, proposal) {
+  if (!proposal || typeof proposal !== "object" || !proposal.proposal_id) {
+    return notes;
+  }
+  return {
+    ...notes,
+    pendingProposals: [
+      proposal,
+      ...notes.pendingProposals.filter((item) => (
+        item.proposal_id !== proposal.proposal_id
+      )),
+    ].slice(0, 20),
   };
 }
 

@@ -17,8 +17,14 @@ import {
   listBlueprintFeedback,
   listBlueprints,
   createWorkspace,
+  archiveNote,
+  createNoteCorrection,
+  deleteNote,
+  getNote,
   listWorkspaces,
+  listNotes,
   deleteMemorySignal,
+  restoreNote,
   restoreArtifact,
   revokeMemorySignal,
   updateArtifactMetadata,
@@ -502,6 +508,141 @@ test("memory mutation wrappers reject invalid identifiers", async () => {
       "bad/slash",
       async () => new Response(null, { status: 204 }),
     ),
+    /invalid/i,
+  );
+});
+
+test("note API wrappers use canonical user workspace note paths", async () => {
+  const calls = [];
+  await listNotes(
+    "wifiknight",
+    "agent-col",
+    { status_filter: "archived", limit: 10, cursor: "note--cursor", authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        next_note_id: null,
+      });
+    },
+  );
+  await getNote(
+    "wifiknight",
+    "agent-col",
+    "note--1",
+    { limit: 20, authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { note_contract_version: "1.0" });
+    },
+  );
+  await createNoteCorrection(
+    "wifiknight",
+    "agent-col",
+    "note--1",
+    {
+      expected_revision: 2,
+      note_kind: "constraint",
+      title: "API version",
+      body: "Use API version 3.",
+      source_session_id: "session--1",
+      source_message_ids: ["message--1"],
+    },
+    { idempotencyKey: "note-correction--1", authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { note_contract_version: "1.0" });
+    },
+  );
+  await archiveNote(
+    "wifiknight",
+    "agent-col",
+    "note--1",
+    { expected_revision: 2 },
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { note_contract_version: "1.0" });
+    },
+  );
+  await restoreNote(
+    "wifiknight",
+    "agent-col",
+    "note--1",
+    { expected_revision: 3 },
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { note_contract_version: "1.0" });
+    },
+  );
+  await deleteNote(
+    "wifiknight",
+    "agent-col",
+    "note--1",
+    { expected_revision: 4 },
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return new Response(null, { status: 204 });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/projects/agent-col/notes?limit=10&status_filter=archived&cursor=note--cursor",
+  );
+  assert.equal(calls[0][1].method, "GET");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[1][0],
+    "/api/users/wifiknight/projects/agent-col/notes/note--1?limit=20",
+  );
+  assert.equal(calls[1][1].method, "GET");
+  assert.equal(
+    calls[2][0],
+    "/api/users/wifiknight/projects/agent-col/notes/note--1/corrections",
+  );
+  assert.equal(calls[2][1].method, "POST");
+  assert.equal(calls[2][1].headers["Idempotency-Key"], "note-correction--1");
+  assert.equal(calls[2][1].body, JSON.stringify({
+    expected_revision: 2,
+    note_kind: "constraint",
+    title: "API version",
+    body: "Use API version 3.",
+    source_session_id: "session--1",
+    source_message_ids: ["message--1"],
+  }));
+  assert.equal(
+    calls[3][0],
+    "/api/users/wifiknight/projects/agent-col/notes/note--1/archive",
+  );
+  assert.equal(calls[3][1].body, JSON.stringify({ expected_revision: 2 }));
+  assert.equal(
+    calls[4][0],
+    "/api/users/wifiknight/projects/agent-col/notes/note--1/restore",
+  );
+  assert.equal(calls[4][1].body, JSON.stringify({ expected_revision: 3 }));
+  assert.equal(
+    calls[5][0],
+    "/api/users/wifiknight/projects/agent-col/notes/note--1",
+  );
+  assert.equal(calls[5][1].method, "DELETE");
+  assert.equal(calls[5][1].body, JSON.stringify({ expected_revision: 4 }));
+});
+
+test("note API wrappers reject invalid identifiers and filters", async () => {
+  assert.throws(
+    () => listNotes("bad/slash", "agent-col", {}, async () => jsonResponse(200, {})),
+    /invalid/i,
+  );
+  assert.throws(
+    () => listNotes("wifiknight", "agent-col", { status_filter: "pending" }, async () => jsonResponse(200, {})),
+    /status_filter/i,
+  );
+  assert.throws(
+    () => getNote("wifiknight", "agent-col", "bad/slash", {}, async () => jsonResponse(200, {})),
     /invalid/i,
   );
 });

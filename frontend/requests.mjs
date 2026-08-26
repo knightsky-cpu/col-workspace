@@ -5,6 +5,7 @@ const ARTIFACT_FEEDBACK_DECISIONS = new Set([
   "edited",
 ]);
 const MEMORY_DECISIONS = new Set(["approve", "reject"]);
+const CONTINUITY_SOURCE_KINDS = new Set(["collaborative_note", "chat_session"]);
 
 function deepFreeze(value) {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
@@ -70,10 +71,12 @@ export function buildChatRequest(input) {
     input.memory_decision,
     input.artifact_feedback_decision,
     input.memory_clarification_selection,
+    input.collaborative_note_decision,
+    input.continuity_selection,
   ].filter(Boolean).length;
   if (structuredDecisionCount > 1) {
     throw new Error(
-      "Structured memory, artifact, and clarification decisions are mutually exclusive.",
+      "Structured memory, artifact, note, and clarification decisions are mutually exclusive.",
     );
   }
   if (input.memory_decision) {
@@ -84,6 +87,12 @@ export function buildChatRequest(input) {
   }
   if (input.memory_clarification_selection) {
     body.memory_clarification_selection = input.memory_clarification_selection;
+  }
+  if (input.collaborative_note_decision) {
+    body.collaborative_note_decision = input.collaborative_note_decision;
+  }
+  if (input.continuity_selection) {
+    body.continuity_selection = input.continuity_selection;
   }
 
   return deepFreeze({
@@ -204,6 +213,69 @@ export function buildMemoryDecisionChatRequest(
     user_id: context.user_id,
     message,
     memory_decision: memoryDecision,
+    crypto: cryptoLike,
+  });
+}
+
+export function buildCollaborativeNoteDecisionChatRequest(
+  context,
+  message,
+  decision,
+  cryptoLike = globalThis.crypto,
+) {
+  const noteDecision = {
+    proposal_id: String(decision.proposal_id ?? "").trim(),
+    decision: String(decision.decision ?? "").trim(),
+  };
+
+  if (!isValidIdentifier(noteDecision.proposal_id)) {
+    throw new Error("proposal_id is invalid.");
+  }
+  if (!MEMORY_DECISIONS.has(noteDecision.decision)) {
+    throw new Error("Collaborative note decision is invalid.");
+  }
+
+  return buildChatRequest({
+    project_id: context.project_id,
+    session_id: context.session_id,
+    user_id: context.user_id,
+    message,
+    collaborative_note_decision: noteDecision,
+    crypto: cryptoLike,
+  });
+}
+
+export function buildContinuitySelectionChatRequest(
+  context,
+  choice,
+  cryptoLike = globalThis.crypto,
+) {
+  const selection = {
+    choice_id: String(choice.choice_id ?? "").trim(),
+    source_kind: String(choice.source_kind ?? "").trim(),
+    source_id: String(choice.source_id ?? "").trim(),
+  };
+  const label = String(choice.display_label ?? "").trim();
+
+  if (!isValidIdentifier(selection.choice_id)) {
+    throw new Error("choice_id is invalid.");
+  }
+  if (!CONTINUITY_SOURCE_KINDS.has(selection.source_kind)) {
+    throw new Error("Continuity source kind is invalid.");
+  }
+  if (!isValidIdentifier(selection.source_id)) {
+    throw new Error("source_id is invalid.");
+  }
+  if (!label) {
+    throw new Error("choice label is required.");
+  }
+
+  return buildChatRequest({
+    project_id: context.project_id,
+    session_id: context.session_id,
+    user_id: context.user_id,
+    message: `Use note: ${label}.`,
+    continuity_selection: selection,
     crypto: cryptoLike,
   });
 }

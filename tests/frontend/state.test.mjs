@@ -6,6 +6,8 @@ import {
   beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
+  beginNoteDetailLoad,
+  beginNotesLoad,
   beginWorkDetailLoad,
   beginWorkListLoad,
   beginMemoryLoad,
@@ -19,6 +21,8 @@ import {
   completeWorkspaceListLoad,
   completeWorkListLoad,
   completeMemoryLoad,
+  completeNoteDetailLoad,
+  completeNotesLoad,
   completePendingTurn,
   completeChatSessionDetailLoad,
   completeChatSessionListLoad,
@@ -36,6 +40,7 @@ import {
   selectWorkRefreshPlan,
   selectWorkspace,
   setWorkLifecycleStatus,
+  storePendingNoteProposal,
   startNewConversation,
 } from "../../frontend/state.mjs";
 
@@ -678,10 +683,14 @@ test("receipt refresh selector is driven by structured fields", () => {
       artifacts: [{ artifact_id: "blueprint--1" }],
       memory_proposals: [{ proposal_id: "response_length--1" }],
       adaptations: [{ signal_id: "planning_granularity--1" }],
+      collaborative_note_proposals: [{ proposal_id: "note-proposal-1" }],
+      collaborative_note_events: [{ event_id: "note-1--approved" }],
+      continuity_receipts: [{ source_kind: "collaborative_note", source_id: "note-1" }],
     }),
     {
       work: true,
       memory: true,
+      notes: true,
     },
   );
   assert.deepEqual(
@@ -689,7 +698,128 @@ test("receipt refresh selector is driven by structured fields", () => {
     {
       work: false,
       memory: true,
+      notes: false,
     },
+  );
+});
+
+test("note lifecycle stores pending proposals, notes, detail, and clears on workspace switch", () => {
+  const loading = beginNotesLoad(createInitialState(), "active");
+  assert.equal(loading.notes.status, "loading");
+  assert.equal(loading.notes.statusFilter, "active");
+
+  const completed = completeNotesLoad(loading, {
+    notes: [{
+      note_id: "note-1",
+      title: "API version",
+      body: "Use API version 2.",
+      status: "active",
+      revision: 2,
+    }],
+    next_note_id: "note-2",
+  });
+  assert.equal(completed.notes.status, "ready");
+  assert.equal(completed.notes.notes[0].note_id, "note-1");
+  assert.equal(completed.notes.next_note_id, "note-2");
+
+  const withProposal = storePendingNoteProposal(completed, {
+    proposal_id: "note-proposal-1",
+    title: "API version",
+    body: "Use API version 2.",
+    status: "pending",
+  });
+  assert.equal(withProposal.notes.pendingProposals[0].proposal_id, "note-proposal-1");
+
+  const withDetail = completeNoteDetailLoad(
+    beginNoteDetailLoad(withProposal, "note-1"),
+    {
+      note: completed.notes.notes[0],
+      events: [{ event_id: "note-1--approved", event_type: "approved" }],
+    },
+  );
+  assert.equal(withDetail.notes.selectedNoteId, "note-1");
+  assert.equal(withDetail.notes.detail.events[0].event_type, "approved");
+
+  const selected = selectWorkspace(
+    {
+      ...withDetail,
+      context: { user_id: "wifiknight", project_id: "agent-col", session_id: "session-1" },
+    },
+    { workspace_id: "project--abc--study-plans", display_name: "Study Plans" },
+    cryptoStub,
+  );
+  assert.equal(selected.notes.notes.length, 0);
+  assert.equal(selected.notes.pendingProposals.length, 0);
+  assert.equal(selected.notes.detail.status, "idle");
+});
+
+test("completed turn stores active continuity choices and pending note proposals", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const pending = beginPendingTurn(accepted, {
+    key: "chat--1",
+    body: { message: "Remember this workspace note." },
+  });
+
+  const completed = completePendingTurn(pending, {
+    response: "Which note should I use?",
+    collaborative_note_proposals: [{
+      proposal_id: "note-proposal-1",
+      title: "API version",
+      body: "Use API version 2.",
+      status: "pending",
+    }],
+    continuity_choices: [{
+      choice_id: "choice-1",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+      display_label: "API version",
+      match_reason: "bounded_relevance",
+    }],
+  });
+
+  assert.equal(completed.notes.pendingProposals[0].proposal_id, "note-proposal-1");
+  assert.equal(completed.activeContinuityChoices[0].choice_id, "choice-1");
+});
+
+test("completed note event removes matching pending note proposal", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const withFirstProposal = storePendingNoteProposal(accepted, {
+    proposal_id: "note-proposal-1",
+    title: "API version",
+    body: "Use API version 2.",
+    status: "pending",
+  });
+  const withSecondProposal = storePendingNoteProposal(withFirstProposal, {
+    proposal_id: "note-proposal-2",
+    title: "Build target",
+    body: "Use the browser target.",
+    status: "pending",
+  });
+  const pending = beginPendingTurn(withSecondProposal, {
+    key: "chat--approve-note",
+    body: { message: "Record approve decision for note proposal note-proposal-1." },
+  });
+
+  const completed = completePendingTurn(pending, {
+    response: "Approved.",
+    collaborative_note_events: [{
+      event_id: "note-1--approved",
+      event_type: "approved",
+      note_id: "note-1",
+      proposal_id: "note-proposal-1",
+      title: "API version",
+    }],
+  });
+
+  assert.deepEqual(
+    completed.notes.pendingProposals.map((proposal) => proposal.proposal_id),
+    ["note-proposal-2"],
   );
 });
 

@@ -143,6 +143,18 @@
                 <div data-work-list></div>
               </div>
             </section>
+            <section class="drawer-section" aria-labelledby="notes-title" data-section="notes">
+              <div class="section-heading">
+                <h2 id="notes-title">Notes</h2>
+                <button type="button" class="drawer-toggle" data-section-toggle="notes" aria-expanded="false">
+                  Expand
+                </button>
+              </div>
+              <div data-section-content="notes" hidden>
+                <p class="form-error" role="alert" data-notes-error hidden></p>
+                <div data-notes-panel></div>
+              </div>
+            </section>
             <section class="drawer-section" aria-labelledby="memory-title" data-section="memory">
               <div class="section-heading">
                 <h2 id="memory-title">Memory</h2>
@@ -180,6 +192,7 @@
           <div class="chat-transcript" data-chat-transcript aria-live="polite"></div>
           <div class="conversation-footer">
             <div class="memory-clarification-choices" data-memory-clarification-choices hidden></div>
+            <div class="continuity-choices" data-continuity-choices hidden></div>
             <p class="chat-status" data-chat-status role="status"></p>
             <p class="chat-error" data-chat-error role="alert" hidden></p>
             <button type="button" data-retry-turn hidden>Retry exact request</button>

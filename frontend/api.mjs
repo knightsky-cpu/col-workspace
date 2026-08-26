@@ -159,6 +159,12 @@ function buildQuery(options = {}) {
   if (options.lifecycle_status !== undefined && options.lifecycle_status !== null) {
     params.set("lifecycle_status", String(options.lifecycle_status));
   }
+  if (options.status_filter !== undefined && options.status_filter !== null) {
+    params.set("status_filter", String(options.status_filter));
+  }
+  if (options.cursor !== undefined && options.cursor !== null) {
+    params.set("cursor", String(options.cursor));
+  }
   const query = params.toString();
   return query ? `?${query}` : "";
 }
@@ -427,6 +433,131 @@ export function deleteMemorySignal(
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/memory/signals/${encodeURIComponent(signalId)}`,
     { method: "DELETE", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+function assertNoteStatusFilter(value) {
+  if (value !== undefined && value !== null && !["active", "archived"].includes(value)) {
+    throw new Error("status_filter must be active or archived.");
+  }
+}
+
+export function listNotes(
+  userId,
+  projectId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertNoteStatusFilter(options.status_filter);
+  if (options.cursor !== undefined && options.cursor !== null) {
+    assertIdentifier("cursor", String(options.cursor));
+  }
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes${buildQuery(options)}`,
+    { method: "GET", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function getNote(
+  userId,
+  projectId,
+  noteId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("note_id", noteId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes/${encodeURIComponent(noteId)}${buildQuery(options)}`,
+    { method: "GET", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function createNoteCorrection(
+  userId,
+  projectId,
+  noteId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("note_id", noteId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes/${encodeURIComponent(noteId)}/corrections`,
+    {
+      method: "POST",
+      idempotencyKey: options.idempotencyKey,
+      authToken: options.authToken,
+      body: request,
+    },
+    fetchLike,
+  );
+}
+
+export function archiveNote(
+  userId,
+  projectId,
+  noteId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("note_id", noteId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes/${encodeURIComponent(noteId)}/archive`,
+    { method: "POST", authToken: options.authToken, body: request },
+    fetchLike,
+  );
+}
+
+export function restoreNote(
+  userId,
+  projectId,
+  noteId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("note_id", noteId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes/${encodeURIComponent(noteId)}/restore`,
+    { method: "POST", authToken: options.authToken, body: request },
+    fetchLike,
+  );
+}
+
+export function deleteNote(
+  userId,
+  projectId,
+  noteId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("note_id", noteId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes/${encodeURIComponent(noteId)}`,
+    { method: "DELETE", authToken: options.authToken, body: request },
     fetchLike,
   );
 }

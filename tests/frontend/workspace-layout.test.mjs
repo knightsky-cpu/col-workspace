@@ -14,6 +14,7 @@ test("drawer sections are collapsed by default", () => {
 
   assert.equal(initial.sections.workspace, false);
   assert.equal(initial.sections.work, false);
+  assert.equal(initial.sections.notes, false);
   assert.equal(initial.sections.memory, false);
   assert.equal(initial.sections.chats, false);
 });
@@ -53,11 +54,16 @@ test("left drawer sections can collapse without changing neighboring sections", 
 
   const expandedMemory = setSectionExpanded(initial, "memory", true);
   assert.equal(expandedMemory.sections.work, false);
+  assert.equal(expandedMemory.sections.notes, false);
   assert.equal(expandedMemory.sections.memory, true);
   assert.equal(expandedMemory.sections.chats, false);
 
   const collapsedMemory = setSectionExpanded(expandedMemory, "memory", false);
   assert.equal(collapsedMemory.sections.memory, false);
+
+  const expandedNotes = setSectionExpanded(initial, "notes", true);
+  assert.equal(expandedNotes.sections.notes, true);
+  assert.equal(expandedNotes.sections.memory, false);
 
   assert.throws(
     () => setSectionExpanded(initial, "activity", true),

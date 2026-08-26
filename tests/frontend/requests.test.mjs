@@ -7,6 +7,8 @@ import {
   buildExactRetryRequest,
   buildMemoryClarificationSelectionChatRequest,
   buildMemoryDecisionChatRequest,
+  buildCollaborativeNoteDecisionChatRequest,
+  buildContinuitySelectionChatRequest,
   buildOrdinaryChatRequest,
   generateIdempotencyKey,
   generateSessionId,
@@ -126,6 +128,28 @@ test("structured clarification selections are mutually exclusive with other deci
       memory_clarification_selection: {
         clarification_id: "memory-clarification--clarify-1",
         selected_candidate_index: 0,
+      },
+      crypto: cryptoStub,
+    }),
+    /mutually exclusive/,
+  );
+});
+
+test("structured note decisions and continuity selections are mutually exclusive", () => {
+  assert.throws(
+    () => buildChatRequest({
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+      message: "Use the selected note.",
+      collaborative_note_decision: {
+        proposal_id: "note-proposal-1",
+        decision: "approve",
+      },
+      continuity_selection: {
+        choice_id: "choice-1",
+        source_kind: "collaborative_note",
+        source_id: "note-1",
       },
       crypto: cryptoStub,
     }),
@@ -268,6 +292,114 @@ test("memory decision chat request rejects invalid decisions", () => {
       cryptoStub,
     ),
     /Memory decision is invalid/,
+  );
+});
+
+test("collaborative note decision chat request includes structured decision", () => {
+  const request = buildCollaborativeNoteDecisionChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    "Approve this note proposal.",
+    {
+      proposal_id: "note-proposal-1",
+      decision: "approve",
+    },
+    cryptoStub,
+  );
+
+  assert.equal(request.key, "chat--123e4567-e89b-12d3-a456-426614174000");
+  assert.deepEqual(request.body.collaborative_note_decision, {
+    proposal_id: "note-proposal-1",
+    decision: "approve",
+  });
+  assert.equal(request.body.message, "Approve this note proposal.");
+});
+
+test("continuity selection chat request includes only server-owned source identity", () => {
+  const request = buildContinuitySelectionChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    {
+      choice_id: "choice-1",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+      display_label: "API version",
+    },
+    cryptoStub,
+  );
+
+  assert.deepEqual(request.body, {
+    project_id: "agent-col",
+    session_id: "session-1",
+    user_id: "wifiknight",
+    message: "Use note: API version.",
+    continuity_selection: {
+      choice_id: "choice-1",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+    },
+  });
+  assert.throws(() => {
+    request.body.continuity_selection.source_id = "note-2";
+  }, TypeError);
+});
+
+test("note decision and continuity selection requests validate bounded fields", () => {
+  const context = {
+    project_id: "agent-col",
+    session_id: "session-1",
+    user_id: "wifiknight",
+  };
+
+  assert.throws(
+    () => buildCollaborativeNoteDecisionChatRequest(
+      context,
+      "Approve this note.",
+      { proposal_id: "bad/slash", decision: "approve" },
+      cryptoStub,
+    ),
+    /proposal_id is invalid/,
+  );
+  assert.throws(
+    () => buildCollaborativeNoteDecisionChatRequest(
+      context,
+      "Approve this note.",
+      { proposal_id: "note-proposal-1", decision: "approved" },
+      cryptoStub,
+    ),
+    /Collaborative note decision is invalid/,
+  );
+  assert.throws(
+    () => buildContinuitySelectionChatRequest(
+      context,
+      {
+        choice_id: "bad/slash",
+        source_kind: "collaborative_note",
+        source_id: "note-1",
+        display_label: "API version",
+      },
+      cryptoStub,
+    ),
+    /choice_id is invalid/,
+  );
+  assert.throws(
+    () => buildContinuitySelectionChatRequest(
+      context,
+      {
+        choice_id: "choice-1",
+        source_kind: "memory",
+        source_id: "note-1",
+        display_label: "API version",
+      },
+      cryptoStub,
+    ),
+    /Continuity source kind is invalid/,
   );
 });
 

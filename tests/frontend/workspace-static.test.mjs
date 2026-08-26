@@ -48,3 +48,14 @@ test("workspace provides a bounded memory clarification choice region", () => {
   assert.match(app, /buildMemoryClarificationSelectionChatRequest/);
   assert.match(app, /onSelectMemoryClarification/);
 });
+
+test("workspace provides a separate notes drawer and continuity choice region", () => {
+  assert.match(html, /<h2 id="notes-title">Notes<\/h2>/);
+  assert.match(html, /data-section="notes"/);
+  assert.match(html, /data-notes-panel/);
+  assert.match(html, /data-continuity-choices/);
+  assert.match(styles, /\.notes-card/);
+  assert.match(styles, /\.continuity-choices/);
+  assert.match(app, /createNotesView/);
+  assert.match(app, /buildContinuitySelectionChatRequest/);
+});

@@ -1,21 +1,27 @@
 import {
   apiFetchJson,
+  archiveNote,
   archiveArtifact,
   createArtifact,
   createArtifactVersion,
+  createNoteCorrection,
   createWorkspace,
+  deleteNote,
   deleteMemorySignal,
   getArtifact,
   getAuthConfig,
   getAuthSession,
   getChatSession,
   getBlueprint,
+  getNote,
   inspectMemory,
+  listNotes,
   listChatSessions,
   listArtifacts,
   listWorkspaces,
   listBlueprintFeedback,
   listBlueprints,
+  restoreNote,
   restoreArtifact,
   revokeMemorySignal,
   updateArtifactMetadata,
@@ -31,10 +37,13 @@ import {
 import { createChatsView } from "./chats-view.mjs";
 import { createChatView } from "./chat-view.mjs";
 import { createMemoryView } from "./memory-view.mjs";
+import { createNotesView } from "./notes-view.mjs";
 import { createWorkView } from "./work-view.mjs";
 import { createWorkspaceView } from "./workspace-view.mjs";
 import {
   buildArtifactFeedbackChatRequest,
+  buildCollaborativeNoteDecisionChatRequest,
+  buildContinuitySelectionChatRequest,
   buildExactRetryRequest,
   buildMemoryDecisionChatRequest,
   buildMemoryClarificationSelectionChatRequest,
@@ -55,10 +64,16 @@ import {
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
   beginMemoryLoad,
+  beginNoteDetailLoad,
+  beginNoteRequest,
+  beginNotesLoad,
   beginPendingTurn,
   beginWorkDetailLoad,
   beginWorkListLoad,
   completeMemoryLoad,
+  completeNoteDetailLoad,
+  completeNoteRequest,
+  completeNotesLoad,
   completeChatSessionDetailLoad,
   completeChatSessionListLoad,
   completeWorkspaceCreate,
@@ -72,6 +87,9 @@ import {
   completePendingTurn,
   createInitialState,
   failMemoryLoad,
+  failNoteDetailLoad,
+  failNoteRequest,
+  failNotesLoad,
   failChatSessionDetailLoad,
   failChatSessionListLoad,
   failWorkspaceListLoad,
@@ -82,7 +100,9 @@ import {
   selectNeedsReceiptRefresh,
   selectWorkspace,
   selectWorkRefreshPlan,
+  setNotesStatusFilter,
   setWorkLifecycleStatus,
+  storePendingNoteProposal,
   startNewConversation,
 } from "./state.mjs";
 import { setText } from "./render.mjs";
@@ -91,6 +111,7 @@ let state = createInitialState();
 let chatView = null;
 let workView = null;
 let memoryView = null;
+let notesView = null;
 let chatsView = null;
 let workspaceView = null;
 let layoutState = createInitialLayoutState();
@@ -184,6 +205,18 @@ function clearWorkspaceError() {
 
 function clearMemoryError() {
   const error = document.querySelector("[data-memory-error]");
+  setText(error, "");
+  error.hidden = true;
+}
+
+function showNotesError(message) {
+  const error = document.querySelector("[data-notes-error]");
+  setText(error, message);
+  error.hidden = false;
+}
+
+function clearNotesError() {
+  const error = document.querySelector("[data-notes-error]");
   setText(error, "");
   error.hidden = true;
 }
@@ -292,6 +325,7 @@ function renderWorkspace() {
   ensureWorkspaceView().render(state);
   ensureChatView().render(state);
   ensureWorkView().render(state);
+  ensureNotesView().render(state);
   ensureMemoryView().render(state);
   ensureChatsView().render(state);
   renderLayout();
@@ -331,7 +365,7 @@ function renderLayout() {
   );
   artifactExpandButton.setAttribute("aria-expanded", String(artifactsExpanded));
 
-  for (const section of ["workspace", "work", "memory", "chats"]) {
+  for (const section of ["workspace", "work", "notes", "memory", "chats"]) {
     const expanded = isSectionExpanded(layoutState, section);
     const content = document.querySelector(`[data-section-content="${section}"]`);
     const toggle = document.querySelector(`[data-section-toggle="${section}"]`);
@@ -458,6 +492,49 @@ async function loadMemory() {
   ensureMemoryView().render(state);
 }
 
+async function loadNotes(statusFilter = state.notes.statusFilter ?? "active") {
+  if (!state.context) {
+    return;
+  }
+  clearNotesError();
+  state = beginNotesLoad(state, statusFilter);
+  ensureNotesView().render(state);
+  try {
+    const response = await listNotes(
+      state.context.user_id,
+      state.context.project_id,
+      authOptions({ limit: 20, status_filter: statusFilter }),
+    );
+    state = completeNotesLoad(state, response);
+  } catch (error) {
+    state = failNotesLoad(state, error);
+    showNotesError(error.message);
+  }
+  ensureNotesView().render(state);
+}
+
+async function loadNoteDetail(noteId) {
+  if (!state.context) {
+    return;
+  }
+  clearNotesError();
+  state = beginNoteDetailLoad(state, noteId);
+  ensureNotesView().render(state);
+  try {
+    const response = await getNote(
+      state.context.user_id,
+      state.context.project_id,
+      noteId,
+      authOptions({ limit: 20 }),
+    );
+    state = completeNoteDetailLoad(state, response);
+  } catch (error) {
+    state = failNoteDetailLoad(state, error);
+    showNotesError(error.message);
+  }
+  ensureNotesView().render(state);
+}
+
 async function loadChatSessions() {
   if (!state.context) {
     return;
@@ -521,8 +598,12 @@ async function submitRequest(request) {
     if (refreshPlan.selectArtifactId !== null) {
       await loadWorkDetail(refreshPlan.selectArtifactId);
     }
-    if (selectNeedsReceiptRefresh(response).memory) {
+    const receiptRefresh = selectNeedsReceiptRefresh(response);
+    if (receiptRefresh.memory) {
       await loadMemory();
+    }
+    if (receiptRefresh.notes) {
+      await loadNotes();
     }
     await loadChatSessions();
   } catch (error) {
@@ -546,6 +627,7 @@ function ensureChatView() {
       transcript: document.querySelector("[data-chat-transcript]"),
       characterCount: document.querySelector("[data-character-count]"),
       clarificationChoices: document.querySelector("[data-memory-clarification-choices]"),
+      continuityChoices: document.querySelector("[data-continuity-choices]"),
     },
     {
       onSubmit(message) {
@@ -566,6 +648,16 @@ function ensureChatView() {
           return;
         }
         const request = buildMemoryClarificationSelectionChatRequest(
+          state.context,
+          choice,
+        );
+        submitRequest(request);
+      },
+      onSelectContinuityChoice(choice) {
+        if (!selectCanSubmit(state)) {
+          return;
+        }
+        const request = buildContinuitySelectionChatRequest(
           state.context,
           choice,
         );
@@ -592,6 +684,7 @@ function ensureWorkspaceView() {
         state = selectWorkspace(state, workspace);
         renderWorkspace();
         await loadWorkList();
+        await loadNotes();
         await loadMemory();
         await loadChatSessions();
       },
@@ -610,6 +703,7 @@ function ensureWorkspaceView() {
           renderWorkspace();
           await loadWorkspaces();
           await loadWorkList();
+          await loadNotes();
           await loadMemory();
           await loadChatSessions();
         } catch (error) {
@@ -806,6 +900,43 @@ function ensureMemoryView() {
   return memoryView;
 }
 
+function ensureNotesView() {
+  if (notesView !== null) {
+    return notesView;
+  }
+  notesView = createNotesView(
+    {
+      panel: document.querySelector("[data-notes-panel]"),
+    },
+    {
+      onSubmitDecision(decision) {
+        submitCollaborativeNoteDecision(decision);
+      },
+      onSelectNote(noteId) {
+        loadNoteDetail(noteId);
+      },
+      async onSetStatusFilter(statusFilter) {
+        state = setNotesStatusFilter(state, statusFilter);
+        ensureNotesView().render(state);
+        await loadNotes(statusFilter);
+      },
+      onCreateCorrection(note, request) {
+        createCollaborativeNoteCorrection(note, request);
+      },
+      onArchiveNote(note) {
+        changeCollaborativeNoteLifecycle("archive", note);
+      },
+      onRestoreNote(note) {
+        changeCollaborativeNoteLifecycle("restore", note);
+      },
+      onDeleteNote(note) {
+        changeCollaborativeNoteLifecycle("delete", note);
+      },
+    },
+  );
+  return notesView;
+}
+
 function ensureChatsView() {
   if (chatsView !== null) {
     return chatsView;
@@ -845,6 +976,88 @@ async function submitMemoryDecision(decision) {
     decision,
   );
   await submitRequest(request);
+}
+
+async function submitCollaborativeNoteDecision(decision) {
+  if (!selectCanSubmit(state)) {
+    return;
+  }
+  const request = buildCollaborativeNoteDecisionChatRequest(
+    state.context,
+    `Record ${decision.decision} decision for note proposal ${decision.proposal_id}.`,
+    decision,
+  );
+  await submitRequest(request);
+}
+
+async function createCollaborativeNoteCorrection(note, request) {
+  if (!state.context || !selectCanSubmit(state)) {
+    return;
+  }
+  clearNotesError();
+  state = beginNoteRequest(state, `correction:${note.note_id}`);
+  ensureNotesView().render(state);
+  try {
+    const response = await createNoteCorrection(
+      state.context.user_id,
+      state.context.project_id,
+      note.note_id,
+      request,
+      {
+        ...authOptions(),
+        idempotencyKey: `note-correction--${crypto.randomUUID()}`,
+      },
+    );
+    state = completeNoteRequest(storePendingNoteProposal(state, response.proposal));
+    await loadNotes();
+  } catch (error) {
+    state = failNoteRequest(state, error);
+    showNotesError(error.message);
+  }
+  renderWorkspace();
+}
+
+async function changeCollaborativeNoteLifecycle(action, note) {
+  if (!state.context || !selectCanSubmit(state)) {
+    return;
+  }
+  clearNotesError();
+  state = beginNoteRequest(state, `${action}:${note.note_id}`);
+  ensureNotesView().render(state);
+  try {
+    const request = { expected_revision: note.revision };
+    if (action === "archive") {
+      await archiveNote(
+        state.context.user_id,
+        state.context.project_id,
+        note.note_id,
+        request,
+        authOptions(),
+      );
+    } else if (action === "restore") {
+      await restoreNote(
+        state.context.user_id,
+        state.context.project_id,
+        note.note_id,
+        request,
+        authOptions(),
+      );
+    } else {
+      await deleteNote(
+        state.context.user_id,
+        state.context.project_id,
+        note.note_id,
+        request,
+        authOptions(),
+      );
+    }
+    state = completeNoteRequest(state);
+    await loadNotes(state.notes.statusFilter);
+  } catch (error) {
+    state = failNoteRequest(state, error);
+    showNotesError(error.message);
+  }
+  renderWorkspace();
 }
 
 async function revokeActiveMemorySignal(signal) {
@@ -892,12 +1105,14 @@ document.querySelector("[data-context-form]").addEventListener("submit", (event)
     );
     ensureChatView();
     ensureWorkView();
+    ensureNotesView();
     ensureMemoryView();
     ensureChatsView();
     ensureWorkspaceView();
     showWorkspace();
     loadWorkspaces();
     loadWorkList();
+    loadNotes();
     loadMemory();
     loadChatSessions();
   } catch (error) {
@@ -913,6 +1128,7 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
   document.querySelector("[data-chat-error]").hidden = true;
   setText(document.querySelector("[data-chat-status]"), "");
   renderWorkspace();
+  loadNotes();
   loadChatSessions();
   document.querySelector("#conversation-workspace").focus();
 });
@@ -960,6 +1176,7 @@ document.querySelector("[data-artifacts-expand]").addEventListener("click", () =
 document.querySelector("[data-left-refresh]").addEventListener("click", () => {
   loadWorkspaces();
   loadWorkList();
+  loadNotes();
   loadMemory();
   loadChatSessions();
 });

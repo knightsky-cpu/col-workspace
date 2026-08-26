@@ -140,6 +140,101 @@ test("renderReceipts renders list-valued adaptation proof without raw ids", () =
   assert.doesNotMatch(text, /missing-category--1/);
 });
 
+test("renderReceipts labels collaborative note and continuity receipts distinctly", () => {
+  const container = node();
+  renderReceipts(container, {
+    response: "I used note-1 in prose.",
+    collaborative_note_proposals: [{
+      proposal_id: "note-proposal-1",
+      note_kind: "constraint",
+      title: "API version",
+      body: "Use API version 2.",
+    }],
+    collaborative_note_events: [{
+      event_id: "note-1--approved",
+      event_type: "approved",
+      note_id: "note-1",
+      title: "API version",
+    }],
+    continuity_receipts: [{
+      receipt_id: "continuity--note-1--rev-2",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+      display_label: "Used note: API version",
+      match_reason: "exact_title",
+    }],
+  });
+
+  const text = textTree(container);
+  assert.match(text, /Note proposal: API version/);
+  assert.match(text, /Note updated: API version/);
+  assert.match(text, /Used note: API version/);
+  assert.doesNotMatch(text, /note-proposal-1/);
+  assert.doesNotMatch(text, /note-1--approved/);
+  assert.doesNotMatch(text, /continuity--note-1/);
+});
+
+test("createChatView renders continuity choices as buttons without bodies or raw ids", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+  const clarificationChoices = node("div");
+  const continuityChoices = node("div");
+  const selections = [];
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+    clarificationChoices,
+    continuityChoices,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+    onSelectContinuityChoice(choice) {
+      selections.push(choice);
+    },
+  });
+
+  view.render({
+    transcript: [],
+    lastFailure: null,
+    pendingTurn: null,
+    activeMemoryClarification: null,
+    activeContinuityChoices: [
+      {
+        choice_id: "choice-1",
+        source_kind: "collaborative_note",
+        source_id: "note-1",
+        display_label: "API version",
+        match_reason: "bounded_relevance",
+      },
+    ],
+  });
+
+  assert.equal(continuityChoices.hidden, false);
+  assert.equal(continuityChoices.children[0].tagName, "button");
+  assert.equal(continuityChoices.children[0].attributes.type, "button");
+  assert.equal(continuityChoices.children[0].textContent, "API version");
+  assert.doesNotMatch(textTree(continuityChoices), /choice-1|note-1|Use API version/);
+
+  continuityChoices.children[0].onclick();
+
+  assert.deepEqual(selections, [{
+    choice_id: "choice-1",
+    source_kind: "collaborative_note",
+    source_id: "note-1",
+    display_label: "API version",
+    match_reason: "bounded_relevance",
+  }]);
+});
+
 test("createChatView updates the character counter from prompt input", () => {
   const form = node("form");
   const input = node("textarea");

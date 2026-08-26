@@ -28,6 +28,23 @@ export function renderReceipts(container, response) {
   for (const proposal of response.memory_proposals ?? []) {
     appendReceipt(list, "Memory proposal", humanLabel(proposal.category));
   }
+  for (const proposal of response.collaborative_note_proposals ?? []) {
+    appendReceipt(list, "Note proposal", proposal.title);
+  }
+  for (const event of response.collaborative_note_events ?? []) {
+    appendReceipt(
+      list,
+      "Note updated",
+      event.title ?? humanLabel(event.event_type),
+    );
+  }
+  for (const receipt of response.continuity_receipts ?? []) {
+    appendReceipt(
+      list,
+      receipt.source_kind === "chat_session" ? "Used prior chat" : "Used note",
+      String(receipt.display_label ?? "").replace(/^Used note:\s*/i, ""),
+    );
+  }
   for (const adaptation of response.adaptations ?? []) {
     if (
       !adaptation
@@ -100,6 +117,30 @@ function renderMemoryClarificationChoices(container, clarification, disabled, on
   container.hidden = container.children.length === 0;
 }
 
+function renderContinuityChoices(container, choices, disabled, onSelect) {
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  for (const choice of Array.isArray(choices) ? choices : []) {
+    const label = String(choice.display_label ?? "").trim();
+    if (!label) {
+      continue;
+    }
+    const button = element("button", "continuity-choice contain-text", label);
+    button.setAttribute("type", "button");
+    button.disabled = disabled;
+    button.addEventListener("click", () => {
+      if (button.disabled) {
+        return;
+      }
+      onSelect(choice);
+    });
+    container.append(button);
+  }
+  container.hidden = container.children.length === 0;
+}
+
 export function createChatView(elements, handlers) {
   function updateCharacterCount() {
     if (!elements.characterCount) {
@@ -129,6 +170,12 @@ export function createChatView(elements, handlers) {
         state.activeMemoryClarification ?? null,
         state.pendingTurn !== null,
         handlers.onSelectMemoryClarification ?? (() => {}),
+      );
+      renderContinuityChoices(
+        elements.continuityChoices,
+        state.activeContinuityChoices ?? [],
+        state.pendingTurn !== null,
+        handlers.onSelectContinuityChoice ?? (() => {}),
       );
       updateCharacterCount();
     },

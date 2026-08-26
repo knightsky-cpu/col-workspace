@@ -564,6 +564,8 @@ p {
 
 .memory-card,
 .memory-event,
+.notes-card,
+.notes-event,
 .activity-event {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -571,10 +573,47 @@ p {
   padding: 0.75rem;
 }
 
-.memory-actions {
+.memory-actions,
+.notes-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.notes-card {
+  display: block;
+  inline-size: 100%;
+  text-align: left;
+}
+
+.notes-correction-form {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+}
+
+.notes-correction-form input,
+.notes-correction-form textarea {
+  inline-size: 100%;
+}
+
+.notes-correction-form textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
+.continuity-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.continuity-choices[hidden] {
+  display: none !important;
+}
+
+.continuity-choice {
+  overflow-wrap: anywhere;
 }
 
 .muted {
