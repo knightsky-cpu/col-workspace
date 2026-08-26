@@ -112,6 +112,34 @@ def clarification_function_response() -> types.FunctionResponse:
     )
 
 
+def pending_note_function_response() -> types.FunctionResponse:
+    return types.FunctionResponse(
+        name="propose_collaborative_note",
+        response={
+            "status": "pending",
+            "action": {
+                "action_name": "propose_collaborative_note",
+                "status": "completed",
+            },
+            "collaborative_note_proposal": {
+                "note_contract_version": "1.0",
+                "proposal_id": "note-proposal-1",
+                "note_kind": "constraint",
+                "title": "API version",
+                "body": "Use API version 2.",
+                "source_session_id": "session-1",
+                "source_message_ids": ["message-1"],
+                "expected_note_id": None,
+                "expected_revision": None,
+                "policy_version": "1.0",
+                "status": "pending",
+                "created_at": "2026-08-26T16:00:00Z",
+                "expires_at": "2026-08-27T16:00:00Z",
+            },
+        },
+    )
+
+
 @dataclass
 class FakeRunner:
     events: list[object]
@@ -224,10 +252,80 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
         "memory_source_message_text": (
             "Remember that I prefer concise responses."
         ),
-            "memory_decision_present": False,
-            "artifact_feedback_decision_present": False,
-            "memory_turn_id": "a" * 64,
+        "memory_decision_present": False,
+        "artifact_feedback_decision_present": False,
+        "memory_turn_id": "a" * 64,
         "memory_turn_owner_token": "owner-token-1",
+        "note_user_id": "user-1",
+        "note_workspace_id": "project-1",
+        "note_session_id": "session-1",
+        "note_source_message_id": "turn--source-message--user",
+        "note_source_message_text": (
+            "Remember that I prefer concise responses."
+        ),
+        "collaborative_note_decision_present": False,
+        "note_turn_id": "a" * 64,
+        "note_turn_owner_token": "owner-token-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_turn_places_server_owned_note_context_in_session_state(
+) -> None:
+    from memory_proposals import ProposalTurnLease
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(events=[FakeEvent("Pending note.", True)]),
+        session_service=sessions,
+    )
+
+    await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Agent Col, note that this workspace must use API v2.",
+            source_message_id="turn--source-message--user",
+            memory_decision_present=False,
+            collaborative_note_decision_present=False,
+            artifact_feedback_decision_present=False,
+            turn_lease=ProposalTurnLease(
+                turn_id="a" * 64,
+                owner_token="owner-token-1",
+            ),
+        )
+    )
+
+    state = dict(sessions.created[0]["state"])
+    delegation_token = state.pop("expert_delegation_token")
+    assert isinstance(delegation_token, str)
+    assert state == {
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "memory_user_id": "user-1",
+        "memory_workspace_id": "project-1",
+        "memory_session_id": "session-1",
+        "memory_source_message_id": "turn--source-message--user",
+        "memory_source_message_text": (
+            "Agent Col, note that this workspace must use API v2."
+        ),
+        "memory_decision_present": False,
+        "artifact_feedback_decision_present": False,
+        "memory_turn_id": "a" * 64,
+        "memory_turn_owner_token": "owner-token-1",
+        "note_user_id": "user-1",
+        "note_workspace_id": "project-1",
+        "note_session_id": "session-1",
+        "note_source_message_id": "turn--source-message--user",
+        "note_source_message_text": (
+            "Agent Col, note that this workspace must use API v2."
+        ),
+        "collaborative_note_decision_present": False,
+        "note_turn_id": "a" * 64,
+        "note_turn_owner_token": "owner-token-1",
     }
 
 
@@ -282,6 +380,78 @@ async def test_run_turn_includes_precompleted_note_decision_context() -> None:
     assert "SERVER_VALIDATED_PRECOMPLETED_ACTIONS" in context_text
     assert "collaborative_note_events" in context_text
     assert "note-proposal-1" in context_text
+
+
+@pytest.mark.asyncio
+async def test_run_turn_collects_note_proposal_receipt_truthfully() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [pending_note_function_response()]),
+                FakeEvent("That note is pending your approval.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Agent Col, note that this workspace must use API v2.",
+        )
+    )
+
+    assert result.response == "That note is pending your approval."
+    assert [action.model_dump(mode="json") for action in result.actions] == [
+        {
+            "action_name": "propose_collaborative_note",
+            "status": "completed",
+        }
+    ]
+    assert result.memory_proposals == ()
+    assert len(result.collaborative_note_proposals) == 1
+    assert result.collaborative_note_proposals[0].proposal_id == (
+        "note-proposal-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_turn_rejects_combined_memory_and_note_proposals() -> None:
+    from supervisor_runtime import (
+        SupervisorRuntime,
+        SupervisorRuntimeError,
+        SupervisorTurnContext,
+    )
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    None,
+                    False,
+                    [
+                        pending_function_response(),
+                        pending_note_function_response(),
+                    ],
+                )
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    with pytest.raises(SupervisorRuntimeError, match="conflicting"):
+        await runtime.run_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Remember and note this.",
+            )
+        )
 
 
 @pytest.mark.asyncio

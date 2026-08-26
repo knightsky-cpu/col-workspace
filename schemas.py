@@ -143,6 +143,7 @@ class AgentActionReceipt(StrictModel):
         "reject_memory_signal",
         "revoke_memory_signal",
         "delete_memory_signal",
+        "propose_collaborative_note",
         "approve_collaborative_note",
         "reject_collaborative_note",
     ]

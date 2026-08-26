@@ -1214,6 +1214,7 @@ class ServiceState:
     ]
     artifact_feedback_service_dependencies: list[tuple[object, object]]
     artifact_feedback_executor_dependencies: list[tuple[object, object]]
+    responder_note_services: list[object]
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ]
@@ -1455,6 +1456,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     ] = []
     artifact_feedback_service_dependencies: list[tuple[object, object]] = []
     artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
+    responder_note_services: list[object] = []
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ] = []
@@ -1495,6 +1497,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         artifact_feedback_executor_dependencies=(
             artifact_feedback_executor_dependencies
         ),
+        responder_note_services=responder_note_services,
         turn_service_dependencies=turn_service_dependencies,
     )
 
@@ -1579,9 +1582,11 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         *,
         vertex_settings: VertexAISettings,
         memory_service: object | None = None,
+        collaborative_note_service: object | None = None,
     ) -> object:
         responder_vertex_settings.append(vertex_settings)
         responder_memory_services.append(memory_service)
+        responder_note_services.append(collaborative_note_service)
         return responder_app
 
     monkeypatch.setattr(
@@ -2633,12 +2638,15 @@ async def test_lifespan_uses_explicit_vertex_clients_without_api_key(
 
 
 @pytest.mark.asyncio
-async def test_lifespan_injects_memory_only_into_responder_app(
+async def test_lifespan_injects_memory_and_notes_into_responder_app(
     service_state: ServiceState,
 ) -> None:
     async with main.lifespan(main.app):
         assert service_state.responder_memory_services == [
             service_state.memory_service
+        ]
+        assert service_state.responder_note_services == [
+            service_state.collaborative_note_service
         ]
 
 
@@ -4429,6 +4437,59 @@ async def test_headerless_chat_returns_proposal_from_persisted_source_message(
     assert context.turn_lease is None
     assert context.precompleted_actions == ()
     assert context.precompleted_memory_proposals == ()
+
+
+@pytest.mark.asyncio
+async def test_headerless_chat_returns_collaborative_note_proposal(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    proposal = CollaborativeNoteProposal.model_validate(
+        {
+            **collaborative_note_proposal_payload(),
+            "body": "Use API version 2.",
+            "expected_note_id": None,
+            "expected_revision": None,
+        }
+    )
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="I created a pending workspace note for your review.",
+        actions=(
+            AgentActionReceipt(
+                action_name="propose_collaborative_note",
+                status="completed",
+            ),
+        ),
+        collaborative_note_proposals=(proposal,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": (
+                "Agent Col, note that this workspace must use API version 2."
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["actions"] == [
+        {
+            "action_name": "propose_collaborative_note",
+            "status": "completed",
+        }
+    ]
+    assert response.json()["memory_proposals"] == []
+    assert response.json()["collaborative_note_proposals"] == [
+        proposal.model_dump(mode="json")
+    ]
+    context = service_state.turn_service.calls[0]
+    assert context.source_message_id == "user-message-1"
+    assert context.memory_decision_present is False
+    assert context.collaborative_note_decision_present is False
 
 
 @pytest.mark.asyncio

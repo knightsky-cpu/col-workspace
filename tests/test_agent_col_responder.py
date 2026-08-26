@@ -57,6 +57,24 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool() -> None:
     )
 
 
+def test_responder_app_catalog_exposes_governed_note_tool_separately() -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION, create_responder_app
+
+    app = create_responder_app(
+        vertex_settings=VERTEX_SETTINGS,
+        collaborative_note_service=object(),
+    )
+
+    assert tuple(tool.name for tool in app.root_agent.tools) == (
+        "propose_collaborative_note",
+    )
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+    assert "use propose_collaborative_note only" in normalized
+    assert "notes are workspace scoped" in normalized
+    assert "note request must not become profile memory" in normalized
+    assert "memory request must not become a note" in normalized
+
+
 def test_responder_instruction_preserves_final_response_authority() -> None:
     from agent_col_responder import (
         RESPONDER_INSTRUCTION,

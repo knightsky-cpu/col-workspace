@@ -908,6 +908,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             create_responder_app(
                 vertex_settings=vertex_settings,
                 memory_service=memory_service,
+                collaborative_note_service=collaborative_note_service,
             )
         )
         turn_service = AgentColTurnService(

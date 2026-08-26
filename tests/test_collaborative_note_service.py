@@ -230,6 +230,116 @@ async def test_note_service_creates_correction_without_mutating_active_note() ->
 
 
 @pytest.mark.asyncio
+async def test_note_service_creates_natural_pending_proposal_from_current_message(
+) -> None:
+    from collaborative_note_candidates import NoteCandidateDecision
+    from collaborative_note_service import (
+        CollaborativeNoteService,
+        NaturalCollaborativeNoteCommand,
+    )
+    from memory_proposals import ProposalTurnLease
+
+    database = FakeNoteDatabase()
+    service = CollaborativeNoteService(database=database)
+    turn_lease = ProposalTurnLease(
+        turn_id="a" * 64,
+        owner_token="owner-token-1",
+    )
+
+    result = await service.create_natural_proposal(
+        NaturalCollaborativeNoteCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-1",
+            source_message_id="message-1",
+            source_message_text=(
+                "Agent Col, note that this workspace must use API version 2."
+            ),
+            memory_decision_present=False,
+            collaborative_note_decision_present=False,
+            artifact_feedback_decision_present=False,
+            decision=NoteCandidateDecision(
+                note_kind="constraint",
+                title="API version",
+                body="Use API version 2.",
+                evidence_text="this workspace must use API version 2",
+            ),
+            observed_at=NOW,
+            turn_lease=turn_lease,
+        )
+    )
+
+    assert result.action is not None
+    assert result.action.action_name == "propose_collaborative_note"
+    assert result.proposal == database.proposal
+    assert database.proposal_calls == [
+        {
+            "user_id": "user-1",
+            "workspace_id": "workspace-1",
+            "session_id": "session-1",
+            "source_message_ids": ("message-1",),
+            "note_kind": "constraint",
+            "title": "API version",
+            "body": "Use API version 2.",
+            "idempotency_key": "a" * 64,
+            "expected_note_id": None,
+            "expected_revision": None,
+            "observed_at": NOW,
+            "turn_lease": turn_lease,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flag_name",
+    (
+        "memory_decision_present",
+        "collaborative_note_decision_present",
+        "artifact_feedback_decision_present",
+    ),
+)
+async def test_note_service_rejects_natural_proposal_on_structured_turn(
+    flag_name: str,
+) -> None:
+    from collaborative_note_candidates import NoteCandidateDecision
+    from collaborative_note_service import (
+        CollaborativeNoteService,
+        NaturalCollaborativeNoteCommand,
+    )
+
+    database = FakeNoteDatabase()
+    service = CollaborativeNoteService(database=database)
+    flags = {
+        "memory_decision_present": False,
+        "collaborative_note_decision_present": False,
+        "artifact_feedback_decision_present": False,
+    }
+    flags[flag_name] = True
+
+    with pytest.raises(ValueError, match="Structured decision"):
+        await service.create_natural_proposal(
+            NaturalCollaborativeNoteCommand(
+                user_id="user-1",
+                workspace_id="workspace-1",
+                session_id="session-1",
+                source_message_id="message-1",
+                source_message_text="Agent Col, note that use API version 2.",
+                decision=NoteCandidateDecision(
+                    note_kind="constraint",
+                    title="API version",
+                    body="Use API version 2.",
+                    evidence_text="use API version 2",
+                ),
+                observed_at=NOW,
+                **flags,
+            )
+        )
+
+    assert database.proposal_calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ("approve", "reject"))
 async def test_note_service_decides_pending_note_proposal(
     decision: str,

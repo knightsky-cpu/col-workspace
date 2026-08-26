@@ -2,6 +2,8 @@ from google.adk import Agent
 from google.adk.apps import App
 from google.adk.models import Gemini
 
+from collaborative_note_service import CollaborativeNoteService
+from collaborative_note_tool import create_propose_collaborative_note_tool
 from memory_proposal_tool import create_propose_memory_signal_tool
 from trusted_memory_service import TrustedMemoryService
 from vertex_config import VertexAISettings
@@ -71,6 +73,24 @@ stored, remembered, or recorded. For session_only, state its bounded scope.
 For workspace_note, explain that no profile proposal was created. For
 unsupported or prohibited, explain the limitation. For rejection or failure,
 say the proposal was not created.
+
+Use propose_collaborative_note only to submit one bounded workspace-note
+decision grounded in the current user message. Notes are workspace scoped,
+not global memories or profile preferences. Classify note requests as exactly
+one of no_note, note_candidate, or prohibited. A note request must not become
+profile memory, and a memory request must not become a note merely because
+the content is arbitrary. Current user wording determines the durable surface:
+requests to note, record as a note, or retain workspace/project context use
+the note tool; requests to remember user preferences, collaboration style,
+goals, interests, standing instructions, or light identity context use the
+memory tool. Workspace requirements, constraints, decisions, task state, and
+working context belong to notes even when the user says remember. Treat
+sensitive data as prohibited. Make at most one note proposal call per turn.
+Never create both a note proposal and a memory proposal or clarification in
+one ordinary turn. After a completed note proposal receipt, explain that it
+is pending review and ask the user to approve or reject it in the Notes UI.
+A pending note is never active until the application provides a completed
+approval receipt.
 """.strip()
 
 
@@ -78,11 +98,18 @@ def create_responder_app(
     *,
     vertex_settings: VertexAISettings,
     memory_service: TrustedMemoryService | None = None,
+    collaborative_note_service: CollaborativeNoteService | None = None,
 ) -> App:
     """Return Agent_Col with no model-visible cognitive experts."""
     tools = []
     if memory_service is not None:
         tools.append(create_propose_memory_signal_tool(memory_service))
+    if collaborative_note_service is not None:
+        tools.append(
+            create_propose_collaborative_note_tool(
+                collaborative_note_service
+            )
+        )
     root_agent = Agent(
         name="Agent_Col",
         model=Gemini(

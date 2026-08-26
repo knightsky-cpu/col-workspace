@@ -587,6 +587,7 @@ class MemoryEngine:
         expected_note_id: str | None,
         expected_revision: int | None,
         observed_at: datetime,
+        turn_lease: ProposalTurnLease | None = None,
     ) -> CollaborativeNoteProposal:
         self._validate_memory_identifier(user_id, "user_id")
         self._validate_memory_identifier(workspace_id, "workspace_id")
@@ -639,12 +640,22 @@ class MemoryEngine:
                 session_ref.collection("messages").document(message_id)
                 for message_id in source_message_ids
             ]
+            turn_ref = (
+                session_ref.collection("turns").document(turn_lease.turn_id)
+                if turn_lease is not None
+                else None
+            )
             transaction = self._client.transaction()
 
             async def create_in_transaction(
                 transaction: AsyncTransaction,
             ) -> CollaborativeNoteProposal:
                 session_snapshot = await session_ref.get(transaction=transaction)
+                turn_snapshot = (
+                    await turn_ref.get(transaction=transaction)
+                    if turn_ref is not None
+                    else None
+                )
                 if not session_snapshot.exists:
                     raise ChatSessionOwnershipError("Chat session is unavailable.")
                 self._validate_chat_session_owner(
@@ -682,6 +693,22 @@ class MemoryEngine:
                         raise MemoryProposalConflictError(
                             "Note proposal conflicts with existing state."
                         )
+                    if turn_lease is not None:
+                        effect = self._collaborative_note_proposal_turn_effect_update(
+                            turn_snapshot=turn_snapshot,
+                            user_id=user_id,
+                            workspace_id=workspace_id,
+                            session_id=session_id,
+                            source_message_id=source_message_ids[0],
+                            turn_lease=turn_lease,
+                            observed_at=observed_at,
+                            proposal=stored,
+                        )
+                        if effect is not None:
+                            raise ChatTurnStateError(
+                                "Stored note proposal has no matching turn "
+                                "effect."
+                            )
                     return stored
                 pending_count = await self._count_query_results(
                     proposal_collection.where("status", "==", "pending")
@@ -692,7 +719,23 @@ class MemoryEngine:
                     raise MemoryProposalConflictError(
                         "Collaborative note proposal limit reached."
                     )
+                effect = (
+                    self._collaborative_note_proposal_turn_effect_update(
+                        turn_snapshot=turn_snapshot,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        session_id=session_id,
+                        source_message_id=source_message_ids[0],
+                        turn_lease=turn_lease,
+                        observed_at=observed_at,
+                        proposal=proposal,
+                    )
+                    if turn_lease is not None
+                    else None
+                )
                 transaction.set(proposal_ref, proposal.model_dump(mode="python"))
+                if turn_ref is not None and effect is not None:
+                    transaction.set(turn_ref, effect, merge=True)
                 return proposal
 
             run_transaction = firestore.async_transactional(
@@ -3214,11 +3257,18 @@ class MemoryEngine:
             if action.action_name
             in {"approve_collaborative_note", "reject_collaborative_note"}
         )
+        note_proposal_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "propose_collaborative_note"
+        )
         note_decision = request.collaborative_note_decision
         if (
             len(note_proposals) > 1
             or len(note_events) > 1
             or bool(note_proposals) and bool(note_events)
+            or bool(note_proposal_actions) != bool(note_proposals)
+            or (note_proposals and len(note_proposal_actions) != 1)
             or bool(note_actions) != bool(note_events)
             or (note_events and len(note_actions) != 1)
             or (note_events and note_decision is None)
@@ -3594,10 +3644,17 @@ class MemoryEngine:
             if action.action_name
             in {"approve_collaborative_note", "reject_collaborative_note"}
         )
+        note_proposal_actions = tuple(
+            action
+            for action in actions
+            if action.action_name == "propose_collaborative_note"
+        )
         if (
             len(proposals) > 1
             or len(events) > 1
             or bool(proposals) and bool(events)
+            or bool(note_proposal_actions) != bool(proposals)
+            or (proposals and len(note_proposal_actions) != 1)
             or bool(note_actions) != bool(events)
             or (events and len(note_actions) != 1)
         ):
@@ -3637,6 +3694,105 @@ class MemoryEngine:
                 "Stored chat turn note effects are invalid."
             )
         return proposals, events
+
+    @staticmethod
+    def _collaborative_note_proposal_turn_effect_update(
+        *,
+        turn_snapshot: object,
+        user_id: str,
+        workspace_id: str,
+        session_id: str,
+        source_message_id: str,
+        turn_lease: ProposalTurnLease,
+        observed_at: datetime,
+        proposal: CollaborativeNoteProposal,
+    ) -> dict[str, object] | None:
+        if (
+            turn_snapshot is None
+            or not getattr(turn_snapshot, "exists", False)
+        ):
+            raise ChatTurnOwnershipError(
+                "Stored chat turn cannot own a note proposal effect."
+            )
+        turn_data = turn_snapshot.to_dict()
+        if not isinstance(turn_data, Mapping):
+            raise ChatTurnStateError("Stored chat turn is invalid.")
+        lease_expires_at = turn_data.get("lease_expires_at")
+        if (
+            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
+            or turn_data.get("status") != "in_progress"
+            or turn_data.get("user_id") != user_id
+            or turn_data.get("project_id") != workspace_id
+            or turn_data.get("session_id") != session_id
+            or turn_data.get("user_message_id") != source_message_id
+            or turn_data.get("lease_owner") != turn_lease.owner_token
+            or not MemoryEngine._is_aware_datetime(lease_expires_at)
+            or lease_expires_at <= observed_at
+        ):
+            raise ChatTurnOwnershipError(
+                "Stored chat turn cannot own a note proposal effect."
+            )
+        existing_actions = turn_data.get("actions", [])
+        existing_note_proposals = turn_data.get(
+            "collaborative_note_proposals",
+            [],
+        )
+        if not isinstance(existing_actions, list) or not isinstance(
+            existing_note_proposals,
+            list,
+        ):
+            raise ChatTurnStateError("Stored chat turn note effects are invalid.")
+        try:
+            validated_actions = [
+                AgentActionReceipt.model_validate(item).model_dump(
+                    mode="python"
+                )
+                for item in existing_actions
+            ]
+            validated_note_proposals = [
+                CollaborativeNoteProposal.model_validate(item).model_dump(
+                    mode="python"
+                )
+                for item in existing_note_proposals
+            ]
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ChatTurnStateError(
+                "Stored chat turn note effects are invalid."
+            ) from exc
+        if (
+            turn_data.get("memory_proposals")
+            or turn_data.get("memory_clarifications")
+            or turn_data.get("artifacts")
+            or turn_data.get("artifact_feedback")
+            or turn_data.get("collaborative_note_events")
+        ):
+            raise ChatTurnStateError(
+                "Stored chat turn has another durable effect."
+            )
+        action = AgentActionReceipt(
+            action_name="propose_collaborative_note",
+            status="completed",
+        ).model_dump(mode="python")
+        receipt = proposal.model_dump(mode="python")
+        proposal_actions = [
+            item
+            for item in validated_actions
+            if item["action_name"] == "propose_collaborative_note"
+        ]
+        if proposal_actions or validated_note_proposals:
+            if (
+                proposal_actions == [action]
+                and validated_note_proposals == [receipt]
+            ):
+                return None
+            raise ChatTurnStateError(
+                "Stored chat turn has conflicting note proposal effects."
+            )
+        return {
+            "actions": [*validated_actions, action],
+            "collaborative_note_proposals": [receipt],
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
 
     @classmethod
     def _assert_chat_turn_response_preserves_effects(

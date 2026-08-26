@@ -3,7 +3,13 @@ from datetime import datetime
 from typing import Literal
 
 from database import MemoryEngine
+from collaborative_note_candidates import (
+    NoteCandidateDecision,
+    NaturalCollaborativeNoteDecision,
+    validate_note_candidate_evidence,
+)
 from collaborative_note_policy import CollaborativeNoteKind
+from memory_proposals import ProposalTurnLease
 from schemas import (
     AgentActionReceipt,
     CollaborativeNote,
@@ -48,6 +54,21 @@ class CollaborativeNoteCorrectionCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class NaturalCollaborativeNoteCommand:
+    user_id: str
+    workspace_id: str
+    session_id: str
+    source_message_id: str
+    source_message_text: str
+    memory_decision_present: bool
+    collaborative_note_decision_present: bool
+    artifact_feedback_decision_present: bool
+    decision: NaturalCollaborativeNoteDecision
+    observed_at: datetime
+    turn_lease: ProposalTurnLease | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CollaborativeNoteDecisionCommand:
     user_id: str
     workspace_id: str
@@ -80,6 +101,7 @@ class CollaborativeNoteDetailResult:
 @dataclass(frozen=True, slots=True)
 class CollaborativeNoteProposalResult:
     proposal: CollaborativeNoteProposal
+    action: AgentActionReceipt | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +172,51 @@ class CollaborativeNoteService:
             observed_at=command.observed_at,
         )
         return CollaborativeNoteProposalResult(proposal=proposal)
+
+    async def create_natural_proposal(
+        self,
+        command: NaturalCollaborativeNoteCommand,
+    ) -> CollaborativeNoteProposalResult:
+        if (
+            command.memory_decision_present
+            or command.collaborative_note_decision_present
+            or command.artifact_feedback_decision_present
+        ):
+            raise ValueError(
+                "Structured decision turns cannot create note proposals."
+            )
+        if not isinstance(command.decision, NoteCandidateDecision):
+            raise ValueError("Command must contain a note candidate.")
+        validate_note_candidate_evidence(
+            command.decision,
+            command.source_message_text,
+        )
+        idempotency_key = (
+            command.turn_lease.turn_id
+            if command.turn_lease is not None
+            else command.source_message_id
+        )
+        proposal = await self._database.create_collaborative_note_proposal(
+            user_id=command.user_id,
+            workspace_id=command.workspace_id,
+            session_id=command.session_id,
+            source_message_ids=(command.source_message_id,),
+            note_kind=command.decision.note_kind,
+            title=command.decision.title,
+            body=command.decision.body,
+            idempotency_key=idempotency_key,
+            expected_note_id=None,
+            expected_revision=None,
+            observed_at=command.observed_at,
+            turn_lease=command.turn_lease,
+        )
+        return CollaborativeNoteProposalResult(
+            proposal=proposal,
+            action=AgentActionReceipt(
+                action_name="propose_collaborative_note",
+                status="completed",
+            ),
+        )
 
     async def decide_proposal(
         self,

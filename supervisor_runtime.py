@@ -14,6 +14,10 @@ from expert_delegation import (
     ExpertDelegationBudget,
     ExpertDelegationRegistry,
 )
+from collaborative_note_tool import (
+    PendingCollaborativeNoteToolResponse,
+    parse_collaborative_note_tool_response,
+)
 from memory_proposals import ProposalTurnLease
 from memory_proposal_tool import (
     ClarificationMemoryProposalToolResponse,
@@ -75,6 +79,7 @@ class SupervisorTurnContext:
     model_input_context: tuple[types.Content, ...] = ()
     source_message_id: str | None = None
     memory_decision_present: bool = False
+    collaborative_note_decision_present: bool = False
     artifact_feedback_decision_present: bool = False
     turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
@@ -191,6 +196,16 @@ class SupervisorRuntime:
                             "artifact_feedback_decision_present": (
                                 context.artifact_feedback_decision_present
                             ),
+                            "note_user_id": context.user_id,
+                            "note_workspace_id": context.project_id,
+                            "note_session_id": context.session_id,
+                            "note_source_message_id": (
+                                context.source_message_id
+                            ),
+                            "note_source_message_text": context.message,
+                            "collaborative_note_decision_present": (
+                                context.collaborative_note_decision_present
+                            ),
                         }
                     )
                     if context.turn_lease is not None:
@@ -198,6 +213,10 @@ class SupervisorRuntime:
                             {
                                 "memory_turn_id": context.turn_lease.turn_id,
                                 "memory_turn_owner_token": (
+                                    context.turn_lease.owner_token
+                                ),
+                                "note_turn_id": context.turn_lease.turn_id,
+                                "note_turn_owner_token": (
                                     context.turn_lease.owner_token
                                 ),
                             }
@@ -236,6 +255,67 @@ class SupervisorRuntime:
                     await research_tracker.observe(event)
                     source_tracker.observe(event)
                     for function_response in event.get_function_responses():
+                        if function_response.name == "propose_collaborative_note":
+                            parsed_note = parse_collaborative_note_tool_response(
+                                function_response.response
+                            )
+                            if isinstance(
+                                parsed_note,
+                                PendingCollaborativeNoteToolResponse,
+                            ):
+                                if not collaborative_note_proposals:
+                                    actions.append(parsed_note.action)
+                                    collaborative_note_proposals.append(
+                                        parsed_note.collaborative_note_proposal
+                                    )
+                                elif (
+                                    [
+                                        action
+                                        for action in actions
+                                        if action.action_name
+                                        == "propose_collaborative_note"
+                                    ]
+                                    != [parsed_note.action]
+                                    or collaborative_note_proposals
+                                    != [
+                                        parsed_note
+                                        .collaborative_note_proposal
+                                    ]
+                                ):
+                                    raise SupervisorRuntimeError(
+                                        "Agent_Col produced conflicting "
+                                        "collaborative note proposal receipts.",
+                                        actions=tuple(actions),
+                                        memory_proposals=tuple(
+                                            memory_proposals
+                                        ),
+                                        memory_clarifications=tuple(
+                                            memory_clarifications
+                                        ),
+                                        collaborative_note_proposals=tuple(
+                                            collaborative_note_proposals
+                                        ),
+                                        collaborative_note_events=tuple(
+                                            collaborative_note_events
+                                        ),
+                                    )
+                            if memory_proposals or memory_clarifications:
+                                raise SupervisorRuntimeError(
+                                    "Agent_Col produced conflicting memory "
+                                    "and collaborative note proposal receipts.",
+                                    actions=tuple(actions),
+                                    memory_proposals=tuple(memory_proposals),
+                                    memory_clarifications=tuple(
+                                        memory_clarifications
+                                    ),
+                                    collaborative_note_proposals=tuple(
+                                        collaborative_note_proposals
+                                    ),
+                                    collaborative_note_events=tuple(
+                                        collaborative_note_events
+                                    ),
+                                )
+                            continue
                         if function_response.name != "propose_memory_signal":
                             continue
                         parsed = parse_memory_proposal_tool_response(
@@ -317,6 +397,22 @@ class SupervisorRuntime:
                                         collaborative_note_events
                                     ),
                                 )
+                        if collaborative_note_proposals:
+                            raise SupervisorRuntimeError(
+                                "Agent_Col produced conflicting memory and "
+                                "collaborative note proposal receipts.",
+                                actions=tuple(actions),
+                                memory_proposals=tuple(memory_proposals),
+                                memory_clarifications=tuple(
+                                    memory_clarifications
+                                ),
+                                collaborative_note_proposals=tuple(
+                                    collaborative_note_proposals
+                                ),
+                                collaborative_note_events=tuple(
+                                    collaborative_note_events
+                                ),
+                            )
                     if (
                         getattr(event, "author", "Agent_Col") == "Agent_Col"
                         and event.is_final_response()
@@ -424,6 +520,21 @@ class SupervisorRuntime:
             action
             for action in actions
             if action.action_name
+            in {
+                "propose_collaborative_note",
+                "approve_collaborative_note",
+                "reject_collaborative_note",
+            }
+        ]
+        note_proposal_actions = [
+            action
+            for action in actions
+            if action.action_name == "propose_collaborative_note"
+        ]
+        note_decision_actions = [
+            action
+            for action in actions
+            if action.action_name
             in {"approve_collaborative_note", "reject_collaborative_note"}
         ]
         if (
@@ -431,10 +542,14 @@ class SupervisorRuntime:
             or len(collaborative_note_events) > 1
             or bool(collaborative_note_proposals)
             and bool(collaborative_note_events)
-            or bool(note_actions) != bool(collaborative_note_events)
+            or bool(note_proposal_actions) != bool(collaborative_note_proposals)
+            or bool(note_decision_actions) != bool(collaborative_note_events)
+            or note_proposal_actions
+            and len(note_proposal_actions) != 1
             or (
                 collaborative_note_events
-                and len(note_actions) != len(collaborative_note_events)
+                and len(note_decision_actions)
+                != len(collaborative_note_events)
             )
         ):
             raise SupervisorRuntimeError(

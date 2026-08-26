@@ -75,6 +75,29 @@ def test_create_supervisor_app_registers_only_injected_memory_tool() -> None:
     ] == ["research_expert"]
 
 
+def test_create_supervisor_app_registers_injected_note_tool_separately(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION, create_supervisor_app
+
+    note_service = object()
+    app = create_supervisor_app(
+        vertex_settings=VERTEX_SETTINGS,
+        collaborative_note_service=note_service,
+    )
+
+    assert [tool.name for tool in app.root_agent.tools] == [
+        "propose_collaborative_note",
+        "research_expert",
+    ]
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+    assert "Use propose_collaborative_note only" in normalized_instruction
+    assert "Notes are workspace scoped" in normalized_instruction
+    assert "note request must not become profile memory" in (
+        normalized_instruction
+    )
+    assert "memory request must not become a note" in normalized_instruction
+
+
 def test_supervisor_instruction_enforces_governed_memory_restraint() -> None:
     from supervisor import SUPERVISOR_INSTRUCTION, create_supervisor_app
 
