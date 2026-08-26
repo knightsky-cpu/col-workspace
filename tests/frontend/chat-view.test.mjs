@@ -9,6 +9,7 @@ function node(tagName = "div") {
     children: [],
     attributes: {},
     value: "",
+    disabled: false,
     scrollHeight: 0,
     scrollTop: 0,
     textContent: "",
@@ -161,4 +162,135 @@ test("createChatView scrolls the transcript to the latest rendered turn", () => 
   });
 
   assert.equal(transcript.scrollTop, 1200);
+});
+
+test("createChatView renders active memory clarification choices without internal ids", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+  const clarificationChoices = node("div");
+  const selections = [];
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+    clarificationChoices,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+    onSelectMemoryClarification(choice) {
+      selections.push(choice);
+    },
+  });
+
+  view.render({
+    transcript: [],
+    lastFailure: null,
+    pendingTurn: null,
+    activeMemoryClarification: {
+      clarification_id: "memory-clarification--clarify-1",
+      expires_at: "2099-01-01T00:00:00Z",
+      choices: [
+        {
+          candidate_index: 0,
+          category_label: "Response length",
+          value_label: "Detailed",
+        },
+        {
+          candidate_index: 1,
+          category_label: "Explanation structure",
+          value_label: "Step by step",
+        },
+      ],
+    },
+  });
+
+  assert.equal(clarificationChoices.hidden, false);
+  assert.equal(clarificationChoices.children.length, 2);
+  assert.equal(
+    clarificationChoices.children[0].textContent,
+    "Response length: Detailed",
+  );
+  assert.equal(clarificationChoices.children[0].attributes.type, "button");
+  assert.equal(clarificationChoices.children[0].disabled, false);
+  assert.doesNotMatch(textTree(clarificationChoices), /memory-clarification--/);
+
+  clarificationChoices.children[0].onclick();
+
+  assert.equal(selections.length, 1);
+  assert.equal(selections[0].candidate_index, 0);
+  assert.equal(
+    selections[0].clarification_id,
+    "memory-clarification--clarify-1",
+  );
+});
+
+test("createChatView disables clarification choices while pending or expired", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+  const clarificationChoices = node("div");
+  let calls = 0;
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+    clarificationChoices,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+    onSelectMemoryClarification() {
+      calls += 1;
+    },
+  });
+
+  view.render({
+    transcript: [],
+    lastFailure: null,
+    pendingTurn: { key: "chat--pending", body: { message: "pending" } },
+    activeMemoryClarification: {
+      clarification_id: "memory-clarification--clarify-1",
+      expires_at: "2099-01-01T00:00:00Z",
+      choices: [{
+        candidate_index: 0,
+        category_label: "Response length",
+        value_label: "Detailed",
+      }],
+    },
+  });
+
+  assert.equal(clarificationChoices.children[0].disabled, true);
+  clarificationChoices.children[0].onclick();
+  assert.equal(calls, 0);
+
+  view.render({
+    transcript: [],
+    lastFailure: null,
+    pendingTurn: null,
+    activeMemoryClarification: {
+      clarification_id: "memory-clarification--clarify-1",
+      expires_at: "2000-01-01T00:00:00Z",
+      choices: [{
+        candidate_index: 0,
+        category_label: "Response length",
+        value_label: "Detailed",
+      }],
+    },
+  });
+
+  assert.equal(clarificationChoices.children[0].disabled, true);
 });

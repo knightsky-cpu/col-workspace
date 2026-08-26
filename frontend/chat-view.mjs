@@ -49,6 +49,41 @@ export function renderTranscript(container, transcript) {
   }
 }
 
+function isClarificationExpired(clarification) {
+  const expiresAt = Date.parse(clarification?.expires_at ?? "");
+  return Number.isNaN(expiresAt) || expiresAt <= Date.now();
+}
+
+function renderMemoryClarificationChoices(container, clarification, disabled, onSelect) {
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  if (!clarification) {
+    container.hidden = true;
+    return;
+  }
+
+  const buttonsDisabled = disabled || isClarificationExpired(clarification);
+  for (const choice of clarification.choices ?? []) {
+    const label = `${choice.category_label}: ${choice.value_label}`;
+    const button = element("button", "memory-clarification-choice contain-text", label);
+    button.setAttribute("type", "button");
+    button.disabled = buttonsDisabled;
+    button.addEventListener("click", () => {
+      if (button.disabled) {
+        return;
+      }
+      onSelect({
+        ...choice,
+        clarification_id: clarification.clarification_id,
+      });
+    });
+    container.append(button);
+  }
+  container.hidden = container.children.length === 0;
+}
+
 export function createChatView(elements, handlers) {
   function updateCharacterCount() {
     if (!elements.characterCount) {
@@ -73,6 +108,12 @@ export function createChatView(elements, handlers) {
       elements.transcript.scrollTop = elements.transcript.scrollHeight;
       elements.retryButton.hidden = state.lastFailure === null;
       elements.submitButton.disabled = state.pendingTurn !== null;
+      renderMemoryClarificationChoices(
+        elements.clarificationChoices,
+        state.activeMemoryClarification ?? null,
+        state.pendingTurn !== null,
+        handlers.onSelectMemoryClarification ?? (() => {}),
+      );
       updateCharacterCount();
     },
   };

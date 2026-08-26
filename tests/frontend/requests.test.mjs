@@ -5,6 +5,7 @@ import {
   buildArtifactFeedbackChatRequest,
   buildChatRequest,
   buildExactRetryRequest,
+  buildMemoryClarificationSelectionChatRequest,
   buildMemoryDecisionChatRequest,
   buildOrdinaryChatRequest,
   generateIdempotencyKey,
@@ -104,6 +105,27 @@ test("structured memory and artifact decisions are mutually exclusive", () => {
         decision: "accepted",
         feedback_text: "accepted",
         expected_schema_version: "2.0",
+      },
+      crypto: cryptoStub,
+    }),
+    /mutually exclusive/,
+  );
+});
+
+test("structured clarification selections are mutually exclusive with other decisions", () => {
+  assert.throws(
+    () => buildChatRequest({
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+      message: "Select Response length: Detailed.",
+      memory_decision: {
+        proposal_id: "response_length--proposal-1",
+        decision: "approve",
+      },
+      memory_clarification_selection: {
+        clarification_id: "memory-clarification--clarify-1",
+        selected_candidate_index: 0,
       },
       crypto: cryptoStub,
     }),
@@ -246,5 +268,92 @@ test("memory decision chat request rejects invalid decisions", () => {
       cryptoStub,
     ),
     /Memory decision is invalid/,
+  );
+});
+
+test("memory clarification selection request includes only server-owned choice identity", () => {
+  const request = buildMemoryClarificationSelectionChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    {
+      clarification_id: "memory-clarification--clarify-1",
+      candidate_index: 0,
+      category_label: "Response length",
+      value_label: "Detailed",
+    },
+    cryptoStub,
+  );
+
+  assert.equal(request.key, "chat--123e4567-e89b-12d3-a456-426614174000");
+  assert.deepEqual(request.body, {
+    project_id: "agent-col",
+    session_id: "session-1",
+    user_id: "wifiknight",
+    message: "Select Response length: Detailed.",
+    memory_clarification_selection: {
+      clarification_id: "memory-clarification--clarify-1",
+      selected_candidate_index: 0,
+    },
+  });
+  assert.throws(() => {
+    request.body.memory_clarification_selection.selected_candidate_index = 1;
+  }, TypeError);
+});
+
+test("memory clarification selection request validates bounded choices before network access", () => {
+  const context = {
+    project_id: "agent-col",
+    session_id: "session-1",
+    user_id: "wifiknight",
+  };
+  const valid = {
+    clarification_id: "memory-clarification--clarify-1",
+    candidate_index: 0,
+    category_label: "Response length",
+    value_label: "Detailed",
+  };
+
+  assert.throws(
+    () => buildMemoryClarificationSelectionChatRequest(
+      context,
+      { ...valid, clarification_id: "memory clarification 1" },
+      cryptoStub,
+    ),
+    /clarification_id is invalid/,
+  );
+  assert.throws(
+    () => buildMemoryClarificationSelectionChatRequest(
+      context,
+      { ...valid, candidate_index: true },
+      cryptoStub,
+    ),
+    /candidate index is invalid/,
+  );
+  assert.throws(
+    () => buildMemoryClarificationSelectionChatRequest(
+      context,
+      { ...valid, candidate_index: 1.5 },
+      cryptoStub,
+    ),
+    /candidate index is invalid/,
+  );
+  assert.throws(
+    () => buildMemoryClarificationSelectionChatRequest(
+      context,
+      { ...valid, candidate_index: 5 },
+      cryptoStub,
+    ),
+    /candidate index is invalid/,
+  );
+  assert.throws(
+    () => buildMemoryClarificationSelectionChatRequest(
+      context,
+      { ...valid, value_label: " " },
+      cryptoStub,
+    ),
+    /choice label is required/,
   );
 });

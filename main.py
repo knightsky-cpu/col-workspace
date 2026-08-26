@@ -113,6 +113,7 @@ from database import (
     MemorySignalNotFoundError,
 )
 from memory_context import MemoryContextRenderer
+from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
 from memory_proposals import ProposalTurnLease
 from research_expert_service import ResearchExpertService
 from requirements_verification_service import RequirementsVerificationService
@@ -127,6 +128,7 @@ from schemas import (
     ChatRequest,
     ChatResponse,
     IdentifierStr,
+    MemoryClarificationReceipt,
     MemoryInspectionResponse,
     MemoryMutationResponse,
     SynthesisRequest,
@@ -159,6 +161,8 @@ from trusted_memory_service import (
     DeleteMemorySignalCommand,
     InspectMemoryCommand,
     MemoryDecisionCommand,
+    NaturalMemoryClarificationResult,
+    NaturalMemoryCommand,
     RevokeMemorySignalCommand,
     SelectMemoryClarificationCommand,
     TrustedMemoryService,
@@ -401,6 +405,31 @@ async def _release_chat_turn_safely(
         return None
 
 
+async def _complete_chat_turn_safely(
+    database: MemoryEngine,
+    claim: ChatTurnClaim,
+    response: ChatResponse,
+) -> bool:
+    try:
+        await database.complete_chat_turn(
+            claim,
+            response,
+            observed_at=datetime.now(UTC),
+        )
+    except (
+        ChatTurnOwnershipError,
+        ChatTurnStateError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        logger.error(
+            "Chat turn completion failed (%s).",
+            type(exc).__name__,
+        )
+        return False
+    return True
+
+
 def _merge_receipts(
     *groups: tuple[ReceiptT, ...],
 ) -> tuple[ReceiptT, ...]:
@@ -412,12 +441,136 @@ def _merge_receipts(
     return tuple(merged)
 
 
+def _normalise_memory_preflight_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.casefold()).strip()
+
+
+def _memory_preflight_evidence_text(source: str) -> str:
+    evidence = source.strip()
+    if not evidence:
+        return source[:500]
+    return evidence[:500]
+
+
+def _deterministic_memory_clarification_decision(
+    message: str,
+) -> ClarifyDecision | None:
+    normalized = _normalise_memory_preflight_text(message)
+    if not normalized:
+        return None
+    if not re.search(r"\b(remember|save|memory)\b", normalized):
+        return None
+    if not (
+        " or " in normalized
+        and (
+            "one of" in normalized
+            or "which one" in normalized
+            or "choose" in normalized
+            or "help me choose" in normalized
+        )
+    ):
+        return None
+
+    evidence = _memory_preflight_evidence_text(message)
+    candidate_specs: tuple[tuple[str, object, tuple[str, ...]], ...] = (
+        (
+            "example_usage",
+            "when_helpful",
+            (
+                "practical examples",
+                "practical code examples",
+                "examples whenever helpful",
+                "example whenever helpful",
+                "code examples",
+            ),
+        ),
+        (
+            "question_style",
+            "minimal_follow_up",
+            (
+                "fewer follow-up",
+                "fewer follow up",
+                "ask fewer",
+                "reasonable assumptions",
+                "make reasonable assumptions",
+            ),
+        ),
+        (
+            "question_style",
+            "ask_before_assuming",
+            ("ask before assuming",),
+        ),
+        (
+            "question_style",
+            "recommend_then_ask",
+            ("recommend then ask", "recommend and then ask"),
+        ),
+        (
+            "explanation_structure",
+            "step_by_step",
+            ("step-by-step", "step by step"),
+        ),
+        (
+            "explanation_structure",
+            "concept_then_example",
+            ("concept then example", "concepts then examples"),
+        ),
+        ("response_length", "concise", ("concise", "short answers")),
+        ("response_length", "detailed", ("detailed", "long answers")),
+        (
+            "development_environments",
+            ["macos", "linux"],
+            (
+                "macos and linux",
+                "linux and macos",
+                "macos or linux",
+                "linux or macos",
+            ),
+        ),
+    )
+
+    candidates: list[ProfileCandidateDecision] = []
+    seen: set[tuple[str, str]] = set()
+    for category, canonical_value, phrases in candidate_specs:
+        if not any(phrase in normalized for phrase in phrases):
+            continue
+        identity = (
+            category,
+            json.dumps(
+                canonical_value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        candidates.append(
+            ProfileCandidateDecision(
+                kind="profile_candidate",
+                category=category,
+                canonical_value=canonical_value,
+                evidence_text=evidence,
+            )
+        )
+        if len(candidates) == 5:
+            break
+
+    if len(candidates) < 2:
+        return None
+    return ClarifyDecision(kind="clarify", candidates=candidates)
+
+
 def _partial_failure_response(
     *,
     status_code: int,
     detail: str,
     decision_actions: tuple[AgentActionReceipt, ...],
     decision_memory_proposals: tuple[VersionedMemoryProposalReceipt, ...],
+    decision_memory_clarifications: tuple[
+        MemoryClarificationReceipt, ...
+    ],
     runtime_error: AgentColTurnServiceError,
     released_claim: ChatTurnClaim | None,
 ) -> JSONResponse | None:
@@ -457,6 +610,7 @@ def _partial_failure_response(
         released_proposals,
     )
     clarifications = _merge_receipts(
+        decision_memory_clarifications,
         runtime_error.memory_clarifications,
         released_clarifications,
     )
@@ -513,6 +667,54 @@ def _partial_failure_response(
     return JSONResponse(
         status_code=status_code,
         content=content,
+    )
+
+
+def _memory_clarification_selection_fallback_response(
+    *,
+    decision_actions: tuple[AgentActionReceipt, ...],
+    decision_memory_proposals: tuple[VersionedMemoryProposalReceipt, ...],
+) -> ChatResponse | None:
+    if not decision_memory_proposals:
+        return None
+    proposal = decision_memory_proposals[0]
+    category = proposal.category.replace("_", " ").capitalize()
+    response = (
+        "I created a pending memory proposal for "
+        f"{category}: {proposal.proposed_value}. "
+        "Please approve or reject it before I use it as saved memory."
+    )
+    return ChatResponse(
+        response=response,
+        actions=list(decision_actions),
+        artifacts=[],
+        artifact_feedback=[],
+        citations=[],
+        memory_proposals=list(decision_memory_proposals),
+        memory_clarifications=[],
+        adaptations=[],
+    )
+
+
+def _memory_clarification_preflight_fallback_response(
+    *,
+    decision_memory_clarifications: tuple[MemoryClarificationReceipt, ...],
+) -> ChatResponse | None:
+    if len(decision_memory_clarifications) != 1:
+        return None
+    return ChatResponse(
+        response=(
+            "I found more than one possible memory preference in your "
+            "message. Please choose one option below so I can submit the "
+            "correct pending memory proposal for your approval."
+        ),
+        actions=[],
+        artifacts=[],
+        artifact_feedback=[],
+        citations=[],
+        memory_proposals=[],
+        memory_clarifications=list(decision_memory_clarifications),
+        adaptations=[],
     )
 
 
@@ -1625,6 +1827,9 @@ async def chat(
     decision_memory_proposals: tuple[
         VersionedMemoryProposalReceipt, ...
     ] = ()
+    decision_memory_clarifications: tuple[
+        MemoryClarificationReceipt, ...
+    ] = ()
     chat_turn_claim: ChatTurnClaim | None = None
     effective_user_id = _resolve_effective_user_id(
         request=request,
@@ -1959,6 +2164,87 @@ async def chat(
         decision_actions = (selection_result.action,)
         decision_memory_proposals = (selection_result.proposal,)
 
+    if (
+        chat_turn_claim is not None
+        and payload.memory_decision is None
+        and payload.memory_clarification_selection is None
+        and payload.artifact_feedback_decision is None
+        and not chat_turn_claim.precompleted_memory_proposals
+        and not chat_turn_claim.precompleted_memory_clarifications
+    ):
+        preflight_decision = _deterministic_memory_clarification_decision(
+            payload.message
+        )
+        if preflight_decision is not None:
+            try:
+                preflight_result = (
+                    await memory_service.handle_natural_memory_decision(
+                        NaturalMemoryCommand(
+                            user_id=effective_user_id,
+                            workspace_id=effective_project_id,
+                            session_id=payload.session_id,
+                            source_message_id=user_message_id,
+                            source_message_text=payload.message,
+                            memory_decision_present=False,
+                            decision=preflight_decision,
+                            turn_lease=ProposalTurnLease(
+                                turn_id=chat_turn_claim.ids.turn_id,
+                                owner_token=chat_turn_claim.owner_token,
+                            ),
+                        )
+                    )
+                )
+            except (
+                MemoryProposalConflictError,
+                MemoryProposalOriginConflictError,
+                MemorySignalAlreadyActiveError,
+            ) as exc:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Memory proposal state conflicts with this request."
+                    ),
+                ) from exc
+            except ChatSessionOwnershipError as exc:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+                _raise_chat_session_unavailable(exc)
+            except (ChatTurnOwnershipError, ChatTurnStateError) as exc:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+                _raise_chat_turn_operation_http_error(
+                    exc,
+                    "memory clarification preflight",
+                )
+            except (
+                MemoryClarificationStateError,
+                MemoryProposalStateError,
+            ) as exc:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+                logger.error(
+                    "Memory clarification preflight state failed (%s).",
+                    type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Memory clarification state is invalid.",
+                ) from exc
+            except MemoryEngineError as exc:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+                _raise_database_http_error(exc)
+            except ValueError as exc:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Memory clarification preflight is invalid.",
+                ) from exc
+            if isinstance(
+                preflight_result,
+                NaturalMemoryClarificationResult,
+            ):
+                decision_memory_clarifications = (
+                    preflight_result.clarification,
+                )
+
     if payload.memory_decision is not None:
         try:
             model_input_context, adaptations = _build_model_input_context(
@@ -1988,6 +2274,15 @@ async def chat(
         ) as exc:
             _raise_chat_turn_operation_http_error(exc, "renewal")
 
+    precompleted_memory_clarifications = (
+        _merge_receipts(
+            chat_turn_claim.precompleted_memory_clarifications,
+            decision_memory_clarifications,
+        )
+        if chat_turn_claim is not None
+        else decision_memory_clarifications
+    )
+
     try:
         result = await turn_service.run_turn(
             AgentColTurnCommand(
@@ -2005,6 +2300,7 @@ async def chat(
                 memory_decision_present=(
                     payload.memory_decision is not None
                     or payload.memory_clarification_selection is not None
+                    or bool(precompleted_memory_clarifications)
                 ),
                 artifact_feedback_decision_present=(
                     payload.artifact_feedback_decision is not None
@@ -2034,9 +2330,7 @@ async def chat(
                     else decision_memory_proposals
                 ),
                 precompleted_memory_clarifications=(
-                    chat_turn_claim.precompleted_memory_clarifications
-                    if chat_turn_claim is not None
-                    else ()
+                    precompleted_memory_clarifications
                 ),
                 precompleted_artifact_feedback=(
                     chat_turn_claim.precompleted_artifact_feedback
@@ -2051,8 +2345,27 @@ async def chat(
         AgentColTurnTimeoutError,
     ) as exc:
         _log_chat_turn_timeout(exc)
-        released_claim = None
+        fallback_response = (
+            _memory_clarification_selection_fallback_response(
+                decision_actions=decision_actions,
+                decision_memory_proposals=decision_memory_proposals,
+            )
+            if payload.memory_clarification_selection is not None
+            else _memory_clarification_preflight_fallback_response(
+                decision_memory_clarifications=(
+                    decision_memory_clarifications
+                ),
+            )
+        )
         failure_claim = exc.chat_turn_claim or chat_turn_claim
+        if fallback_response is not None and failure_claim is not None:
+            if await _complete_chat_turn_safely(
+                database,
+                failure_claim,
+                fallback_response,
+            ):
+                return fallback_response
+        released_claim = None
         if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
                 database,
@@ -2066,6 +2379,7 @@ async def chat(
             ),
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
+            decision_memory_clarifications=decision_memory_clarifications,
             runtime_error=exc,
             released_claim=released_claim,
         )
@@ -2080,8 +2394,27 @@ async def chat(
             "Agent_Col response failed (%s).",
             type(exc).__name__,
         )
-        released_claim = None
+        fallback_response = (
+            _memory_clarification_selection_fallback_response(
+                decision_actions=decision_actions,
+                decision_memory_proposals=decision_memory_proposals,
+            )
+            if payload.memory_clarification_selection is not None
+            else _memory_clarification_preflight_fallback_response(
+                decision_memory_clarifications=(
+                    decision_memory_clarifications
+                ),
+            )
+        )
         failure_claim = exc.chat_turn_claim or chat_turn_claim
+        if fallback_response is not None and failure_claim is not None:
+            if await _complete_chat_turn_safely(
+                database,
+                failure_claim,
+                fallback_response,
+            ):
+                return fallback_response
+        released_claim = None
         if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
                 database,
@@ -2093,6 +2426,7 @@ async def chat(
             detail="Agent_Col response failed after a completed action.",
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
+            decision_memory_clarifications=decision_memory_clarifications,
             runtime_error=exc,
             released_claim=released_claim,
         )
@@ -2115,7 +2449,12 @@ async def chat(
                 result.memory_proposals,
             )
         ),
-        memory_clarifications=list(result.memory_clarifications),
+        memory_clarifications=list(
+            _merge_receipts(
+                precompleted_memory_clarifications,
+                result.memory_clarifications,
+            )
+        ),
         adaptations=list(
             _merge_receipts(adaptations, result.adaptations)
         ),

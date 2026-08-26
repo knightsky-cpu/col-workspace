@@ -66,9 +66,14 @@ export function buildChatRequest(input) {
       throw new Error(`${key} is invalid.`);
     }
   }
-  if (input.memory_decision && input.artifact_feedback_decision) {
+  const structuredDecisionCount = [
+    input.memory_decision,
+    input.artifact_feedback_decision,
+    input.memory_clarification_selection,
+  ].filter(Boolean).length;
+  if (structuredDecisionCount > 1) {
     throw new Error(
-      "Structured memory and artifact decisions are mutually exclusive.",
+      "Structured memory, artifact, and clarification decisions are mutually exclusive.",
     );
   }
   if (input.memory_decision) {
@@ -76,6 +81,9 @@ export function buildChatRequest(input) {
   }
   if (input.artifact_feedback_decision) {
     body.artifact_feedback_decision = input.artifact_feedback_decision;
+  }
+  if (input.memory_clarification_selection) {
+    body.memory_clarification_selection = input.memory_clarification_selection;
   }
 
   return deepFreeze({
@@ -196,6 +204,44 @@ export function buildMemoryDecisionChatRequest(
     user_id: context.user_id,
     message,
     memory_decision: memoryDecision,
+    crypto: cryptoLike,
+  });
+}
+
+export function buildMemoryClarificationSelectionChatRequest(
+  context,
+  choice,
+  cryptoLike = globalThis.crypto,
+) {
+  const clarificationId = String(choice.clarification_id ?? "").trim();
+  const candidateIndex = choice.candidate_index;
+  const categoryLabel = String(choice.category_label ?? "").trim();
+  const valueLabel = String(choice.value_label ?? "").trim();
+
+  if (!isValidIdentifier(clarificationId)) {
+    throw new Error("clarification_id is invalid.");
+  }
+  if (
+    typeof candidateIndex !== "number"
+    || !Number.isInteger(candidateIndex)
+    || candidateIndex < 0
+    || candidateIndex > 4
+  ) {
+    throw new Error("candidate index is invalid.");
+  }
+  if (!categoryLabel || !valueLabel) {
+    throw new Error("choice label is required.");
+  }
+
+  return buildChatRequest({
+    project_id: context.project_id,
+    session_id: context.session_id,
+    user_id: context.user_id,
+    message: `Select ${categoryLabel}: ${valueLabel}.`,
+    memory_clarification_selection: {
+      clarification_id: clarificationId,
+      selected_candidate_index: candidateIndex,
+    },
     crypto: cryptoLike,
   });
 }

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 const html = readFileSync(new URL("../../frontend/index.html", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../../frontend/styles.css", import.meta.url), "utf8");
+const app = readFileSync(new URL("../../frontend/app.mjs", import.meta.url), "utf8");
 
 test("workspace labels artifact surfaces with human-facing names", () => {
   assert.match(html, /<h2 id="work-list-title">Artifacts<\/h2>/);
@@ -37,4 +38,13 @@ test("workspace print stylesheet prints only the artifact detail surface", () =>
   assert.match(styles, /data-work-detail/);
   assert.match(styles, /display:\s*none\s*!important/);
   assert.match(styles, /display:\s*block\s*!important/);
+});
+
+test("workspace provides a bounded memory clarification choice region", () => {
+  assert.match(html, /data-memory-clarification-choices/);
+  assert.match(styles, /\.memory-clarification-choices/);
+  assert.match(styles, /\.memory-clarification-choice/);
+  assert.match(styles, /overflow-wrap:\s*anywhere/);
+  assert.match(app, /buildMemoryClarificationSelectionChatRequest/);
+  assert.match(app, /onSelectMemoryClarification/);
 });

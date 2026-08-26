@@ -114,6 +114,26 @@ def test_supervisor_requires_clarification_for_multiple_memory_candidates(
     assert "macOS and Linux" in normalized_instruction
 
 
+def test_supervisor_memory_clarification_overrides_generic_no_tool_rule(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+
+    assert (
+        "Explicit memory-save ambiguity is an exception to the generic "
+        "clarifying-question rule"
+    ) in normalized_instruction
+    assert (
+        "do not answer only in prose when the user explicitly asks to "
+        "remember or save one of multiple supported profile candidates"
+    ) in normalized_instruction
+    assert (
+        "ordinary non-memory missing context remains a conversational "
+        "clarifying question"
+    ) in normalized_instruction
+
+
 def test_supervisor_allows_semantic_selection_after_memory_clarification(
 ) -> None:
     from supervisor import SUPERVISOR_INSTRUCTION

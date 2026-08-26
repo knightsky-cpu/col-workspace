@@ -45,6 +45,25 @@ const cryptoStub = {
   },
 };
 
+function clarificationReceipt() {
+  return {
+    clarification_id: "memory-clarification--clarify-1",
+    expires_at: "2026-08-25T12:00:00Z",
+    choices: [
+      {
+        candidate_index: 0,
+        category_label: "Response length",
+        value_label: "Detailed",
+      },
+      {
+        candidate_index: 1,
+        category_label: "Explanation structure",
+        value_label: "Step by step",
+      },
+    ],
+  };
+}
+
 test("acceptContext stores local locators and creates a session", () => {
   const state = acceptContext(
     createInitialState(),
@@ -105,6 +124,7 @@ test("workspace selection updates context and clears workspace-scoped panels", (
   const populated = {
     ...state,
     transcript: [{ request: {}, response: {} }],
+    activeMemoryClarification: clarificationReceipt(),
     work: {
       ...state.work,
       list: {
@@ -132,6 +152,7 @@ test("workspace selection updates context and clears workspace-scoped panels", (
     "project--abc--study-plans",
   );
   assert.equal(selected.transcript.length, 0);
+  assert.equal(selected.activeMemoryClarification, null);
   assert.equal(selected.work.list.items.length, 0);
   assert.equal(selected.chats.sessions.length, 0);
 });
@@ -172,6 +193,112 @@ test("pending turn lifecycle preserves exact retry envelope on failure", () => {
   assert.equal(failed.pendingTurn, null);
   assert.equal(failed.lastFailure.request, request);
   assert.equal(failed.lastFailure.message, "network failed");
+});
+
+test("initial state has no active memory clarification", () => {
+  assert.equal(createInitialState().activeMemoryClarification, null);
+});
+
+test("completed clarification response stores the active receipt and activity label", () => {
+  const request = Object.freeze({
+    key: "chat--clarify",
+    body: Object.freeze({ message: "remember two things" }),
+  });
+
+  const completed = completePendingTurn(
+    beginPendingTurn(createInitialState(), request),
+    {
+      response: "Which should I remember first?",
+      memory_clarifications: [clarificationReceipt()],
+      memory_proposals: [],
+    },
+  );
+
+  assert.deepEqual(completed.activeMemoryClarification, clarificationReceipt());
+  assert.equal(
+    completed.activity.entries.at(-1).label,
+    "Memory clarification",
+  );
+  assert.equal(
+    completed.activity.entries.at(-1).detail,
+    "Response length: Detailed",
+  );
+  assert.doesNotMatch(
+    completed.activity.entries.at(-1).detail,
+    /memory-clarification--/,
+  );
+});
+
+test("failed clarification selection keeps the active receipt and exact retry", () => {
+  const withClarification = {
+    ...createInitialState(),
+    activeMemoryClarification: clarificationReceipt(),
+  };
+  const selectionRequest = Object.freeze({
+    key: "chat--select",
+    body: Object.freeze({
+      message: "Select Response length: Detailed.",
+      memory_clarification_selection: Object.freeze({
+        clarification_id: "memory-clarification--clarify-1",
+        selected_candidate_index: 0,
+      }),
+    }),
+  });
+
+  const failed = failPendingTurn(
+    beginPendingTurn(withClarification, selectionRequest),
+    { message: "network failed", status: 0 },
+  );
+
+  assert.deepEqual(failed.activeMemoryClarification, clarificationReceipt());
+  assert.equal(failed.lastFailure.request, selectionRequest);
+});
+
+test("successful clarification selection clears the consumed receipt", () => {
+  const withClarification = {
+    ...createInitialState(),
+    activeMemoryClarification: clarificationReceipt(),
+  };
+  const selectionRequest = Object.freeze({
+    key: "chat--select",
+    body: Object.freeze({
+      message: "Select Response length: Detailed.",
+      memory_clarification_selection: Object.freeze({
+        clarification_id: "memory-clarification--clarify-1",
+        selected_candidate_index: 0,
+      }),
+    }),
+  });
+
+  const completed = completePendingTurn(
+    beginPendingTurn(withClarification, selectionRequest),
+    {
+      response: "Proposal created.",
+      memory_proposals: [{
+        proposal_id: "response_length--proposal-1",
+        category: "response_length",
+      }],
+    },
+  );
+
+  assert.equal(completed.activeMemoryClarification, null);
+});
+
+test("ordinary chat does not invent or consume a memory clarification", () => {
+  const withClarification = {
+    ...createInitialState(),
+    activeMemoryClarification: clarificationReceipt(),
+  };
+
+  const completed = completePendingTurn(
+    beginPendingTurn(withClarification, {
+      key: "chat--ordinary",
+      body: { message: "hello" },
+    }),
+    { response: "ok", memory_proposals: [] },
+  );
+
+  assert.deepEqual(completed.activeMemoryClarification, clarificationReceipt());
 });
 
 test("completed turn records response and clears pending failure", () => {
@@ -405,6 +532,51 @@ test("chat session detail load switches context and rebuilds transcript", () => 
   assert.equal(loaded.transcript[0].response.response, "hi");
 });
 
+test("chat session detail restores an active memory clarification", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+
+  const loaded = completeChatSessionDetailLoad(
+    beginChatSessionDetailLoad(state, "session--old"),
+    {
+      chat_contract_version: "1.0",
+      session_id: "session--old",
+      project_id: "agent-col",
+      user_id: "wifiknight",
+      messages: [],
+      active_memory_clarification: clarificationReceipt(),
+    },
+  );
+
+  assert.deepEqual(loaded.activeMemoryClarification, clarificationReceipt());
+});
+
+test("chat session detail clears stale memory clarification when none remains active", () => {
+  const state = acceptContext(
+    {
+      ...createInitialState(),
+      activeMemoryClarification: clarificationReceipt(),
+    },
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+
+  const loaded = completeChatSessionDetailLoad(
+    beginChatSessionDetailLoad(state, "session--old"),
+    {
+      chat_contract_version: "1.0",
+      session_id: "session--old",
+      project_id: "agent-col",
+      user_id: "wifiknight",
+      messages: [],
+      active_memory_clarification: null,
+    },
+  );
+
+  assert.equal(loaded.activeMemoryClarification, null);
+});
+
 test("chat session load failures are bounded in state", () => {
   const state = acceptContext(
     createInitialState(),
@@ -438,13 +610,18 @@ test("new conversation keeps user and project but replaces session and clears pa
     ),
     { response: "ok" },
   );
+  const withClarification = {
+    ...withTranscript,
+    activeMemoryClarification: clarificationReceipt(),
+  };
 
-  const next = startNewConversation(withTranscript, cryptoStub);
+  const next = startNewConversation(withClarification, cryptoStub);
 
   assert.equal(next.context.user_id, "wifiknight");
   assert.equal(next.context.project_id, "agent-col");
   assert.equal(next.transcript.length, 0);
   assert.equal(next.lastFailure, null);
+  assert.equal(next.activeMemoryClarification, null);
 });
 
 test("selectCanSubmit requires workspace context and no pending turn", () => {

@@ -141,6 +141,8 @@ from trusted_memory_service import (
     DeleteMemorySignalCommand,
     InspectMemoryCommand,
     MemoryDecisionCommand,
+    NaturalMemoryClarificationResult,
+    NaturalMemoryCommand,
     NaturalMemoryProposalResult,
     RevokeMemorySignalCommand,
     SelectMemoryClarificationCommand,
@@ -656,6 +658,9 @@ class FakeTrustedMemoryService:
     revoke_result: TrustedMemoryMutationResult | None = None
     delete_result: TrustedMemoryMutationResult | None = None
     decision_result: TrustedMemoryMutationResult | None = None
+    natural_memory_result: (
+        NaturalMemoryProposalResult | NaturalMemoryClarificationResult | None
+    ) = None
     selection_result: NaturalMemoryProposalResult | None = None
     calls: list[InspectMemoryCommand] = field(default_factory=list)
     revoke_calls: list[RevokeMemorySignalCommand] = field(
@@ -665,6 +670,9 @@ class FakeTrustedMemoryService:
         default_factory=list
     )
     decision_calls: list[MemoryDecisionCommand] = field(
+        default_factory=list
+    )
+    natural_memory_calls: list[NaturalMemoryCommand] = field(
         default_factory=list
     )
     selection_calls: list[SelectMemoryClarificationCommand] = field(
@@ -692,6 +700,18 @@ class FakeTrustedMemoryService:
         if self.decision_result is None:
             raise AssertionError("Missing fake decision result.")
         return self.decision_result
+
+    async def handle_natural_memory_decision(
+        self,
+        command: NaturalMemoryCommand,
+    ) -> NaturalMemoryProposalResult | NaturalMemoryClarificationResult:
+        self.natural_memory_calls.append(command)
+        self.events.append(("natural_memory_decision",))
+        if self.error is not None:
+            raise self.error
+        if self.natural_memory_result is None:
+            raise AssertionError("Missing fake natural memory result.")
+        return self.natural_memory_result
 
     async def select_memory_clarification(
         self,
@@ -3531,7 +3551,7 @@ async def test_chat_clarification_selection_returns_and_replays_proposal(
 
 
 @pytest.mark.asyncio
-async def test_chat_clarification_selection_preserves_receipt_on_failure(
+async def test_chat_clarification_selection_returns_fallback_when_responder_fails_after_proposal(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
@@ -3560,7 +3580,8 @@ async def test_chat_clarification_selection_preserves_receipt_on_failure(
         },
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 200
+    assert "pending memory proposal" in response.json()["response"]
     assert response.json()["actions"] == [
         {
             "action_name": "propose_memory_signal",
@@ -3570,7 +3591,13 @@ async def test_chat_clarification_selection_preserves_receipt_on_failure(
     assert response.json()["memory_proposals"][0]["proposal_id"] == (
         "response_length--clarified-proposal-1"
     )
-    assert len(service_state.database.release_calls) == 1
+    assert service_state.database.release_calls == []
+    assert len(service_state.database.complete_calls) == 1
+    completed_response = service_state.database.complete_calls[0][1]
+    assert "pending memory proposal" in completed_response.response
+    assert completed_response.memory_proposals == [
+        service_state.memory_service.selection_result.proposal
+    ]
 
 
 @pytest.mark.asyncio
@@ -3922,6 +3949,131 @@ async def test_chat_returns_authoritative_memory_clarification_receipt(
     assert response.json()["memory_clarifications"] == [
         clarification.model_dump(mode="json")
     ]
+
+
+@pytest.mark.asyncio
+async def test_chat_preflights_ambiguous_memory_request_into_clarification(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    prompt = (
+        "Please remember one of these preferences, but help me choose which "
+        "one to save: I prefer practical examples whenever helpful, or I "
+        "prefer Agent Col to ask fewer follow-up questions and make "
+        "reasonable assumptions."
+    )
+    clarification = make_memory_clarification_receipt()
+    service_state.memory_service.natural_memory_result = (
+        NaturalMemoryClarificationResult(
+            status="clarification_required",
+            clarification=clarification,
+        )
+    )
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="Please choose one."
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "memory-clarification-preflight-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": prompt,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["memory_clarifications"] == [
+        clarification.model_dump(mode="json")
+    ]
+    assert len(service_state.memory_service.natural_memory_calls) == 1
+    natural_call = service_state.memory_service.natural_memory_calls[0]
+    assert natural_call.user_id == "user-1"
+    assert natural_call.workspace_id == "project-1"
+    assert natural_call.session_id == "session-1"
+    assert natural_call.source_message_id == f"turn--{DEFAULT_TURN_ID}--user"
+    assert natural_call.source_message_text == prompt
+    assert natural_call.memory_decision_present is False
+    assert natural_call.turn_lease == ProposalTurnLease(
+        turn_id=DEFAULT_TURN_ID,
+        owner_token="owner-token-1",
+    )
+    assert natural_call.decision.kind == "clarify"
+    assert [
+        (candidate.category, candidate.canonical_value)
+        for candidate in natural_call.decision.candidates
+    ] == [
+        ("example_usage", "when_helpful"),
+        ("question_style", "minimal_follow_up"),
+    ]
+    assert service_state.turn_service.calls[0].precompleted_memory_clarifications == (
+        clarification,
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_preflight_clarification_returns_fallback_when_responder_fails(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    prompt = (
+        "Please remember one of these preferences, but help me choose which "
+        "one to save: I prefer practical examples whenever helpful, or I "
+        "prefer Agent Col to ask fewer follow-up questions and make "
+        "reasonable assumptions."
+    )
+    clarification = make_memory_clarification_receipt()
+    claim = make_chat_turn_claim()
+    service_state.memory_service.natural_memory_result = (
+        NaturalMemoryClarificationResult(
+            status="clarification_required",
+            clarification=clarification,
+        )
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private provider failure"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={
+            "Idempotency-Key": "memory-clarification-preflight-fallback-1"
+        },
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": prompt,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "response": (
+            "I found more than one possible memory preference in your "
+            "message. Please choose one option below so I can submit the "
+            "correct pending memory proposal for your approval."
+        ),
+        "actions": [],
+        "artifacts": [],
+        "artifact_feedback": [],
+        "citations": [],
+        "memory_proposals": [],
+        "memory_clarifications": [clarification.model_dump(mode="json")],
+        "adaptations": [],
+    }
+    assert len(service_state.database.complete_calls) == 1
+    completed_claim, completed_response, completed_at = (
+        service_state.database.complete_calls[0]
+    )
+    assert completed_claim == claim
+    assert completed_response.model_dump(mode="json") == response.json()
+    assert completed_at.tzinfo is not None
+    assert service_state.database.release_calls == []
 
 
 @pytest.mark.parametrize(

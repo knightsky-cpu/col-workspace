@@ -7,6 +7,7 @@ export function createInitialState() {
     transcript: [],
     pendingTurn: null,
     lastFailure: null,
+    activeMemoryClarification: null,
     workspaces: {
       status: "idle",
       items: [],
@@ -165,6 +166,7 @@ export function selectWorkspace(
     transcript: [],
     pendingTurn: null,
     lastFailure: null,
+    activeMemoryClarification: null,
     work: emptyWorkState(),
     chats: emptyChatSessionState(),
     workspaces: {
@@ -235,6 +237,14 @@ export function failPendingTurn(state, error) {
 }
 
 export function completePendingTurn(state, response) {
+  const completedSelection = isMemoryClarificationSelectionRequest(
+    state.pendingTurn,
+  );
+  const nextClarification = nextActiveMemoryClarification(
+    state.activeMemoryClarification,
+    response,
+    completedSelection,
+  );
   return {
     ...state,
     transcript: [
@@ -256,6 +266,7 @@ export function completePendingTurn(state, response) {
     },
     pendingTurn: null,
     lastFailure: null,
+    activeMemoryClarification: nextClarification,
   };
 }
 
@@ -274,6 +285,7 @@ export function startNewConversation(state, cryptoLike = globalThis.crypto) {
     transcript: [],
     pendingTurn: null,
     lastFailure: null,
+    activeMemoryClarification: null,
     chats: {
       ...state.chats,
       selectedSessionId: null,
@@ -339,6 +351,9 @@ export function completeChatSessionDetailLoad(state, response) {
     transcript: transcriptFromMessages(response.messages),
     pendingTurn: null,
     lastFailure: null,
+    activeMemoryClarification: (
+      response.active_memory_clarification ?? null
+    ),
     chats: {
       ...state.chats,
       selectedSessionId: response.session_id,
@@ -474,6 +489,34 @@ function objectOrEmpty(value) {
   return value !== null && typeof value === "object" ? value : {};
 }
 
+function isMemoryClarificationSelectionRequest(request) {
+  return Boolean(
+    request
+    && typeof request === "object"
+    && request.body
+    && typeof request.body === "object"
+    && request.body.memory_clarification_selection,
+  );
+}
+
+function firstMemoryClarification(response) {
+  const clarifications = Array.isArray(response.memory_clarifications)
+    ? response.memory_clarifications
+    : [];
+  return clarifications[0] ?? null;
+}
+
+function nextActiveMemoryClarification(current, response, completedSelection) {
+  const clarification = firstMemoryClarification(response);
+  if (clarification !== null) {
+    return clarification;
+  }
+  if (completedSelection) {
+    return null;
+  }
+  return current ?? null;
+}
+
 function activityEntriesFromResponse(response) {
   const entries = [];
   for (const rawAction of Array.isArray(response.actions) ? response.actions : []) {
@@ -522,6 +565,26 @@ function activityEntriesFromResponse(response) {
       kind: "memory",
       label: proposal.category ?? "Memory proposal",
       detail: proposal.proposal_id ?? "",
+    });
+  }
+  for (
+    const rawClarification of Array.isArray(response.memory_clarifications)
+      ? response.memory_clarifications
+      : []
+  ) {
+    const clarification = objectOrEmpty(rawClarification);
+    const choices = Array.isArray(clarification.choices)
+      ? clarification.choices
+      : [];
+    const firstChoice = objectOrEmpty(choices[0]);
+    entries.push({
+      kind: "memory_clarification",
+      label: "Memory clarification",
+      detail: compactText([
+        firstChoice.category_label && firstChoice.value_label
+          ? `${firstChoice.category_label}: ${firstChoice.value_label}`
+          : "",
+      ]),
     });
   }
   for (const rawAdaptation of Array.isArray(response.adaptations) ? response.adaptations : []) {

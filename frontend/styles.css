@@ -376,6 +376,23 @@ p {
   min-width: 0;
 }
 
+.memory-clarification-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-start: 1rem;
+}
+
+.memory-clarification-choices[hidden] {
+  display: none;
+}
+
+.memory-clarification-choice {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .composer textarea {
   width: 100%;
   resize: vertical;

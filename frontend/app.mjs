@@ -37,6 +37,7 @@ import {
   buildArtifactFeedbackChatRequest,
   buildExactRetryRequest,
   buildMemoryDecisionChatRequest,
+  buildMemoryClarificationSelectionChatRequest,
   buildOrdinaryChatRequest,
   readContextForm,
 } from "./requests.mjs";
@@ -544,6 +545,7 @@ function ensureChatView() {
       retryButton: document.querySelector("[data-retry-turn]"),
       transcript: document.querySelector("[data-chat-transcript]"),
       characterCount: document.querySelector("[data-character-count]"),
+      clarificationChoices: document.querySelector("[data-memory-clarification-choices]"),
     },
     {
       onSubmit(message) {
@@ -558,6 +560,16 @@ function ensureChatView() {
           return;
         }
         submitRequest(buildExactRetryRequest(state.lastFailure.request));
+      },
+      onSelectMemoryClarification(choice) {
+        if (!selectCanSubmit(state)) {
+          return;
+        }
+        const request = buildMemoryClarificationSelectionChatRequest(
+          state.context,
+          choice,
+        );
+        submitRequest(request);
       },
     },
   );
