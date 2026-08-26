@@ -11,6 +11,7 @@ from agent_col_routing_v3 import AgentColRoutingDirective
 from memory_proposals import ProposalTurnLease
 from schemas import (
     AgentActionReceipt,
+    ContinuitySourceReceipt,
     MemoryClarificationChoice,
     MemoryClarificationReceipt,
     MemoryProposalReceipt,
@@ -105,6 +106,17 @@ def memory_clarification_receipt() -> MemoryClarificationReceipt:
             ),
         ],
         expires_at=datetime(2026, 8, 25, 12, 15, tzinfo=UTC),
+    )
+
+
+def continuity_receipt() -> ContinuitySourceReceipt:
+    return ContinuitySourceReceipt(
+        receipt_id="continuity--note-export--rev-2",
+        source_kind="collaborative_note",
+        source_id="note-export",
+        display_label="Used note: Export workflow",
+        match_reason="exact_title",
+        source_updated_at=datetime(2026, 8, 25, 12, 15, tzinfo=UTC),
     )
 
 
@@ -1107,6 +1119,33 @@ async def test_turn_service_stably_merges_authoritative_receipts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_service_preserves_continuity_receipts_on_success() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    receipt = continuity_receipt()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Use the saved note.",
+            continuity_receipts=(receipt,),
+        )
+    )
+
+    assert result.continuity_receipts == (receipt,)
+
+
+@pytest.mark.asyncio
 async def test_turn_service_preserves_memory_clarification_receipt() -> None:
     from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
 
@@ -1700,12 +1739,14 @@ async def test_outer_deadline_contains_responder_phase() -> None:
 @pytest.mark.asyncio
 async def test_responder_runtime_timeout_uses_turn_timeout_classification() -> None:
     from agent_col_turn_service import (
+        AgentColTurnCommand,
         AgentColTurnService,
         AgentColTurnTimeoutError,
     )
     from supervisor_runtime import SupervisorTimeoutError
 
     runtime_error = SupervisorTimeoutError("private-runtime-timeout")
+    receipt = continuity_receipt()
     service = AgentColTurnService(
         routing_client=object(),
         expert_executor=RecordingExecutor(),
@@ -1716,9 +1757,18 @@ async def test_responder_runtime_timeout_uses_turn_timeout_classification() -> N
     )
 
     with pytest.raises(AgentColTurnTimeoutError) as captured:
-        await service.run_turn(short_deadline_command("Direct request."))
+        await service.run_turn(
+            AgentColTurnCommand(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Direct request.",
+                continuity_receipts=(receipt,),
+            )
+        )
 
     assert captured.value.__cause__ is runtime_error
+    assert captured.value.continuity_receipts == (receipt,)
 
 
 @pytest.mark.asyncio

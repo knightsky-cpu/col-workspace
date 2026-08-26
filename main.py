@@ -97,6 +97,14 @@ from collaborative_note_service import (
     GetCollaborativeNoteCommand,
     ListCollaborativeNotesCommand,
 )
+from continuity import (
+    ContinuityResolution,
+    build_continuity_context,
+)
+from continuity_service import (
+    ContinuityResolutionCommand,
+    ContinuityService,
+)
 from computational_expert_service import ComputationalExpertService
 from database import (
     ArtifactCursorNotFoundError,
@@ -708,6 +716,10 @@ def _partial_failure_response(
         content.pop("collaborative_note_proposals")
     if not response.collaborative_note_events:
         content.pop("collaborative_note_events")
+    if not response.continuity_receipts:
+        content.pop("continuity_receipts")
+    if not response.continuity_choices:
+        content.pop("continuity_choices")
     return JSONResponse(
         status_code=status_code,
         content=content,
@@ -886,6 +898,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
+        continuity_service = ContinuityService(note_reader=database)
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
             vertex_settings
@@ -941,6 +954,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.collaborative_note_service = collaborative_note_service
+    app.state.continuity_service = continuity_service
     app.state.turn_service = turn_service
     app.state.authenticator = Authenticator(load_auth_settings())
 
@@ -2203,6 +2217,7 @@ async def chat(
 ) -> ChatResponse:
     database = request.app.state.db
     memory_service = request.app.state.memory_service
+    continuity_service = request.app.state.continuity_service
     turn_service = request.app.state.turn_service
     decision_actions = ()
     decision_memory_proposals: tuple[
@@ -2213,6 +2228,7 @@ async def chat(
     ] = ()
     decision_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
     decision_note_events: tuple[CollaborativeNoteEvent, ...] = ()
+    continuity_resolution = ContinuityResolution(status="none")
     chat_turn_claim: ChatTurnClaim | None = None
     effective_user_id = _resolve_effective_user_id(
         request=request,
@@ -2257,6 +2273,15 @@ async def chat(
         )
 
     if (
+        payload.continuity_selection is not None
+        and idempotency_key is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Continuity selection requires an idempotency key.",
+        )
+
+    if (
         payload.collaborative_note_decision is not None
         and idempotency_key is None
     ):
@@ -2288,6 +2313,7 @@ async def chat(
                     memory_clarification_selection=(
                         payload.memory_clarification_selection
                     ),
+                    continuity_selection=payload.continuity_selection,
                     artifact_feedback_decision=(
                         payload.artifact_feedback_decision
                     ),
@@ -2729,6 +2755,103 @@ async def chat(
                 detail="Collaboration context is invalid.",
             ) from exc
 
+    if (
+        payload.memory_decision is None
+        and payload.memory_clarification_selection is None
+        and payload.artifact_feedback_decision is None
+        and payload.collaborative_note_decision is None
+    ) or payload.continuity_selection is not None:
+        try:
+            continuity_resolution = await continuity_service.resolve(
+                ContinuityResolutionCommand(
+                    user_id=effective_user_id,
+                    workspace_id=effective_project_id,
+                    message=payload.message,
+                    selection=payload.continuity_selection,
+                )
+            )
+        except MemoryEngineError as exc:
+            if chat_turn_claim is not None:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+            _raise_database_http_error(exc)
+        except ValueError as exc:
+            if chat_turn_claim is not None:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Continuity request is invalid.",
+            ) from exc
+
+    if continuity_resolution.status == "ambiguous":
+        chat_response = ChatResponse(
+            response=(
+                "I found more than one saved workspace note that could match. "
+                "Please choose the one you mean."
+            ),
+            actions=[],
+            artifacts=[],
+            artifact_feedback=[],
+            citations=[],
+            memory_proposals=[],
+            memory_clarifications=[],
+            collaborative_note_proposals=[],
+            collaborative_note_events=[],
+            continuity_receipts=[],
+            continuity_choices=list(continuity_resolution.choices),
+            adaptations=list(adaptations),
+        )
+        if chat_turn_claim is None:
+            try:
+                await database.save_message(
+                    payload.session_id,
+                    "model",
+                    chat_response.response,
+                    project_id=effective_project_id,
+                    user_id=effective_user_id,
+                )
+            except ChatSessionOwnershipError as exc:
+                _raise_chat_session_unavailable(exc)
+            except MemoryEngineError as exc:
+                _raise_database_http_error(exc)
+        else:
+            try:
+                await database.complete_chat_turn(
+                    chat_turn_claim,
+                    chat_response,
+                    observed_at=datetime.now(UTC),
+                )
+            except (
+                ChatTurnOwnershipError,
+                ChatTurnStateError,
+                MemoryEngineError,
+            ) as exc:
+                _raise_chat_turn_operation_http_error(exc, "completion")
+        return chat_response
+
+    if continuity_resolution.status == "resolved":
+        try:
+            continuity_context = build_continuity_context(
+                continuity_resolution
+            )
+        except ValueError as exc:
+            logger.error(
+                "Continuity context is invalid (%s).",
+                type(exc).__name__,
+            )
+            if chat_turn_claim is not None:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Continuity context is invalid.",
+            ) from exc
+        model_input_context = (
+            *model_input_context,
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=continuity_context)],
+            ),
+        )
+
     if chat_turn_claim is not None:
         try:
             chat_turn_claim = await database.renew_chat_turn_lease(
@@ -2824,6 +2947,12 @@ async def chat(
                     )
                     if chat_turn_claim is not None
                     else decision_note_events
+                ),
+                continuity_receipts=tuple(
+                    continuity_resolution.receipts
+                ),
+                continuity_choices=tuple(
+                    continuity_resolution.choices
                 ),
                 chat_turn_claim=chat_turn_claim,
             )
@@ -2961,6 +3090,18 @@ async def chat(
         ),
         adaptations=list(
             _merge_receipts(adaptations, result.adaptations)
+        ),
+        continuity_receipts=list(
+            _merge_receipts(
+                tuple(continuity_resolution.receipts),
+                result.continuity_receipts,
+            )
+        ),
+        continuity_choices=list(
+            _merge_receipts(
+                tuple(continuity_resolution.choices),
+                result.continuity_choices,
+            )
         ),
     )
     if chat_turn_claim is None:

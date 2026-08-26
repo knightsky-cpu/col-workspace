@@ -77,6 +77,8 @@ from schemas import (
     ArtifactFeedbackReference,
     CollaborativeNoteEvent,
     CollaborativeNoteProposal,
+    ContinuityChoice,
+    ContinuitySourceReceipt,
     CitationReference,
     MemoryClarificationReceipt,
     VersionedAdaptationReceipt,
@@ -180,6 +182,8 @@ class AgentColTurnCommand:
     precompleted_collaborative_note_events: tuple[
         CollaborativeNoteEvent, ...
     ] = ()
+    continuity_receipts: tuple[ContinuitySourceReceipt, ...] = ()
+    continuity_choices: tuple[ContinuityChoice, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
 
@@ -194,6 +198,8 @@ class AgentColTurnResult:
     memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
     collaborative_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
     collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = ()
+    continuity_receipts: tuple[ContinuitySourceReceipt, ...] = ()
+    continuity_choices: tuple[ContinuityChoice, ...] = ()
     adaptations: tuple[VersionedAdaptationReceipt, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
 
@@ -214,6 +220,8 @@ class AgentColTurnServiceError(RuntimeError):
             CollaborativeNoteProposal, ...
         ] = (),
         collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = (),
+        continuity_receipts: tuple[ContinuitySourceReceipt, ...] = (),
+        continuity_choices: tuple[ContinuityChoice, ...] = (),
         adaptations: tuple[VersionedAdaptationReceipt, ...] = (),
         chat_turn_claim: ChatTurnClaim | None = None,
     ) -> None:
@@ -225,6 +233,8 @@ class AgentColTurnServiceError(RuntimeError):
         self.memory_clarifications = memory_clarifications
         self.collaborative_note_proposals = collaborative_note_proposals
         self.collaborative_note_events = collaborative_note_events
+        self.continuity_receipts = continuity_receipts
+        self.continuity_choices = continuity_choices
         self.adaptations = adaptations
         self.chat_turn_claim = chat_turn_claim
 
@@ -354,6 +364,8 @@ class AgentColTurnService:
                     if command.chat_turn_claim is not None
                     else command.precompleted_collaborative_note_events
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 chat_turn_claim=command.chat_turn_claim,
             ) from exc
 
@@ -394,6 +406,8 @@ class AgentColTurnService:
                 memory_clarifications=(
                     claim.precompleted_memory_clarifications
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 chat_turn_claim=claim,
             ) from exc
         model_input_context = (
@@ -455,6 +469,8 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 chat_turn_claim=execution.claim,
             ) from exc
         except SupervisorRuntimeError as exc:
@@ -478,6 +494,8 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 chat_turn_claim=execution.claim,
             ) from exc
         return AgentColTurnResult(
@@ -501,6 +519,8 @@ class AgentColTurnService:
                 command.precompleted_collaborative_note_events,
                 result.collaborative_note_events,
             ),
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
             chat_turn_claim=execution.claim,
         )
 
@@ -591,6 +611,8 @@ class AgentColTurnService:
                 memory_clarifications=(
                     claim.precompleted_memory_clarifications
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 chat_turn_claim=claim,
             ) from exc
         except (
@@ -605,6 +627,8 @@ class AgentColTurnService:
                 memory_clarifications=(
                     claim.precompleted_memory_clarifications
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 chat_turn_claim=claim,
             ) from exc
 
@@ -671,6 +695,8 @@ class AgentColTurnService:
                 memory_clarifications=(
                     claim.precompleted_memory_clarifications
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 chat_turn_claim=claim,
             ) from exc
 
@@ -721,6 +747,8 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 adaptations=execution.adaptations,
                 chat_turn_claim=execution.claim,
             ) from exc
@@ -740,6 +768,8 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
                 adaptations=execution.adaptations,
                 chat_turn_claim=execution.claim,
             ) from exc
@@ -756,6 +786,8 @@ class AgentColTurnService:
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
             ),
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
             adaptations=execution.adaptations,
             chat_turn_claim=execution.claim,
         )
@@ -842,6 +874,8 @@ class AgentColTurnService:
                     memory_clarifications=(
                         command.precompleted_memory_clarifications
                     ),
+                    continuity_receipts=command.continuity_receipts,
+                    continuity_choices=command.continuity_choices,
                 ) from exc
             except (
                 AgentColRoutingV3ProviderError,
@@ -865,6 +899,8 @@ class AgentColTurnService:
                     memory_clarifications=(
                         command.precompleted_memory_clarifications
                     ),
+                    continuity_receipts=command.continuity_receipts,
+                    continuity_choices=command.continuity_choices,
                 ) from exc
         expert_routes = {
             AgentColRoute.SOURCE,
@@ -913,6 +949,8 @@ class AgentColTurnService:
                         memory_clarifications=(
                             command.precompleted_memory_clarifications
                         ),
+                        continuity_receipts=command.continuity_receipts,
+                        continuity_choices=command.continuity_choices,
                     ) from exc
         else:
             try:
@@ -937,6 +975,8 @@ class AgentColTurnService:
                     memory_clarifications=(
                         command.precompleted_memory_clarifications
                     ),
+                    continuity_receipts=command.continuity_receipts,
+                    continuity_choices=command.continuity_choices,
                 ) from exc
         model_input_context = (
             *command.model_input_context,
@@ -999,6 +1039,8 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
             ) from exc
         except SupervisorRuntimeError as exc:
             logger.error(
@@ -1028,6 +1070,8 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
             ) from exc
         return AgentColTurnResult(
             response=result.response,
@@ -1057,6 +1101,8 @@ class AgentColTurnService:
                 command.precompleted_collaborative_note_events,
                 result.collaborative_note_events,
             ),
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
         )
 
     def _remaining_seconds(self, deadline: float) -> float:

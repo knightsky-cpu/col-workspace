@@ -13,6 +13,7 @@ from schemas import (
     CollaborativeNoteDecisionRequest,
     CollaborativeNoteEvent,
     CollaborativeNoteProposal,
+    ContinuitySelectionRequest,
     MemoryDecisionRequest,
     MemoryClarificationReceipt,
     MemoryClarificationSelectionRequest,
@@ -76,6 +77,7 @@ class ChatTurnRequest:
     ) = None
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
     collaborative_note_decision: CollaborativeNoteDecisionRequest | None = None
+    continuity_selection: ContinuitySelectionRequest | None = None
 
 
 @dataclass(frozen=True, slots=True)

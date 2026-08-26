@@ -35,6 +35,9 @@ from schemas import (
     ChatResponse,
     CollaborativeNoteDecisionRequest,
     CollaborativeNoteEvent,
+    ContinuityChoice,
+    ContinuitySelectionRequest,
+    ContinuitySourceReceipt,
     MemoryDecisionRequest,
     MemoryClarificationReceipt,
     MemoryClarificationSelectionRequest,
@@ -256,6 +259,27 @@ def proposal_receipt_document() -> dict[str, object]:
         "category": "response_length",
         "proposed_value": "concise",
         "expires_at": NOW + timedelta(hours=24),
+    }
+
+
+def continuity_receipt_document() -> dict[str, object]:
+    return {
+        "receipt_id": "continuity--note-1--rev-2",
+        "source_kind": "collaborative_note",
+        "source_id": "note-1",
+        "display_label": "Used note: Export workflow requirements",
+        "match_reason": "exact_title",
+        "source_updated_at": NOW,
+    }
+
+
+def continuity_choice_document() -> dict[str, object]:
+    return {
+        "choice_id": "choice-1",
+        "source_kind": "collaborative_note",
+        "source_id": "note-1",
+        "display_label": "Export workflow requirements",
+        "match_reason": "bounded_relevance",
     }
 
 
@@ -1272,6 +1296,41 @@ async def test_claim_chat_turn_persists_collaborative_note_decision_identity(
 
 
 @pytest.mark.asyncio
+async def test_claim_chat_turn_persists_continuity_selection_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("continuity-selection-request-1")
+    store = ChatTurnStore(ids)
+    store.session_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.turn_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    store.user_message_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    selection = ContinuitySelectionRequest(
+        choice_id="choice-1",
+        source_kind="collaborative_note",
+        source_id="note-1",
+    )
+    request = ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Use the selected note.",
+        continuity_selection=selection,
+    )
+
+    await MemoryEngine(store.client).claim_chat_turn(
+        request,
+        idempotency_key="continuity-selection-request-1",
+        observed_at=NOW,
+    )
+
+    stored_turn = store.transaction.set.call_args_list[1].args[1]
+    assert stored_turn["continuity_selection"] == selection.model_dump(
+        mode="json"
+    )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_rejects_request_mismatch_without_writes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1867,6 +1926,50 @@ async def test_completed_chat_turn_replay_preserves_note_event_receipt(
     ]
     assert result.response.collaborative_note_events == [
         CollaborativeNoteEvent.model_validate(note_event_document())
+    ]
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_completed_chat_turn_replay_preserves_continuity_receipts_and_choices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    ids = derive_chat_turn_ids("request-1")
+    store = ChatTurnStore(ids)
+    stored_turn = turn_document(ids, status="completed")
+    stored_turn["continuity_receipts"] = [continuity_receipt_document()]
+    stored_turn["continuity_choices"] = [continuity_choice_document()]
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=stored_turn)
+    )
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=user_message_document())
+    )
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"role": "model", "text": "Use the saved note.", "timestamp": NOW},
+        )
+    )
+
+    result = await MemoryEngine(store.client).claim_chat_turn(
+        ChatTurnRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember one logical turn.",
+        ),
+        idempotency_key="request-1",
+        observed_at=NOW,
+    )
+
+    assert isinstance(result, ChatTurnReplay)
+    assert result.response.continuity_receipts == [
+        ContinuitySourceReceipt.model_validate(continuity_receipt_document())
+    ]
+    assert result.response.continuity_choices == [
+        ContinuityChoice.model_validate(continuity_choice_document())
     ]
     store.transaction.set.assert_not_called()
 
@@ -2838,6 +2941,8 @@ async def test_complete_chat_turn_atomically_stores_response_and_receipts(
                 "memory_clarifications": [],
                 "collaborative_note_proposals": [],
                 "collaborative_note_events": [],
+                "continuity_receipts": [],
+                "continuity_choices": [],
                 "adaptations": [],
                 "completed_at": firestore.SERVER_TIMESTAMP,
                 "updated_at": firestore.SERVER_TIMESTAMP,

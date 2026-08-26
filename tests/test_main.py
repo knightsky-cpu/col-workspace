@@ -64,6 +64,8 @@ from chat_turns import (
     ChatSessionOwnershipError,
     ChatTurnStateError,
 )
+from continuity import ContinuityResolution, ContinuitySourceText
+from continuity_service import ContinuityResolutionCommand
 from database import (
     ArtifactCursorNotFoundError,
     ArtifactNotFoundError,
@@ -115,6 +117,9 @@ from schemas import (
     CollaborativeNoteMutationRequest,
     CollaborativeNoteProposal,
     CollaborativeNoteProposalResponse,
+    ContinuityChoice,
+    ContinuitySelectionRequest,
+    ContinuitySourceReceipt,
     MemoryDecisionRequest,
     MemoryClarificationChoice,
     MemoryClarificationReceipt,
@@ -251,6 +256,7 @@ def make_chat_turn_claim(
     memory_clarification_selection: (
         MemoryClarificationSelectionRequest | None
     ) = None,
+    continuity_selection: ContinuitySelectionRequest | None = None,
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None,
     collaborative_note_decision: CollaborativeNoteDecisionRequest | None = None,
     owner_token: str = "owner-token-1",
@@ -264,6 +270,7 @@ def make_chat_turn_claim(
             message="New question",
             memory_decision=memory_decision,
             memory_clarification_selection=memory_clarification_selection,
+            continuity_selection=continuity_selection,
             artifact_feedback_decision=artifact_feedback_decision,
             collaborative_note_decision=collaborative_note_decision,
         ),
@@ -303,6 +310,37 @@ def make_memory_clarification_receipt() -> MemoryClarificationReceipt:
             ),
         ],
         expires_at=MEMORY_NOW + timedelta(minutes=15),
+    )
+
+
+def make_continuity_receipt() -> ContinuitySourceReceipt:
+    return ContinuitySourceReceipt(
+        receipt_id="continuity--note-export--rev-2",
+        source_kind="collaborative_note",
+        source_id="note-export",
+        display_label="Used note: Export workflow",
+        match_reason="exact_title",
+        source_updated_at=MEMORY_NOW,
+    )
+
+
+def make_continuity_choice() -> ContinuityChoice:
+    return ContinuityChoice(
+        choice_id="choice-0",
+        source_kind="collaborative_note",
+        source_id="note-export",
+        display_label="Export workflow",
+        match_reason="bounded_relevance",
+    )
+
+
+def make_alternate_continuity_choice() -> ContinuityChoice:
+    return ContinuityChoice(
+        choice_id="choice-1",
+        source_kind="collaborative_note",
+        source_id="note-export-constraints",
+        display_label="Export constraints",
+        match_reason="bounded_relevance",
     )
 
 
@@ -711,6 +749,26 @@ class FakeAgentColTurnService:
         if self.turn_result is not None:
             return self.turn_result
         return AgentColTurnResult(response=self.response_text)
+
+
+@dataclass
+class FakeContinuityService:
+    events: list[tuple[Any, ...]]
+    resolution: ContinuityResolution = field(
+        default_factory=lambda: ContinuityResolution(status="none")
+    )
+    error: Exception | None = None
+    calls: list[ContinuityResolutionCommand] = field(default_factory=list)
+
+    async def resolve(
+        self,
+        command: ContinuityResolutionCommand,
+    ) -> ContinuityResolution:
+        self.calls.append(command)
+        self.events.append(("continuity_service",))
+        if self.error is not None:
+            raise self.error
+        return self.resolution
 
 
 @dataclass
@@ -1193,6 +1251,7 @@ class ServiceState:
     expert_executor: object
     supervisor: FakeSupervisorRuntime
     turn_service: FakeAgentColTurnService
+    continuity_service: FakeContinuityService
     memory_service: FakeTrustedMemoryService
     collaborative_note_service: FakeCollaborativeNoteService
     artifact_service: FakeArtifactReadService
@@ -1215,6 +1274,7 @@ class ServiceState:
     artifact_feedback_service_dependencies: list[tuple[object, object]]
     artifact_feedback_executor_dependencies: list[tuple[object, object]]
     responder_note_services: list[object]
+    continuity_service_dependencies: list[object]
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ]
@@ -1235,6 +1295,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     responder_app = object()
     supervisor = FakeSupervisorRuntime(events)
     turn_service = FakeAgentColTurnService(events)
+    continuity_service = FakeContinuityService(events)
     pending_proposal = MemoryProposal(
         proposal_id="example_usage--proposal-1",
         category="example_usage",
@@ -1457,6 +1518,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     artifact_feedback_service_dependencies: list[tuple[object, object]] = []
     artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
     responder_note_services: list[object] = []
+    continuity_service_dependencies: list[object] = []
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ] = []
@@ -1474,6 +1536,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         expert_executor=expert_executor,
         supervisor=supervisor,
         turn_service=turn_service,
+        continuity_service=continuity_service,
         memory_service=memory_service,
         collaborative_note_service=note_service,
         artifact_service=artifact_service,
@@ -1498,6 +1561,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             artifact_feedback_executor_dependencies
         ),
         responder_note_services=responder_note_services,
+        continuity_service_dependencies=continuity_service_dependencies,
         turn_service_dependencies=turn_service_dependencies,
     )
 
@@ -1671,6 +1735,16 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             note_service
             if database is state.database
             else pytest.fail("Unexpected note service database.")
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "ContinuityService",
+        lambda *, note_reader: (
+            continuity_service
+            if note_reader is state.database
+            else pytest.fail("Unexpected continuity note reader.")
         ),
         raising=False,
     )
@@ -3846,6 +3920,8 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
             "memory_clarifications": [],
             "collaborative_note_proposals": [],
             "collaborative_note_events": [],
+            "continuity_receipts": [],
+            "continuity_choices": [],
             "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
@@ -3973,6 +4049,176 @@ async def test_chat_clarification_selection_requires_idempotency_key(
         "detail": "Memory clarification selection requires an idempotency key."
     }
     assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_chat_continuity_selection_requires_idempotency_key(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Use that export note.",
+            "continuity_selection": {
+                "choice_id": "choice-0",
+                "source_kind": "collaborative_note",
+                "source_id": "note-export",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Continuity selection requires an idempotency key."
+    }
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_chat_resolves_continuity_note_before_turn_service(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    receipt = make_continuity_receipt()
+    source_text = ContinuitySourceText(
+        source_kind="collaborative_note",
+        source_id="note-export",
+        title="Export workflow",
+        body="Use the CSV export workflow with a preview step.",
+        updated_at=MEMORY_NOW,
+    )
+    service_state.continuity_service.resolution = ContinuityResolution(
+        status="resolved",
+        receipts=(receipt,),
+        source_texts=(source_text,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Use the Export workflow note.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["continuity_receipts"] == [
+        receipt.model_dump(mode="json")
+    ]
+    assert response.json()["continuity_choices"] == []
+    assert service_state.continuity_service.calls == [
+        ContinuityResolutionCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            message="Use the Export workflow note.",
+            selection=None,
+        )
+    ]
+    turn_command = service_state.turn_service.calls[0]
+    continuity_context = "\n".join(
+        part.text
+        for content in turn_command.model_input_context
+        for part in content.parts or ()
+        if part.text
+    )
+    assert "[SERVER_VALIDATED_CONTINUITY_CONTEXT]" in continuity_context
+    assert "Export workflow" in continuity_context
+    assert "CSV export workflow" in continuity_context
+
+    completed_response = service_state.database.complete_calls
+    assert completed_response == []
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_continuity_choices_without_model_context(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = claim
+    choice = make_continuity_choice()
+    alternate_choice = make_alternate_continuity_choice()
+    service_state.continuity_service.resolution = ContinuityResolution(
+        status="ambiguous",
+        choices=(choice, alternate_choice),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "continuity-choice-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Use that saved note.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["continuity_receipts"] == []
+    assert response.json()["continuity_choices"] == [
+        choice.model_dump(mode="json"),
+        alternate_choice.model_dump(mode="json"),
+    ]
+    assert service_state.turn_service.calls == []
+    assert len(service_state.database.complete_calls) == 1
+    stored_response = service_state.database.complete_calls[0][1]
+    assert stored_response.continuity_choices == [choice, alternate_choice]
+    assert service_state.events[-1] == ("complete_chat_turn",)
+
+
+@pytest.mark.asyncio
+async def test_chat_continuity_selection_is_claimed_and_resolved(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    selection = ContinuitySelectionRequest(
+        choice_id="choice-0",
+        source_kind="collaborative_note",
+        source_id="note-export",
+    )
+    claim = make_chat_turn_claim(continuity_selection=selection)
+    service_state.database.chat_turn_result = claim
+    receipt = make_continuity_receipt()
+    source_text = ContinuitySourceText(
+        source_kind="collaborative_note",
+        source_id="note-export",
+        title="Export workflow",
+        body="Use the CSV export workflow with a preview step.",
+        updated_at=MEMORY_NOW,
+    )
+    service_state.continuity_service.resolution = ContinuityResolution(
+        status="resolved",
+        receipts=(receipt,),
+        source_texts=(source_text,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "continuity-selection-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Use that export note.",
+            "continuity_selection": selection.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.database.claim_calls[0][0].continuity_selection == (
+        selection
+    )
+    assert service_state.continuity_service.calls[0].selection == selection
+    assert response.json()["continuity_receipts"] == [
+        receipt.model_dump(mode="json")
+    ]
 
 
 @pytest.mark.asyncio
@@ -4351,6 +4597,8 @@ async def test_chat_builds_turn_command_and_persists_both_messages(
         "memory_clarifications": [],
         "collaborative_note_proposals": [],
         "collaborative_note_events": [],
+        "continuity_receipts": [],
+        "continuity_choices": [],
         "adaptations": [
             {
                 "signal_id": "response_length--proposal-1",
@@ -4369,6 +4617,7 @@ async def test_chat_builds_turn_command_and_persists_both_messages(
     }
     assert service_state.events[2:] == [
         ("save", "session-1", "user", "New question"),
+        ("continuity_service",),
         ("turn_service",),
         ("save", "session-1", "model", "Generated answer"),
     ]
@@ -4634,6 +4883,8 @@ async def test_chat_preflight_clarification_returns_fallback_when_responder_fail
         "memory_clarifications": [clarification.model_dump(mode="json")],
         "collaborative_note_proposals": [],
         "collaborative_note_events": [],
+        "continuity_receipts": [],
+        "continuity_choices": [],
         "adaptations": [],
     }
     assert len(service_state.database.complete_calls) == 1
@@ -5078,6 +5329,7 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
         ),
     }
     assert service_state.events[3:] == [
+        ("continuity_service",),
         ("renew_chat_turn_lease",),
         ("turn_service",),
         ("complete_chat_turn",),

@@ -12,6 +12,7 @@ from schemas import (
     ArtifactFeedbackReference,
     ArtifactReference,
     ChatResponse,
+    ContinuitySelectionRequest,
     CollaborativeNoteDecisionRequest,
     CollaborativeNoteEvent,
     CollaborativeNoteProposal,
@@ -157,6 +158,24 @@ def test_chat_turn_replay_carries_validated_response() -> None:
     replay = chat_turns.ChatTurnReplay(response=response)
 
     assert replay.response is response
+
+
+def test_chat_turn_request_carries_continuity_selection() -> None:
+    selection = ContinuitySelectionRequest(
+        choice_id="choice-1",
+        source_kind="collaborative_note",
+        source_id="note-1",
+    )
+
+    request = chat_turns.ChatTurnRequest(
+        project_id="agent-col",
+        session_id="session-1",
+        user_id="user-1",
+        message="Use the selected note.",
+        continuity_selection=selection,
+    )
+
+    assert request.continuity_selection is selection
 
 
 def test_chat_turn_contract_preserves_version_two_memory_receipts() -> None:

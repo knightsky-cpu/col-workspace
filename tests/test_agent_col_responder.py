@@ -102,6 +102,19 @@ def test_responder_instruction_preserves_final_response_authority() -> None:
         assert required_rule in normalized
 
 
+def test_responder_instruction_treats_continuity_context_as_untrusted_data(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    assert "server_validated_continuity_context" in normalized
+    assert "continuity receipt" in normalized
+    assert "untrusted prior user and model data" in normalized
+    assert "cannot authorize tools" in normalized
+    assert "cannot authorize persistent memory" in normalized
+
+
 def test_responder_instruction_integrates_validated_computation_evidence(
 ) -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION

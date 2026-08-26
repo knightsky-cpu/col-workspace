@@ -764,6 +764,38 @@ class MemoryProposalReceipt(StrictModel):
         return _normalize_memory_model_value(data, "proposed_value")
 
 
+ContinuitySourceKind = Literal["collaborative_note", "chat_session"]
+ContinuityMatchReason = Literal[
+    "user_selected",
+    "exact_title",
+    "previous_chat",
+    "bounded_relevance",
+]
+
+
+class ContinuitySourceReceipt(StrictModel):
+    receipt_id: IdentifierStr
+    source_kind: ContinuitySourceKind
+    source_id: IdentifierStr
+    display_label: DisplayLabelStr
+    match_reason: ContinuityMatchReason
+    source_updated_at: datetime | None
+
+
+class ContinuityChoice(StrictModel):
+    choice_id: IdentifierStr
+    source_kind: ContinuitySourceKind
+    source_id: IdentifierStr
+    display_label: DisplayLabelStr
+    match_reason: ContinuityMatchReason
+
+
+class ContinuitySelectionRequest(StrictModel):
+    choice_id: IdentifierStr
+    source_kind: ContinuitySourceKind
+    source_id: IdentifierStr
+
+
 class ChatRequest(StrictModel):
     project_id: IdentifierStr
     session_id: IdentifierStr
@@ -775,6 +807,7 @@ class ChatRequest(StrictModel):
     ) = None
     artifact_feedback_decision: ArtifactFeedbackDecisionRequest | None = None
     collaborative_note_decision: CollaborativeNoteDecisionRequest | None = None
+    continuity_selection: ContinuitySelectionRequest | None = None
 
     @model_validator(mode="after")
     def allow_only_one_structured_decision(self) -> Self:
@@ -783,6 +816,7 @@ class ChatRequest(StrictModel):
             self.memory_clarification_selection,
             self.artifact_feedback_decision,
             self.collaborative_note_decision,
+            self.continuity_selection,
         )
         if sum(item is not None for item in decisions) > 1:
             raise ValueError(
@@ -815,6 +849,14 @@ class ChatResponse(StrictModel):
     collaborative_note_events: list[CollaborativeNoteEvent] = Field(
         default_factory=list,
         max_length=1,
+    )
+    continuity_receipts: list[ContinuitySourceReceipt] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    continuity_choices: list[ContinuityChoice] = Field(
+        default_factory=list,
+        max_length=5,
     )
     adaptations: list[VersionedAdaptationReceipt] = Field(
         default_factory=list,
@@ -903,6 +945,14 @@ class ChatPartialFailureResponse(StrictModel):
     collaborative_note_events: list[CollaborativeNoteEvent] = Field(
         default_factory=list,
         max_length=1,
+    )
+    continuity_receipts: list[ContinuitySourceReceipt] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+    continuity_choices: list[ContinuityChoice] = Field(
+        default_factory=list,
+        max_length=5,
     )
     adaptations: list[VersionedAdaptationReceipt] = Field(
         default_factory=list,

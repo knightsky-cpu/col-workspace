@@ -88,6 +88,9 @@ from schemas import (
     CollaborativeNoteProposal,
     CollaborationProfile,
     CollaborationProfileV2,
+    ContinuityChoice,
+    ContinuitySelectionRequest,
+    ContinuitySourceReceipt,
     MemoryEvent,
     MemoryEventV2,
     MemoryDecisionRequest,
@@ -1067,6 +1070,45 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("list_collaborative_notes", exc)
 
+    async def list_active_collaborative_notes_for_continuity(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        limit: int,
+    ) -> tuple[CollaborativeNote, ...]:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        if not 1 <= limit <= 50:
+            raise ValueError("limit must be between 1 and 50.")
+        try:
+            notes_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+                .collection("collaborative_notes")
+            )
+            query = notes_ref.where("status", "==", "active").limit(limit)
+            notes: list[CollaborativeNote] = []
+            async for snapshot in query.stream():
+                note = CollaborativeNote.model_validate(snapshot.to_dict())
+                if (
+                    note.owner_user_id != user_id
+                    or note.workspace_id != workspace_id
+                    or note.status != "active"
+                ):
+                    raise ValueError("Stored collaborative note ownership is invalid.")
+                notes.append(note)
+            return tuple(notes)
+        except ValidationError as exc:
+            raise ValueError("Stored collaborative note state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "list_active_collaborative_notes_for_continuity",
+                exc,
+            )
+
     async def get_collaborative_note_detail(
         self,
         *,
@@ -1483,6 +1525,16 @@ class MemoryEngine:
                 "CollaborativeNoteDecisionRequest."
             )
         if (
+            request.continuity_selection is not None
+            and not isinstance(
+                request.continuity_selection,
+                ContinuitySelectionRequest,
+            )
+        ):
+            raise ValueError(
+                "continuity_selection must be a ContinuitySelectionRequest."
+            )
+        if (
             request.memory_clarification_selection is not None
             and not isinstance(
                 request.memory_clarification_selection,
@@ -1500,6 +1552,7 @@ class MemoryEngine:
                 request.memory_clarification_selection,
                 request.artifact_feedback_decision,
                 request.collaborative_note_decision,
+                request.continuity_selection,
             )
         ) > 1:
             raise ValueError("structured decisions are mutually exclusive.")
@@ -1670,6 +1723,7 @@ class MemoryEngine:
             transaction.set(session_ref, session_update, merge=True)
             feedback_decision = request.artifact_feedback_decision
             note_decision = request.collaborative_note_decision
+            continuity_selection = request.continuity_selection
             clarification_selection = (
                 request.memory_clarification_selection
             )
@@ -1712,6 +1766,15 @@ class MemoryEngine:
                             )
                         }
                         if note_decision is not None
+                        else {}
+                    ),
+                    **(
+                        {
+                            "continuity_selection": (
+                                continuity_selection.model_dump(mode="json")
+                            )
+                        }
+                        if continuity_selection is not None
                         else {}
                     ),
                     "user_message_id": ids.user_message_id,
@@ -3053,6 +3116,11 @@ class MemoryEngine:
             if request.collaborative_note_decision is not None
             else None
         )
+        expected_continuity_selection = (
+            request.continuity_selection.model_dump(mode="json")
+            if request.continuity_selection is not None
+            else None
+        )
         if (
             turn_data.get("project_id") != request.project_id
             or turn_data.get("user_id") != request.user_id
@@ -3063,6 +3131,8 @@ class MemoryEngine:
             != expected_feedback_decision
             or turn_data.get("collaborative_note_decision")
             != expected_note_decision
+            or turn_data.get("continuity_selection")
+            != expected_continuity_selection
         ):
             raise ChatTurnConflictError(
                 "Idempotency key conflicts with a different chat request."
@@ -3144,6 +3214,14 @@ class MemoryEngine:
             )
         ):
             raise ValueError("claim collaborative_note_decision is invalid.")
+        if (
+            request.continuity_selection is not None
+            and not isinstance(
+                request.continuity_selection,
+                ContinuitySelectionRequest,
+            )
+        ):
+            raise ValueError("claim continuity_selection is invalid.")
         if sum(
             decision is not None
             for decision in (
@@ -3151,6 +3229,7 @@ class MemoryEngine:
                 request.memory_clarification_selection,
                 request.artifact_feedback_decision,
                 request.collaborative_note_decision,
+                request.continuity_selection,
             )
         ) > 1:
             raise ValueError("claim structured decisions are invalid.")
@@ -3337,6 +3416,11 @@ class MemoryEngine:
             if claim.request.collaborative_note_decision is not None
             else None
         )
+        expected_continuity_selection = (
+            claim.request.continuity_selection.model_dump(mode="json")
+            if claim.request.continuity_selection is not None
+            else None
+        )
         if (
             turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
             or turn_data.get("project_id") != claim.request.project_id
@@ -3348,6 +3432,8 @@ class MemoryEngine:
             != expected_feedback_decision
             or turn_data.get("collaborative_note_decision")
             != expected_note_decision
+            or turn_data.get("continuity_selection")
+            != expected_continuity_selection
             or turn_data.get("user_message_id")
             != claim.ids.user_message_id
             or turn_data.get("model_message_id")
@@ -3401,6 +3487,8 @@ class MemoryEngine:
                     collaborative_note_proposals
                 ),
                 collaborative_note_events=list(collaborative_note_events),
+                continuity_receipts=turn_data.get("continuity_receipts", []),
+                continuity_choices=turn_data.get("continuity_choices", []),
                 adaptations=turn_data.get("adaptations", []),
             )
         except (ValidationError, TypeError, ValueError) as exc:

@@ -179,6 +179,85 @@ def test_v2_memory_models_accept_user_requested_memory_text() -> None:
     assert receipt.value == proposed.proposed_value
 
 
+def test_chat_response_carries_continuity_receipts_and_choices_without_bodies() -> None:
+    from datetime import UTC, datetime
+
+    from schemas import (
+        ChatResponse,
+        ContinuityChoice,
+        ContinuitySourceReceipt,
+    )
+
+    receipt = ContinuitySourceReceipt(
+        receipt_id="continuity--note-1--rev-2",
+        source_kind="collaborative_note",
+        source_id="note-1",
+        display_label="Used note: Export workflow requirements",
+        match_reason="exact_title",
+        source_updated_at=datetime(2026, 8, 26, 18, 30, tzinfo=UTC),
+    )
+    choice = ContinuityChoice(
+        choice_id="choice-1",
+        source_kind="collaborative_note",
+        source_id="note-2",
+        display_label="Export workflow constraints",
+        match_reason="bounded_relevance",
+    )
+
+    response = ChatResponse(
+        response="Use the saved export workflow note.",
+        continuity_receipts=[receipt],
+        continuity_choices=[choice],
+    )
+
+    document = response.model_dump(mode="json")
+    assert document["continuity_receipts"] == [
+        {
+            "receipt_id": "continuity--note-1--rev-2",
+            "source_kind": "collaborative_note",
+            "source_id": "note-1",
+            "display_label": "Used note: Export workflow requirements",
+            "match_reason": "exact_title",
+            "source_updated_at": "2026-08-26T18:30:00Z",
+        }
+    ]
+    assert document["continuity_choices"] == [
+        {
+            "choice_id": "choice-1",
+            "source_kind": "collaborative_note",
+            "source_id": "note-2",
+            "display_label": "Export workflow constraints",
+            "match_reason": "bounded_relevance",
+        }
+    ]
+    assert "body" not in str(document)
+
+
+def test_chat_request_continuity_selection_is_mutually_exclusive_with_decisions() -> None:
+    from schemas import (
+        ChatRequest,
+        ContinuitySelectionRequest,
+        MemoryDecisionRequest,
+    )
+
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        ChatRequest(
+            project_id="agent-col",
+            session_id="session-1",
+            user_id="user-1",
+            message="Use the selected note.",
+            continuity_selection=ContinuitySelectionRequest(
+                choice_id="choice-1",
+                source_kind="collaborative_note",
+                source_id="note-1",
+            ),
+            memory_decision=MemoryDecisionRequest(
+                proposal_id="response_length--proposal-1",
+                decision="approve",
+            ),
+        )
+
+
 def test_blueprint_v2_uses_architectural_decisions(
     valid_blueprint_payload: dict[str, object],
 ) -> None:
@@ -639,6 +718,7 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "memory_clarification_selection": None,
         "artifact_feedback_decision": None,
         "collaborative_note_decision": None,
+        "continuity_selection": None,
     }
     assert response.model_dump(mode="json") == {
         "response": "Collaborative answer.",
@@ -650,6 +730,8 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "memory_clarifications": [],
         "collaborative_note_proposals": [],
         "collaborative_note_events": [],
+        "continuity_receipts": [],
+        "continuity_choices": [],
         "adaptations": [],
     }
 

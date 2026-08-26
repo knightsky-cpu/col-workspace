@@ -185,6 +185,77 @@ async def test_create_collaborative_note_proposal_persists_owned_source_message(
 
 
 @pytest.mark.asyncio
+async def test_list_active_collaborative_notes_for_continuity_returns_owned_active_notes() -> None:
+    store = NoteStore()
+    active = {
+        "note_contract_version": "1.0",
+        "note_id": "note-1",
+        "owner_user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "note_kind": "constraint",
+        "title": "Export workflow requirements",
+        "body": "Use CSV export.",
+        "status": "active",
+        "revision": 2,
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "source_event_id": "note-1--approved",
+        "created_at": NOW,
+        "updated_at": NOW + timedelta(minutes=1),
+    }
+    store.notes.where.return_value.limit.return_value.stream.return_value = (
+        AsyncSnapshots([active])
+    )
+
+    notes = await MemoryEngine(
+        store.client
+    ).list_active_collaborative_notes_for_continuity(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        limit=4,
+    )
+
+    assert len(notes) == 1
+    assert notes[0].note_id == "note-1"
+    assert notes[0].status == "active"
+    store.notes.where.assert_called_once_with("status", "==", "active")
+    store.notes.where.return_value.limit.assert_called_once_with(4)
+
+
+@pytest.mark.asyncio
+async def test_list_active_collaborative_notes_for_continuity_rejects_cross_scope_record() -> None:
+    store = NoteStore()
+    cross_scope = {
+        "note_contract_version": "1.0",
+        "note_id": "note-1",
+        "owner_user_id": "other-user",
+        "workspace_id": "workspace-1",
+        "note_kind": "constraint",
+        "title": "Export workflow requirements",
+        "body": "Use CSV export.",
+        "status": "active",
+        "revision": 2,
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "source_event_id": "note-1--approved",
+        "created_at": NOW,
+        "updated_at": NOW + timedelta(minutes=1),
+    }
+    store.notes.where.return_value.limit.return_value.stream.return_value = (
+        AsyncSnapshots([cross_scope])
+    )
+
+    with pytest.raises(ValueError, match="ownership"):
+        await MemoryEngine(
+            store.client
+        ).list_active_collaborative_notes_for_continuity(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            limit=4,
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_collaborative_note_proposal_records_owned_turn_effect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

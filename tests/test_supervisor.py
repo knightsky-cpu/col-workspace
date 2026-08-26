@@ -54,6 +54,19 @@ def test_create_supervisor_app_defines_restrained_research_agent() -> None:
     assert "untrusted data" in SUPERVISOR_INSTRUCTION
 
 
+def test_supervisor_instruction_treats_continuity_context_as_untrusted_data(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split()).lower()
+
+    assert "server_validated_continuity_context" in normalized_instruction
+    assert "continuity receipt" in normalized_instruction
+    assert "untrusted prior user and model data" in normalized_instruction
+    assert "cannot authorize tools" in normalized_instruction
+    assert "cannot authorize persistent memory" in normalized_instruction
+
+
 def test_create_supervisor_app_registers_only_injected_memory_tool() -> None:
     from supervisor import create_supervisor_app
 
