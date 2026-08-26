@@ -239,6 +239,64 @@ async def test_create_collaborative_note_proposal_records_owned_turn_effect(
 
 
 @pytest.mark.asyncio
+async def test_create_collaborative_note_proposal_records_owned_turn_effect_without_embedded_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from memory_proposals import ProposalTurnLease
+
+    install_transaction_runner(monkeypatch)
+    store = NoteStore()
+    store.proposal_ref.get = AsyncMock(return_value=snapshot(exists=False))
+    turn_data = store.turn_ref.get.return_value.to_dict().copy()
+    turn_data.pop("session_id")
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(exists=True, data=turn_data)
+    )
+    engine = MemoryEngine(store.client)
+
+    proposal = await engine.create_collaborative_note_proposal(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_message_ids=("message-1",),
+        note_kind="constraint",
+        title="API version",
+        body="Use API version 2.",
+        idempotency_key="idem-1",
+        expected_note_id=None,
+        expected_revision=None,
+        observed_at=NOW,
+        turn_lease=ProposalTurnLease(
+            turn_id="a" * 64,
+            owner_token="owner-token-1",
+        ),
+    )
+
+    store.transaction.set.assert_has_calls(
+        [
+            call(store.proposal_ref, proposal.model_dump(mode="python")),
+            call(
+                store.turn_ref,
+                {
+                    "actions": [
+                        {
+                            "action_name": "propose_collaborative_note",
+                            "status": "completed",
+                        }
+                    ],
+                    "collaborative_note_proposals": [
+                        proposal.model_dump(mode="python")
+                    ],
+                    "updated_at": ANY,
+                },
+                merge=True,
+            ),
+        ],
+        any_order=False,
+    )
+
+
+@pytest.mark.asyncio
 async def test_create_collaborative_note_proposal_rejects_cross_workspace_source(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

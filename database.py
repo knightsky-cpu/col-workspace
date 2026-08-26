@@ -3723,7 +3723,6 @@ class MemoryEngine:
             or turn_data.get("status") != "in_progress"
             or turn_data.get("user_id") != user_id
             or turn_data.get("project_id") != workspace_id
-            or turn_data.get("session_id") != session_id
             or turn_data.get("user_message_id") != source_message_id
             or turn_data.get("lease_owner") != turn_lease.owner_token
             or not MemoryEngine._is_aware_datetime(lease_expires_at)
