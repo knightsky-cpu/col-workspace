@@ -1,4 +1,4 @@
-import { element, humanLabel, setText } from "./render.mjs";
+import { element, humanLabel, humanValue, setText } from "./render.mjs";
 
 function appendReceipt(container, label, value) {
   const item = element("li", "receipt-item contain-text");
@@ -27,6 +27,22 @@ export function renderReceipts(container, response) {
   }
   for (const proposal of response.memory_proposals ?? []) {
     appendReceipt(list, "Memory proposal", humanLabel(proposal.category));
+  }
+  for (const adaptation of response.adaptations ?? []) {
+    if (
+      !adaptation
+      || typeof adaptation !== "object"
+      || typeof adaptation.category !== "string"
+    ) {
+      continue;
+    }
+    appendReceipt(
+      list,
+      "Adaptation",
+      [humanLabel(adaptation.category), humanValue(adaptation.value)]
+        .filter(Boolean)
+        .join(" · "),
+    );
   }
   if (list.children.length > 0) {
     container.append(list);

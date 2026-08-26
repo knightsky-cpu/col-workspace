@@ -1,4 +1,5 @@
 import { generateSessionId } from "./requests.mjs";
+import { humanLabel, humanValue } from "./render.mjs";
 
 export function createInitialState() {
   return {
@@ -589,10 +590,13 @@ function activityEntriesFromResponse(response) {
   }
   for (const rawAdaptation of Array.isArray(response.adaptations) ? response.adaptations : []) {
     const adaptation = objectOrEmpty(rawAdaptation);
+    if (typeof adaptation.category !== "string") {
+      continue;
+    }
     entries.push({
       kind: "adaptation",
-      label: adaptation.category ?? "Adaptation",
-      detail: adaptation.signal_id ?? "",
+      label: humanLabel(adaptation.category),
+      detail: humanValue(adaptation.value),
     });
   }
   return entries;

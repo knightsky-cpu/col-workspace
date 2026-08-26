@@ -33,3 +33,16 @@ export function humanLabel(value) {
     .toLowerCase();
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
+
+export function humanValue(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (Array.isArray(value)) {
+    return value.map(humanValue).filter(Boolean).join(", ");
+  }
+  if (typeof value === "object") {
+    return Object.values(value).map(humanValue).filter(Boolean).join(":");
+  }
+  return humanLabel(value);
+}

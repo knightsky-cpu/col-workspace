@@ -86,6 +86,9 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
     adaptations: [{
       signal_id: "planning_granularity--1",
       category: "planning_granularity",
+      value: "short_plan_first",
+      source_event_id: "planning_granularity--1--approved",
+      status: "provided_to_model",
     }],
   });
 
@@ -94,8 +97,11 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
   assert.match(text, /Example Domain/);
   assert.match(text, /Blueprint/);
   assert.match(text, /Response length/);
+  assert.match(text, /Adaptation: Planning granularity/);
+  assert.match(text, /Short plan first/);
   assert.doesNotMatch(text, /response_length--1/);
   assert.doesNotMatch(text, /planning_granularity--1/);
+  assert.doesNotMatch(text, /planning_granularity--1--approved/);
   assert.doesNotMatch(text, /google_search/);
   assert.equal(
     container.children[0].children.every((receipt) => (
@@ -103,6 +109,35 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
     )),
     true,
   );
+});
+
+test("renderReceipts renders list-valued adaptation proof without raw ids", () => {
+  const container = node();
+  renderReceipts(container, {
+    response: "I used memory in prose from development_environments--active-v2.",
+    adaptations: [
+      {
+        signal_id: "development_environments--active-v2",
+        category: "development_environments",
+        value: ["macos", "linux"],
+        policy_version: "2.0",
+        source_event_id: "development_environments--active-v2--approved",
+        status: "provided_to_model",
+      },
+      null,
+      {
+        signal_id: "missing-category--1",
+        source_event_id: "missing-category--1--approved",
+      },
+    ],
+  });
+
+  const text = textTree(container);
+  assert.match(text, /Adaptation: Development environments/);
+  assert.match(text, /Macos, Linux/);
+  assert.doesNotMatch(text, /development_environments--active-v2/);
+  assert.doesNotMatch(text, /development_environments--active-v2--approved/);
+  assert.doesNotMatch(text, /missing-category--1/);
 });
 
 test("createChatView updates the character counter from prompt input", () => {

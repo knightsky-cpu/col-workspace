@@ -356,6 +356,9 @@ test("completed turn projects authoritative receipts into activity", () => {
       adaptations: [{
         signal_id: "preferred_name--signal-1",
         category: "preferred_name",
+        value: "wifiknight",
+        source_event_id: "preferred_name--signal-1--approved",
+        status: "provided_to_model",
       }],
     },
   );
@@ -366,7 +369,35 @@ test("completed turn projects authoritative receipts into activity", () => {
   );
   assert.equal(completed.activity.entries[0].label, "synthesize_project");
   assert.equal(completed.activity.entries[2].detail, "blueprint--1");
-  assert.equal(completed.activity.entries[5].detail, "preferred_name--signal-1");
+  assert.equal(completed.activity.entries[5].label, "Preferred name");
+  assert.equal(completed.activity.entries[5].detail, "Wifiknight");
+});
+
+test("completed turn projects adaptation activity with readable provenance", () => {
+  const request = Object.freeze({
+    key: "chat--adapted",
+    body: Object.freeze({ message: "Compare two planning options." }),
+  });
+  const completed = completePendingTurn(
+    beginPendingTurn(createInitialState(), request),
+    {
+      response: "ok",
+      adaptations: [{
+        signal_id: "development_environments--active-v2",
+        category: "development_environments",
+        value: ["macos", "linux"],
+        policy_version: "2.0",
+        source_event_id: "development_environments--active-v2--approved",
+        status: "provided_to_model",
+      }],
+    },
+  );
+
+  assert.deepEqual(completed.activity.entries, [{
+    kind: "adaptation",
+    label: "Development environments",
+    detail: "Macos, Linux",
+  }]);
 });
 
 test("failed turns add a bounded error activity entry", () => {
@@ -440,7 +471,6 @@ test("activity projection tolerates malformed receipt entries", () => {
       "Artifact",
       "Feedback",
       "Memory proposal",
-      "Adaptation",
     ],
   );
 });
