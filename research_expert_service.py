@@ -2,6 +2,7 @@ import asyncio
 import logging
 from uuid import uuid4
 
+from google import genai
 from google.adk.agents.run_config import RunConfig
 from google.adk.apps import App
 from google.adk.events import Event
@@ -13,11 +14,13 @@ from pydantic import ValidationError
 
 from expert_contracts import ExpertStatus
 from research_expert import (
+    RESEARCH_EXPERT_MODEL_NAME,
     RESEARCH_EXPERT_TIMEOUT_SECONDS,
     ResearchExpertInput,
     ResearchInvalidOutputReason,
     ResearchExpertResult,
     create_research_expert,
+    diagnose_grounded_research_text,
     diagnose_research_event,
 )
 from vertex_config import VertexAISettings
@@ -55,6 +58,7 @@ class ResearchExpertService:
         app: App,
         runner: object,
         session_service: object,
+        direct_client: object | None = None,
         timeout_seconds: float = RESEARCH_EXPERT_TIMEOUT_SECONDS,
     ) -> None:
         if timeout_seconds <= 0:
@@ -62,12 +66,18 @@ class ResearchExpertService:
         self._app = app
         self._runner = runner
         self._session_service = session_service
+        self._direct_client = direct_client
         self._timeout_seconds = timeout_seconds
 
     @property
     def app(self) -> App:
         """Return the ADK application topology owned by this service."""
         return self._app
+
+    @property
+    def direct_client(self) -> object | None:
+        """Return the direct Gen AI client used for grounded Research."""
+        return self._direct_client
 
     @classmethod
     def from_vertex_settings(
@@ -88,6 +98,7 @@ class ResearchExpertService:
             app=app,
             runner=Runner(app=app, session_service=sessions),
             session_service=sessions,
+            direct_client=genai.Client(**vertex_settings.client_kwargs()),
         )
 
     async def research(
@@ -95,6 +106,8 @@ class ResearchExpertService:
         request: ResearchExpertInput,
     ) -> ResearchExpertResult:
         """Return one locally validated, provider-grounded Research result."""
+        if self._direct_client is not None:
+            return await self._research_direct(request)
         invocation_session_id = uuid4().hex
         session_kwargs = {
             "app_name": RESEARCH_EXPERT_APP_NAME,
@@ -133,6 +146,73 @@ class ResearchExpertService:
         finally:
             if session_created:
                 await self._session_service.delete_session(**session_kwargs)
+
+    async def _research_direct(
+        self,
+        request: ResearchExpertInput,
+    ) -> ResearchExpertResult:
+        try:
+            async with asyncio.timeout(self._timeout_seconds):
+                return await self._run_direct_invocation(request)
+        except ResearchExpertServiceError:
+            raise
+        except ValidationError as exc:
+            self._log_failure(exc)
+            raise ResearchExpertServiceError(
+                ExpertStatus.REJECTED_INPUT
+            ) from exc
+        except (TimeoutError, NodeTimeoutError) as exc:
+            self._log_failure(exc)
+            raise ResearchExpertServiceError(
+                ExpertStatus.TIMED_OUT
+            ) from exc
+        except Exception as exc:
+            self._log_failure(exc)
+            raise ResearchExpertServiceError(
+                ExpertStatus.UNAVAILABLE
+            ) from exc
+
+    async def _run_direct_invocation(
+        self,
+        request: ResearchExpertInput,
+    ) -> ResearchExpertResult:
+        final_reason: ResearchInvalidOutputReason | None = None
+        for attempt_index in range(2):
+            response = await self._direct_client.aio.models.generate_content(
+                model=RESEARCH_EXPERT_MODEL_NAME,
+                contents=_direct_research_prompt(request),
+                config=types.GenerateContentConfig(
+                    tools=[
+                        types.Tool(google_search=types.GoogleSearch()),
+                    ],
+                    temperature=0.0,
+                    max_output_tokens=2_048,
+                ),
+            )
+            response_text = (
+                response.text if isinstance(response.text, str) else ""
+            )
+            outcome = diagnose_grounded_research_text(
+                response_text=response_text,
+                metadata=_direct_response_grounding_metadata(response),
+            )
+            if outcome.result.status is ExpertStatus.COMPLETED:
+                return outcome.result
+            final_reason = (
+                outcome.invalid_output_reason
+                or ResearchInvalidOutputReason.NORMALIZED_RESULT_VALIDATION_FAILED
+            )
+            if attempt_index == 0 and final_reason in {
+                ResearchInvalidOutputReason.MISSING_GROUNDING_METADATA,
+                ResearchInvalidOutputReason.MISSING_GROUNDING_CHUNKS,
+                ResearchInvalidOutputReason.MISSING_GROUNDING_SUPPORTS,
+            }:
+                continue
+            break
+        self._raise_invalid_output(
+            final_reason
+            or ResearchInvalidOutputReason.NORMALIZED_RESULT_VALIDATION_FAILED
+        )
 
     async def _run_invocation(
         self,
@@ -195,3 +275,27 @@ class ResearchExpertService:
             "Research Expert invocation failed (%s).",
             type(exc).__name__,
         )
+
+
+def _direct_research_prompt(request: ResearchExpertInput) -> str:
+    constraints = "\n".join(f"- {constraint}" for constraint in request.constraints)
+    if not constraints:
+        constraints = "- None supplied."
+    return (
+        "Use Google Search grounding for current public web evidence.\n"
+        "Answer only with factual claims supported by the returned grounding "
+        "metadata.\n"
+        "State uncertainty if sources disagree or are incomplete.\n"
+        f"Question: {request.question}\n"
+        f"Objective: {request.objective}\n"
+        f"Constraints:\n{constraints}\n"
+    )
+
+
+def _direct_response_grounding_metadata(
+    response: object,
+) -> types.GroundingMetadata | None:
+    candidates = tuple(getattr(response, "candidates", None) or ())
+    if not candidates:
+        return None
+    return getattr(candidates[0], "grounding_metadata", None)

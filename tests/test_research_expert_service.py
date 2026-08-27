@@ -65,6 +65,53 @@ class BlockingRunner:
         yield  # pragma: no cover
 
 
+class RecordingGenerateContentModels:
+    def __init__(self, response: object) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+
+    async def generate_content(self, **kwargs: object) -> object:
+        self.calls.append(kwargs)
+        return self.response
+
+
+class RecordingGenerateContentClient:
+    def __init__(self, response: object) -> None:
+        self.aio = type("Aio", (), {})()
+        self.aio.models = RecordingGenerateContentModels(response)
+
+
+class SequencedGenerateContentModels:
+    def __init__(self, responses: tuple[object, ...]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, object]] = []
+
+    async def generate_content(self, **kwargs: object) -> object:
+        self.calls.append(kwargs)
+        return self.responses[len(self.calls) - 1]
+
+
+class SequencedGenerateContentClient:
+    def __init__(self, responses: tuple[object, ...]) -> None:
+        self.aio = type("Aio", (), {})()
+        self.aio.models = SequencedGenerateContentModels(responses)
+
+
+class RaisingGenerateContentModels:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    async def generate_content(self, **kwargs: object) -> object:
+        del kwargs
+        raise self.error
+
+
+class RaisingGenerateContentClient:
+    def __init__(self, error: Exception) -> None:
+        self.aio = type("Aio", (), {})()
+        self.aio.models = RaisingGenerateContentModels(error)
+
+
 class FailingCreateSessionService(RecordingSessionService):
     async def create_session(self, **kwargs: object) -> object:
         self.created.append(kwargs)
@@ -128,6 +175,22 @@ def public_grounding_chunk(index: int = 0) -> types.GroundingChunk:
     )
 
 
+def direct_response(
+    text: str,
+    metadata: types.GroundingMetadata | None,
+) -> object:
+    candidate = type(
+        "Candidate",
+        (),
+        {"grounding_metadata": metadata},
+    )()
+    return type(
+        "DirectResponse",
+        (),
+        {"text": text, "candidates": [candidate]},
+    )()
+
+
 def test_research_service_uses_one_node_isolated_workflow_topology() -> None:
     from research_expert_service import (
         RESEARCH_EXPERT_APP_NAME,
@@ -161,6 +224,171 @@ def test_research_service_uses_one_node_isolated_workflow_topology() -> None:
     assert expert.disallow_transfer_to_peers is True
     assert expert.include_contents == "none"
     assert expert.timeout == RESEARCH_EXPERT_TIMEOUT_SECONDS == 45
+
+
+def test_research_service_from_vertex_settings_configures_direct_client(
+) -> None:
+    from research_expert_service import ResearchExpertService
+
+    service = ResearchExpertService.from_vertex_settings(
+        VertexAISettings(project="project-1", location="global")
+    )
+
+    assert service.direct_client is not None
+
+
+@pytest.mark.asyncio
+async def test_research_service_normalizes_direct_grounded_response() -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert_service import ResearchExpertService
+
+    claim = "Omarchy installation is documented by the project."
+    metadata = types.GroundingMetadata(
+        grounding_chunks=[public_grounding_chunk()],
+        grounding_supports=[
+            types.GroundingSupport(
+                segment=types.Segment(text=claim),
+                grounding_chunk_indices=[0],
+            )
+        ],
+    )
+    client = RecordingGenerateContentClient(direct_response(claim, metadata))
+    service = ResearchExpertService(
+        app=object(),  # type: ignore[arg-type]
+        runner=RecordingRunner(()),
+        session_service=RecordingSessionService(),
+        direct_client=client,
+    )
+
+    result = await service.research(
+        ResearchExpertInput(
+            question="What are the current Omarchy install instructions?",
+            objective="Return grounded public evidence.",
+        )
+    )
+
+    assert result.status is ExpertStatus.COMPLETED
+    assert result.payload is not None
+    assert result.payload.findings[0].claim == claim
+    assert result.evidence is not None
+    assert result.evidence.grounding_support_count == 1
+    call = client.aio.models.calls[0]
+    assert call["model"] == "gemini-3.6-flash"
+    assert "What are the current Omarchy install instructions?" in (
+        call["contents"]
+    )
+    assert "You are Agent_Col's bounded Research Expert" not in (
+        call["contents"]
+    )
+    assert call["config"].tools
+    assert call["config"].temperature == 0.0
+
+
+@pytest.mark.asyncio
+async def test_research_service_rejects_direct_response_without_grounding_chunks(
+) -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert import ResearchInvalidOutputReason
+    from research_expert_service import (
+        ResearchExpertService,
+        ResearchExpertServiceError,
+    )
+
+    response = direct_response(
+        "Omarchy installation is documented.",
+        types.GroundingMetadata(grounding_chunks=[], grounding_supports=[]),
+    )
+    service = ResearchExpertService(
+        app=object(),  # type: ignore[arg-type]
+        runner=RecordingRunner(()),
+        session_service=RecordingSessionService(),
+        direct_client=RecordingGenerateContentClient(response),
+    )
+
+    with pytest.raises(ResearchExpertServiceError) as exc_info:
+        await service.research(
+            ResearchExpertInput(
+                question="What are the current Omarchy install instructions?",
+                objective="Return grounded public evidence.",
+            )
+        )
+
+    assert exc_info.value.status is ExpertStatus.INVALID_OUTPUT
+    assert exc_info.value.invalid_output_reason is (
+        ResearchInvalidOutputReason.MISSING_GROUNDING_CHUNKS
+    )
+
+
+@pytest.mark.asyncio
+async def test_research_service_retries_once_after_ungrounded_direct_response(
+) -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert_service import ResearchExpertService
+
+    claim = "Omarchy installation is documented by the project."
+    grounded_metadata = types.GroundingMetadata(
+        grounding_chunks=[public_grounding_chunk()],
+        grounding_supports=[
+            types.GroundingSupport(
+                segment=types.Segment(text=claim),
+                grounding_chunk_indices=[0],
+            )
+        ],
+    )
+    client = SequencedGenerateContentClient(
+        (
+            direct_response(
+                "Ungrounded provider answer.",
+                types.GroundingMetadata(
+                    grounding_chunks=[],
+                    grounding_supports=[],
+                ),
+            ),
+            direct_response(claim, grounded_metadata),
+        )
+    )
+    service = ResearchExpertService(
+        app=object(),  # type: ignore[arg-type]
+        runner=RecordingRunner(()),
+        session_service=RecordingSessionService(),
+        direct_client=client,
+    )
+
+    result = await service.research(
+        ResearchExpertInput(
+            question="What are the current Omarchy install instructions?",
+            objective="Return grounded public evidence.",
+        )
+    )
+
+    assert result.status is ExpertStatus.COMPLETED
+    assert len(client.aio.models.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_research_service_maps_direct_timeout_to_timed_out() -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert_service import (
+        ResearchExpertService,
+        ResearchExpertServiceError,
+    )
+
+    service = ResearchExpertService(
+        app=object(),  # type: ignore[arg-type]
+        runner=RecordingRunner(()),
+        session_service=RecordingSessionService(),
+        direct_client=RaisingGenerateContentClient(TimeoutError()),
+    )
+
+    with pytest.raises(ResearchExpertServiceError) as exc_info:
+        await service.research(
+            ResearchExpertInput(
+                question="Current release?",
+                objective="Ground it.",
+            )
+        )
+
+    assert exc_info.value.status is ExpertStatus.TIMED_OUT
 
 
 @pytest.mark.asyncio
