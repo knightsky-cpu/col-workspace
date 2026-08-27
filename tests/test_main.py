@@ -344,6 +344,26 @@ def make_alternate_continuity_choice() -> ContinuityChoice:
     )
 
 
+def make_chat_session_continuity_choice() -> ContinuityChoice:
+    return ContinuityChoice(
+        choice_id="choice-0",
+        source_kind="chat_session",
+        source_id="session-prior",
+        display_label="Prior HIDS implementation discussion",
+        match_reason="previous_chat",
+    )
+
+
+def make_alternate_chat_session_continuity_choice() -> ContinuityChoice:
+    return ContinuityChoice(
+        choice_id="choice-1",
+        source_kind="chat_session",
+        source_id="session-older",
+        display_label="Older implementation discussion",
+        match_reason="previous_chat",
+    )
+
+
 @dataclass
 class FakeMemoryEngine:
     events: list[tuple[Any, ...]]
@@ -1740,12 +1760,30 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     )
     monkeypatch.setattr(
         main,
-        "ContinuityService",
-        lambda *, note_reader: (
-            continuity_service
-            if note_reader is state.database
-            else pytest.fail("Unexpected continuity note reader.")
+        "GeminiContinuityTermExpander",
+        lambda *, client: (
+            object()
+            if client is state.genai_client
+            else pytest.fail("Unexpected continuity term-expander client.")
         ),
+        raising=False,
+    )
+    def create_continuity_service(
+        *,
+        store: object,
+        term_expander: object | None = None,
+    ) -> object:
+        continuity_service_dependencies.extend([store, term_expander])
+        if store is not state.database:
+            pytest.fail("Unexpected continuity store.")
+        if term_expander is None:
+            pytest.fail("Missing continuity term expander.")
+        return continuity_service
+
+    monkeypatch.setattr(
+        main,
+        "ContinuityService",
+        create_continuity_service,
         raising=False,
     )
     monkeypatch.setattr(
@@ -4116,6 +4154,7 @@ async def test_chat_resolves_continuity_note_before_turn_service(
         ContinuityResolutionCommand(
             user_id="user-1",
             workspace_id="project-1",
+            session_id="session-1",
             message="Use the Export workflow note.",
             selection=None,
         )
@@ -4171,6 +4210,40 @@ async def test_chat_returns_continuity_choices_without_model_context(
     stored_response = service_state.database.complete_calls[0][1]
     assert stored_response.continuity_choices == [choice, alternate_choice]
     assert service_state.events[-1] == ("complete_chat_turn",)
+
+
+@pytest.mark.asyncio
+async def test_chat_labels_ambiguous_prior_chat_choices(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = claim
+    choice = make_chat_session_continuity_choice()
+    alternate_choice = make_alternate_chat_session_continuity_choice()
+    service_state.continuity_service.resolution = ContinuityResolution(
+        status="ambiguous",
+        choices=(choice, alternate_choice),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "continuity-chat-choice-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "What was that HIDS we talked about recently?",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "prior chat" in response.json()["response"]
+    assert "saved workspace note" not in response.json()["response"]
+    assert response.json()["continuity_choices"] == [
+        choice.model_dump(mode="json"),
+        alternate_choice.model_dump(mode="json"),
+    ]
 
 
 @pytest.mark.asyncio

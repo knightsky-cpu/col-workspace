@@ -104,6 +104,7 @@ from continuity import (
 from continuity_service import (
     ContinuityResolutionCommand,
     ContinuityService,
+    GeminiContinuityTermExpander,
 )
 from computational_expert_service import ComputationalExpertService
 from database import (
@@ -898,7 +899,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
-        continuity_service = ContinuityService(note_reader=database)
+        continuity_service = ContinuityService(
+            store=database,
+            term_expander=GeminiContinuityTermExpander(client=client),
+        )
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
             vertex_settings
@@ -2766,6 +2770,7 @@ async def chat(
                 ContinuityResolutionCommand(
                     user_id=effective_user_id,
                     workspace_id=effective_project_id,
+                    session_id=payload.session_id,
                     message=payload.message,
                     selection=payload.continuity_selection,
                 )
@@ -2783,11 +2788,22 @@ async def chat(
             ) from exc
 
     if continuity_resolution.status == "ambiguous":
-        chat_response = ChatResponse(
-            response=(
+        continuity_choice_kind = (
+            continuity_resolution.choices[0].source_kind
+            if continuity_resolution.choices
+            else "collaborative_note"
+        )
+        continuity_ambiguous_response = (
+            "I found more than one prior chat that could match. "
+            "Please choose the one you mean."
+            if continuity_choice_kind == "chat_session"
+            else (
                 "I found more than one saved workspace note that could match. "
                 "Please choose the one you mean."
-            ),
+            )
+        )
+        chat_response = ChatResponse(
+            response=continuity_ambiguous_response,
             actions=[],
             artifacts=[],
             artifact_feedback=[],
