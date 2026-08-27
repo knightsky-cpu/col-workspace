@@ -243,6 +243,23 @@ def test_build_artifact_source_text_uses_recent_context_for_reference_request(
     assert "simple Pomodoro timer" in source_text
 
 
+def test_build_artifact_source_text_uses_last_six_recent_context_messages(
+) -> None:
+    from agent_col_artifact_executor import build_artifact_source_text
+
+    recent_messages = tuple(f"Context message {index}" for index in range(8))
+
+    source_text = build_artifact_source_text(
+        current_message="Turn that into a markdown artifact.",
+        recent_user_messages=recent_messages,
+    )
+
+    assert "Context message 0" not in source_text
+    assert "Context message 1" not in source_text
+    for index in range(2, 8):
+        assert f"Context message {index}" in source_text
+
+
 def test_build_artifact_source_text_keeps_self_contained_request_single_source(
 ) -> None:
     from agent_col_artifact_executor import build_artifact_source_text

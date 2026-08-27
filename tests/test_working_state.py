@@ -85,6 +85,19 @@ def test_working_state_enforces_bounded_fields():
         ("Actually, artifact generation only takes 10 seconds.", None, True),
         ("Create a markdown study guide for algebra rules.", "artifact", True),
         ("What did we decide about the deployment plan?", None, True),
+        (
+            "Can you explain the disconnect choice without deciding it for me?",
+            None,
+            True,
+        ),
+        (
+            "Turn this into a checklist while keeping disconnect behavior "
+            "undecided.",
+            None,
+            True,
+        ),
+        ("What detail would change the recommendation the most?", None, True),
+        ("Which choice matters most for this architecture?", None, True),
         ("thanks", "direct", False),
     ),
 )

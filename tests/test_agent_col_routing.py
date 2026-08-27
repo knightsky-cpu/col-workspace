@@ -159,6 +159,23 @@ def test_projection_returns_bounded_user_authored_public_urls() -> None:
     )
 
 
+def test_projection_returns_up_to_ten_user_authored_public_urls() -> None:
+    from agent_col_routing import project_routing_url_candidates
+
+    candidates = project_routing_url_candidates(
+        current_message="Start with https://example.com/current.",
+        recent_user_messages=tuple(
+            f"Prior source https://example.com/source-{index}."
+            for index in range(12)
+        ),
+    )
+
+    assert tuple(candidate.candidate_id for candidate in candidates) == tuple(
+        f"url-{index}" for index in range(1, 11)
+    )
+    assert len(candidates) == 10
+
+
 def test_projection_preserves_url_path_and_query_punctuation() -> None:
     from agent_col_routing import project_routing_url_candidates
 
@@ -176,19 +193,19 @@ def test_projection_preserves_url_path_and_query_punctuation() -> None:
     )
 
 
-def test_projection_caps_candidates_at_eight() -> None:
+def test_projection_caps_candidates_at_ten() -> None:
     from agent_col_routing import project_routing_url_candidates
 
     candidates = project_routing_url_candidates(
         current_message=" ".join(
-            f"https://example.com/source-{index}" for index in range(1, 10)
+            f"https://example.com/source-{index}" for index in range(1, 12)
         ),
         recent_user_messages=(),
     )
 
-    assert len(candidates) == 8
-    assert candidates[-1].candidate_id == "url-8"
-    assert str(candidates[-1].url) == "https://example.com/source-8"
+    assert len(candidates) == 10
+    assert candidates[-1].candidate_id == "url-10"
+    assert str(candidates[-1].url) == "https://example.com/source-10"
 
 
 def test_routing_input_normalizes_bounded_context() -> None:
@@ -232,7 +249,7 @@ def test_routing_input_normalizes_bounded_context() -> None:
                     "url": f"https://example.com/{index}",
                     "source": "current_message",
                 }
-                for index in range(1, 10)
+                for index in range(1, 12)
             ],
             "available_capabilities": ["source"],
         },

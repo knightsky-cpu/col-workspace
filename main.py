@@ -3200,7 +3200,7 @@ async def chat(
                     current_message=payload.message,
                     model_response=result.response,
                     previous_state=working_state_snapshot,
-                    recent_user_messages=recent_user_messages[-6:],
+                    recent_user_messages=recent_user_messages[-8:],
                 )
             )
             if (

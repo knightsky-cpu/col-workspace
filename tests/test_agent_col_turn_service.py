@@ -383,6 +383,62 @@ async def test_turn_service_projects_only_minimal_routing_input() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_service_bounds_recent_user_messages_for_v4_routing(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Turn this into a checklist.",
+        ),
+        ids=derive_chat_turn_ids("long-history-routing-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    artifact_directive = AgentColRoutingDirectiveV4.model_validate(
+        {
+            "schema_version": "4.0",
+            "route": "artifact",
+            "artifact_intent": {
+                "operation": "create_blueprint",
+                "objective": "Create the requested checklist.",
+            },
+        }
+    )
+    artifact_routing = RecordingRoutingRequest(artifact_directive)
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=artifact_routing,
+    )
+    recent_messages = tuple(f"Message {index}" for index in range(25))
+
+    await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Turn this into a checklist.",
+            recent_user_messages=recent_messages,
+            chat_turn_claim=claim,
+        )
+    )
+
+    routing_input = artifact_routing.calls[0]["routing_input"]
+    assert routing_input.recent_user_messages == recent_messages[-20:]
+
+
+@pytest.mark.asyncio
 async def test_turn_service_v3_projects_current_message_numeric_candidates(
 ) -> None:
     from agent_col_responder_context_v3 import AgentColResponderContextV3
@@ -937,6 +993,24 @@ def test_responder_instruction_defines_hidden_working_state_policy() -> None:
     assert "incomplete instructions" in instruction
     assert "Continue from the current" in instruction
     assert "Never expose" in instruction
+
+
+def test_responder_instruction_treats_unresolved_working_state_questions_as_unsettled() -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    instruction = " ".join(RESPONDER_INSTRUCTION.split())
+
+    assert "Unresolved working-state questions are not facts" in instruction
+    assert "facts, assumptions, and open decisions" in instruction
+    assert "challenge missing details" in instruction
+    assert "guide the user toward a decision" in instruction
+    assert "Do not turn unresolved questions into examples" in instruction
+    assert "settled platform" in instruction
+    assert "source-backed" in instruction
+    assert "validated routing" in instruction
+    assert "assumption" in instruction
+    assert "option" in instruction
+    assert "open decision" in instruction
 
 
 def completed_source_context() -> AgentColResponderContext:

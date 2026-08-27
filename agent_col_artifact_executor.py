@@ -46,7 +46,7 @@ _ARTIFACT_TRIGGER_WORDS = re.compile(
     r"\b(?:artifact|blueprint|deliverable|markdown|text|json|pdf|printable)\b",
     re.IGNORECASE,
 )
-_MAX_RECENT_ARTIFACT_CONTEXT_MESSAGES = 3
+_MAX_RECENT_ARTIFACT_CONTEXT_MESSAGES = 6
 
 
 class ArtifactSynthesisService(Protocol):

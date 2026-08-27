@@ -97,6 +97,7 @@ TURN_ROUTING_TIMEOUT_SECONDS = 15.0
 TURN_TIMEOUT_SECONDS = 90.0
 TURN_EXPERT_BUDGET_SECONDS = 45.0
 TURN_RESPONDER_RESERVE_SECONDS = 20.0
+MAX_ROUTING_RECENT_USER_MESSAGES = 20
 logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
 
@@ -568,11 +569,14 @@ class AgentColTurnService:
             command.message
         )
         text_projection = project_routing_text_blocks(command.message)
+        routing_recent_user_messages = command.recent_user_messages[
+            -MAX_ROUTING_RECENT_USER_MESSAGES:
+        ]
         routing_input = AgentColRoutingInputV4(
             current_message=command.message,
             candidate_urls=project_routing_url_candidates(
                 command.message,
-                command.recent_user_messages,
+                routing_recent_user_messages,
             ),
             numeric_candidates=numeric_projection.candidates,
             numeric_projection_incomplete=(
@@ -582,7 +586,7 @@ class AgentColTurnService:
             text_projection_incomplete=(
                 text_projection.text_projection_incomplete
             ),
-            recent_user_messages=command.recent_user_messages,
+            recent_user_messages=routing_recent_user_messages,
             available_capabilities=(
                 self._expert_executor.available_capabilities
             ),
@@ -849,11 +853,14 @@ class AgentColTurnService:
                 command.message
             )
             text_projection = project_routing_text_blocks(command.message)
+            routing_recent_user_messages = command.recent_user_messages[
+                -MAX_ROUTING_RECENT_USER_MESSAGES:
+            ]
             routing_input = AgentColRoutingInput(
                 current_message=command.message,
                 candidate_urls=project_routing_url_candidates(
                     command.message,
-                    command.recent_user_messages,
+                    routing_recent_user_messages,
                 ),
                 numeric_candidates=numeric_projection.candidates,
                 numeric_projection_incomplete=(

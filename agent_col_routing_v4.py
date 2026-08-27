@@ -77,7 +77,7 @@ class RoutingDirectiveInputError(RuntimeError):
 class AgentColRoutingInput(AgentColRoutingInputV3):
     recent_user_messages: tuple[RoutingTaskText, ...] = Field(
         default_factory=tuple,
-        max_length=6,
+        max_length=20,
     )
     artifact_creation_available: bool = False
     structured_decision_present: bool = False

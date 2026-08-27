@@ -36,10 +36,10 @@ RoutingConstraintText = Annotated[
 ]
 RoutingUrlId = Annotated[
     str,
-    StringConstraints(pattern=r"^url-[1-8]$"),
+    StringConstraints(pattern=r"^url-(?:[1-9]|10)$"),
 ]
 _URL_PATTERN = re.compile(r'https?://[^\s<>"\']+')
-_MAX_ROUTING_URL_CANDIDATES = 8
+_MAX_ROUTING_URL_CANDIDATES = 10
 
 
 class AgentColRoute(StrEnum):

@@ -4814,6 +4814,10 @@ async def test_chat_uses_hidden_working_state_without_public_response_fields(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
+    service_state.database.history = [
+        {"role": "user", "text": f"Earlier question {index}"}
+        for index in range(10)
+    ]
     previous_state = make_working_state_snapshot()
     updated_state = make_working_state_snapshot(
         request_summary="Artifact creation plan after user correction.",
@@ -4869,7 +4873,9 @@ async def test_chat_uses_hidden_working_state_without_public_response_fields(
     )
     assert update_command.model_response == "Generated answer"
     assert update_command.previous_state == previous_state
-    assert update_command.recent_user_messages == ("Earlier question",)
+    assert update_command.recent_user_messages == tuple(
+        f"Earlier question {index}" for index in range(2, 10)
+    )
     assert len(service_state.database.working_state_save_calls) == 1
     saved_state, observed_at = service_state.database.working_state_save_calls[0]
     assert saved_state == updated_state

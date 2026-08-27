@@ -104,6 +104,20 @@ def update_request():
     )
 
 
+def test_working_state_update_input_accepts_eight_recent_user_messages(
+) -> None:
+    from working_state_service import WorkingStateUpdateInput
+
+    request = update_request()
+    payload = request.model_dump()
+    payload["recent_user_messages"] = tuple(
+        f"Recent user message {index}" for index in range(8)
+    )
+    bounded = WorkingStateUpdateInput(**payload)
+
+    assert len(bounded.recent_user_messages) == 8
+
+
 @pytest.mark.asyncio
 async def test_generate_working_state_update_accepts_valid_snapshot() -> None:
     import working_state_service as service
@@ -136,6 +150,31 @@ async def test_generate_working_state_update_accepts_valid_snapshot() -> None:
     prompt = arguments["contents"][0].parts[0].text
     assert "[WORKING_STATE_UPDATE_INPUT]" in prompt
     assert "security matters more than speed" in prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_working_state_update_marks_external_facts_as_verification_needed() -> None:
+    import working_state_service as service
+
+    client = fake_genai_client(json.dumps(update_response_payload()))
+
+    await service.generate_working_state_update(client, update_request())
+
+    instruction = " ".join(
+        client.aio.models.arguments["config"].system_instruction.split()
+    )
+    assert "user-owned decisions" in instruction
+    assert "temporary assumptions" in instruction
+    assert "verification-needed external facts" in instruction
+    assert "software, dependencies, operating systems, programs" in instruction
+    assert "websites, articles, books, networking" in instruction
+    assert "calculus, algebra, school subjects, documentation" in instruction
+    assert "source-sensitive" in instruction
+    assert (
+        "Do not convert model response speculation into working-state facts"
+        in instruction
+    )
+    assert "guide the user toward choosing criteria" in instruction
 
 
 @pytest.mark.asyncio
