@@ -10,11 +10,14 @@
 
 **Spec:** `docs/superpowers/plans/2026-08-27-research-current-work-and-handoff.md` and `docs/superpowers/plans/2026-08-27-adk-gemini-tool-surface-mismatch-handoff.md`
 
+**Evidence:** `docs/superpowers/plans/2026-08-27-research-official-source-evidence-findings.md`
+
 ## Global Constraints
 
 - Do not migrate Research to AgentTool.
 - Do not migrate Research to Gemini Interactions.
 - Do not add another validation layer around failed provider output.
+- Do not add a source-policy `mode` field in this pass. If this pass works in automated and manual verification, a follow-up pass may add explicit modes such as official-only versus official-preferred.
 - Do not require official-source filtering for broad research requests unless the user asks for official documentation, official install instructions, official release data, or equivalent authoritative-source wording.
 - Preserve existing fail-closed behavior for missing response text, missing grounding metadata, missing grounding chunks, missing grounding supports, private/invalid sources, unmappable claims, claims without source IDs, too many sources per claim, and more than 40 grounding supports.
 - Preserve the current bounded output limit of at most 8 Research findings.
@@ -47,6 +50,7 @@
   - `policy_name: str`
 - Add optional `source_policy: ResearchSourcePolicy | None = None` to `ResearchExpertInput`.
 - Preserve existing `ResearchExpertInput` behavior when `source_policy is None`.
+- Do not add `mode` yet. This pass is official-only enforcement when a policy is present. Official-preferred or unofficial-context preservation is a later pass only if this pass works.
 
 - [ ] **Step 1: Write the failing contract test**
 
@@ -396,16 +400,24 @@ Expected result: no output, exit 0.
 - Official Omarchy install/docs requests enforce only verified official project domains/repos after source review confirms the canonical domain and repo.
 - Broad public research requests still allow mixed public sources.
 - Failed official-source validation returns a content-safe `official_source_policy_mismatch` reason.
+- Unofficial sources returned by Google Search are not exposed as citations for official-only answers in this pass. They may inform a future diagnostics mode, but they do not satisfy the official-source request.
+- The pass report includes the four targeted Research/Google Search manual prompts listed below and their expected pass/fail interpretation.
 - No provider topology migration is introduced.
 
 ## Manual Runtime Verification Targets
 
-1. Ask the OpenAI official-docs prompt from the manual test.
-2. Expected: if citations include non-OpenAI/non-approved GitHub sources for the verified claims, Research fails closed instead of presenting them as official docs.
-3. Ask the Python official-release prompt.
-4. Expected: success only with `python.org` or `peps.python.org` sources.
-5. Ask the Omarchy official-install prompt after implementation confirms official Omarchy source domains.
-6. Expected: success only with official Omarchy project sources, or a bounded failure if the provider returns blogs/social/video sources.
+Run these prompts through the normal Agent Col chat path. Each prompt is intentionally current/external so routing should select Research and the Research Expert should have reason to use Google Search grounding.
+
+1. Prompt: `Using only official OpenAI documentation, tell me the current Python SDK install command and the recommended Responses API call pattern for a FastAPI backend.`
+   - Expected: success only when retained citations are approved OpenAI sources such as `openai.com` or `github.com/openai`; fail closed with `official_source_policy_mismatch` if retained claims depend on unrelated public sources such as tutorials, blogs, vendor pages, or social sites.
+2. Prompt: `Using only official Python sources, what is the current stable Python release and where is it documented?`
+   - Expected: success only with `python.org` or `peps.python.org` sources; fail closed if retained claims depend on unrelated public sources.
+3. Prompt: `Using only official Omarchy project documentation, what are the current install instructions and prerequisites?`
+   - Expected: success only with verified official Omarchy project sources after source review confirms the canonical domain/repo; fail closed if retained claims depend on video, blog, vendor, or social sources.
+4. Prompt: `Research current Python packaging discussion across public sources and summarize the main points with citations.`
+   - Expected: broad public research remains unchanged; mixed public sources are allowed because no official-only source policy should be derived.
+
+In the implementation pass report, include these four prompts under manual verification targets and explicitly state that the user must confirm the live results before checkpointing the source implementation.
 
 ## Rollback
 

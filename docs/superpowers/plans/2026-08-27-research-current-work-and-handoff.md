@@ -16,8 +16,9 @@ Read these documents in order:
 4. `docs/superpowers/plans/2026-08-27-invalid-output-reason-handoff-pass-findings.md`
 5. `docs/superpowers/plans/2026-08-27-research-grounded-claim-normalization-plan.md`
 6. `docs/superpowers/plans/2026-08-27-research-official-source-policy-plan.md`
-7. `docs/superpowers/plans/2026-08-27-research-tool-invalid-output-findings-and-plan.md`
-8. `docs/superpowers/plans/2026-08-27-adk-gemini-research-tool-root-issues-and-research-plan.md`
+7. `docs/superpowers/plans/2026-08-27-research-official-source-evidence-findings.md`
+8. `docs/superpowers/plans/2026-08-27-research-tool-invalid-output-findings-and-plan.md`
+9. `docs/superpowers/plans/2026-08-27-adk-gemini-research-tool-root-issues-and-research-plan.md`
 
 Then inspect these source files:
 
