@@ -422,20 +422,6 @@ async def test_research_service_reports_content_safe_invalid_output_reason(
         ),
         (
             research_workflow_event(
-                response_text="Private claims marker.",
-                grounding_chunks=[public_grounding_chunk()],
-                grounding_supports=[
-                    types.GroundingSupport(
-                        segment=types.Segment(text=f"Private claim {index}."),
-                        grounding_chunk_indices=[0],
-                    )
-                    for index in range(9)
-                ],
-            ),
-            "too_many_grounded_claims",
-        ),
-        (
-            research_workflow_event(
                 response_text="Private claim marker.",
                 grounding_chunks=[public_grounding_chunk()],
                 grounding_supports=[
@@ -517,6 +503,47 @@ async def test_research_service_distinguishes_normalization_rejection_reason(
         "Private claim marker",
     ):
         assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_research_service_compacts_extra_valid_grounded_claims(
+) -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert_service import ResearchExpertService
+
+    claims = tuple(
+        f"Documented public fact {index}." for index in range(1, 10)
+    )
+    event = research_workflow_event(
+        response_text=" ".join(claims),
+        grounding_chunks=[public_grounding_chunk()],
+        grounding_supports=[
+            types.GroundingSupport(
+                segment=types.Segment(text=claim),
+                grounding_chunk_indices=[0],
+            )
+            for claim in claims
+        ],
+    )
+    service = ResearchExpertService(
+        app=object(),  # type: ignore[arg-type]
+        runner=RecordingRunner((event,)),
+        session_service=RecordingSessionService(),
+    )
+
+    result = await service.research(
+        ResearchExpertInput(
+            question="Which public facts are documented?",
+            objective="Return bounded public evidence.",
+        )
+    )
+
+    assert result.status is ExpertStatus.COMPLETED
+    assert result.payload is not None
+    assert len(result.payload.findings) == 8
+    assert result.evidence is not None
+    assert result.evidence.grounded_finding_count == 8
+    assert result.evidence.grounding_support_count == 9
 
 
 def rejected_input_error() -> ValidationError:

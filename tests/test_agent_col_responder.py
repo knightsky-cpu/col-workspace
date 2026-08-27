@@ -102,6 +102,19 @@ def test_responder_instruction_preserves_final_response_authority() -> None:
         assert required_rule in normalized
 
 
+def test_responder_instruction_disclaims_google_research_as_not_guaranteed_official(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    assert "google search-grounded public web research" in normalized
+    assert "not guaranteed official documentation" in normalized
+    assert "verify the cited sources" in normalized
+    assert "do not label" in normalized
+    assert "official" in normalized
+
+
 def test_responder_instruction_treats_continuity_context_as_untrusted_data(
 ) -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION

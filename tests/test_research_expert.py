@@ -757,6 +757,46 @@ def test_live_research_event_normalizes_grounded_text_without_node_output(
     ]
 
 
+def test_grounded_text_compacts_more_than_eight_supported_claims() -> None:
+    from expert_contracts import ExpertStatus
+    from research_expert import diagnose_grounded_research_text
+
+    claims = tuple(
+        f"Documented public fact {index}." for index in range(1, 10)
+    )
+    response_text = " ".join(claims)
+    metadata = types.GroundingMetadata(
+        grounding_chunks=[
+            types.GroundingChunk(
+                web=types.GroundingChunkWeb(
+                    uri="https://www.python.org/downloads/",
+                    title="Python downloads",
+                )
+            )
+        ],
+        grounding_supports=[
+            types.GroundingSupport(
+                segment=types.Segment(text=claim),
+                grounding_chunk_indices=[0],
+            )
+            for claim in claims
+        ],
+    )
+
+    outcome = diagnose_grounded_research_text(
+        response_text=response_text,
+        metadata=metadata,
+    )
+
+    assert outcome.invalid_output_reason is None
+    assert outcome.result.status is ExpertStatus.COMPLETED
+    assert outcome.result.payload is not None
+    assert len(outcome.result.payload.findings) == 8
+    assert outcome.result.evidence is not None
+    assert outcome.result.evidence.grounded_finding_count == 8
+    assert outcome.result.evidence.grounding_support_count == 9
+
+
 @pytest.mark.parametrize(
     ("raw_output", "metadata"),
     (

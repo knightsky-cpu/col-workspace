@@ -674,14 +674,11 @@ def diagnose_grounded_research_text(
             return _invalid_research_outcome(
                 ResearchInvalidOutputReason.NO_MAPPABLE_GROUNDING_CLAIMS
             )
-        if len(source_ids_by_claim) > 8:
-            return _invalid_research_outcome(
-                ResearchInvalidOutputReason.TOO_MANY_GROUNDED_CLAIMS
-            )
+        bounded_claims = tuple(source_ids_by_claim.items())[:8]
 
         findings: list[ResearchFinding] = []
         referenced_source_ids: set[str] = set()
-        for claim, source_ids in source_ids_by_claim.items():
+        for claim, source_ids in bounded_claims:
             if not source_ids:
                 return _invalid_research_outcome(
                     ResearchInvalidOutputReason.GROUNDED_CLAIM_WITHOUT_SOURCE
