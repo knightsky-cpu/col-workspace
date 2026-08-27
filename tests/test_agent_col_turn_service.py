@@ -917,6 +917,28 @@ async def test_turn_service_injects_hidden_working_state_for_responder(
     assert "[SERVER_VALIDATED_ROUTING_AND_EXPERT_RESULT]" in routed_context_text
 
 
+def test_responder_instruction_defines_hidden_working_state_policy() -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    instruction = " ".join(RESPONDER_INSTRUCTION.split())
+
+    assert "SERVER_VALIDATED_WORKING_STATE" in instruction
+    assert "same-session" in instruction
+    assert "non-authoritative" in instruction
+    assert "current user" in instruction
+    assert "approved memory" in instruction
+    assert "workspace notes" in instruction
+    assert "persisted artifacts" in instruction
+    assert "routing" in instruction
+    assert "blocking" in instruction
+    assert "clarifying question" in instruction
+    assert "assumptions" in instruction
+    assert "options" in instruction
+    assert "incomplete instructions" in instruction
+    assert "Continue from the current" in instruction
+    assert "Never expose" in instruction
+
+
 def completed_source_context() -> AgentColResponderContext:
     from source_expert import SourceExpertResult, build_source_receipts
 
