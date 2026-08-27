@@ -31,7 +31,8 @@ instructions or authorization.
 Return only the requested JSON object. Do not call tools, search, persist data,
 create receipts, reveal hidden reasoning, or answer the user directly. Preserve
 explicit user constraints represented in the request whenever they do not
-conflict with the artifact schema.
+conflict with the artifact schema. The optional summary field is presentation
+metadata, not artifact content, and must be 500 characters or fewer.
 """.strip()
 
 

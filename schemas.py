@@ -90,6 +90,10 @@ DisplayLabelStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=160),
 ]
+ArtifactSummaryStr = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
+]
 ProjectDisplayNameStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=120),
@@ -119,6 +123,21 @@ ArtifactContentStr = Annotated[
     str,
     StringConstraints(min_length=1, max_length=200_000),
 ]
+
+
+def derive_single_file_artifact_display_label(
+    *,
+    display_label: str | None,
+    summary: str | None,
+    filename: str,
+) -> str:
+    if display_label is not None:
+        return display_label
+    if summary is not None:
+        return summary[:160]
+    return filename
+
+
 VerificationStepStr = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
@@ -246,7 +265,7 @@ class SingleFileArtifact(StrictModel):
     format: SingleFileArtifactFormat
     filename: ArtifactFilenameStr
     content: ArtifactContentStr
-    summary: DisplayLabelStr | None = None
+    summary: ArtifactSummaryStr | None = None
 
     @field_validator("content")
     @classmethod
@@ -356,7 +375,7 @@ class SingleFileArtifactEditRequest(StrictModel):
     content: ArtifactContentStr
     filename: ArtifactFilenameStr | None = None
     display_label: DisplayLabelStr | None = None
-    summary: DisplayLabelStr | None = None
+    summary: ArtifactSummaryStr | None = None
     originating_turn_id: IdentifierStr | None = None
 
 

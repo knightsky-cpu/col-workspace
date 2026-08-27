@@ -157,6 +157,73 @@ def test_single_file_artifact_models_accept_common_code_document_and_data_format
     assert detail.artifact.content.startswith("import secrets")
 
 
+def test_single_file_artifact_summary_has_summary_specific_bound() -> None:
+    from schemas import (
+        ArtifactReference,
+        SingleFileArtifact,
+        SingleFileArtifactCreateRequest,
+        SingleFileArtifactEditRequest,
+    )
+
+    long_summary = "A" * 300
+
+    artifact = SingleFileArtifact.model_validate(
+        {
+            "artifact_family": "document",
+            "format": "text",
+            "filename": "algebra-rules.txt",
+            "content": "Fundamental algebraic rules.\n",
+            "summary": long_summary,
+        }
+    )
+    edit_request = SingleFileArtifactEditRequest.model_validate(
+        {
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "content": "Updated algebra rules.\n",
+            "summary": long_summary,
+        }
+    )
+
+    assert artifact.summary == long_summary
+    assert edit_request.summary == long_summary
+
+    with pytest.raises(ValidationError):
+        ArtifactReference.model_validate(
+            {
+                "artifact_type": "single_file_artifact",
+                "project_id": "project-1",
+                "artifact_id": "artifact-1",
+                "schema_version": "1.0",
+                "display_label": "D" * 161,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SingleFileArtifactCreateRequest.model_validate(
+            {
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "artifact_family": "document",
+                "format": "text",
+                "filename": "algebra-rules.txt",
+                "source_text": "Create algebra notes.",
+                "display_label": "D" * 161,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        SingleFileArtifact.model_validate(
+            {
+                "artifact_family": "document",
+                "format": "text",
+                "filename": "algebra-rules.txt",
+                "content": "Fundamental algebraic rules.\n",
+                "summary": "S" * 501,
+            }
+        )
+
+
 def test_single_file_artifact_models_reject_mismatched_family_and_format(
 ) -> None:
     from schemas import SingleFileArtifact

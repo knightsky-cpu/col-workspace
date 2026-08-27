@@ -121,6 +121,40 @@ async def test_create_artifact_uses_summary_as_default_display_label() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_artifact_bounds_summary_derived_display_label(
+) -> None:
+    from generic_artifact_creation_service import (
+        GenericArtifactCreationCommand,
+        GenericArtifactCreationService,
+    )
+
+    writer = FakeGenericArtifactWriter()
+    long_summary = "A" * 300
+
+    result = await GenericArtifactCreationService(
+        artifact_writer=writer
+    ).create_artifact(
+        GenericArtifactCreationCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            artifact={
+                "artifact_family": "document",
+                "format": "markdown",
+                "filename": "algebra-rules.md",
+                "content": "# Algebra Rules\n",
+                "summary": long_summary,
+            },
+        )
+    )
+
+    assert result.artifact.summary == long_summary
+    assert result.reference.display_label == long_summary[:160]
+    assert writer.calls[0]["artifact"]["summary"] == long_summary
+    assert writer.calls[0]["display_label"] == long_summary[:160]
+
+
+@pytest.mark.asyncio
 async def test_create_artifact_uses_filename_when_summary_is_absent() -> None:
     from generic_artifact_creation_service import (
         GenericArtifactCreationCommand,

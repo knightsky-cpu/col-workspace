@@ -16,6 +16,7 @@ from schemas import (
     SingleFileArtifactLifecycleResponse,
     SingleFileArtifactListResponse,
     SingleFileArtifactMetadata,
+    derive_single_file_artifact_display_label,
 )
 
 
@@ -228,12 +229,17 @@ class GenericArtifactReadService:
                 "summary": command.summary or parent_artifact.summary,
             }
         )
-        display_label = (
-            command.display_label
-            or artifact.summary
-            or parent_record.document.get("display_label")
-            or artifact.filename
-        )
+        if command.display_label is not None or artifact.summary is not None:
+            display_label = derive_single_file_artifact_display_label(
+                display_label=command.display_label,
+                summary=artifact.summary,
+                filename=artifact.filename,
+            )
+        else:
+            display_label = (
+                parent_record.document.get("display_label")
+                or artifact.filename
+            )
         artifact_id = await self._database.save_single_file_artifact(
             project_id=command.project_id,
             session_id=command.session_id,

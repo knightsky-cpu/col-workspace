@@ -27,6 +27,7 @@ from schemas import (
     SingleFileArtifact,
     SingleFileArtifactDetailResponse,
     VersionedAdaptationReceipt,
+    derive_single_file_artifact_display_label,
 )
 from synthesis import SYNTHESIS_MODEL_NAME
 from synthesis_service import (
@@ -291,7 +292,11 @@ class AgentColArtifactExecutor:
                     claim,
                     model_name=GENERIC_ARTIFACT_MODEL_NAME,
                     artifact=generated.model_dump(mode="json"),
-                    display_label=generated.summary or generated.filename,
+                    display_label=derive_single_file_artifact_display_label(
+                        display_label=None,
+                        summary=generated.summary,
+                        filename=generated.filename,
+                    ),
                     observed_at=command.observed_at,
                 )
             )

@@ -2,13 +2,13 @@
 
 import asyncio
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, Self
 
 from google import genai
 from google.genai import types
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError, model_validator
 
-from agent_col_routing import RoutingClarificationText
+from agent_col_routing import RoutingClarificationText, RoutingTaskText
 from agent_col_routing_v2 import (
     ComputationRoutingIntent,
     ResearchRoutingIntent,
@@ -17,10 +17,15 @@ from agent_col_routing_v2 import (
 from agent_col_routing_v4 import (
     AgentColRoutingDirective,
     AgentColRoutingInput,
-    ArtifactRoutingIntent,
     RequirementsVerificationRoutingIntent,
     StrictRoutingModel,
     validate_routing_directive_for_input,
+)
+from schemas import (
+    ArtifactFilenameStr,
+    SingleFileArtifactFamily,
+    SingleFileArtifactFormat,
+    _allowed_single_file_artifact_formats,
 )
 from synthesis_schema import adapt_schema_for_gemini
 
@@ -152,9 +157,36 @@ class _RequirementsVerificationProviderDirective(_ProviderRoutingBase):
     requirements_verification_intent: RequirementsVerificationRoutingIntent
 
 
+class _ProviderBlueprintArtifactRoutingIntent(StrictRoutingModel):
+    operation: Literal["create_blueprint"]
+    objective: RoutingTaskText
+
+
+class _ProviderSingleFileArtifactRoutingIntent(StrictRoutingModel):
+    operation: Literal["create_single_file_artifact"]
+    objective: RoutingTaskText
+    artifact_family: SingleFileArtifactFamily
+    format: SingleFileArtifactFormat
+    filename: ArtifactFilenameStr
+
+    @model_validator(mode="after")
+    def validate_family_format_match(self) -> Self:
+        if self.format not in _allowed_single_file_artifact_formats(
+            self.artifact_family
+        ):
+            raise ValueError("Artifact family and format do not match.")
+        return self
+
+
+ProviderArtifactRoutingIntent = (
+    _ProviderBlueprintArtifactRoutingIntent
+    | _ProviderSingleFileArtifactRoutingIntent
+)
+
+
 class _ArtifactProviderDirective(_ProviderRoutingBase):
     route: Literal["artifact"]
-    artifact_intent: ArtifactRoutingIntent
+    artifact_intent: ProviderArtifactRoutingIntent
 
 
 ProviderRoutingDirective = (
@@ -180,6 +212,69 @@ def _replace_consts_with_enums(value: object) -> None:
             _replace_consts_with_enums(child)
 
 
+def _schema_ref(
+    definitions: dict[str, object],
+    reference: object,
+) -> dict[str, object] | None:
+    if not isinstance(reference, str):
+        return None
+    value = definitions.get(reference.removeprefix("#/$defs/"))
+    return value if isinstance(value, dict) else None
+
+
+def _provider_variant_for_route(
+    definitions: dict[str, object],
+    variants: list[object],
+    route: str,
+) -> dict[str, object] | None:
+    for option in variants:
+        if not isinstance(option, dict):
+            continue
+        variant = _schema_ref(definitions, option.get("$ref"))
+        if variant is None:
+            continue
+        properties = variant.get("properties")
+        if not isinstance(properties, dict):
+            continue
+        route_schema = properties.get("route")
+        if not isinstance(route_schema, dict):
+            continue
+        if route_schema.get("enum") == [route]:
+            return variant
+    return None
+
+
+def _artifact_intent_variant_schemas(
+    definitions: dict[str, object],
+    variants: list[object],
+) -> list[dict[str, object]]:
+    artifact_directive = _provider_variant_for_route(
+        definitions,
+        variants,
+        "artifact",
+    )
+    if artifact_directive is None:
+        return []
+    properties = artifact_directive.get("properties")
+    if not isinstance(properties, dict):
+        return []
+    artifact_intent = properties.get("artifact_intent")
+    if not isinstance(artifact_intent, dict):
+        return []
+    options = artifact_intent.get("anyOf")
+    if not isinstance(options, list):
+        return []
+    artifact_variants: list[dict[str, object]] = []
+    for option in options:
+        if not isinstance(option, dict):
+            return []
+        variant = _schema_ref(definitions, option.get("$ref"))
+        if variant is None:
+            return []
+        artifact_variants.append(variant)
+    return artifact_variants
+
+
 def build_agent_col_routing_v4_response_schema() -> dict[str, object]:
     """Return strict route-specific provider variants for routing v4."""
     schema = adapt_schema_for_gemini(
@@ -191,29 +286,24 @@ def build_agent_col_routing_v4_response_schema() -> dict[str, object]:
         raise RuntimeError("Canonical routing v4 schema is invalid.")
     _replace_consts_with_enums(schema)
 
-    artifact_schema = definitions.get("ArtifactRoutingIntent")
+    artifact_schemas = _artifact_intent_variant_schemas(
+        definitions,
+        variants,
+    )
     computation_schema = definitions.get("ComputationRoutingIntent")
     if (
-        not isinstance(artifact_schema, dict)
+        len(artifact_schemas) != 2
         or not isinstance(computation_schema, dict)
     ):
         raise RuntimeError("Canonical routing v4 schema is invalid.")
 
-    artifact_properties = artifact_schema.get("properties")
     computation_properties = computation_schema.get("properties")
-    if not isinstance(artifact_properties, dict) or not isinstance(
-        computation_properties,
-        dict,
-    ):
+    if not isinstance(computation_properties, dict):
         raise RuntimeError("Canonical routing v4 schema is invalid.")
-    operation_schema = artifact_properties.get("operation")
-    artifact_objective_schema = artifact_properties.get("objective")
     computation_objective_schema = computation_properties.get("objective")
     computation_constraints_schema = computation_properties.get("constraints")
     if (
-        not isinstance(operation_schema, dict)
-        or not isinstance(artifact_objective_schema, dict)
-        or not isinstance(computation_objective_schema, dict)
+        not isinstance(computation_objective_schema, dict)
         or not isinstance(computation_constraints_schema, dict)
     ):
         raise RuntimeError("Canonical routing v4 schema is invalid.")
@@ -227,10 +317,17 @@ def build_agent_col_routing_v4_response_schema() -> dict[str, object]:
     )
     computation_objective_schema["description"] = numeric_free_description
     constraint_items["description"] = numeric_free_description
-    artifact_objective_schema["description"] = (
-        "Use no digits or source material; state only the bounded creation "
-        "objective."
-    )
+    for artifact_schema in artifact_schemas:
+        artifact_properties = artifact_schema.get("properties")
+        if not isinstance(artifact_properties, dict):
+            raise RuntimeError("Canonical routing v4 schema is invalid.")
+        artifact_objective_schema = artifact_properties.get("objective")
+        if not isinstance(artifact_objective_schema, dict):
+            raise RuntimeError("Canonical routing v4 schema is invalid.")
+        artifact_objective_schema["description"] = (
+            "Use no digits or source material; state only the bounded "
+            "creation objective."
+        )
     return schema
 
 

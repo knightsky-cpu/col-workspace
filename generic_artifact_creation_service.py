@@ -3,7 +3,11 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from schemas import ArtifactReference, SingleFileArtifact
+from schemas import (
+    ArtifactReference,
+    SingleFileArtifact,
+    derive_single_file_artifact_display_label,
+)
 
 
 GENERIC_ARTIFACT_MODEL_NAME = "agent-col-generic-artifact"
@@ -51,10 +55,10 @@ class GenericArtifactCreationService:
         command: GenericArtifactCreationCommand,
     ) -> GenericArtifactCreationResult:
         artifact = SingleFileArtifact.model_validate(command.artifact)
-        display_label = (
-            command.display_label
-            or artifact.summary
-            or artifact.filename
+        display_label = derive_single_file_artifact_display_label(
+            display_label=command.display_label,
+            summary=artifact.summary,
+            filename=artifact.filename,
         )
         artifact_document = artifact.model_dump(mode="json")
         artifact_id = await self._artifact_writer.save_single_file_artifact(

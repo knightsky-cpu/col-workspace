@@ -11,6 +11,13 @@ VALID_ARTIFACT_RESPONSE = (
     '"artifact_intent":{"operation":"create_blueprint",'
     '"objective":"Create the requested structured blueprint."}}'
 )
+VALID_SINGLE_FILE_ARTIFACT_RESPONSE = (
+    '{"schema_version":"4.0","route":"artifact",'
+    '"artifact_intent":{"operation":"create_single_file_artifact",'
+    '"objective":"Create the requested project setup script.",'
+    '"artifact_family":"code","format":"bash",'
+    '"filename":"setup_project.sh"}}'
+)
 
 
 class FakeRoutingModels:
@@ -82,6 +89,13 @@ def collect_schema_keys(value: object) -> set[str]:
     return set()
 
 
+def referenced_schema(
+    schema: dict[str, object],
+    reference: str,
+) -> dict[str, object]:
+    return schema["$defs"][reference.removeprefix("#/$defs/")]
+
+
 def provider_variants_by_route(
     schema: dict[str, object],
 ) -> dict[str, dict[str, object]]:
@@ -93,6 +107,17 @@ def provider_variants_by_route(
         route = variant["properties"]["route"]["enum"][0]
         variants[route] = variant
     return variants
+
+
+def artifact_intent_variants(
+    schema: dict[str, object],
+) -> list[dict[str, object]]:
+    artifact_directive = provider_variants_by_route(schema)["artifact"]
+    artifact_intent = artifact_directive["properties"]["artifact_intent"]
+    return [
+        referenced_schema(schema, option["$ref"])
+        for option in artifact_intent["anyOf"]
+    ]
 
 
 def test_v4_provider_schema_requires_the_matching_payload_for_each_route(
@@ -140,26 +165,48 @@ def test_v4_provider_schema_requires_the_matching_payload_for_each_route(
         assert variant["additionalProperties"] is False
         assert not (all_payloads - payloads) & set(variant["properties"])
 
-    artifact = schema["$defs"]["ArtifactRoutingIntent"]
-    assert artifact["additionalProperties"] is False
-    assert set(artifact["properties"]) == {
+    operations = {
+        option["properties"]["operation"]["enum"][0]: option
+        for option in artifact_intent_variants(schema)
+    }
+    assert set(operations) == {
+        "create_blueprint",
+        "create_single_file_artifact",
+    }
+    blueprint = operations["create_blueprint"]
+    assert blueprint["additionalProperties"] is False
+    assert set(blueprint["required"]) == {"operation", "objective"}
+    assert set(blueprint["properties"]) == {"operation", "objective"}
+
+    single_file = operations["create_single_file_artifact"]
+    assert single_file["additionalProperties"] is False
+    assert set(single_file["required"]) == {
         "operation",
         "objective",
         "artifact_family",
         "format",
         "filename",
     }
-    assert artifact["properties"]["operation"]["enum"] == [
-        "create_blueprint",
-        "create_single_file_artifact",
-    ]
+    assert set(single_file["properties"]) == {
+        "operation",
+        "objective",
+        "artifact_family",
+        "format",
+        "filename",
+    }
+    artifact_schema_scope = {
+        "artifact_intent": [
+            blueprint,
+            single_file,
+        ]
+    }
     assert not {
         "source_text",
         "project_id",
         "artifact_id",
         "profile_value",
         "policy_version",
-    } & collect_schema_keys(artifact)
+    } & collect_schema_keys(artifact_schema_scope)
 
 
 @pytest.mark.asyncio
@@ -183,6 +230,54 @@ async def test_v4_request_rejects_artifact_route_without_required_intent(
     assert error.value.schema_failure_reason == "route_payload_mismatch"
 
 
+@pytest.mark.asyncio
+async def test_v4_request_accepts_single_file_artifact_intent() -> None:
+    provider = load_routing_provider_v4()
+
+    directive = await provider.request_agent_col_routing_v4_directive(
+        fake_client(
+            FakeRoutingModels(response_text=VALID_SINGLE_FILE_ARTIFACT_RESPONSE)
+        ),
+        artifact_routing_input(
+            current_message=(
+                "Create a Bash script that creates a project folder with "
+                "source, tests, documentation, and readme files."
+            )
+        ),
+    )
+
+    assert directive.route == "artifact"
+    assert directive.artifact_intent is not None
+    assert directive.artifact_intent.operation == "create_single_file_artifact"
+    assert directive.artifact_intent.artifact_family == "code"
+    assert directive.artifact_intent.format == "bash"
+    assert directive.artifact_intent.filename == "setup_project.sh"
+
+
+@pytest.mark.asyncio
+async def test_v4_request_rejects_single_file_artifact_without_filename(
+) -> None:
+    provider = load_routing_provider_v4()
+    response_text = VALID_SINGLE_FILE_ARTIFACT_RESPONSE.replace(
+        ',"filename":"setup_project.sh"',
+        "",
+    )
+
+    with pytest.raises(provider.AgentColRoutingV4ProviderOutputError) as error:
+        await provider.request_agent_col_routing_v4_directive(
+            fake_client(FakeRoutingModels(response_text=response_text)),
+            artifact_routing_input(
+                current_message=(
+                    "Create a Bash script that creates a project folder with "
+                    "source, tests, documentation, and readme files."
+                )
+            ),
+        )
+
+    assert error.value.reason == "schema_validation_failed"
+    assert error.value.schema_failure_reason == "intent_invariant_failed"
+
+
 def test_v4_provider_schema_relaxes_only_provider_unsupported_constraints(
 ) -> None:
     provider = load_routing_provider_v4()
@@ -201,12 +296,15 @@ def test_v4_provider_schema_marks_artifact_objective_numeric_free() -> None:
     provider = load_routing_provider_v4()
 
     schema = provider.build_agent_col_routing_v4_response_schema()
-    description = schema["$defs"]["ArtifactRoutingIntent"]["properties"][
-        "objective"
-    ]["description"].lower()
+    descriptions = [
+        variant["properties"]["objective"]["description"].lower()
+        for variant in artifact_intent_variants(schema)
+    ]
 
-    assert "no digits" in description
-    assert "source material" in description
+    assert descriptions
+    for description in descriptions:
+        assert "no digits" in description
+        assert "source material" in description
 
 
 @pytest.mark.asyncio

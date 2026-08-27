@@ -588,6 +588,82 @@ async def test_artifact_executor_generates_single_file_artifact_without_blueprin
 
 
 @pytest.mark.asyncio
+async def test_artifact_executor_bounds_summary_derived_artifact_receipt_label(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactExecutionCommand,
+        AgentColArtifactExecutor,
+    )
+
+    claim = initial_claim()
+    long_summary = "A" * 300
+    generated = SingleFileArtifact(
+        artifact_family="document",
+        format="text",
+        filename="algebra-rules.txt",
+        content="Fundamental algebraic rules.\n",
+        summary=long_summary,
+    )
+    artifact = single_file_reference_for_claim(claim).model_copy(
+        update={"display_label": long_summary[:160]}
+    )
+    action = AgentActionReceipt(
+        action_name="create_artifact",
+        status="completed",
+    )
+    effect_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    generic_generator = FakeGenericArtifactGenerator(generated)
+    ledger = FakeArtifactLedger(
+        ChatTurnArtifactEffectResult(
+            claim=effect_claim,
+            artifact=artifact,
+        )
+    )
+    generic_reader = FakeGenericArtifactReader(
+        single_file_detail(effect_claim, artifact, generated)
+    )
+    executor = AgentColArtifactExecutor(
+        synthesis_service=FakeSynthesisService(blueprint()),
+        artifact_ledger=ledger,
+        artifact_reader=FakeArtifactReader(
+            artifact_detail(effect_claim, artifact_for_claim(claim), blueprint())
+        ),
+        generic_artifact_generator=generic_generator,
+        generic_artifact_reader=generic_reader,
+        genai_client=object(),
+    )
+
+    result = await executor.execute(
+        AgentColArtifactExecutionCommand(
+            claim=claim,
+            routing_directive=AgentColRoutingDirective.model_validate(
+                {
+                    "schema_version": "4.0",
+                    "route": "artifact",
+                    "artifact_intent": {
+                        "operation": "create_single_file_artifact",
+                        "objective": "Create the requested algebra rules artifact.",
+                        "artifact_family": "document",
+                        "format": "text",
+                        "filename": "algebra-rules.txt",
+                    },
+                }
+            ),
+            observed_at=NOW,
+            source_text="Create a text document containing algebraic rules.",
+        )
+    )
+
+    assert ledger.calls[0][1]["display_label"] == long_summary[:160]
+    assert ledger.calls[0][1]["artifact"]["summary"] == long_summary
+    assert result.projection.summary == long_summary
+
+
+@pytest.mark.asyncio
 async def test_artifact_executor_reuses_precompleted_effect_before_generation(
 ) -> None:
     from agent_col_artifact_executor import (

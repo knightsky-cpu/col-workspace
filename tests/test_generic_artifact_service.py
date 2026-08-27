@@ -432,6 +432,45 @@ async def test_generic_artifact_service_creates_linked_content_replacement(
 
 
 @pytest.mark.asyncio
+async def test_generic_artifact_service_bounds_summary_derived_version_label(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        CreateGenericArtifactVersionCommand,
+        GenericArtifactReadService,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--abc",
+                document=stored_single_file_document(),
+            ),
+        )
+    )
+    long_summary = "A" * 300
+
+    result = await GenericArtifactReadService(
+        database=database
+    ).create_artifact_version(
+        CreateGenericArtifactVersionCommand(
+            project_id="project-1",
+            artifact_id="artifact--abc",
+            session_id="session-2",
+            user_id="user-1",
+            content="import secrets\nprint('replacement')\n",
+            summary=long_summary,
+            originating_turn_id="turn-2",
+        )
+    )
+
+    assert result.artifact.summary == long_summary
+    assert result.reference.display_label == long_summary[:160]
+    assert database.save_calls[0]["artifact"]["summary"] == long_summary
+    assert database.save_calls[0]["display_label"] == long_summary[:160]
+
+
+@pytest.mark.asyncio
 async def test_generic_artifact_service_rejects_blueprint_documents() -> None:
     from database import ArtifactDocumentRecord
     from generic_artifact_service import (

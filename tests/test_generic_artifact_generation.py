@@ -77,7 +77,11 @@ async def test_generate_generic_artifact_uses_structured_untrusted_context(
     assert config.temperature == 0.2
     assert config.max_output_tokens == 16_384
     assert config.automatic_function_calling.disable is True
-    assert "single-file artifact provider" in config.system_instruction
+    instruction = " ".join(config.system_instruction.split())
+    assert "single-file artifact provider" in instruction
+    assert "summary" in instruction
+    assert "presentation metadata" in instruction
+    assert "500 characters or fewer" in instruction
     contents = arguments["contents"]
     prompt = contents[0].parts[0].text
     assert "[GENERIC_ARTIFACT_REQUEST]" in prompt
@@ -88,6 +92,38 @@ async def test_generate_generic_artifact_uses_structured_untrusted_context(
     assert "Linux and macOS" in prompt
     assert "python" in prompt
     assert "password_generator.py" in prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_generic_artifact_accepts_document_summary_metadata(
+) -> None:
+    import generic_artifact_generation as generation
+
+    long_summary = "A" * 300
+    client = fake_genai_client(
+        json.dumps(
+            {
+                "artifact_family": "document",
+                "format": "text",
+                "filename": "algebraic_rules.txt",
+                "content": "Fundamental algebraic rules.\n",
+                "summary": long_summary,
+            }
+        )
+    )
+
+    artifact = await generation.generate_generic_artifact(
+        client,
+        generation.GenericArtifactGenerationRequest(
+            artifact_family="document",
+            artifact_format="text",
+            filename="algebraic_rules.txt",
+            source_text="Create a text document containing algebraic rules.",
+        ),
+    )
+
+    assert artifact.summary == long_summary
+    assert artifact.content == "Fundamental algebraic rules.\n"
 
 
 @pytest.mark.asyncio
