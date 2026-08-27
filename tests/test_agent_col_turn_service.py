@@ -866,6 +866,57 @@ async def test_turn_service_composes_each_route_into_responder_context(
     assert responder_context.model_dump_json() in routed_text
 
 
+@pytest.mark.asyncio
+async def test_turn_service_injects_hidden_working_state_for_responder(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    directive = AgentColRoutingDirective(route="direct")
+    original_context = types.Content(
+        role="user",
+        parts=[types.Part.from_text(text="existing-context")],
+    )
+    working_state_context = (
+        "[SERVER_VALIDATED_WORKING_STATE]\n"
+        "hidden internal working state\n"
+        "{\"current_goal\":\"Choose deployment plan\"}\n"
+        "[/SERVER_VALIDATED_WORKING_STATE]"
+    )
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(directive),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Actually, artifact generation only takes ten seconds.",
+            model_input_context=(original_context,),
+            working_state_context=working_state_context,
+        )
+    )
+
+    assert result.response == "Agent_Col response."
+    assert result.actions == ()
+    assert result.artifacts == ()
+    assert result.memory_proposals == ()
+    assert result.collaborative_note_proposals == ()
+    assert result.continuity_receipts == ()
+    runtime_context = responder.contexts[0]
+    assert runtime_context.model_input_context[0] is original_context
+    assert runtime_context.model_input_context[1].parts[0].text == (
+        working_state_context
+    )
+    routed_context_text = runtime_context.model_input_context[2].parts[0].text
+    assert routed_context_text is not None
+    assert "[SERVER_VALIDATED_ROUTING_AND_EXPERT_RESULT]" in routed_context_text
+
+
 def completed_source_context() -> AgentColResponderContext:
     from source_expert import SourceExpertResult, build_source_receipts
 

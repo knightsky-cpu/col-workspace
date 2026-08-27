@@ -112,6 +112,7 @@ from schemas import (
     parse_collaboration_profile,
     project_collaboration_profile_v2,
 )
+from working_state import WorkingStateSnapshot
 
 
 logger = logging.getLogger(__name__)
@@ -4938,6 +4939,83 @@ class MemoryEngine:
             raise
         except GoogleAPIError as exc:
             self._raise_firestore_error("get_chat_history", exc)
+
+    async def get_working_state(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+    ) -> WorkingStateSnapshot | None:
+        """Return the hidden current-session working state when present."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_string(session_id, "session_id")
+
+        try:
+            session_ref = self._client.collection("sessions").document(
+                session_id
+            )
+            session_snapshot = await session_ref.get()
+            if not session_snapshot.exists:
+                return None
+            self._validate_chat_session_owner(
+                session_snapshot.to_dict(),
+                user_id=user_id,
+                project_id=project_id,
+            )
+            state_ref = session_ref.collection("working_state").document(
+                "current"
+            )
+            state_snapshot = await state_ref.get()
+            if not state_snapshot.exists:
+                return None
+            data = state_snapshot.to_dict()
+            if not isinstance(data, Mapping):
+                raise ValueError("Stored working state is invalid.")
+            return WorkingStateSnapshot.model_validate(data)
+        except (ChatSessionOwnershipError, ChatTurnStateError):
+            raise
+        except ValidationError as exc:
+            raise ValueError("Stored working state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("get_working_state", exc)
+
+    async def save_working_state(
+        self,
+        snapshot: WorkingStateSnapshot,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        """Persist the hidden current-session working state."""
+        if not isinstance(snapshot, WorkingStateSnapshot):
+            raise ValueError("snapshot must be a WorkingStateSnapshot.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+
+        try:
+            session_ref = self._client.collection("sessions").document(
+                snapshot.session_id
+            )
+            session_snapshot = await session_ref.get()
+            if not session_snapshot.exists:
+                raise ChatSessionOwnershipError("Chat session is unavailable.")
+            self._validate_chat_session_owner(
+                session_snapshot.to_dict(),
+                user_id=snapshot.user_id,
+                project_id=snapshot.project_id,
+            )
+            state_ref = session_ref.collection("working_state").document(
+                "current"
+            )
+            await state_ref.set(
+                snapshot.model_dump(mode="python", exclude={"updated_at"})
+                | {"updated_at": observed_at}
+            )
+        except (ChatSessionOwnershipError, ChatTurnStateError):
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("save_working_state", exc)
 
     async def update_user_profile(
         self, user_id: str, updates: dict[str, object]

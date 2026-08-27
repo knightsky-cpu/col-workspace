@@ -178,6 +178,8 @@ from trusted_memory_service import (
     TrustedMemoryMutationResult,
 )
 from vertex_config import VertexAISettings
+from working_state import WorkingStateSnapshot
+from working_state_service import WorkingStateUpdateInput, WorkingStateUpdateResult
 
 
 VALID_BLUEPRINT_PAYLOAD = {
@@ -324,6 +326,31 @@ def make_continuity_receipt() -> ContinuitySourceReceipt:
     )
 
 
+def make_working_state_snapshot(**overrides) -> WorkingStateSnapshot:
+    values = {
+        "user_id": "user-1",
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "source_message_id": "message-1",
+        "request_summary": "Deployment plan with Cloud Run under consideration.",
+        "current_goal": "Choose a deployment plan.",
+        "intent_hypothesis": (
+            "The user likely wants a secure deployment plan and is unsure "
+            "whether background workers are necessary."
+        ),
+        "active_constraints": ("security matters more than speed",),
+        "unresolved_questions": (),
+        "clarification_status": "useful",
+        "next_step_hypothesis": (
+            "Prefer a synchronous MVP unless durability becomes required."
+        ),
+        "confidence": "medium",
+        "updated_at": MEMORY_NOW,
+    }
+    values.update(overrides)
+    return WorkingStateSnapshot(**values)
+
+
 def make_continuity_choice() -> ContinuityChoice:
     return ContinuityChoice(
         choice_id="choice-0",
@@ -444,6 +471,14 @@ class FakeMemoryEngine:
     note_decision_effect_calls: list[
         tuple[ChatTurnClaim, CollaborativeNoteEvent, datetime]
     ] = field(default_factory=list)
+    working_state: WorkingStateSnapshot | None = None
+    working_state_error: Exception | None = None
+    working_state_calls: list[tuple[str, str, str]] = field(
+        default_factory=list
+    )
+    working_state_save_calls: list[
+        tuple[WorkingStateSnapshot, datetime]
+    ] = field(default_factory=list)
     closed: bool = False
 
     async def get_collaboration_profile(
@@ -491,6 +526,30 @@ class FakeMemoryEngine:
                 )
             )
         return self.history
+
+    async def get_working_state(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+    ) -> WorkingStateSnapshot | None:
+        self.working_state_calls.append((user_id, project_id, session_id))
+        self.events.append(("working_state", session_id))
+        if self.working_state_error is not None:
+            raise self.working_state_error
+        return self.working_state
+
+    async def save_working_state(
+        self,
+        snapshot: WorkingStateSnapshot,
+        *,
+        observed_at: datetime,
+    ) -> None:
+        self.working_state_save_calls.append((snapshot, observed_at))
+        self.events.append(("save_working_state", snapshot.session_id))
+        if self.working_state_error is not None:
+            raise self.working_state_error
 
     async def save_message(
         self,
@@ -789,6 +848,24 @@ class FakeContinuityService:
         if self.error is not None:
             raise self.error
         return self.resolution
+
+
+@dataclass
+class FakeWorkingStateService:
+    events: list[tuple[Any, ...]]
+    result: WorkingStateUpdateResult | None = None
+    calls: list[WorkingStateUpdateInput] = field(default_factory=list)
+    error: Exception | None = None
+
+    async def update(
+        self,
+        command: WorkingStateUpdateInput,
+    ) -> WorkingStateUpdateResult:
+        self.calls.append(command)
+        self.events.append(("working_state_service", command.session_id))
+        if self.error is not None:
+            raise self.error
+        return self.result or WorkingStateUpdateResult(update_required=False)
 
 
 @dataclass
@@ -1272,6 +1349,7 @@ class ServiceState:
     supervisor: FakeSupervisorRuntime
     turn_service: FakeAgentColTurnService
     continuity_service: FakeContinuityService
+    working_state_service: FakeWorkingStateService
     memory_service: FakeTrustedMemoryService
     collaborative_note_service: FakeCollaborativeNoteService
     artifact_service: FakeArtifactReadService
@@ -1295,6 +1373,7 @@ class ServiceState:
     artifact_feedback_executor_dependencies: list[tuple[object, object]]
     responder_note_services: list[object]
     continuity_service_dependencies: list[object]
+    working_state_service_dependencies: list[object]
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ]
@@ -1316,6 +1395,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     supervisor = FakeSupervisorRuntime(events)
     turn_service = FakeAgentColTurnService(events)
     continuity_service = FakeContinuityService(events)
+    working_state_service = FakeWorkingStateService(events)
     pending_proposal = MemoryProposal(
         proposal_id="example_usage--proposal-1",
         category="example_usage",
@@ -1539,6 +1619,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
     responder_note_services: list[object] = []
     continuity_service_dependencies: list[object] = []
+    working_state_service_dependencies: list[object] = []
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ] = []
@@ -1557,6 +1638,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         supervisor=supervisor,
         turn_service=turn_service,
         continuity_service=continuity_service,
+        working_state_service=working_state_service,
         memory_service=memory_service,
         collaborative_note_service=note_service,
         artifact_service=artifact_service,
@@ -1582,6 +1664,9 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         ),
         responder_note_services=responder_note_services,
         continuity_service_dependencies=continuity_service_dependencies,
+        working_state_service_dependencies=(
+            working_state_service_dependencies
+        ),
         turn_service_dependencies=turn_service_dependencies,
     )
 
@@ -1784,6 +1869,19 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         main,
         "ContinuityService",
         create_continuity_service,
+        raising=False,
+    )
+
+    def create_working_state_service(*, client: object) -> object:
+        working_state_service_dependencies.append(client)
+        if client is not state.genai_client:
+            pytest.fail("Unexpected working-state service client.")
+        return working_state_service
+
+    monkeypatch.setattr(
+        main,
+        "WorkingStateService",
+        create_working_state_service,
         raising=False,
     )
     monkeypatch.setattr(
@@ -4712,6 +4810,73 @@ async def test_chat_builds_turn_command_and_persists_both_messages(
 
 
 @pytest.mark.asyncio
+async def test_chat_uses_hidden_working_state_without_public_response_fields(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    previous_state = make_working_state_snapshot()
+    updated_state = make_working_state_snapshot(
+        request_summary="Artifact creation plan after user correction.",
+        current_goal="Create a durable artifact from the current request.",
+        next_step_hypothesis="Ask only if artifact format becomes blocking.",
+    )
+    service_state.database.working_state = previous_state
+    service_state.working_state_service.result = WorkingStateUpdateResult(
+        update_required=True,
+        snapshot=updated_state,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": (
+                "I want a deployment plan, probably Cloud Run, but security "
+                "matters more than speed."
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["response"] == "Generated answer"
+    assert "working_state" not in body
+    assert "model_thoughts" not in body
+    assert service_state.database.working_state_calls == [
+        ("user-1", "project-1", "session-1")
+    ]
+    assert len(service_state.turn_service.calls) == 1
+    turn_command = service_state.turn_service.calls[0]
+    assert turn_command.working_state_context is not None
+    assert "[SERVER_VALIDATED_WORKING_STATE]" in (
+        turn_command.working_state_context
+    )
+    assert "non-authoritative" in turn_command.working_state_context
+    assert "security matters more than speed" in (
+        turn_command.working_state_context
+    )
+
+    assert len(service_state.working_state_service.calls) == 1
+    update_command = service_state.working_state_service.calls[0]
+    assert update_command.user_id == "user-1"
+    assert update_command.project_id == "project-1"
+    assert update_command.session_id == "session-1"
+    assert update_command.source_message_id == "user-message-1"
+    assert update_command.current_message.startswith(
+        "I want a deployment plan"
+    )
+    assert update_command.model_response == "Generated answer"
+    assert update_command.previous_state == previous_state
+    assert update_command.recent_user_messages == ("Earlier question",)
+    assert len(service_state.database.working_state_save_calls) == 1
+    saved_state, observed_at = service_state.database.working_state_save_calls[0]
+    assert saved_state == updated_state
+    assert observed_at.tzinfo is not None
+
+
+@pytest.mark.asyncio
 async def test_headerless_chat_returns_proposal_from_persisted_source_message(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -6587,6 +6752,41 @@ async def test_chat_translates_owned_turn_persistence_errors_safely(
         str(error),
     ):
         assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_chat_does_not_update_working_state_when_completion_fails(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = claim
+    service_state.database.working_state = make_working_state_snapshot()
+    service_state.working_state_service.result = WorkingStateUpdateResult(
+        update_required=True,
+        snapshot=make_working_state_snapshot(
+            current_goal="Persist only after completion succeeds."
+        ),
+    )
+    service_state.database.complete_error = main.MemoryEngineError(
+        "complete failed"
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "private-owned-key"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "I want a deployment plan.",
+        },
+    )
+
+    assert response.status_code == 500
+    assert len(service_state.turn_service.calls) == 1
+    assert service_state.working_state_service.calls == []
+    assert service_state.database.working_state_save_calls == []
 
 
 @pytest.mark.parametrize(

@@ -107,6 +107,17 @@ from continuity_service import (
     GeminiContinuityTermExpander,
 )
 from computational_expert_service import ComputationalExpertService
+from working_state import (
+    WorkingStateSnapshot,
+    build_working_state_context,
+    should_update_working_state,
+)
+from working_state_service import (
+    WorkingStateGenerationError,
+    WorkingStateGenerationTimeoutError,
+    WorkingStateService,
+    WorkingStateUpdateInput,
+)
 from database import (
     ArtifactCursorNotFoundError,
     ArtifactNotFoundError,
@@ -903,6 +914,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             store=database,
             term_expander=GeminiContinuityTermExpander(client=client),
         )
+        working_state_service = WorkingStateService(client=client)
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
             vertex_settings
@@ -959,6 +971,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.memory_service = memory_service
     app.state.collaborative_note_service = collaborative_note_service
     app.state.continuity_service = continuity_service
+    app.state.working_state_service = working_state_service
     app.state.turn_service = turn_service
     app.state.authenticator = Authenticator(load_auth_settings())
 
@@ -2222,6 +2235,7 @@ async def chat(
     database = request.app.state.db
     memory_service = request.app.state.memory_service
     continuity_service = request.app.state.continuity_service
+    working_state_service = request.app.state.working_state_service
     turn_service = request.app.state.turn_service
     decision_actions = ()
     decision_memory_proposals: tuple[
@@ -2233,6 +2247,8 @@ async def chat(
     decision_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
     decision_note_events: tuple[CollaborativeNoteEvent, ...] = ()
     continuity_resolution = ContinuityResolution(status="none")
+    working_state_snapshot: WorkingStateSnapshot | None = None
+    working_state_context: str | None = None
     chat_turn_claim: ChatTurnClaim | None = None
     effective_user_id = _resolve_effective_user_id(
         request=request,
@@ -2868,6 +2884,29 @@ async def chat(
             ),
         )
 
+    working_state_enabled = should_update_working_state(payload.message)
+    if working_state_enabled:
+        try:
+            working_state_snapshot = await database.get_working_state(
+                user_id=effective_user_id,
+                project_id=effective_project_id,
+                session_id=payload.session_id,
+            )
+            if working_state_snapshot is not None:
+                working_state_context = build_working_state_context(
+                    working_state_snapshot
+                )
+        except (
+            ChatSessionOwnershipError,
+            MemoryEngineError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            logger.error(
+                "Hidden working state context unavailable (%s).",
+                type(exc).__name__,
+            )
+
     if chat_turn_claim is not None:
         try:
             chat_turn_claim = await database.renew_chat_turn_lease(
@@ -2889,6 +2928,11 @@ async def chat(
         if chat_turn_claim is not None
         else decision_memory_clarifications
     )
+    recent_user_messages = tuple(
+        message["text"]
+        for message in validated_history
+        if message["role"] == "user"
+    )
 
     try:
         result = await turn_service.run_turn(
@@ -2897,12 +2941,9 @@ async def chat(
                 session_id=payload.session_id,
                 user_id=effective_user_id,
                 message=payload.message,
-                recent_user_messages=tuple(
-                    message["text"]
-                    for message in validated_history
-                    if message["role"] == "user"
-                ),
+                recent_user_messages=recent_user_messages,
                 model_input_context=model_input_context,
+                working_state_context=working_state_context,
                 source_message_id=user_message_id,
                 memory_decision_present=(
                     payload.memory_decision is not None
@@ -3145,7 +3186,42 @@ async def chat(
             ChatTurnOwnershipError,
             ChatTurnStateError,
             MemoryEngineError,
+            ) as exc:
+                _raise_chat_turn_operation_http_error(exc, "completion")
+
+    if working_state_enabled:
+        try:
+            working_state_update = await working_state_service.update(
+                WorkingStateUpdateInput(
+                    user_id=effective_user_id,
+                    project_id=effective_project_id,
+                    session_id=payload.session_id,
+                    source_message_id=user_message_id,
+                    current_message=payload.message,
+                    model_response=result.response,
+                    previous_state=working_state_snapshot,
+                    recent_user_messages=recent_user_messages[-6:],
+                )
+            )
+            if (
+                working_state_update.update_required
+                and working_state_update.snapshot is not None
+            ):
+                await database.save_working_state(
+                    working_state_update.snapshot,
+                    observed_at=datetime.now(UTC),
+                )
+        except (
+            WorkingStateGenerationError,
+            WorkingStateGenerationTimeoutError,
+            ChatSessionOwnershipError,
+            MemoryEngineError,
+            TypeError,
+            ValueError,
         ) as exc:
-            _raise_chat_turn_operation_http_error(exc, "completion")
+            logger.error(
+                "Hidden working state update failed (%s).",
+                type(exc).__name__,
+            )
 
     return chat_response

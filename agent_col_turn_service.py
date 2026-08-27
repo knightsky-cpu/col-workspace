@@ -161,6 +161,7 @@ class AgentColTurnCommand:
     message: str
     recent_user_messages: tuple[str, ...] = ()
     model_input_context: tuple[types.Content, ...] = ()
+    working_state_context: str | None = None
     source_message_id: str | None = None
     memory_decision_present: bool = False
     artifact_feedback_decision_present: bool = False
@@ -411,7 +412,7 @@ class AgentColTurnService:
                 chat_turn_claim=claim,
             ) from exc
         model_input_context = (
-            *command.model_input_context,
+            *self._model_input_with_working_state(command),
             build_agent_col_artifact_feedback_model_context(
                 execution.projection
             ),
@@ -701,7 +702,7 @@ class AgentColTurnService:
             ) from exc
 
         model_input_context = (
-            *command.model_input_context,
+            *self._model_input_with_working_state(command),
             build_agent_col_artifact_model_context(execution.projection),
         )
         authoritative_actions = _stable_merge(
@@ -819,6 +820,22 @@ class AgentColTurnService:
             raise AgentColTurnServiceError(
                 "Agent_Col artifact claim is inconsistent."
             )
+
+    @staticmethod
+    def _model_input_with_working_state(
+        command: AgentColTurnCommand,
+    ) -> tuple[types.Content, ...]:
+        if command.working_state_context is None:
+            return command.model_input_context
+        return (
+            *command.model_input_context,
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_text(text=command.working_state_context)
+                ],
+            ),
+        )
 
     async def _run_with_deadline(
         self,
@@ -979,7 +996,7 @@ class AgentColTurnService:
                     continuity_choices=command.continuity_choices,
                 ) from exc
         model_input_context = (
-            *command.model_input_context,
+            *self._model_input_with_working_state(command),
             build_agent_col_responder_v3_model_context(responder_context),
         )
         try:

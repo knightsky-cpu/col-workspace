@@ -21,6 +21,7 @@ from chat_turns import (
     derive_chat_turn_ids,
 )
 from database import MemoryEngine, MemoryEngineError
+from database import ChatSessionOwnershipError
 from memory_clarifications import (
     MemoryClarificationEnvelope,
     derive_memory_clarification_id,
@@ -43,9 +44,35 @@ from schemas import (
     MemoryClarificationSelectionRequest,
     MemoryProposalReceipt,
 )
+from working_state import WorkingStateSnapshot
 
 
 NOW = datetime(2026, 8, 20, 15, 0, tzinfo=UTC)
+
+
+def make_working_state_snapshot(**overrides) -> WorkingStateSnapshot:
+    values = {
+        "user_id": "user-1",
+        "project_id": "agent-col",
+        "session_id": "session-1",
+        "source_message_id": "message-1",
+        "request_summary": "Deployment plan with Cloud Run under consideration.",
+        "current_goal": "Choose a deployment plan.",
+        "intent_hypothesis": (
+            "The user likely wants a secure deployment plan and is unsure "
+            "whether background workers are necessary."
+        ),
+        "active_constraints": ("security matters more than speed",),
+        "unresolved_questions": (),
+        "clarification_status": "useful",
+        "next_step_hypothesis": (
+            "Prefer a synchronous MVP unless durability becomes required."
+        ),
+        "confidence": "medium",
+        "updated_at": NOW,
+    }
+    values.update(overrides)
+    return WorkingStateSnapshot(**values)
 
 
 def test_adaptation_receipt_documents_accept_v2_receipts() -> None:
@@ -81,6 +108,48 @@ def snapshot(
     *, exists: bool, data: dict[str, object] | None = None
 ) -> SimpleNamespace:
     return SimpleNamespace(exists=exists, to_dict=lambda: data)
+
+
+def working_state_store(
+    *,
+    session_exists: bool = True,
+    session_data: dict[str, object] | None = None,
+    state_exists: bool = True,
+    state_data: dict[str, object] | None = None,
+) -> SimpleNamespace:
+    client = MagicMock()
+    sessions = MagicMock()
+    session = MagicMock()
+    working_state = MagicMock()
+    current = MagicMock()
+    client.collection.return_value = sessions
+    sessions.document.return_value = session
+
+    def session_collection(name: str) -> MagicMock:
+        if name == "working_state":
+            return working_state
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    session.collection.side_effect = session_collection
+    working_state.document.return_value = current
+    current.set = AsyncMock()
+    session.get = AsyncMock(
+        return_value=snapshot(
+            exists=session_exists,
+            data=session_data
+            if session_data is not None
+            else {"project_id": "agent-col", "user_id": "user-1"},
+        )
+    )
+    current.get = AsyncMock(
+        return_value=snapshot(exists=state_exists, data=state_data)
+    )
+    return SimpleNamespace(
+        client=client,
+        session=session,
+        working_state=working_state,
+        current=current,
+    )
 
 
 class ChatTurnStore:
@@ -425,6 +494,88 @@ def chat_session_detail_store(
         client=client,
         clarification=clarification,
     )
+
+
+@pytest.mark.asyncio
+async def test_get_working_state_returns_current_session_snapshot() -> None:
+    expected = make_working_state_snapshot()
+    store = working_state_store(
+        state_data=expected.model_dump(mode="python")
+    )
+
+    result = await MemoryEngine(store.client).get_working_state(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+    )
+
+    assert result == expected
+    store.session.collection.assert_called_once_with("working_state")
+    store.working_state.document.assert_called_once_with("current")
+
+
+@pytest.mark.asyncio
+async def test_get_working_state_returns_none_when_session_state_absent() -> None:
+    store = working_state_store(state_exists=False)
+
+    result = await MemoryEngine(store.client).get_working_state(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_working_state_rejects_session_ownership_mismatch() -> None:
+    store = working_state_store(
+        session_data={"project_id": "other-project", "user_id": "other-user"},
+    )
+
+    with pytest.raises(ChatSessionOwnershipError):
+        await MemoryEngine(store.client).get_working_state(
+            user_id="user-1",
+            project_id="agent-col",
+            session_id="session-1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_working_state_rejects_invalid_stored_state() -> None:
+    invalid = make_working_state_snapshot().model_dump(mode="python")
+    invalid["request_summary"] = "x" * 201
+    store = working_state_store(state_data=invalid)
+
+    with pytest.raises(ValueError, match="Stored working state is invalid."):
+        await MemoryEngine(store.client).get_working_state(
+            user_id="user-1",
+            project_id="agent-col",
+            session_id="session-1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_save_working_state_writes_current_session_snapshot() -> None:
+    expected = make_working_state_snapshot(updated_at=None)
+    store = working_state_store(state_exists=False)
+
+    await MemoryEngine(store.client).save_working_state(
+        expected,
+        observed_at=NOW,
+    )
+
+    store.session.get.assert_awaited_once()
+    store.session.collection.assert_called_once_with("working_state")
+    store.working_state.document.assert_called_once_with("current")
+    store.current.set.assert_awaited_once()
+    written_data = store.current.set.await_args.args[0]
+    assert written_data["schema_version"] == "1.0"
+    assert written_data["authority"] == "non_authoritative"
+    assert written_data["user_id"] == "user-1"
+    assert written_data["project_id"] == "agent-col"
+    assert written_data["session_id"] == "session-1"
+    assert written_data["updated_at"] == NOW
 
 
 @pytest.mark.asyncio
