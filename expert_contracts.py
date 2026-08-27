@@ -18,6 +18,10 @@ ExpertLimitation = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=500),
 ]
+ExpertInvalidOutputReason = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=120),
+]
 
 
 class ExpertCapability(StrEnum):
@@ -59,6 +63,7 @@ class ExpertResult(BaseModel, Generic[PayloadT, EvidenceT]):
         default_factory=tuple,
         max_length=5,
     )
+    invalid_output_reason: ExpertInvalidOutputReason | None = None
     payload: PayloadT | None = None
     evidence: EvidenceT | None = None
 
@@ -81,5 +86,13 @@ class ExpertResult(BaseModel, Generic[PayloadT, EvidenceT]):
         ):
             raise ValueError(
                 "Noncompleted expert results cannot carry content."
+            )
+        if (
+            self.invalid_output_reason is not None
+            and self.status is not ExpertStatus.INVALID_OUTPUT
+        ):
+            raise ValueError(
+                "Only invalid-output expert results can carry an "
+                "invalid-output reason."
             )
         return self

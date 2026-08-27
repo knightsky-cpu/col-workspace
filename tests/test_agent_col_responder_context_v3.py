@@ -142,6 +142,13 @@ def completed_research_result() -> ResearchExpertResult:
     )
 
 
+def failed_research_invalid_output_result() -> ResearchExpertResult:
+    return ResearchExpertResult(
+        status=ExpertStatus.INVALID_OUTPUT,
+        invalid_output_reason="missing_grounding_metadata",
+    )
+
+
 def completed_computation_result() -> ComputationResponderResult:
     return ComputationResponderResult.model_validate(
         {
@@ -315,3 +322,29 @@ def test_v3_responder_serialization_contains_only_bounded_verification_context(
         "PROVIDER_PAYLOAD_MARKER",
     ):
         assert excluded not in text
+
+
+def test_v3_responder_context_marks_failed_expert_as_non_authoritative(
+) -> None:
+    context_v3 = load_context_v3()
+    result = failed_research_invalid_output_result()
+    context = context_v3.AgentColResponderContextV3(
+        routing_directive=AgentColRoutingDirective(
+            route="research",
+            research_intent={
+                "question": "What is the current stable Python release?",
+                "objective": "Verify with public evidence.",
+            },
+        ),
+        expert_result=result,
+        actions=(),
+        citations=(),
+    )
+
+    rendered = context_v3.build_agent_col_responder_v3_model_context(context)
+    assert rendered.parts is not None
+    text = rendered.parts[0].text
+    assert text is not None
+    assert '"invalid_output_reason":"missing_grounding_metadata"' in text
+    assert "Failed expert results are non-authoritative" in text
+    assert "do not replace failed expert evidence with fallback facts" in text

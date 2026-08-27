@@ -270,7 +270,10 @@ class AgentColExpertExecutorV3:
         try:
             result = await service.research(request)
         except ResearchExpertServiceError as exc:
-            result = ResearchExpertResult(status=exc.status)
+            result = ResearchExpertResult(
+                status=exc.status,
+                invalid_output_reason=_invalid_output_reason_value(exc),
+            )
         receipts = build_research_receipts(result)
         return AgentColResponderContextV3(
             routing_directive=directive,
@@ -337,7 +340,10 @@ class AgentColExpertExecutorV3:
             try:
                 result = await service.verify(request)
             except RequirementsVerificationServiceError as exc:
-                result = RequirementsVerificationResult(status=exc.status)
+                result = RequirementsVerificationResult(
+                    status=exc.status,
+                    invalid_output_reason=_invalid_output_reason_value(exc),
+                )
         receipts = build_requirements_verification_receipts(result)
         return AgentColResponderContextV3(
             routing_directive=directive,
@@ -345,3 +351,13 @@ class AgentColExpertExecutorV3:
             actions=receipts.actions,
             citations=receipts.citations,
         )
+
+
+def _invalid_output_reason_value(exc: Exception) -> str | None:
+    if getattr(exc, "status", None) is not ExpertStatus.INVALID_OUTPUT:
+        return None
+    reason = getattr(exc, "invalid_output_reason", None)
+    if reason is None:
+        return None
+    value = getattr(reason, "value", reason)
+    return str(value)

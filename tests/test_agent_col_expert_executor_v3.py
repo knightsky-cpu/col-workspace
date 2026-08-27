@@ -157,9 +157,10 @@ class RecordingVerificationService:
 
 
 class FailingVerificationService(RecordingVerificationService):
-    def __init__(self, status: ExpertStatus) -> None:
+    def __init__(self, status: ExpertStatus, reason=None) -> None:
         super().__init__()
         self.status = status
+        self.reason = reason
 
     async def verify(self, request):
         from requirements_verification_service import (
@@ -167,7 +168,25 @@ class FailingVerificationService(RecordingVerificationService):
         )
 
         self.requests.append(request)
-        raise RequirementsVerificationServiceError(self.status)
+        raise RequirementsVerificationServiceError(
+            self.status,
+            invalid_output_reason=self.reason,
+        )
+
+
+class FailingResearchService(RecordingService):
+    def __init__(self, reason) -> None:
+        super().__init__()
+        self.reason = reason
+
+    async def research(self, request):
+        from research_expert_service import ResearchExpertServiceError
+
+        self.requests.append(request)
+        raise ResearchExpertServiceError(
+            ExpertStatus.INVALID_OUTPUT,
+            invalid_output_reason=self.reason,
+        )
 
 
 def test_executor_v3_derives_stable_four_capability_order() -> None:
@@ -263,6 +282,68 @@ async def test_executor_v3_contains_verification_failure_without_fallback(
     assert context.expert_result.summary is None
     assert context.expert_result.payload is None
     assert context.expert_result.evidence is None
+    assert context.actions == ()
+    assert context.citations == ()
+
+
+@pytest.mark.asyncio
+async def test_executor_v3_preserves_research_invalid_output_reason() -> None:
+    from research_expert import ResearchInvalidOutputReason
+
+    executor_v3 = load_executor_v3()
+    directive = AgentColRoutingDirective(
+        route="research",
+        research_intent={
+            "question": "What is the current stable Python release?",
+            "objective": "Verify with public sources.",
+        },
+    )
+    routing_input = AgentColRoutingInput(
+        current_message="What is the current stable Python release?",
+        available_capabilities=("research",),
+    )
+    research = FailingResearchService(
+        ResearchInvalidOutputReason.MISSING_GROUNDING_METADATA
+    )
+    executor = executor_v3.AgentColExpertExecutorV3(
+        research_service=research,
+    )
+
+    context = await executor.execute(directive, routing_input)
+
+    assert len(research.requests) == 1
+    assert context.expert_result is not None
+    assert context.expert_result.status is ExpertStatus.INVALID_OUTPUT
+    assert context.expert_result.invalid_output_reason == (
+        "missing_grounding_metadata"
+    )
+    assert context.actions == ()
+    assert context.citations == ()
+
+
+@pytest.mark.asyncio
+async def test_executor_v3_preserves_verification_invalid_output_reason(
+) -> None:
+    from requirements_verification_service import (
+        RequirementsVerificationInvalidOutputReason,
+    )
+
+    executor_v3 = load_executor_v3()
+    directive, routing_input = requirements_routing_case()
+    verification = FailingVerificationService(
+        ExpertStatus.INVALID_OUTPUT,
+        RequirementsVerificationInvalidOutputReason.INVALID_JSON,
+    )
+    executor = executor_v3.AgentColExpertExecutorV3(
+        requirements_verification_service=verification,
+    )
+
+    context = await executor.execute(directive, routing_input)
+
+    assert len(verification.requests) == 1
+    assert context.expert_result is not None
+    assert context.expert_result.status is ExpertStatus.INVALID_OUTPUT
+    assert context.expert_result.invalid_output_reason == "invalid_json"
     assert context.actions == ()
     assert context.citations == ()
 

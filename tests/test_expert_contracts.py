@@ -115,3 +115,45 @@ def test_completed_expert_result_rejects_unbounded_text(
 
     with pytest.raises(ValidationError):
         ExpertResult[ExamplePayload, ExampleEvidence](**values)
+
+
+def test_invalid_output_result_can_carry_content_safe_reason() -> None:
+    from expert_contracts import ExpertResult, ExpertStatus
+
+    result = ExpertResult[object, object](
+        capability="research",
+        status=ExpertStatus.INVALID_OUTPUT,
+        invalid_output_reason="missing_grounding_metadata",
+    )
+
+    assert result.invalid_output_reason == "missing_grounding_metadata"
+    assert result.summary is None
+    assert result.payload is None
+    assert result.evidence is None
+
+
+@pytest.mark.parametrize(
+    "status",
+    ("completed", "rejected_input", "unavailable", "timed_out"),
+)
+def test_non_invalid_output_result_rejects_invalid_output_reason(
+    status: str,
+) -> None:
+    from expert_contracts import ExpertResult
+
+    values: dict[str, object] = {
+        "capability": "research",
+        "status": status,
+        "invalid_output_reason": "missing_grounding_metadata",
+    }
+    if status == "completed":
+        values.update(
+            {
+                "summary": "Verified summary",
+                "payload": ExamplePayload(finding="Verified finding"),
+                "evidence": ExampleEvidence(source_id="source-1"),
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        ExpertResult[ExamplePayload, ExampleEvidence](**values)
