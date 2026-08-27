@@ -3114,6 +3114,17 @@ async def chat(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Agent_Col response failed.",
         ) from exc
+    except Exception as exc:
+        logger.error(
+            "Agent_Col response failed unexpectedly (%s).",
+            type(exc).__name__,
+        )
+        if chat_turn_claim is not None:
+            await _release_chat_turn_safely(database, chat_turn_claim)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Agent_Col response failed.",
+        ) from exc
 
     chat_response = ChatResponse(
         response=result.response,

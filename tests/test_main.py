@@ -6867,6 +6867,44 @@ async def test_chat_releases_claim_after_turn_service_failure(
     assert not any(event[0] == "save" for event in service_state.events)
 
 
+@pytest.mark.asyncio
+async def test_chat_releases_claim_after_unexpected_turn_exception(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    claim = make_chat_turn_claim()
+    renewed_claim = ChatTurnClaim(
+        request=claim.request,
+        ids=claim.ids,
+        owner_token=claim.owner_token,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+        resumed=claim.resumed,
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+    service_state.turn_service.error = ValueError("private routing marker")
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "unexpected-failure-key"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Agent_Col response failed."}
+    assert len(service_state.database.renew_calls) == 1
+    assert len(service_state.turn_service.calls) == 1
+    assert service_state.database.complete_calls == []
+    assert len(service_state.database.release_calls) == 1
+    assert service_state.database.release_calls[0][0] == renewed_claim
+    assert service_state.database.release_calls[0][1].tzinfo is not None
+
+
 @pytest.mark.parametrize(
     ("turn_error_type", "expected_status", "expected_detail"),
     (
