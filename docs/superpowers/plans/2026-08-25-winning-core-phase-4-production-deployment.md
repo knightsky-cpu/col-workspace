@@ -10,6 +10,12 @@
 dependency, data-migration, Google Cloud, IAM, billing, container, or deployment
 changes.
 
+**August 27, 2026 reconciliation note:** Phase 1 memory lifecycle, Phase 2
+workspace notes/continuity, internal working state, and the four specialist
+expert surfaces are accepted in current source. Winning Core Phase 3 durable
+asynchronous artifact jobs remain pending, so this Phase 4 plan still requires
+a fresh source re-audit after Phase 3 acceptance before implementation.
+
 **Goal:** Make the accepted Agent Col Winning Core safe and reproducible as a
 public Google OIDC application on Cloud Run, with durable ownership, bounded
 resource use, content-safe observability, defined data lifecycle, a private
@@ -45,9 +51,11 @@ OIDC/IAM, Bash, vanilla JavaScript ES modules, Node test runner, and pytest.
 ## Planning baseline and prerequisites
 
 The source audit used commit `4e1fd4d` on `main`, with `origin/main` equal and
-the worktree clean before this plan was drafted. That baseline includes the
-approved Phase 4 research audit and planning documents for Phases 2 and 3; it
-does not include Phase 2 or Phase 3 implementation.
+the worktree clean before this plan was drafted. That original baseline
+included the approved Phase 4 research audit and planning documents for Phases
+2 and 3; it did not include Phase 2 or Phase 3 implementation. As of the
+August 27, 2026 documentation reconciliation, Phase 2 is accepted and Phase 3
+durable asynchronous artifact work is still pending.
 
 Phase 4 implementation must not start until:
 
@@ -1025,9 +1033,10 @@ reproducibility work unless a focused check exposes cross-domain regression.
 
 ## Material risks and mitigations
 
-- **Plan drift before execution:** Phases 2/3 are not implemented at this
-  baseline. Mandatory re-audit and explicit stop conditions prevent guessed
-  paths from overwriting accepted contracts.
+- **Plan drift before execution:** Phase 2 has landed after the original
+  baseline, while Phase 3 durable asynchronous artifact jobs are still pending.
+  Mandatory re-audit and explicit stop conditions prevent guessed paths from
+  overwriting accepted contracts.
 - **Identity migration risk:** changing raw-subject IDs touches durable memory
   and ownership. Dry-run, conflict refusal, target verification, no same-run
   source deletion, and separate live-apply approval protect existing data.

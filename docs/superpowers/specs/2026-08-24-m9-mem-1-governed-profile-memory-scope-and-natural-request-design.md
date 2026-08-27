@@ -13,8 +13,8 @@ This design is subordinate to:
 - [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
 - [`2026-08-20-phase-3b-trusted-memory-design.md`](2026-08-20-phase-3b-trusted-memory-design.md);
 - [`2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`](2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md);
-- [`features-plan-revisions.md`](../../../features-plan-revisions.md);
-- [`frontend-plan-revision.md`](../../../frontend-plan-revision.md).
+- [`features-plan-revisions.md`](../../legacy/features-plan-revisions.md);
+- [`frontend-plan-revision.md`](../../legacy/frontend-plan-revision.md).
 
 Agent Col remains a general collaborative partner. Profile memory is one
 governed adaptation domain. It is not a transcript archive, a generic personal

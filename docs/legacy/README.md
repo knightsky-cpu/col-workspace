@@ -12,10 +12,12 @@ Current authority is ordered as follows:
    for product identity and memory boundaries;
 3. root [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md)
    for documentation requirements;
-4. root [`README.md`](../../README.md) for current repository status and setup;
-5. accepted design contracts and implementation plans under
+4. [`docs/current-state.md`](../current-state.md) for the current source-level
+   feature and gap inventory;
+5. root [`README.md`](../../README.md) for current repository status and setup;
+6. accepted design contracts and implementation plans under
    [`docs/superpowers`](../superpowers/);
-6. current source and tests for implemented behavior.
+7. current source and tests for implemented behavior.
 
 Archived documents should retain an archive notice and working links. Do not
 silently update their historical architecture or phase claims to resemble the
@@ -25,3 +27,12 @@ current system.
 
 - [`context.md`](context.md): project-context snapshot superseded by the current
   README, identity directive, trusted-memory contracts, and live source.
+- [`document-reconcile-aug-25-2026.md`](document-reconcile-aug-25-2026.md):
+  read-only stale-document audit superseded by the August 27 current-state
+  reconciliation.
+- [`features-plan-revisions.md`](features-plan-revisions.md): historical
+  feature planning revision superseded by accepted phase evidence and the
+  current-state inventory.
+- [`frontend-plan-revision.md`](frontend-plan-revision.md): historical frontend
+  planning revision superseded by the implemented workspace source, the safe
+  visual guide, and the current-state inventory.

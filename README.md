@@ -1,78 +1,90 @@
-# Agent_Col
+# Agent Col
 
-Agent_Col is a Collaborative Partner for the Devpost All Things Agentic
-Hackathon. It is a persistent AI collaborator that uses user-approved working
-preferences and low-sensitivity identity context to adapt across sessions.
-Structured project synthesis is one demonstrated collaboration workflow, not
-the complete identity of the system.
+Agent Col is a persistent collaborative partner for the Devpost All Things
+Agentic Hackathon. It keeps user-approved continuity, takes governed workspace
+notes, routes to bounded specialist capabilities, and records inspectable
+receipts for durable side effects.
 
-## Current status
+Structured synthesis and artifacts are demonstration workflows beneath the
+larger product identity. Agent Col is not only a coding assistant or blueprint
+generator.
 
-Agent_Col is under active development and is not publicly deployed.
+For the detailed source-level status, see
+[Agent Col Current State](docs/current-state.md).
 
-Implemented today:
+## Current Status
 
-- asynchronous FastAPI health and chat endpoints;
-- Gemini 3.6 Flash through the Google GenAI SDK;
-- asynchronous Firestore message and profile persistence;
-- atomic session/message writes;
-- optional retry-safe chat turns with durable claim, replay, conflict, lease,
-  and atomic-completion behavior;
-- project-owned, atomically persisted structured synthesis blueprints;
-- a hybrid ADK runtime with model-controlled, locally validated routing and a
-  responder-only Agent_Col boundary;
-- strict local schema and semantic validation for blueprint version 2.0;
-- governed memory proposals, approval/rejection, provenance, correction,
-  revocation, bounded inspection, and hard deletion;
-- ordinary-chat creation of one bounded, pending memory proposal when the user
-  states an eligible reusable preference or allowed light identity detail;
-- cross-session chat use of approved memory with explicit adaptation receipts;
-- four bounded cognitive experts: Research with Google Search, Source with URL
-  Context, Computation with code execution, and Requirements Verification with
-  deterministic local validation;
-- zero-or-one cognitive expert execution per turn, delegation depth one,
-  application-derived receipts, and responder-owned final answers;
-- layered decision-only, deterministic orchestration, and bounded live
-  end-to-end tool-belt evaluations;
-- offline API, orchestration, schema, database, and smoke-runner tests.
+Agent Col is under active development and is not publicly deployed.
 
-Not implemented yet:
+Implemented in the current source:
 
-- chat-routed synthesis, artifact retrieval, and artifact feedback workflows;
-- governed-memory personalization for structured synthesis;
-- durable background jobs;
-- the browser workspace;
-- authentication and public Cloud Run deployment.
+- same-origin browser workspace at `/workspace`;
+- local-development and Google OIDC authentication foundation;
+- workspace list/create flows;
+- persisted chat sessions and retry-safe chat turns;
+- governed profile memory with proposal, clarification, approval, rejection,
+  correction, revocation, deletion, inspection, and adaptation receipts;
+- governed workspace notes with proposal, approval/rejection, correction,
+  archive, restore, deletion, active projection, and continuity receipts;
+- hidden internal working state for same-session collaboration continuity;
+- four bounded specialist capabilities:
+  - Research with Google Search grounding;
+  - Source with URL Context;
+  - Computation with Python code execution;
+  - Requirements Verification with local evidence validation;
+- zero-or-one expert execution per turn and responder-owned final answers;
+- synchronous structured synthesis;
+- persisted blueprint and generic artifacts;
+- artifact lifecycle, versioning, and feedback surfaces;
+- frontend panels for Workspace, Work, Notes, Memory, Chats, Activity, and
+  conversation receipts;
+- offline API, orchestration, schema, database, frontend, and smoke-runner
+  tests.
 
-## Contest category
+Still planned:
+
+- durable asynchronous artifact jobs with queued/running/completed/failed/
+  cancelled states;
+- Google Cloud Tasks and private Cloud Run worker execution;
+- production hardening for ownership, limits, logging, retention, startup, and
+  hosted security;
+- Dockerfile, production startup scripts, Cloud Run service configuration, and
+  hosted deployment evidence;
+- hosted reproducibility/submission evidence and demo freeze.
+
+## Contest Category
 
 **Collaborative Partner**
 
-The intended judge-facing workflow is:
+The judged workflow is intended to demonstrate:
 
-1. Ingest messy text, Markdown, or a PDF rubric.
-2. Ask a consequential clarifying question.
-3. Create a strict, validated project blueprint.
-4. Save the artifact and execution state in Firestore.
-5. Capture accepted, rejected, or edited recommendations.
-6. Apply approved profile signals to a later blueprint.
+1. approved profile learning and new-session adaptation;
+2. governed workspace notes;
+3. consequential clarification;
+4. bounded specialist work;
+5. artifact creation and feedback;
+6. controlled failure or retry behavior;
+7. inspectable Firestore and Google Cloud evidence once deployed.
 
 ## Technology
 
-- Python and FastAPI
-- Google GenAI SDK and Gemini 3.6 Flash on Vertex AI
-- Google Cloud Firestore
-- Google Cloud Tasks for the target durable asynchronous synthesis phase
-- Docker and Google Cloud Run for the target deployment phase
-- HTML, static CSS or TailwindCSS, and Vanilla JavaScript for the target browser
-  workspace
+Pinned runtime stack:
 
-See [Architecture](docs/architecture.md) for current and target data flows.
+- Python 3.14 local/runtime target;
+- FastAPI `0.141.1`;
+- Google ADK `2.7.0`;
+- Google GenAI SDK `2.18.1`;
+- Google Cloud Firestore `2.28.1`;
+- Pydantic `2.13.4`;
+- Uvicorn `0.52.4`;
+- Gemini `gemini-3.6-flash` through Vertex AI / Gemini Enterprise.
 
-## Local setup
+The frontend is static HTML, CSS, and vanilla JavaScript ES modules served by
+FastAPI.
 
-The complete reproducible setup is in
-[Local development setup](docs/development/local-setup.md). The short path is:
+## Local Setup
+
+Create and activate the virtual environment:
 
 ```bash
 python3 -m venv venv
@@ -87,10 +99,14 @@ Create an ignored `.env` file:
 GOOGLE_CLOUD_PROJECT=replace-with-your-project-id
 GOOGLE_CLOUD_LOCATION=global
 GOOGLE_GENAI_USE_ENTERPRISE=True
+GOOGLE_OAUTH_CLIENT_ID=replace-with-public-oauth-client-id
 ```
 
-Enable Vertex AI and configure Application Default Credentials for local
-Firestore and model access:
+`GOOGLE_OAUTH_CLIENT_ID` is public browser configuration, not a client secret.
+Do not commit `.env`, OAuth client secrets, service-account keys, access
+tokens, or ADC credential files.
+
+Configure local Application Default Credentials for Firestore and Vertex AI:
 
 ```bash
 gcloud config set project YOUR_PROJECT_ID
@@ -99,28 +115,41 @@ gcloud auth application-default login
 gcloud auth application-default set-quota-project YOUR_PROJECT_ID
 ```
 
-The application does not use a Gemini API key. Vertex AI and Firestore use
-the authenticated ADC identity. The pinned GenAI SDK calls its current Vertex
-backend selector `enterprise`; the older `GOOGLE_GENAI_USE_VERTEXAI` alias is
-deprecated and must not be configured.
+The application does not use a Gemini API key. Vertex AI and Firestore use the
+authenticated ADC identity. Browser Google OIDC is a separate end-user
+authentication boundary.
 
-Run the server:
+## Running Locally
 
-```bash
-uvicorn main:app --reload
-```
-
-The health endpoint is available at `http://127.0.0.1:8000/`.
-
-With Uvicorn running, verify the durable chat-turn boundary from another
-activated terminal:
+Local-development auth mode:
 
 ```bash
-python3 smoke_test_chat_idempotency.py
+AGENT_COL_AUTH_MODE=local_dev venv/bin/uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Success reports `first=200 replay=200 conflict=409 replay_equal=true` and safe
-Firestore locators. It does not print the key, prompts, or model response.
+Google OIDC auth mode:
+
+```bash
+AGENT_COL_AUTH_MODE=google_oidc venv/bin/uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000/workspace
+```
+
+Health check:
+
+```text
+http://127.0.0.1:8000/
+```
+
+Expected response:
+
+```json
+{"status":"online"}
+```
 
 ## Tests
 
@@ -130,25 +159,39 @@ Run the offline automated suite:
 pytest
 ```
 
-See [Testing](docs/development/testing.md) for focused commands, test-layer
-boundaries, live smoke checks, and the complete core tool-belt evaluation.
+Run frontend tests:
 
-## Security status
+```bash
+node --test tests/frontend/*.test.mjs
+```
 
-The current API is local-development-only. Request-provided user and session
-identifiers are not an authorization boundary. Do not expose this revision as
-a public Cloud Run service.
+Run the retry-safe chat smoke check against a local server:
 
-## Submission material
+```bash
+python3 smoke_test_chat_idempotency.py
+```
 
+See [Testing](docs/development/testing.md) for focused commands and test-layer
+boundaries.
+
+## Documentation
+
+- [Current state](docs/current-state.md)
 - [Architecture](docs/architecture.md)
-- [Chat turn idempotency](docs/design/turn-idempotency.md)
 - [Local development setup](docs/development/local-setup.md)
 - [Testing](docs/development/testing.md)
-- [Core tool-belt evaluation closure](docs/superpowers/specs/2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md)
 - [Troubleshooting](docs/development/troubleshooting.md)
+- [Winning Core checklist](docs/aug-25-2026-final-checklist.md)
+- [Safe frontend visual change boundaries](docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md)
 - [Submission checklist](docs/submission-checklist.md)
-- [Phase 3 design](docs/superpowers/specs/2026-08-19-phase-3-synthesis-engine-design.md)
+
+Historical snapshots live under [docs/legacy](docs/legacy/README.md).
+
+## Security Status
+
+Do not expose the current local-development configuration as a public service.
+Google OIDC support exists, but the full Phase 4 production hardening and
+Cloud Run deployment work is still pending.
 
 ## License
 

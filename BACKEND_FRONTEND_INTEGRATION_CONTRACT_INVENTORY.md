@@ -10,10 +10,8 @@ accepted workspace, Notes, and continuity contracts through
 reference, not a proposal for new behavior.
 
 Executable source and accepted repository contracts are authoritative when
-they conflict with older status documentation. In particular, portions of
-`README.md` and `docs/architecture.md` still describe chat-routed synthesis,
-artifact retrieval, artifact feedback, and governed synthesis personalization
-as pending even though current source implements those capabilities.
+they conflict with older status documentation. For the current source-level
+project inventory, see [`docs/current-state.md`](docs/current-state.md).
 
 Primary sources for this inventory are:
 
@@ -156,14 +154,32 @@ responses.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Health check |
+| `GET` | `/workspace` | Browser workspace shell |
 | `GET` | `/api/auth/config` | Read public frontend authentication bootstrap config |
 | `GET` | `/api/auth/session` | Inspect local-dev or Google OIDC session state |
 | `GET` | `/api/users/{user_id}/memory` | Inspect governed memory |
+| `GET` | `/api/users/{user_id}/workspaces` | List bounded workspaces for the effective user |
+| `POST` | `/api/users/{user_id}/workspaces` | Create a workspace in the effective user boundary |
+| `GET` | `/api/users/{user_id}/projects/{project_id}/notes` | List active or archived collaborative notes |
+| `GET` | `/api/users/{user_id}/projects/{project_id}/notes/{note_id}` | Read one collaborative note with events |
+| `POST` | `/api/users/{user_id}/projects/{project_id}/notes/{note_id}/corrections` | Create a pending note correction proposal |
+| `POST` | `/api/users/{user_id}/projects/{project_id}/notes/{note_id}/archive` | Archive an active collaborative note |
+| `POST` | `/api/users/{user_id}/projects/{project_id}/notes/{note_id}/restore` | Restore an archived collaborative note |
+| `DELETE` | `/api/users/{user_id}/projects/{project_id}/notes/{note_id}` | Hard-delete bounded note artifacts |
+| `GET` | `/api/users/{user_id}/projects/{project_id}/chat-sessions` | List bounded persisted chat sessions |
+| `GET` | `/api/users/{user_id}/projects/{project_id}/chat-sessions/{session_id}` | Read bounded chat-session detail |
 | `POST` | `/api/users/{user_id}/memory/signals/{signal_id}/revoke` | Revoke an active memory signal |
 | `DELETE` | `/api/users/{user_id}/memory/signals/{signal_id}` | Hard-delete bounded memory artifacts |
 | `POST` | `/api/synthesize` | Direct synchronous blueprint synthesis |
 | `GET` | `/api/projects/{project_id}/blueprints` | List project blueprints |
 | `GET` | `/api/projects/{project_id}/blueprints/{blueprint_id}` | Read canonical blueprint detail |
+| `GET` | `/api/projects/{project_id}/artifacts` | List generic single-file artifacts |
+| `POST` | `/api/projects/{project_id}/artifacts` | Create a generic single-file artifact |
+| `GET` | `/api/projects/{project_id}/artifacts/{artifact_id}` | Read one generic artifact with versions |
+| `POST` | `/api/projects/{project_id}/artifacts/{artifact_id}/archive` | Archive a generic artifact |
+| `POST` | `/api/projects/{project_id}/artifacts/{artifact_id}/restore` | Restore a generic artifact |
+| `PATCH` | `/api/projects/{project_id}/artifacts/{artifact_id}/metadata` | Update generic artifact metadata |
+| `POST` | `/api/projects/{project_id}/artifacts/{artifact_id}/versions` | Create a new generic artifact version |
 | `GET` | `/api/projects/{project_id}/blueprints/{blueprint_id}/feedback` | Read feedback lifecycle |
 | `POST` | `/api/chat` | Main Agent_Col interaction boundary |
 

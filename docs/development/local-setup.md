@@ -1,23 +1,26 @@
 # Local Development Setup
 
-## What this setup provides
+These steps run the current FastAPI application and same-origin browser
+workspace locally. The local app can use either local-development identity or
+browser Google OIDC. Firestore and Vertex AI calls use Application Default
+Credentials in both modes.
 
-These steps run the current synchronous FastAPI application locally. Chat and
-synthesis requests call Gemini directly during the HTTP request, while
-Firestore stores collaboration memory, chat history, durable chat turns, and
-blueprints. Google Cloud Tasks, a browser UI, authentication, and Cloud Run
-deployment are not part of the current local runtime.
+The current runtime is still request-bound. Cloud Tasks and a private worker
+remain planned durable-artifact work; Docker and Cloud Run deployment remain
+planned production-hardening work. None are current local runtime
+requirements.
 
 ## Prerequisites
 
 - macOS or Linux;
-- Python 3.13 or newer (the current repository is verified with Python 3.14);
+- Python 3.14 recommended;
 - a Google Cloud project with Firestore in Native mode;
-- the Vertex AI API enabled in that project;
-- the Google Cloud CLI;
-- Application Default Credentials with Firestore and Vertex AI access.
+- Vertex AI enabled in that project;
+- Google Cloud CLI;
+- Application Default Credentials with Firestore and Vertex AI access;
+- a Google OAuth web client if testing Google OIDC mode.
 
-## Clone and create the environment
+## Clone And Create The Environment
 
 ```bash
 git clone git@github.com:knightsky-cpu/col-workspace.git
@@ -30,9 +33,9 @@ python -m pip install -r requirements-dev.txt
 ```
 
 `requirements.txt` pins runtime dependencies. `requirements-dev.txt` includes
-the runtime file and pins the offline test dependencies.
+the runtime file and pins offline test dependencies.
 
-## Configure environment variables
+## Environment Variables
 
 Create `.env` in the repository root. It is ignored by Git.
 
@@ -40,42 +43,38 @@ Create `.env` in the repository root. It is ignored by Git.
 GOOGLE_CLOUD_PROJECT=replace-with-your-project-id
 GOOGLE_CLOUD_LOCATION=global
 GOOGLE_GENAI_USE_ENTERPRISE=True
+GOOGLE_OAUTH_CLIENT_ID=replace-with-public-oauth-client-id
 ```
 
-`GOOGLE_CLOUD_PROJECT` identifies the project used by Firestore and Vertex AI.
-Gemini 3.6 Flash is served through the `global` Vertex AI location, and
-`GOOGLE_GENAI_USE_ENTERPRISE=True` selects the current Google Cloud model
-backend used by the pinned GenAI SDK and ADK versions. The older
-`GOOGLE_GENAI_USE_VERTEXAI` name is a deprecated alias in those versions. This
-naming change does not switch Agent_Col away from the Vertex/Aiplatform
-endpoint. The application fails startup instead of falling back to the Gemini
-Developer API when these values are missing or invalid. Never commit `.env`,
-credential JSON, or copied tokens.
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `GOOGLE_CLOUD_PROJECT` | Yes | Firestore and Vertex AI project. |
+| `GOOGLE_CLOUD_LOCATION` | Yes | Gemini model location; current source expects `global`. |
+| `GOOGLE_GENAI_USE_ENTERPRISE` | Yes | Selects the current Vertex/Gemini Enterprise backend used by pinned SDKs. |
+| `AGENT_COL_AUTH_MODE` | Yes when launching | `local_dev` or `google_oidc`. Defaults to `local_dev` if omitted. |
+| `GOOGLE_OAUTH_CLIENT_ID` | Google mode | Public browser OAuth client ID. |
+| `GOOGLE_CLIENT_ID` | Optional fallback | Alternate env name accepted for the same public OAuth client ID. |
 
-## Configure Google Cloud credentials
+The older `GOOGLE_GENAI_USE_VERTEXAI` name is deprecated for this repository's
+pinned SDK versions and should not be configured.
+
+Never commit `.env`, credential JSON, OAuth client secrets, service-account
+keys, access tokens, or ADC credential files.
+
+## Configure Google Cloud Credentials
 
 ```bash
 gcloud config set project YOUR_PROJECT_ID
 gcloud services enable aiplatform.googleapis.com --project=YOUR_PROJECT_ID
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-    --member="user:YOUR_ACCOUNT_EMAIL" \
-    --role="roles/aiplatform.user"
 gcloud auth application-default login
 gcloud auth application-default set-quota-project YOUR_PROJECT_ID
 ```
 
-The first command sets the active CLI project. The second enables Vertex AI.
-The third grants the local development identity the narrow Vertex AI user
-role; an existing project owner already has broader access but should retain
-that broad role only when it is actually needed. The fourth command supplies
-local Application Default Credentials. The final command attributes
-client-library quota and billing to the project.
+Local model and Firestore calls authenticate through ADC. Browser Google OIDC
+is separate: it verifies the end user for application requests but does not
+replace ADC for server-side Google Cloud clients.
 
-Local model calls authenticate through ADC. No long-lived Gemini API key is
-required or supported by this application configuration. Cloud Run will use a
-dedicated service identity instead of a copied local credential file.
-
-To verify Vertex AI independently before starting Agent_Col:
+To verify Vertex AI independently before starting Agent Col:
 
 ```bash
 curl --fail-with-body --silent --show-error \
@@ -86,20 +85,33 @@ curl --fail-with-body --silent --show-error \
     "https://aiplatform.googleapis.com/v1/projects/YOUR_PROJECT_ID/locations/global/publishers/google/models/gemini-3.6-flash:generateContent"
 ```
 
-The response should contain `vertex-online` and report
-`"modelVersion": "gemini-3.6-flash"`.
+The response should contain `vertex-online` and report model version
+`gemini-3.6-flash`.
 
 Firestore must already exist in Native mode. This repository does not create
 or delete a Firestore database automatically.
 
-## Start and verify the application
+## Start The Application
+
+Local-development auth mode:
 
 ```bash
-source venv/bin/activate
-uvicorn main:app --reload
+AGENT_COL_AUTH_MODE=local_dev venv/bin/uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-In a second terminal:
+Google OIDC auth mode:
+
+```bash
+AGENT_COL_AUTH_MODE=google_oidc venv/bin/uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Open the browser workspace:
+
+```text
+http://127.0.0.1:8000/workspace
+```
+
+Health endpoint:
 
 ```bash
 curl --fail-with-body --silent --show-error http://127.0.0.1:8000/
@@ -111,12 +123,16 @@ Expected response:
 {"status":"online"}
 ```
 
-The browser may request `/favicon.ico` and receive 404. That does not affect
-the health endpoint.
+For Google OIDC mode, ensure the OAuth client's authorized JavaScript origins
+include the exact local origin:
 
-## Verify retry-safe chat
+```text
+http://127.0.0.1:8000
+```
 
-Keep Uvicorn running, activate the virtual environment in the second terminal,
+## Verify Retry-Safe Chat
+
+Keep Uvicorn running, activate the virtual environment in a second terminal,
 and run:
 
 ```bash
@@ -124,9 +140,9 @@ python3 smoke_test_chat_idempotency.py
 ```
 
 The runner performs a new chat request, an identical replay, and a changed-body
-conflict using one generated key. It should print one structural line containing
+conflict using one generated key. It should print a structural line containing
 `first=200 replay=200 conflict=409 replay_equal=true` plus generated Firestore
-locators. It does not print the prompts, key, or model response.
+locators. It does not print the prompt, key, or model response.
 
 To verify a future hosted URL without changing code:
 
@@ -134,30 +150,36 @@ To verify a future hosted URL without changing code:
 python3 smoke_test_chat_idempotency.py --base-url https://YOUR_HOST
 ```
 
-Do not use this against a public deployment until authentication and ownership
-checks are implemented.
+Do not use this against a public deployment until Phase 4 authentication,
+ownership, limits, and hosted verification have been accepted.
 
-## Other live checks
+## Other Checks
 
-Direct structured synthesis:
-
-```bash
-python3 smoke_test_synthesis.py
-```
-
-That script makes a live Gemini call and prints the generated blueprint, so it
-is not a privacy-minimized or quota-free check.
-
-Run offline tests before spending provider quota:
+Offline suite:
 
 ```bash
 pytest -q
 ```
 
-## Stop the application
+Frontend tests:
 
-Press `Control-C` in the Uvicorn terminal. The FastAPI lifespan closes the
-GenAI clients and Firestore client. Deactivate the environment when finished:
+```bash
+node --test tests/frontend/*.test.mjs
+```
+
+Direct structured synthesis smoke:
+
+```bash
+python3 smoke_test_synthesis.py
+```
+
+That script makes a live Gemini call and may print generated blueprint content,
+so it is not a privacy-minimized or quota-free check.
+
+## Stop The Application
+
+Press `Control-C` in the Uvicorn terminal. The FastAPI lifespan closes GenAI
+clients and the Firestore client. Deactivate the environment when finished:
 
 ```bash
 deactivate

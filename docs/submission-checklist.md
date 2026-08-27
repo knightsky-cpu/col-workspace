@@ -1,5 +1,12 @@
 # All Things Agentic Submission Checklist
 
+Last reconciled: August 27, 2026.
+
+Current source status is summarized in
+[`current-state.md`](current-state.md). This checklist tracks remaining
+submission evidence and hosted-build readiness; unchecked items are not
+implemented or not yet proven for the judged deployment.
+
 ## Deadlines
 
 - [ ] Request available Google Cloud credits before August 28, 2026, at
@@ -25,10 +32,12 @@
 
 - [x] Repository contains local setup instructions.
 - [x] Repository contains an architecture document and diagram source.
+- [x] Repository contains a current source-state inventory.
 - [ ] Pin and verify the production Python runtime.
 - [ ] Add Dockerfile and container startup instructions.
 - [ ] Add Cloud Run, Firestore, Cloud Tasks, and authentication setup steps.
-- [ ] Add environment-variable reference without secrets.
+- [x] Add local environment-variable reference without secrets.
+- [ ] Add production Cloud Run environment-variable reference without secrets.
 - [ ] Run the complete offline suite from a clean clone.
 - [ ] Run a hosted smoke test against the final deployment.
 - [ ] Confirm `.env`, credentials, virtual environments, and generated data are
@@ -47,8 +56,10 @@
 
 ## Production Controls
 
-- [ ] Derive user identity from a verified authentication token.
-- [ ] Enforce project and session ownership.
+- [x] Derive user identity from a verified Google ID token in `google_oidc`
+  mode.
+- [ ] Complete production project, session, artifact, note, memory, and job
+  ownership hardening.
 - [ ] Enforce text, upload, and request-rate limits.
 - [ ] Make synthesis requests idempotent.
 - [ ] Authenticate Cloud Tasks to the private worker.
@@ -77,7 +88,9 @@
 - [ ] `0:00-0:25` — State the user friction and value proposition.
 - [ ] `0:25-0:55` — Load a messy rubric, notes file, or PDF.
 - [ ] `0:55-1:20` — Show Agent_Col ask and receive one critical clarification.
-- [ ] `1:20-1:50` — Start synthesis and show the job-state transition.
+- [ ] `1:20-1:50` — Start artifact work and show the accepted state boundary
+  available in the judged build. Durable job-state transitions require Phase 3
+  completion.
 - [ ] `1:50-2:30` — Inspect the generated structured blueprint.
 - [ ] `2:30-3:05` — Reject or edit one recommendation and show the profile
   signal change.

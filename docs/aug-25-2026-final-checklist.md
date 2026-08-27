@@ -3,8 +3,12 @@
 ## Status and authority
 
 This checklist records the approved Winning Core direction as of August 25,
-2026. It is a roadmap and alignment document. It does not authorize any source
-change described by a pending phase plan.
+2026 and was reconciled against source on August 27, 2026. It is a roadmap and
+alignment document. It does not authorize any source change described by a
+pending phase plan.
+
+For the current source-level feature inventory, see
+[`current-state.md`](current-state.md).
 
 Implementation remains governed by:
 
@@ -89,14 +93,18 @@ source baseline produced by the preceding phase.
 3. **Phase 3 - Durable Asynchronous Artifact Work**
    - Checkpointed implementation plan:
      [Phase 3 Durable Asynchronous Artifact Work](superpowers/plans/2026-08-25-winning-core-phase-3-async-artifact-work.md)
-   - Status: plan checkpointed at `c889a99`; implementation remains pending
-     approval and completion of Phases 1-2.
+   - Status: plan checkpointed at `c889a99`; implementation remains pending.
+     Do not confuse this Winning Core Phase 3 with the already accepted
+     specialist tooling/expert-surface work. The four expert capabilities are
+     wired; durable asynchronous artifact jobs, Cloud Tasks dispatch, and the
+     private worker are not implemented.
 4. **Phase 4 - Production Hardening and Deployment**
    - Pending implementation plan:
      [Phase 4 Production Hardening and Deployment](superpowers/plans/2026-08-25-winning-core-phase-4-production-deployment.md)
    - Status: plan created from the current source baseline and Phase 4 research
-     audit; pending user approval and documentation checkpoint. Implementation
-     remains blocked on accepted Phases 1-3 and a final source re-audit.
+     audit and reconciled on August 27, 2026; pending user approval.
+     Implementation remains blocked on accepted Phase 3 durable artifact jobs
+     and a final source re-audit.
 5. **Phase 5 - Reproducibility and Submission Evidence**
    - Planned file:
      `docs/superpowers/plans/2026-08-25-winning-core-phase-5-reproducibility-evidence.md`
@@ -321,8 +329,8 @@ and checkpointed.
 
 | Phase | Status | Accepted checkpoint | Evidence location |
 | --- | --- | --- | --- |
-| 1. Memory Continuity Closure | Pass 1A accepted; 1B-1D planned | - | - |
-| 2. Governed Workspace Notes | Pending plan | - | - |
+| 1. Memory Continuity Closure | Accepted | `fca35e5` | [`phase-1-memory-lifecycle-evidence-aug-26-2026.md`](phase-1-memory-lifecycle-evidence-aug-26-2026.md) |
+| 2. Governed Workspace Notes | Accepted | `624c6bb` | [`phase-2-workspace-notes-evidence-aug-26-2026.md`](phase-2-workspace-notes-evidence-aug-26-2026.md) |
 | 3. Durable Asynchronous Artifact Work | Pending plan | - | - |
 | 4. Production Hardening and Deployment | Pending plan | - | - |
 | 5. Reproducibility and Submission Evidence | Pending plan | - | - |

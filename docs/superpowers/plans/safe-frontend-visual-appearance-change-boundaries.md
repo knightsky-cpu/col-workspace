@@ -1,5 +1,7 @@
 # Safe Frontend Visual Appearance Change Boundaries
 
+Last reconciled: August 27, 2026.
+
 ## Purpose
 
 This document defines the safe boundary for user-facing frontend appearance work in Agent Col.
@@ -15,6 +17,11 @@ For this guide, a safe visual change means:
 - the same artifacts, notes, memory records, chat sessions, and working-state data are created, updated, read, exported, or hidden exactly as before.
 
 CSS-only changes are the default safe path. HTML and JavaScript changes are not visual-only unless they are explicitly limited as described below.
+
+For the broader project state, see
+[`docs/current-state.md`](../../current-state.md). This guide governs the
+future UI surface check and visual polish phase; it does not authorize source
+changes by itself.
 
 ## Source-Backed Frontend Surface Map
 

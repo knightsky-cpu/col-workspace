@@ -15,8 +15,8 @@ This design is subordinate to:
 - [`2026-08-20-phase-3b-trusted-memory-design.md`](2026-08-20-phase-3b-trusted-memory-design.md);
 - [`2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md`](2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md);
 - [`2026-08-23-phase-4a-lightweight-browser-workspace-design.md`](2026-08-23-phase-4a-lightweight-browser-workspace-design.md);
-- [`frontend-plan-revision.md`](../../../frontend-plan-revision.md);
-- [`features-plan-revisions.md`](../../../features-plan-revisions.md).
+- [`frontend-plan-revision.md`](../../legacy/frontend-plan-revision.md);
+- [`features-plan-revisions.md`](../../legacy/features-plan-revisions.md).
 
 The executable source remains authoritative for current behavior. This
 document describes planned behavior unless a section explicitly says that a

@@ -28,6 +28,21 @@ documentation claim spans multiple modules. Inspect the exit code, failure
 count, warnings, and skipped tests; a command merely starting is not evidence
 of success.
 
+## Frontend module checks
+
+The browser workspace is implemented as static HTML plus vanilla ES modules
+under `frontend/`. Focused frontend checks can be run without a browser:
+
+```bash
+node --test tests/frontend/*.test.mjs
+```
+
+Use this when a documentation or implementation claim depends on frontend
+request construction, state transitions, DOM-hook preservation, layout-mode
+state, rendering helpers, or workspace module behavior. A CSS-only visual pass
+normally needs `git diff --check` plus manual `/workspace` inspection; HTML or
+JavaScript changes require the relevant frontend tests.
+
 ## Focused chat idempotency checks
 
 HTTP orchestration only:

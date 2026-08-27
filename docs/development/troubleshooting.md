@@ -27,6 +27,41 @@ gcloud config set project YOUR_PROJECT_ID
 
 Restart Uvicorn after changing `.env`.
 
+## Application does not start: unsupported auth mode
+
+Typical error:
+
+```text
+auth.AuthConfigurationError: Unsupported auth mode.
+```
+
+Check the spelling of `AGENT_COL_AUTH_MODE`. The supported local values are:
+
+```bash
+AGENT_COL_AUTH_MODE=local_dev
+AGENT_COL_AUTH_MODE=google_oidc
+```
+
+`google_iodc` is a typo and will fail startup.
+
+## Google OIDC mode does not sign in
+
+Google OIDC mode requires the public web OAuth client ID in the environment:
+
+```dotenv
+GOOGLE_OAUTH_CLIENT_ID=YOUR_PUBLIC_WEB_CLIENT_ID
+```
+
+The OAuth client's authorized JavaScript origins must include the exact origin
+you open in the browser, for example:
+
+```text
+http://127.0.0.1:8000
+```
+
+Google OIDC authenticates the browser user to the application. Vertex AI and
+Firestore server calls still use Application Default Credentials separately.
+
 ## ADC quota-project warning
 
 If startup warns that end-user credentials have no quota project, run:
@@ -117,9 +152,7 @@ Do not rerun with a new key until the original evidence has been inspected.
 
 ## Firestore inspection
 
-Open the project console at:
-
-[Firestore sessions for project-e1e2a890-4566-48a8-a32](https://console.cloud.google.com/firestore/databases/-default-/data/panel/sessions?project=project-e1e2a890-4566-48a8-a32)
+Open the Firestore console for the configured `GOOGLE_CLOUD_PROJECT`.
 
 For the idempotency smoke, use the printed IDs to verify:
 
