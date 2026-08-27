@@ -45,31 +45,35 @@ decision below against executable source and the actual Google Cloud project.
 
 ## Planning baseline and prerequisites
 
-The source audit used commit `f7d20e05ed6f1850fc4a7f2a864bdfd3d41044e5`
-on `main`, with `origin/main` equal and the worktree clean before this plan was
-drafted. That commit checkpoints the approved Phase 2 plan; it does not
-implement Phase 2.
+The original source audit used commit
+`f7d20e05ed6f1850fc4a7f2a864bdfd3d41044e5` on `main` before Phase 2 was
+implemented. This revision re-audits the plan against accepted Phase 2 commit
+`a1cf67e9a3359115583c290d08ae1624f977df12`, with `origin/main` matching that
+checkpoint after the Phase 2 closure evidence push.
 
 Phase 3 implementation must not start until:
 
-1. every Phase 1 implementation pass is accepted and checkpointed;
-2. every Phase 2 implementation pass is accepted and checkpointed;
-3. this plan is re-audited against the final Phase 2 commit;
-4. Pass 3A is separately approved for implementation.
+1. this revised Phase 3 plan is reviewed and approved;
+2. this documentation-only revision is checkpointed if the repository owner
+   wants the plan baseline fixed before implementation;
+3. Pass 3A is separately approved for implementation.
 
-The re-audit must specifically confirm that Phase 2 did not change the
-artifact dispatch seam, current-message authority, continuity-source snapshot,
-chat response fields, or frontend workspace state in a way that invalidates
-this plan.
+Before each implementation pass, the implementer must still inspect current
+source for drift from this baseline. That pass-local re-audit must specifically
+confirm that the artifact dispatch seam, current-message authority,
+continuity-source snapshot, chat response fields, note contracts, and frontend
+workspace state still match the assumptions below.
 
 ## Verified current source state
 
-At the planning baseline:
+At the Phase 2 checkpoint baseline:
 
 - `POST /api/chat` authenticates the user/workspace, claims a retry-safe
-  Firestore turn, loads bounded history and governed memory, routes with the
-  Gemini/ADK stack, executes an artifact synchronously, runs the final
-  responder, and completes the turn before returning.
+  Firestore turn, loads bounded history and governed memory, resolves
+  receipt-backed continuity over active workspace notes or bounded prior chat
+  sessions, routes with the Gemini/ADK stack, executes an artifact
+  synchronously, runs the final responder, and completes the turn before
+  returning.
 - `agent_col_turn_service.py` distinguishes `create_blueprint` from
   `create_single_file_artifact` only after the validated V4 artifact route.
   `_complete_artifact_turn()` is the exact conversion seam.
@@ -91,16 +95,26 @@ At the planning baseline:
   artifact receipts, exports, and the artifact viewer already exist.
 - Generic single-file artifact creation and versions are separate synchronous
   flows and remain synchronous in Phase 3.
-- The browser has transient `pendingTurn` state and artifact list/detail state,
-  but no durable job state, polling controller, status controls, cancellation,
-  or retry UI.
+- Phase 2 added workspace notes and continuity to the public chat contracts:
+  `ChatRequest` now has mutually exclusive `collaborative_note_decision` and
+  `continuity_selection`; `ChatResponse` now carries
+  `collaborative_note_proposals`, `collaborative_note_events`,
+  `continuity_receipts`, and `continuity_choices`.
+- Phase 2 added authenticated workspace, notes, and chat-session inspection
+  routes under the existing single-user Google OIDC boundary. These are not
+  multi-user workspace membership or sharing features.
+- The browser now has Workspace, Work, Notes, Memory, and Chats drawer
+  sections, including frontend API/state/view coverage for notes,
+  chat-session summaries, continuity receipts, and continuity choice buttons.
+- The browser still has no durable artifact job state, polling controller, job
+  status controls, cancellation, retry UI, or Jobs section.
 - Runtime dependencies include Firestore and GenAI clients but not the Cloud
   Tasks client. There is no worker app, queue adapter, deployment source, or
   job index.
 
-## Verified Google Cloud state
+## Google Cloud planning input
 
-The planning audit read the configured project without changing it:
+The original planning audit read the configured project without changing it:
 
 - project: `project-e1e2a890-4566-48a8-a32`;
 - Firestore database location: `us-east4`;
@@ -111,9 +125,12 @@ The planning audit read the configured project without changing it:
   listed as enabled;
 - both Cloud Tasks and Cloud Run currently support `us-east4`.
 
-Phase 3 therefore selects `us-east4` for the queue and private worker to align
-with Firestore. Enabling APIs, creating IAM identities, creating a queue, and
-deploying a private worker belong only to separately approved Pass 3G.
+This source-code re-audit did not re-query Google Cloud. Pass 3G must verify
+current API/IAM/resource state before any cloud mutation. Phase 3 still selects
+`us-east4` for the queue and private worker to align with Firestore unless the
+Pass 3G cloud re-check proves that assumption has drifted. Enabling APIs,
+creating IAM identities, creating a queue, and deploying a private worker
+belong only to separately approved Pass 3G.
 
 ## Resolved architecture decisions
 
@@ -123,7 +140,8 @@ These decisions close the open questions in the research audit.
 
 Only chat-routed `create_blueprint` synthesis becomes asynchronous. Direct
 `POST /api/synthesize`, generic single-file creation, generic versions,
-artifact feedback, memory, notes, and expert routes retain current behavior.
+artifact feedback, memory, workspace notes, receipt-backed continuity, chat
+session inspection, and expert routes retain current behavior.
 
 ### Immediate chat response
 
@@ -271,8 +289,11 @@ One job stores:
 - completed action, adaptation, and artifact receipts when authoritative.
 
 Task names, worker lease owners, IAM identities, internal Firestore paths,
-provider responses, prompts, memory/note values, and raw errors are never part
-of the public job model.
+provider responses, prompts, memory/note values, prior-chat bodies, and raw
+errors are never part of the public job model. Continuity evidence stored for
+a job must be the minimum source IDs, receipts, timestamps, match reasons, and
+bounded generated input needed to reproduce the submitted blueprint request;
+it must not turn Phase 3 into unrestricted chat-history or note-body search.
 
 ### Permitted state transitions
 
@@ -314,18 +335,28 @@ approval for the next.
   GREEN, then refactor.
 - Stop at **implemented, pending manual verification** until user acceptance.
 - Checkpoint only accepted work with explicit path staging to `origin/main`.
-- Re-audit this plan after Phase 2; current baseline paths are planning inputs,
-  not permission to overwrite accepted newer code.
+- This plan is re-audited against Phase 2 checkpoint
+  `a1cf67e9a3359115583c290d08ae1624f977df12`; each pass must still re-check
+  live source before editing because newer accepted work may exist.
 - Agent Col remains the sole user-facing responder. The worker never writes
   conversational prose.
+- Agent Col remains a single-user collaborative agent. Phase 3 must not add
+  shared workspaces, teams, project sharing, or membership ACLs.
 - Firestore completion, not Cloud Tasks HTTP 2xx, is authoritative.
 - Cloud Tasks is at-least-once; application job/artifact idempotency and worker
   fencing are mandatory.
 - The current `ChatTurnClaim` is never passed to the worker or extended into a
   worker lease.
 - Only `create_blueprint` is queued. Generic artifacts remain synchronous.
-- Existing direct synthesis, artifact reads, feedback, exports, memory, notes,
+- Existing direct synthesis, artifact reads, feedback, exports, memory,
+  workspace notes, continuity selections/receipts, chat-session inspection,
   expert routes, and profile adaptation semantics must not regress.
+- Phase 2's deterministic, receipt-backed continuity remains bounded. Phase 3
+  must not add general unrestricted transcript search or a semantic transcript
+  index.
+- Phase 2 intentionally keeps the sensitive-storage policy strict. Phase 3 must
+  not loosen password/key/credential-looking memory or note proposal handling
+  while building artifact jobs.
 - Current user text remains the action authority. Retrieved content may be
   bounded source only when the current message authorizes blueprint creation.
 - Jobs, task names, session IDs, and artifact IDs are locators, never bearer
@@ -483,8 +514,9 @@ must fail configuration when selected in a production environment.
   retry.
 - `SynthesisApplicationService.prepare_governed_input()` returns one strict
   immutable snapshot containing exact source, bounded owned history,
-  personalization projection, continuity provenance accepted after Phase 2,
-  model/schema versions, and source IDs. It performs no provider call.
+  personalization projection, Phase 2 continuity receipts/source IDs when the
+  current turn resolved continuity, model/schema versions, and source IDs. It
+  performs no provider call.
 - `ArtifactJobSubmissionService.submit()` persists job and dispatch metadata
   idempotently; `ensure_dispatched()` repairs pending dispatch.
 
@@ -559,13 +591,22 @@ single-file artifacts continue through the accepted synchronous executor.
 - Modify `tests/test_agent_col_turn_service_artifacts.py`.
 - Modify `tests/test_agent_col_artifact_executor.py`.
 - Modify responder/supervisor/runtime tests and `tests/test_main.py`.
+- Modify `tests/test_continuity_service.py`,
+  `tests/test_collaborative_note_service.py`, and
+  `tests/test_collaborative_note_database.py` only if the queued-job contract
+  directly touches their chat-turn receipts or replay behavior.
+- Treat `continuity_service.py`, `collaborative_note_service.py`, note routes,
+  chat-session routes, and frontend note/continuity modules as regression
+  surfaces even when they are not modified.
 
 ### Required behavior
 
 - `ChatResponse` and partial-failure contracts gain `artifact_jobs` with a
-  maximum of one receipt.
+  maximum of one receipt while preserving existing artifacts,
+  artifact-feedback, memory, collaborative-note, and continuity fields.
 - `ChatTurnClaim` recovers at most one queued-job effect independently from
-  completed artifact effects.
+  completed artifact, artifact-feedback, memory, collaborative-note, and
+  continuity effects.
 - Blueprint routing invokes submission, confirms dispatch acceptance, and
   supplies `[SERVER_VALIDATED_ARTIFACT_JOB]` to the responder.
 - The projection states the exact public status and forbids claims that the
@@ -576,7 +617,10 @@ single-file artifacts continue through the accepted synchronous executor.
   redispatches unnecessarily, or changes queued receipt to completed.
 - Dispatch/responder timeout or failure preserves the completed queued effect
   in the partial response and exact retry.
-- Structured decisions and other major capabilities remain mutually exclusive.
+- Structured decisions and other major capabilities remain mutually exclusive:
+  memory decisions, memory clarification selections, artifact feedback
+  decisions, collaborative note decisions, continuity selections, and queued
+  blueprint submission must not be combined into one turn effect.
 - Single-file artifact creation retains current `create_artifact` action,
   artifact receipt, canonical viewer behavior, and responder projection.
 
@@ -614,6 +658,9 @@ venv/bin/pytest -q \
   tests/test_supervisor.py \
   tests/test_supervisor_runtime.py \
   tests/test_main.py \
+  tests/test_continuity_service.py \
+  tests/test_collaborative_note_service.py \
+  tests/test_collaborative_note_database.py \
   tests/test_generic_artifact_creation_service.py \
   tests/test_generic_artifact_service.py
 venv/bin/python -m compileall -q \
@@ -836,6 +883,9 @@ retry when permitted, and open the canonical artifact after completion.
 - Create `tests/frontend/jobs-controller.test.mjs`.
 - Modify frontend API, state, chat, layout, static, workspace, and work-view
   tests as directly affected.
+- Include `tests/frontend/notes-view.test.mjs`,
+  `tests/frontend/chats-view.test.mjs`, and existing continuity-choice coverage
+  in `tests/frontend/chat-view.test.mjs` as regression surfaces.
 
 Treat Python source as a regression surface. Stop and revise if the UI needs a
 backend contract change.
@@ -854,6 +904,8 @@ backend contract change.
 - Completed jobs expose `Open artifact`, which loads existing canonical detail
   without trusting job content.
 - Chat queued receipts link/select the job but do not imply an artifact exists.
+- Existing note proposal/event receipts, continuity receipts, continuity
+  choices, and chat-session drawer behavior remain unchanged.
 - Loading, empty, queued, running, completed, failed, cancelled, stale,
   conflict, offline, and retry states are visible in text, keyboard operable,
   and stable on desktop/mobile.
@@ -886,6 +938,8 @@ node --test \
   tests/frontend/jobs-controller.test.mjs \
   tests/frontend/jobs-view.test.mjs \
   tests/frontend/chat-view.test.mjs \
+  tests/frontend/notes-view.test.mjs \
+  tests/frontend/chats-view.test.mjs \
   tests/frontend/work-view.test.mjs \
   tests/frontend/workspace-layout.test.mjs \
   tests/frontend/workspace-static.test.mjs \
@@ -1058,20 +1112,24 @@ current environment cannot prove the new pinned dependency resolves.
 
 1. Sign in through Google OIDC and submit one blueprint job.
 2. Show immediate queued response and durable Jobs entry; leave the chat.
-3. Show Firestore queued state and Cloud Tasks task without prompt content.
-4. Trigger the deployment-gated first-attempt failure.
-5. Show running/retry evidence and content-safe task/worker logs.
-6. Let the second attempt complete and show exactly one canonical artifact.
-7. Open the artifact in the existing viewer and inspect completion/adaptation
+3. Confirm existing Phase 2 Notes and Chats drawer surfaces still load and that
+   no workspace note or prior-chat body appears in job/task/log evidence.
+4. Show Firestore queued state and Cloud Tasks task without prompt content.
+5. Trigger the deployment-gated first-attempt failure.
+6. Show running/retry evidence and content-safe task/worker logs.
+7. Let the second attempt complete and show exactly one canonical artifact.
+8. Open the artifact in the existing viewer and inspect completion/adaptation
    receipts.
-8. Exact-replay the original chat request and receive the original queued
+9. Exact-replay the original chat request and receive the original queued
    response without a second job or artifact.
-9. Reuse the key with changed input and receive `409 Conflict`.
-10. Cancel one queued job and one running job; verify truthful race behavior.
-11. Explicitly retry a failed/cancelled job and prove a new linked job.
-12. Attempt list/detail/cancel/retry as another workspace and principal and
+10. Reuse the key with changed input and receive `409 Conflict`.
+11. Cancel one queued job and one running job; verify truthful race behavior.
+12. Explicitly retry a failed/cancelled job and prove a new linked job.
+13. Attempt list/detail/cancel/retry as another workspace and principal and
     verify unavailable responses.
-13. Disable failure injection and repeat one normal successful job.
+14. Ask a bounded Phase 2 continuity question and confirm note/prior-chat
+    receipts still work after the asynchronous artifact cutover.
+15. Disable failure injection and repeat one normal successful job.
 
 ### Evidence requirements
 
@@ -1084,6 +1142,8 @@ Capture judge-readable proof of:
 - Cloud Tasks failed then successful dispatch attempts;
 - Cloud Run worker logs containing only safe fields;
 - browser queued/running/completed/failed/cancelled states;
+- existing Phase 2 Notes, Chats, continuity choice/receipt surfaces remain
+  separate from Jobs and still function;
 - exact replay and changed-request conflict;
 - failure injection disabled after the test.
 
@@ -1111,8 +1171,17 @@ checkpoint. Phase 4 planning remains separately approval-gated.
 - **Temporary worker deployment:** Phase 3 deploys only the private worker for
   real queue proof. Phase 4 owns final containers and deployment of both public
   API/UI and private worker.
-- **Source drift:** Phase 1 and Phase 2 implementation will alter current
-  contracts. Re-audit is mandatory before 3A.
+- **Source drift:** This plan is current as of Phase 2 checkpoint
+  `a1cf67e9a3359115583c290d08ae1624f977df12`, but every pass still needs a
+  short source re-check before editing. Do not apply plan text over newer
+  accepted code blindly.
+- **Single-user boundary:** Phase 3 intentionally does not add shared
+  workspace membership. Agent Col remains a single-user collaborative agent
+  with workspace-scoped data.
+- **No broad retention controls:** Phase 3 keeps bounded job/source snapshots
+  for retry and evidence. Whole-account deletion, broad collaboration-history
+  retention controls, and automatic raw-chat sensitive-data redaction remain
+  useful additions deferred to a later phase.
 
 ## Explicit exclusions
 
@@ -1123,6 +1192,12 @@ checkpoint. Phase 4 planning remains separately approval-gated.
 - General-purpose planners, workflow DAGs, Pub/Sub, GKE, task marketplaces, or
   arbitrary worker payloads.
 - PDF upload or document ingestion.
+- Shared workspaces, teams, project sharing, or membership ACLs.
+- General unrestricted chat-history search or a semantic transcript index.
+- Loosening sensitive-storage policy for password/key/credential-looking
+  prompts.
+- Whole-account deletion, broad collaboration-history retention controls, and
+  automatic sensitive-data detection/redaction for raw persisted chat messages.
 - Final container/public deployment, rate limiting, retention policy, and full
   ownership audit, which remain Phase 4.
 - Submission documentation, clean-clone proof, architecture diagram, and demo
@@ -1132,7 +1207,8 @@ checkpoint. Phase 4 planning remains separately approval-gated.
 
 Stop the current pass and return with evidence plus a revised plan if:
 
-- Phase 1 or Phase 2 is not fully accepted/checkpointed before implementation;
+- the implementation baseline is not the accepted Phase 2 checkpoint or a
+  later explicitly accepted checkpoint;
 - the accepted source no longer has a clean post-routing blueprint dispatch
   seam;
 - implementation would pass `ChatTurnClaim` into a worker or fake one;
@@ -1156,13 +1232,11 @@ Stop the current pass and return with evidence plus a revised plan if:
 ## Approval and checkpoint sequence
 
 1. Repository owner reviews and approves or revises this Phase 3 plan.
-2. After approval, checkpoint this documentation-only plan and checklist index
-   update to `origin/main`.
-3. After checkpoint confirmation, begin the separately gated Phase 4 planning
-   workflow requested by the repository owner.
-4. Before Phase 3 implementation, complete and checkpoint Phases 1 and 2.
-5. Re-audit this plan against that accepted commit and present Pass 3A for
-   explicit implementation approval.
-6. For each pass 3A-3H: RED, verify RED, GREEN, verify GREEN, refactor, focused
+2. After approval, checkpoint this documentation-only plan revision to
+   `origin/main` if the repository owner wants the revised Phase 3 baseline
+   fixed before implementation.
+3. Present Pass 3A for explicit implementation approval.
+4. For each pass 3A-3H: first inspect current source for drift, then RED,
+   verify RED, GREEN, verify GREEN, refactor, focused
    verification, report, manual acceptance, then explicit checkpoint approval.
-7. Mark Phase 3 complete only after 3H evidence is accepted and pushed.
+5. Mark Phase 3 complete only after 3H evidence is accepted and pushed.
