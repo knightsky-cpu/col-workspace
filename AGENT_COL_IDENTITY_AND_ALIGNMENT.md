@@ -210,11 +210,14 @@ The judge should be able to conclude without narration alone:
 
 ## Current implementation status and gaps
 
-As of August 23, 2026, Agent_Col implements the governed memory lifecycle for
+As of August 26, 2026, Agent_Col implements the governed memory lifecycle for
 pending proposals, structured approval and rejection, provenance, correction,
 revocation, bounded inspection, hard deletion, cross-session adaptation
-context, adaptation receipts, and retry-safe chat turns. These behaviors have
-offline tests and accepted live Firestore evidence.
+context, adaptation receipts, and retry-safe chat turns. It also implements
+governed workspace notes with proposal review, approval, rejection,
+correction, archive, restore, deletion, a browser Notes surface, bounded active
+note retrieval, and receipt-backed prior-chat continuity. These behaviors have
+offline tests and accepted live Firestore/Google OIDC evidence.
 
 The responder-only Agent_Col can recognize one eligible explicit preference or
 allowed light identity detail in the current user message and call the bounded
@@ -233,7 +236,14 @@ version comparison, and a later artifact visibly changed by approved feedback
 also remain unfinished.
 
 The chat path persists raw user messages without automatic sensitive-data
-detection or redaction. Collaboration-history retention and deletion controls,
-authenticated ownership, the judge-facing workspace, durable background work,
-and public deployment security remain unfinished. These are active product
-gaps and must not be presented as implemented capabilities.
+detection or redaction. Collaboration-history search is intentionally bounded
+and receipt-backed rather than a general unrestricted transcript search. The
+memory/note sensitive-storage gate is intentionally not loosened for password,
+key, credential, address, or other unsafe-storage-looking prompts. Agent_Col is
+scoped as a single-user collaborative agent; shared multi-user workspace
+membership is not an approved product requirement. Useful deferred additions
+include account-level deletion, broader collaboration-history retention
+controls, and automatic sensitive-data detection or redaction for raw persisted
+chat messages. Durable background work and public deployment security remain
+unfinished. These are active product gaps and deferred additions, and must not
+be presented as implemented capabilities.

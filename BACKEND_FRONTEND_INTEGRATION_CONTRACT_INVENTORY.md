@@ -3,9 +3,11 @@
 ## Status and authority
 
 This document inventories the backend contracts available to the Agent_Col
-frontend as of commit
-`5b34a407e517eb4335c76f780b789462fbbd466f`. It is a source-grounded reference,
-not a proposal for new behavior.
+frontend. It began as a source-grounded inventory at commit
+`5b34a407e517eb4335c76f780b789462fbbd466f`; the Phase 2 delta below records
+accepted workspace, Notes, and continuity contracts through
+`624c6bbf2e65112655e63624b843387bcbbfb81c`. It is a source-grounded
+reference, not a proposal for new behavior.
 
 Executable source and accepted repository contracts are authoritative when
 they conflict with older status documentation. In particular, portions of
@@ -31,8 +33,9 @@ Primary sources for this inventory are:
 
 ### Frontend/backend communication model
 
-There is currently no frontend application, static-file mount, CORS
-middleware, or frontend package manifest.
+The repository now includes a lightweight browser workspace served at
+`GET /workspace` from local frontend modules under `frontend/`. There is still
+no frontend package manifest or separate frontend build pipeline.
 
 The implemented backend boundary is:
 
@@ -46,8 +49,9 @@ HTTP JSON client
 ```
 
 Requests remain open while routing, expert execution, synthesis, response
-generation, and persistence complete. There is no streaming, background job,
-WebSocket, polling, or task-status contract.
+generation, continuity resolution, note effects, and persistence complete.
+There is no streaming, background job, WebSocket, polling, or task-status
+contract.
 
 The browser must never call Vertex AI or Firestore directly.
 
@@ -57,7 +61,9 @@ The browser must never call Vertex AI or Firestore directly.
 - Local launch target: `uvicorn main:app`
 - Application lifecycle: `main.lifespan`
 - Route module: `main.py`
-- Public route count: nine
+- Public route count: more than nine after workspace, note, chat-session,
+  artifact feedback, and trusted-memory routes were added. Treat `main.py` as
+  authoritative for the current route list.
 
 The lifespan constructs and stores:
 
@@ -86,7 +92,43 @@ The lifespan constructs and stores:
 | Artifact read service | Validates and projects Firestore artifacts into public models |
 | Artifact feedback service | Resolves server-issued targets and validates feedback |
 | Trusted memory service | Proposal, decision, inspection, revocation, and deletion |
+| Collaborative note service | Workspace note proposal review, active projection, correction, archive, restore, and deletion |
+| Continuity service | Bounded active-note and prior-chat retrieval with receipts and ambiguity choices |
 | `MemoryEngine` | All Firestore reads, writes, batches, and transactions |
+
+## Phase 2 accepted delta
+
+Phase 2 added the browser and API contracts needed for governed workspace
+notes and receipt-backed continuity:
+
+- `GET /workspace` serves the browser workspace.
+- `GET /api/users/{user_id}/workspaces` lists bounded workspace summaries.
+- `POST /api/users/{user_id}/workspaces` creates a workspace in local/dev
+  boundaries.
+- `GET /api/users/{user_id}/projects/{project_id}/notes` lists active or
+  archived collaborative notes.
+- `GET /api/users/{user_id}/projects/{project_id}/notes/{note_id}` returns
+  one note with bounded provenance/events.
+- `POST /api/users/{user_id}/projects/{project_id}/notes/{note_id}/corrections`
+  creates a pending correction proposal.
+- `POST /api/users/{user_id}/projects/{project_id}/notes/{note_id}/archive`
+  archives an active note.
+- `POST /api/users/{user_id}/projects/{project_id}/notes/{note_id}/restore`
+  restores an archived note.
+- `DELETE /api/users/{user_id}/projects/{project_id}/notes/{note_id}` hard
+  deletes the bounded note artifacts.
+- `GET /api/users/{user_id}/projects/{project_id}/chat-sessions` lists bounded
+  persisted chat sessions.
+- `GET /api/users/{user_id}/projects/{project_id}/chat-sessions/{session_id}`
+  returns bounded chat-session detail.
+- `POST /api/chat` accepts `collaborative_note_decision` and
+  `continuity_selection`, and can return `collaborative_note_proposals`,
+  `collaborative_note_events`, `continuity_receipts`, and
+  `continuity_choices`.
+
+In Google OIDC mode these user/project routes are constrained by the
+server-derived principal and workspace project. The browser must not call
+Firestore directly.
 
 ### Persistence boundary
 

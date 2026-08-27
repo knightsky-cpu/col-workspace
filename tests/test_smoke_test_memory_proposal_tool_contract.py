@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from schemas import AgentActionReceipt, MemoryProposalReceipt
-from trusted_memory_service import TrustedMemoryProposalResult
+from schemas import AgentActionReceipt, MemoryProposalReceiptV2
+from trusted_memory_service import NaturalMemoryProposalResult
 
 
 NOW = datetime(2026, 8, 22, 17, 0, tzinfo=UTC)
@@ -13,14 +13,15 @@ class FakeMemoryService:
     def __init__(self) -> None:
         self.commands: list[object] = []
 
-    async def propose_memory_signal(self, command):
+    async def handle_natural_memory_decision(self, command):
         self.commands.append(command)
-        return TrustedMemoryProposalResult(
+        return NaturalMemoryProposalResult(
+            status="pending",
             action=AgentActionReceipt(
                 action_name="propose_memory_signal",
                 status="completed",
             ),
-            proposal=MemoryProposalReceipt(
+            proposal=MemoryProposalReceiptV2(
                 proposal_id=(
                     "response_length--e82366f7699ee2e39bff6a68154e09b7"
                 ),
@@ -43,7 +44,7 @@ async def test_tool_contract_smoke_runs_real_declaration_and_adapter() -> None:
     )
 
     assert result.tool_name == "propose_memory_signal"
-    assert result.model_args == ("category", "proposed_value")
+    assert result.model_args == ("clarification_selection", "decision")
     assert result.receipt_count == 1
     assert len(service.commands) == 1
 
@@ -61,7 +62,7 @@ async def test_tool_contract_smoke_summary_excludes_private_context() -> None:
     summary = result.safe_summary()
     assert summary == (
         "m7-mem-2 pass tool=propose_memory_signal "
-        "model_args=category,proposed_value receipt_count=1"
+        "model_args=clarification_selection,decision receipt_count=1"
     )
     for private_value in (
         "concise",

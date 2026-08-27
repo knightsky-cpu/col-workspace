@@ -844,17 +844,28 @@ class _ForbiddenMemoryService:
         raise AssertionError("Replay must not execute memory mutation.")
 
 
+class _ForbiddenContinuityService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def resolve(self, _command: object) -> object:
+        self.calls += 1
+        raise AssertionError("Replay must not execute continuity resolution.")
+
+
 def _controlled_request_state(
     database: _ControlledReplayDatabase,
     turn_service: _ForbiddenTurnService,
     memory_service: _ForbiddenMemoryService,
 ) -> object:
+    continuity_service = _ForbiddenContinuityService()
     return SimpleNamespace(
         app=SimpleNamespace(
             state=SimpleNamespace(
                 db=database,
                 turn_service=turn_service,
                 memory_service=memory_service,
+                continuity_service=continuity_service,
             )
         )
     )

@@ -142,9 +142,16 @@ def test_v4_provider_schema_requires_the_matching_payload_for_each_route(
 
     artifact = schema["$defs"]["ArtifactRoutingIntent"]
     assert artifact["additionalProperties"] is False
-    assert set(artifact["properties"]) == {"operation", "objective"}
+    assert set(artifact["properties"]) == {
+        "operation",
+        "objective",
+        "artifact_family",
+        "format",
+        "filename",
+    }
     assert artifact["properties"]["operation"]["enum"] == [
-        "create_blueprint"
+        "create_blueprint",
+        "create_single_file_artifact",
     ]
     assert not {
         "source_text",

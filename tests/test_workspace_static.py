@@ -42,10 +42,10 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert 'data-drawer-toggle="left"' in response.text
     assert 'data-drawer-toggle="right"' in response.text
     assert "Work review" not in response.text
-    assert 'aria-label="Artifacts"' in response.text
-    assert "<h2>Artifacts</h2>" in response.text
-    assert "Show Artifacts" in response.text
-    assert "Expand Artifacts" in response.text
+    assert 'aria-label="Artifacts Viewer"' in response.text
+    assert "<h2>Artifacts Viewer</h2>" in response.text
+    assert "Show Artifacts Viewer" in response.text
+    assert "Expand Artifacts Viewer" in response.text
     header = response.text.split("</header>", maxsplit=1)[0]
     assert "data-drawer-toggle" not in header
     supporting_panel = response.text.split(

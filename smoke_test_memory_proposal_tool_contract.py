@@ -11,8 +11,8 @@ from memory_proposal_tool import (
     create_propose_memory_signal_tool,
     parse_memory_proposal_tool_response,
 )
-from schemas import AgentActionReceipt, MemoryProposalReceipt
-from trusted_memory_service import TrustedMemoryProposalResult
+from schemas import AgentActionReceipt, MemoryProposalReceiptV2
+from trusted_memory_service import NaturalMemoryProposalResult
 
 
 @dataclass(frozen=True)
@@ -30,17 +30,18 @@ class MemoryProposalToolSmokeResult:
 
 
 class OfflineMemoryService:
-    async def propose_memory_signal(
+    async def handle_natural_memory_decision(
         self,
         command: object,
-    ) -> TrustedMemoryProposalResult:
+    ) -> NaturalMemoryProposalResult:
         del command
-        return TrustedMemoryProposalResult(
+        return NaturalMemoryProposalResult(
+            status="pending",
             action=AgentActionReceipt(
                 action_name="propose_memory_signal",
                 status="completed",
             ),
-            proposal=MemoryProposalReceipt(
+            proposal=MemoryProposalReceiptV2(
                 proposal_id=(
                     "response_length--e82366f7699ee2e39bff6a68154e09b7"
                 ),
@@ -72,13 +73,18 @@ async def run_memory_proposal_tool_contract_smoke(
     model_args = tuple(sorted(properties))
     response = await tool.run_async(
         args={
-            "category": "response_length",
-            "proposed_value": "concise",
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "response_length",
+                "canonical_value": "concise",
+                "evidence_text": "prefer concise responses",
+            },
         },
         tool_context=SimpleNamespace(
             state=State(
                 value={
                     "memory_user_id": "user-1",
+                    "memory_workspace_id": "workspace-1",
                     "memory_session_id": "session-1",
                     "memory_source_message_id": "message-1",
                     "memory_source_message_text": (

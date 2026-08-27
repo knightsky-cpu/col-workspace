@@ -80,9 +80,12 @@ source baseline produced by the preceding phase.
 2. **Phase 2 - Governed Workspace Notes**
    - Approved implementation plan:
      [Phase 2 Governed Workspace Notes](superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md)
-   - Status: plan approved and checkpointed at `f7d20e0`, then reconciled
-     against accepted Phase 1 memory lifecycle closure at `fca35e5`.
-     Implementation remains pending explicit Pass 2A approval.
+   - Phase 2H closure evidence:
+     [Phase 2 Workspace Notes Closure Evidence](phase-2-workspace-notes-evidence-aug-26-2026.md)
+   - Status: Phase 2 accepted on August 26, 2026 after live Google OIDC
+     workspace-note and receipt-backed continuity verification, including the
+     accepted chat-continuity correction checkpoint
+     `624c6bbf2e65112655e63624b843387bcbbfb81c`.
 3. **Phase 3 - Durable Asynchronous Artifact Work**
    - Checkpointed implementation plan:
      [Phase 3 Durable Asynchronous Artifact Work](superpowers/plans/2026-08-25-winning-core-phase-3-async-artifact-work.md)
@@ -133,21 +136,26 @@ screenshots are not committed to the repository.
 
 ## Phase 2 - Governed Workspace Notes
 
-- [ ] Complete note persistence using the approved continuity boundary.
-- [ ] Propose one bounded workspace note from the current user message.
-- [ ] Require user review before activation.
-- [ ] Support approval, rejection, correction, archive, restore, and deletion.
-- [ ] Preserve source-session and source-message provenance.
-- [ ] Enforce authenticated user and workspace ownership.
-- [ ] Project only bounded active notes into Agent Col context.
-- [ ] Add bounded note retrieval and application-derived retrieval receipts.
-- [ ] Support bounded immediately-previous-chat retrieval.
-- [ ] Clarify ambiguous retrieval instead of guessing.
-- [ ] Add a complete Notes UI with observable lifecycle states.
+- [x] Complete note persistence using the approved continuity boundary.
+- [x] Propose one bounded workspace note from the current user message.
+- [x] Require user review before activation.
+- [x] Support approval, rejection, correction, archive, restore, and deletion.
+- [x] Preserve source-session and source-message provenance.
+- [x] Enforce authenticated user and workspace ownership.
+- [x] Project only bounded active notes into Agent Col context.
+- [x] Add bounded note retrieval and application-derived retrieval receipts.
+- [x] Support bounded prior-chat retrieval from persisted chat sessions.
+- [x] Clarify ambiguous retrieval instead of guessing.
+- [x] Add a complete Notes UI with observable lifecycle states.
 
 **Exit condition:** Agent Col visibly takes useful, user-approved workspace
 notes without confusing workspace knowledge with global profile preferences or
 silently persisting conversation.
+
+Source-backed Phase 2 implementation and live evidence are recorded in
+[`phase-2-workspace-notes-evidence-aug-26-2026.md`](phase-2-workspace-notes-evidence-aug-26-2026.md).
+Phase 2 was manually accepted from live Google OIDC screenshots and runtime
+checks supplied in the August 26, 2026 implementation conversation.
 
 ## Phase 3 - Durable Asynchronous Artifact Work
 
