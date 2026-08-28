@@ -251,3 +251,40 @@ Deferred to later bounded passes:
 - Memory and notes drawer styling.
 - Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
 - Activity styling remains dormant/non-visible in the current UI.
+
+## 2026-08-28 - Accepted Composer Visual Pass
+
+Status: accepted after user visual verification.
+
+Scope:
+- Implemented the sixth bounded CSS-only visual pass.
+- Touched implementation source only in `frontend/styles.css`.
+- Tightened the composer boundary with a top separator.
+- Made the composer label, textarea, character count, and Send button read as a coherent input surface.
+- Preserved the accepted chat transcript and `.turn-model` treatment from Pass 5.
+- Did not modify frontend modules, `frontend/index.html`, tests, backend code, request construction, submit behavior, Enter/Shift+Enter behavior, retry, memory/continuity controls, receipts, or artifact behavior.
+
+CSS surface changed:
+- `.composer`
+- `.composer label`
+- `.composer textarea`
+- `[data-character-count]`
+- `[data-chat-submit]`
+
+Verification:
+- Temporary Pass 6 CSS assertion failed before implementation for the missing composer polish, then passed after the CSS patch.
+- `git diff --check` passed.
+- `node --test tests/frontend/chat-view.test.mjs` passed: 11 tests.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+
+Screenshot:
+- `/tmp/agent-col-pass6-composer.png`
+- The screenshot used a temporary HTML preview generated from the real `frontend/index.html` and current `frontend/styles.css`, with sample chat content.
+
+Deferred to later bounded passes:
+- User prompt card treatment.
+- Artifact list/detail surfaces.
+- Memory and notes drawer styling.
+- Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
+- Activity styling remains dormant/non-visible in the current UI.
