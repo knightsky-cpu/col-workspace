@@ -14,7 +14,14 @@
           <p class="eyebrow" data-auth-mode-label>Loading authentication</p>
           <h1>Agent Col<span class="workspace-indicator" data-workspace-indicator hidden></span></h1>
         </div>
-        <button type="button" data-new-conversation disabled>
+        <button type="button" class="icon-button-label" data-new-conversation disabled>
+          <span class="button-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M4 20h16"></path>
+              <path d="M14 4l6 6"></path>
+              <path d="M18.5 5.5l-10 10L5 17l1.5-3.5 10-10z"></path>
+            </svg>
+          </span>
           New conversation
         </button>
       </header>
@@ -66,24 +73,38 @@
           </div>
           <div class="supporting-panel__body">
             <section class="drawer-section" aria-labelledby="workspace-title" data-section="workspace">
-              <div class="section-heading">
-                <h2 id="workspace-title">Workspace</h2>
-                <button type="button" class="drawer-toggle" data-section-toggle="workspace" aria-expanded="false">
-                  Expand
-                </button>
-              </div>
+              <button type="button" class="section-heading" data-section-toggle="workspace" aria-expanded="false">
+                <span class="section-heading__label" id="workspace-title">
+                  <span class="title-icon title-icon--workspace" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M3 7h6l2 3h10v10H3z"></path>
+                      <path d="M3 7v13"></path>
+                    </svg>
+                  </span>
+                  Workspace
+                </span>
+                <span class="section-heading__chevron" aria-hidden="true"></span>
+              </button>
               <div data-section-content="workspace" hidden>
                 <p class="form-error" role="alert" data-workspace-error hidden></p>
                 <div data-workspace-list></div>
               </div>
             </section>
             <section class="drawer-section" aria-labelledby="work-list-title" data-section="work">
-              <div class="section-heading">
-                <h2 id="work-list-title">Artifacts</h2>
-                <button type="button" class="drawer-toggle" data-section-toggle="work" aria-expanded="false">
-                  Expand
-                </button>
-              </div>
+              <button type="button" class="section-heading" data-section-toggle="work" aria-expanded="false">
+                <span class="section-heading__label" id="work-list-title">
+                  <span class="title-icon title-icon--artifacts" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"></path>
+                      <path d="M12 12l8-4.5"></path>
+                      <path d="M12 12L4 7.5"></path>
+                      <path d="M12 12v9"></path>
+                    </svg>
+                  </span>
+                  Artifacts
+                </span>
+                <span class="section-heading__chevron" aria-hidden="true"></span>
+              </button>
               <div data-section-content="work" hidden>
                 <p class="form-error" role="alert" data-work-error hidden></p>
                 <form class="artifact-create-form" data-artifact-create-form>
@@ -144,36 +165,62 @@
               </div>
             </section>
             <section class="drawer-section" aria-labelledby="notes-title" data-section="notes">
-              <div class="section-heading">
-                <h2 id="notes-title">Notes</h2>
-                <button type="button" class="drawer-toggle" data-section-toggle="notes" aria-expanded="false">
-                  Expand
-                </button>
-              </div>
+              <button type="button" class="section-heading" data-section-toggle="notes" aria-expanded="false">
+                <span class="section-heading__label" id="notes-title">
+                  <span class="title-icon title-icon--notes" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M6 3h12v18H6z"></path>
+                      <path d="M9 8h6"></path>
+                      <path d="M9 12h6"></path>
+                      <path d="M9 16h4"></path>
+                    </svg>
+                  </span>
+                  Notes
+                </span>
+                <span class="section-heading__chevron" aria-hidden="true"></span>
+              </button>
               <div data-section-content="notes" hidden>
                 <p class="form-error" role="alert" data-notes-error hidden></p>
                 <div data-notes-panel></div>
               </div>
             </section>
             <section class="drawer-section" aria-labelledby="memory-title" data-section="memory">
-              <div class="section-heading">
-                <h2 id="memory-title">Memory</h2>
-                <button type="button" class="drawer-toggle" data-section-toggle="memory" aria-expanded="false">
-                  Expand
-                </button>
-              </div>
+              <button type="button" class="section-heading" data-section-toggle="memory" aria-expanded="false">
+                <span class="section-heading__label" id="memory-title">
+                  <span class="title-icon title-icon--memory" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M9 6a3 3 0 0 1 6 0"></path>
+                      <path d="M7 10a3 3 0 0 1 4-2.8"></path>
+                      <path d="M13 7.2A3 3 0 0 1 17 10"></path>
+                      <path d="M7 14a3 3 0 0 0 4 2.8"></path>
+                      <path d="M13 16.8A3 3 0 0 0 17 14"></path>
+                      <path d="M8 11h8"></path>
+                      <path d="M12 6v12"></path>
+                    </svg>
+                  </span>
+                  Memory
+                </span>
+                <span class="section-heading__chevron" aria-hidden="true"></span>
+              </button>
               <div data-section-content="memory" hidden>
                 <p class="form-error" role="alert" data-memory-error hidden></p>
                 <div data-memory-panel></div>
               </div>
             </section>
             <section class="drawer-section" aria-labelledby="chats-title" data-section="chats">
-              <div class="section-heading">
-                <h2 id="chats-title">Chats</h2>
-                <button type="button" class="drawer-toggle" data-section-toggle="chats" aria-expanded="false">
-                  Expand
-                </button>
-              </div>
+              <button type="button" class="section-heading" data-section-toggle="chats" aria-expanded="false">
+                <span class="section-heading__label" id="chats-title">
+                  <span class="title-icon title-icon--chats" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <path d="M4 5h16v11H8l-4 4z"></path>
+                      <path d="M8 9h8"></path>
+                      <path d="M8 13h5"></path>
+                    </svg>
+                  </span>
+                  Chats
+                </span>
+                <span class="section-heading__chevron" aria-hidden="true"></span>
+              </button>
               <div data-section-content="chats" hidden>
                 <div data-chats-list></div>
               </div>
@@ -183,7 +230,21 @@
 
         <main id="conversation-workspace" class="conversation" tabindex="-1">
           <section class="conversation-intro" aria-labelledby="empty-conversation-title">
-            <h2 id="empty-conversation-title">Start a conversation</h2>
+            <h2 id="empty-conversation-title">
+              <span class="title-icon title-icon--conversation" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 3v4"></path>
+                  <path d="M12 17v4"></path>
+                  <path d="M3 12h4"></path>
+                  <path d="M17 12h4"></path>
+                  <path d="M6.6 6.6l2.8 2.8"></path>
+                  <path d="M14.6 14.6l2.8 2.8"></path>
+                  <path d="M17.4 6.6l-2.8 2.8"></path>
+                  <path d="M9.4 14.6l-2.8 2.8"></path>
+                </svg>
+              </span>
+              Start a conversation
+            </h2>
             <p>
               Ask Agent Col for help, or ask it to create a structured
               blueprint from source text in your message.

@@ -340,6 +340,16 @@ function renderTopBarWorkspaceIndicator() {
   );
 }
 
+function setButtonLabel(button, label) {
+  if (!button) {
+    return;
+  }
+  if (button.matches("[data-section-toggle]")) {
+    return;
+  }
+  setText(button, label);
+}
+
 function renderLayout() {
   const workspace = document.querySelector("[data-workspace]");
   workspace.classList.toggle(
@@ -357,18 +367,18 @@ function renderLayout() {
 
   for (const button of document.querySelectorAll('[data-drawer-toggle="left"]')) {
     const expanded = isDrawerExpanded(layoutState, "left");
-    setText(button, expanded ? "Hide" : "Show side panel");
+    setButtonLabel(button, expanded ? "Hide" : "Show side panel");
     button.setAttribute("aria-expanded", String(expanded));
   }
   for (const button of document.querySelectorAll('[data-drawer-toggle="right"]')) {
     const expanded = isDrawerExpanded(layoutState, "right");
-    setText(button, expanded ? "Hide" : "Show Artifacts Viewer");
+    setButtonLabel(button, expanded ? "Hide" : "Show Artifacts Viewer");
     button.setAttribute("aria-expanded", String(expanded));
   }
 
   const artifactExpandButton = document.querySelector("[data-artifacts-expand]");
   const artifactsExpanded = layoutState.artifactDrawerMode === "expanded";
-  setText(
+  setButtonLabel(
     artifactExpandButton,
     artifactsExpanded ? "Normal Viewer" : "Expand Artifacts Viewer",
   );
@@ -380,7 +390,7 @@ function renderLayout() {
     const toggle = document.querySelector(`[data-section-toggle="${section}"]`);
     content.hidden = !expanded;
     toggle.setAttribute("aria-expanded", String(expanded));
-    setText(toggle, expanded ? "Collapse" : "Expand");
+    setButtonLabel(toggle, expanded ? "Collapse" : "Expand");
   }
 }
 

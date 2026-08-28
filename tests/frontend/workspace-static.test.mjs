@@ -7,7 +7,7 @@ const styles = readFileSync(new URL("../../frontend/styles.css", import.meta.url
 const app = readFileSync(new URL("../../frontend/app.mjs", import.meta.url), "utf8");
 
 test("workspace labels artifact surfaces with human-facing names", () => {
-  assert.match(html, /<h2 id="work-list-title">Artifacts<\/h2>/);
+  assert.match(html, /<span class="section-heading__label" id="work-list-title"[\s\S]*Artifacts[\s\S]*<\/span>/);
   assert.match(html, /<h2>Artifacts Viewer<\/h2>/);
   assert.match(html, /aria-label="Artifacts Viewer"/);
   assert.doesNotMatch(html, /<h2 id="work-list-title">Work<\/h2>/);
@@ -50,7 +50,7 @@ test("workspace provides a bounded memory clarification choice region", () => {
 });
 
 test("workspace provides a separate notes drawer and continuity choice region", () => {
-  assert.match(html, /<h2 id="notes-title">Notes<\/h2>/);
+  assert.match(html, /<span class="section-heading__label" id="notes-title"[\s\S]*Notes[\s\S]*<\/span>/);
   assert.match(html, /data-section="notes"/);
   assert.match(html, /data-notes-panel/);
   assert.match(html, /data-continuity-choices/);
@@ -58,4 +58,34 @@ test("workspace provides a separate notes drawer and continuity choice region", 
   assert.match(styles, /\.continuity-choices/);
   assert.match(app, /createNotesView/);
   assert.match(app, /buildContinuitySelectionChatRequest/);
+});
+
+test("workspace shell provides persistent non-emoji icon hooks for primary navigation", () => {
+  for (const section of ["workspace", "work", "notes", "memory", "chats"]) {
+    assert.match(
+      html,
+      new RegExp(`data-section-toggle="${section}"[\\s\\S]*class="title-icon[^"]*"[\\s\\S]*aria-hidden="true"`),
+    );
+  }
+
+  assert.match(html, /data-new-conversation[\s\S]*class="button-icon"/);
+  assert.match(html, /id="empty-conversation-title"[\s\S]*class="title-icon[^"]*"/);
+  assert.match(styles, /\.section-heading__chevron::before/);
+  assert.match(styles, /\.section-heading\[aria-expanded="true"\] \.section-heading__chevron::before/);
+  assert.match(app, /setButtonLabel/);
+});
+
+test("drawer parent cards are full header disclosure controls without selected state", () => {
+  assert.doesNotMatch(app, /highlightedSection/);
+  assert.doesNotMatch(app, /data-drawer-highlighted/);
+  assert.doesNotMatch(styles, /data-drawer-highlighted/);
+
+  for (const section of ["workspace", "work", "notes", "memory", "chats"]) {
+    assert.match(
+      html,
+      new RegExp(`<button[^>]+class="section-heading"[^>]+data-section-toggle="${section}"[\\s\\S]*<span class="section-heading__label"[\\s\\S]*</button>`),
+    );
+  }
+
+  assert.doesNotMatch(html, /<button type="button" class="drawer-toggle" data-section-toggle/);
 });

@@ -153,9 +153,36 @@ p {
 }
 
 .top-bar [data-new-conversation] {
+  align-items: center;
   border-color: transparent;
   background: linear-gradient(180deg, var(--accent-strong), #2aa998);
   color: #03110f;
+  display: inline-flex;
+  gap: 0.45rem;
+  justify-content: center;
+}
+
+.button-icon,
+.title-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.button-icon svg,
+.title-icon svg {
+  block-size: 1em;
+  fill: none;
+  inline-size: 1em;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.button-icon {
+  font-size: 1rem;
 }
 
 .context-gate {
@@ -541,17 +568,72 @@ p {
 
 .section-heading {
   align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--amber);
   display: flex;
   gap: 0.35rem;
+  inline-size: 100%;
   justify-content: space-between;
-  flex-wrap: wrap;
+  min-height: 2.4rem;
+  padding: 0;
+  text-align: left;
 }
 
-.section-heading h2 {
-  color: var(--text);
+.section-heading__label {
+  align-items: center;
+  display: flex;
   font-size: 0.98rem;
   font-weight: 700;
+  gap: 0.55rem;
   letter-spacing: 0;
+}
+
+.title-icon {
+  block-size: 1.4rem;
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+  inline-size: 1.4rem;
+}
+
+.title-icon--workspace {
+  color: var(--amber);
+}
+
+.title-icon--conversation {
+  color: var(--accent);
+}
+
+.title-icon--artifacts,
+.title-icon--notes,
+.title-icon--memory,
+.title-icon--chats {
+  color: var(--amber);
+}
+
+.section-heading__chevron {
+  align-items: center;
+  aspect-ratio: 1;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  display: inline-flex;
+  flex: 0 0 auto;
+  inline-size: 1.85rem;
+  justify-content: center;
+}
+
+.section-heading__chevron::before {
+  block-size: 0.48rem;
+  border-block-end: 1.5px solid currentColor;
+  border-inline-end: 1.5px solid currentColor;
+  content: "";
+  inline-size: 0.48rem;
+  transform: rotate(45deg) translate(-0.05rem, -0.05rem);
+  transition: transform 160ms ease;
+}
+
+.section-heading[aria-expanded="true"] .section-heading__chevron::before {
+  transform: rotate(225deg) translate(-0.05rem, -0.05rem);
 }
 
 .drawer-section {
@@ -564,22 +646,22 @@ p {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
 }
 
-.drawer-section[data-section="workspace"] .section-heading h2,
-.drawer-section[data-section="work"] .section-heading h2,
-.drawer-section[data-section="notes"] .section-heading h2,
-.drawer-section[data-section="memory"] .section-heading h2,
-.drawer-section[data-section="chats"] .section-heading h2 {
+.drawer-section[data-section="workspace"] .section-heading,
+.drawer-section[data-section="work"] .section-heading,
+.drawer-section[data-section="notes"] .section-heading,
+.drawer-section[data-section="memory"] .section-heading,
+.drawer-section[data-section="chats"] .section-heading {
   color: var(--amber);
 }
 
 @supports selector(:has(*)) {
-  .drawer-section:has([aria-expanded="true"]) {
+  .drawer-section:has(.section-heading[aria-expanded="true"]) {
     border-color: rgba(54, 214, 194, 0.38);
     border-inline-start-color: var(--accent);
     background: var(--accent-soft);
   }
 
-  .drawer-section:has([aria-expanded="true"]) .section-heading h2 {
+  .drawer-section:has(.section-heading[aria-expanded="true"]) .section-heading {
     color: #bceee6;
   }
 }

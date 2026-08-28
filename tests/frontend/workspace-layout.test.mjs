@@ -70,3 +70,14 @@ test("left drawer sections can collapse without changing neighboring sections", 
     /Unsupported section/,
   );
 });
+
+test("left drawer expansion state has no separate selected highlight state", () => {
+  const initial = createInitialLayoutState();
+
+  const expandedWorkspace = setSectionExpanded(initial, "workspace", true);
+  const expandedWork = setSectionExpanded(expandedWorkspace, "work", true);
+
+  assert.equal(expandedWork.sections.workspace, true);
+  assert.equal(expandedWork.sections.work, true);
+  assert.equal(Object.hasOwn(expandedWork, "highlightedSection"), false);
+});
