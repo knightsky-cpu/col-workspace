@@ -231,6 +231,56 @@ export function completeWorkspaceCreate(
   };
 }
 
+export function completeWorkspaceDelete(
+  state,
+  workspaceId,
+  cryptoLike = globalThis.crypto,
+) {
+  const remainingItems = state.workspaces.items.filter(
+    (item) => item.workspace_id !== workspaceId,
+  );
+  if (state.workspaces.selectedWorkspaceId !== workspaceId) {
+    return {
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        items: remainingItems,
+        error: null,
+      },
+    };
+  }
+  const nextWorkspace = remainingItems[0] ?? null;
+  if (nextWorkspace === null) {
+    return {
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        items: remainingItems,
+        selectedWorkspaceId: null,
+        error: null,
+      },
+    };
+  }
+  const selected = selectWorkspace(
+    {
+      ...state,
+      workspaces: {
+        ...state.workspaces,
+        items: remainingItems,
+      },
+    },
+    nextWorkspace,
+    cryptoLike,
+  );
+  return {
+    ...selected,
+    workspaces: {
+      ...selected.workspaces,
+      items: remainingItems,
+    },
+  };
+}
+
 export function beginPendingTurn(state, request) {
   if (state.pendingTurn !== null) {
     throw new Error("A turn is already pending.");

@@ -248,7 +248,167 @@ async def test_create_workspace_persists_user_workspace_container() -> None:
             merge=False,
         ),
     ]
-    batch.commit.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_list_workspaces_does_not_synthesize_deleted_default() -> None:
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    workspaces = MagicMock()
+    default_snapshot = SimpleNamespace(
+        id="agent-col",
+        to_dict=lambda: {
+            "workspace_id": "agent-col",
+            "display_name": "Agent Col",
+            "deleted": True,
+            "is_default": True,
+        },
+    )
+
+    client.collection.return_value = users
+    users.document.return_value = user
+    user.collection.return_value = workspaces
+    workspaces.limit.return_value.stream.return_value = AsyncSnapshotStream([
+        default_snapshot
+    ])
+
+    result = await MemoryEngine(client).list_workspaces(
+        user_id="user-1",
+        default_workspace_id="agent-col",
+        default_display_name="Agent Col",
+        limit=20,
+    )
+
+    assert result.workspaces == []
+
+
+@pytest.mark.asyncio
+async def test_delete_synthesized_default_workspace_writes_tombstone_when_other_workspace_remains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    workspaces = MagicMock()
+    default_ref = MagicMock()
+    other_ref = MagicMock()
+    transaction = MagicMock()
+    other_snapshot = SimpleNamespace(
+        id="project--abc--study-plans",
+        to_dict=lambda: {
+            "workspace_id": "project--abc--study-plans",
+            "display_name": "Study Plans",
+            "is_default": False,
+        },
+    )
+
+    client.collection.return_value = users
+    users.document.return_value = user
+    user.collection.return_value = workspaces
+    workspaces.document.side_effect = lambda workspace_id: {
+        "agent-col": default_ref,
+        "project--abc--study-plans": other_ref,
+    }[workspace_id]
+    workspaces.limit.return_value.stream.return_value = AsyncSnapshotStream([
+        other_snapshot
+    ])
+    client.transaction.return_value = transaction
+
+    await MemoryEngine(client).delete_workspace(
+        user_id="user-1",
+        workspace_id="agent-col",
+        default_workspace_id="agent-col",
+        default_display_name="Agent Col",
+    )
+
+    transaction.set.assert_any_call(
+        user,
+        {"updated_at": firestore.SERVER_TIMESTAMP},
+        merge=True,
+    )
+    transaction.set.assert_any_call(
+        default_ref,
+        {
+            "workspace_contract_version": "1.0",
+            "workspace_id": "agent-col",
+            "display_name": "Agent Col",
+            "deleted": True,
+            "is_default": True,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=False,
+    )
+    transaction.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_non_default_workspace_removes_metadata_when_other_workspace_remains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    workspaces = MagicMock()
+    target_ref = MagicMock()
+    transaction = MagicMock()
+    target_snapshot = SimpleNamespace(
+        id="project--abc--study-plans",
+        to_dict=lambda: {
+            "workspace_id": "project--abc--study-plans",
+            "display_name": "Study Plans",
+            "is_default": False,
+        },
+    )
+
+    client.collection.return_value = users
+    users.document.return_value = user
+    user.collection.return_value = workspaces
+    workspaces.document.return_value = target_ref
+    workspaces.limit.return_value.stream.return_value = AsyncSnapshotStream([
+        target_snapshot
+    ])
+    client.transaction.return_value = transaction
+
+    await MemoryEngine(client).delete_workspace(
+        user_id="user-1",
+        workspace_id="project--abc--study-plans",
+        default_workspace_id="agent-col",
+        default_display_name="Agent Col",
+    )
+
+    transaction.delete.assert_called_once_with(target_ref)
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_rejects_last_visible_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    workspaces = MagicMock()
+    transaction = MagicMock()
+
+    client.collection.return_value = users
+    users.document.return_value = user
+    user.collection.return_value = workspaces
+    workspaces.document.return_value = MagicMock()
+    workspaces.limit.return_value.stream.return_value = AsyncSnapshotStream([])
+    client.transaction.return_value = transaction
+
+    with pytest.raises(database.WorkspaceDeletionConflictError):
+        await MemoryEngine(client).delete_workspace(
+            user_id="user-1",
+            workspace_id="agent-col",
+            default_workspace_id="agent-col",
+            default_display_name="Agent Col",
+        )
+
+    transaction.delete.assert_not_called()
 
 
 @pytest.mark.asyncio

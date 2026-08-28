@@ -187,6 +187,14 @@ class ArtifactCursorNotFoundError(RuntimeError):
     """Raised when generic artifact pagination cursor cannot be resolved."""
 
 
+class WorkspaceNotFoundError(RuntimeError):
+    """Raised when a workspace cannot be found for mutation."""
+
+
+class WorkspaceDeletionConflictError(RuntimeError):
+    """Raised when a workspace deletion would violate invariants."""
+
+
 class BlueprintFeedbackCursorNotFoundError(RuntimeError):
     """Raised when a feedback pagination cursor cannot be resolved."""
 
@@ -481,9 +489,15 @@ class MemoryEngine:
                 .collection("workspaces")
             )
             workspaces: list[WorkspaceSummary] = []
+            default_workspace_deleted = False
             async for snapshot in workspaces_ref.limit(200).stream():
                 data = snapshot.to_dict()
                 if not isinstance(data, Mapping):
+                    continue
+                if snapshot.id == default_workspace_id and data.get("deleted") is True:
+                    default_workspace_deleted = True
+                    continue
+                if data.get("deleted") is True:
                     continue
                 workspace_id = data.get("workspace_id")
                 display_name = data.get("display_name")
@@ -512,7 +526,7 @@ class MemoryEngine:
             if not any(
                 workspace.workspace_id == default_workspace_id
                 for workspace in workspaces
-            ):
+            ) and not default_workspace_deleted:
                 workspaces.append(
                     WorkspaceSummary(
                         workspace_id=default_workspace_id,
@@ -577,6 +591,90 @@ class MemoryEngine:
             )
         except GoogleAPIError as exc:
             self._raise_firestore_error("create_workspace", exc)
+
+    async def delete_workspace(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        default_workspace_id: str,
+        default_display_name: str,
+    ) -> None:
+        """Remove one visible workspace container when another remains."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(workspace_id, "workspace_id")
+        self._validate_string(default_workspace_id, "default_workspace_id")
+        self._validate_string(default_display_name, "default_display_name")
+
+        try:
+            user_ref = self._client.collection("users").document(user_id)
+            workspaces_ref = user_ref.collection("workspaces")
+            workspace_ref = workspaces_ref.document(workspace_id)
+            transaction = self._client.transaction()
+
+            async def delete_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> None:
+                visible_workspace_ids: set[str] = set()
+                default_workspace_deleted = False
+                async for snapshot in workspaces_ref.limit(200).stream(
+                    transaction=transaction
+                ):
+                    data = snapshot.to_dict()
+                    if not isinstance(data, Mapping):
+                        continue
+                    if data.get("deleted") is True:
+                        if snapshot.id == default_workspace_id:
+                            default_workspace_deleted = True
+                        continue
+                    stored_workspace_id = data.get("workspace_id")
+                    display_name = data.get("display_name")
+                    if (
+                        stored_workspace_id == snapshot.id
+                        and isinstance(display_name, str)
+                    ):
+                        visible_workspace_ids.add(snapshot.id)
+                if (
+                    default_workspace_id not in visible_workspace_ids
+                    and not default_workspace_deleted
+                ):
+                    visible_workspace_ids.add(default_workspace_id)
+                if workspace_id not in visible_workspace_ids:
+                    raise WorkspaceNotFoundError("Workspace is unavailable.")
+                if len(visible_workspace_ids) <= 1:
+                    raise WorkspaceDeletionConflictError(
+                        "Cannot delete the last workspace."
+                    )
+
+                transaction.set(
+                    user_ref,
+                    {"updated_at": firestore.SERVER_TIMESTAMP},
+                    merge=True,
+                )
+                if workspace_id == default_workspace_id:
+                    transaction.set(
+                        workspace_ref,
+                        {
+                            "workspace_contract_version": "1.0",
+                            "workspace_id": workspace_id,
+                            "display_name": default_display_name,
+                            "deleted": True,
+                            "is_default": True,
+                            "updated_at": firestore.SERVER_TIMESTAMP,
+                        },
+                        merge=False,
+                    )
+                    return
+                transaction.delete(workspace_ref)
+
+            run_transaction = firestore.async_transactional(
+                delete_in_transaction
+            )
+            await run_transaction(transaction)
+        except (WorkspaceDeletionConflictError, WorkspaceNotFoundError):
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("delete_workspace", exc)
 
     async def create_collaborative_note_proposal(
         self,

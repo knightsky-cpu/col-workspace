@@ -143,6 +143,8 @@ from database import (
     MemorySignalConflictError,
     MemorySignalAlreadyActiveError,
     MemorySignalNotFoundError,
+    WorkspaceDeletionConflictError,
+    WorkspaceNotFoundError,
 )
 from memory_context import MemoryContextRenderer
 from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
@@ -1563,6 +1565,55 @@ async def create_user_workspace(
             detail="Workspace request is invalid.",
         ) from exc
     return WorkspaceCreateResponse(workspace=workspace)
+
+
+@app.delete(
+    "/api/users/{user_id}/workspaces/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_user_workspace(
+    user_id: IdentifierStr,
+    workspace_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> Response:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    default_workspace_id, default_display_name = _workspace_defaults_for_request(
+        request=request,
+        authorization_header=authorization,
+    )
+    try:
+        await request.app.state.db.delete_workspace(
+            user_id=effective_user_id,
+            workspace_id=workspace_id,
+            default_workspace_id=default_workspace_id,
+            default_display_name=default_display_name,
+        )
+    except WorkspaceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace was not found.",
+        ) from exc
+    except WorkspaceDeletionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="At least one workspace must remain.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Workspace request is invalid.",
+        ) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 def _raise_collaborative_note_http_error(exc: Exception) -> NoReturn:

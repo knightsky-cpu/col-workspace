@@ -20,6 +20,7 @@ import {
   archiveNote,
   createNoteCorrection,
   deleteNote,
+  deleteWorkspace,
   getNote,
   listWorkspaces,
   listNotes,
@@ -730,4 +731,24 @@ test("workspace wrappers list and create user workspace containers", async () =>
   assert.equal(calls[1][1].body, JSON.stringify({
     display_name: "Study Plans",
   }));
+});
+
+test("workspace wrapper deletes user workspace containers", async () => {
+  const calls = [];
+  await deleteWorkspace(
+    "wifiknight",
+    "project--abc--study-plans",
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return new Response(null, { status: 204 });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/workspaces/project--abc--study-plans",
+  );
+  assert.equal(calls[0][1].method, "DELETE");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer token-1");
 });

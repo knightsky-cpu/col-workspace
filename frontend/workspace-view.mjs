@@ -21,6 +21,7 @@ export function renderWorkspacePanel(container, workspaces, handlers = {}) {
     appendTextElement(container, "p", "muted contain-text", "No Workspaces loaded yet.");
   }
   for (const workspace of items) {
+    const row = element("div", "workspace-list-row contain-text");
     const button = element("button", "work-list-item contain-text");
     button.type = "button";
     button.setAttribute("data-workspace-id", workspace.workspace_id);
@@ -31,7 +32,23 @@ export function renderWorkspacePanel(container, workspaces, handlers = {}) {
     button.addEventListener("click", () => {
       handlers.onSelectWorkspace?.(workspace);
     });
-    container.append(button);
+    row.append(button);
+    if (items.length > 1) {
+      const actions = element("div", "workspace-actions contain-text");
+      const deleteButton = element("button", "", "Delete");
+      deleteButton.type = "button";
+      deleteButton.setAttribute("data-workspace-action", "delete");
+      deleteButton.setAttribute("data-workspace-id", workspace.workspace_id);
+      deleteButton.addEventListener("click", () => {
+        if (globalThis.confirm?.(`Delete workspace: ${workspace.display_name ?? "Workspace"}?`) === false) {
+          return;
+        }
+        handlers.onDeleteWorkspace?.(workspace);
+      });
+      actions.append(deleteButton);
+      row.append(actions);
+    }
+    container.append(row);
   }
 
   const form = element("form", "workspace-create-form contain-text");

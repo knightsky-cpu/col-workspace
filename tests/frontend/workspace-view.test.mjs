@@ -90,6 +90,66 @@ test("renderWorkspacePanel shows human labels without project ids", () => {
   assert.equal(selected[0].display_name, "Study Plans");
 });
 
+test("renderWorkspacePanel shows delete action for non-final workspaces without archive", () => {
+  const deleted = [];
+  const container = node();
+
+  renderWorkspacePanel(
+    container,
+    {
+      status: "ready",
+      selectedWorkspaceId: "agent-col",
+      items: [
+        {
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+        },
+        {
+          workspace_id: "project--abc--study-plans",
+          display_name: "Study Plans",
+        },
+      ],
+    },
+    { onDeleteWorkspace: (workspace) => deleted.push(workspace) },
+  );
+
+  const text = textTree(container);
+  assert.equal(text.includes("Archive"), false);
+  const deleteButton = findTree(container, (child) => (
+    child.attributes["data-workspace-action"] === "delete"
+    && child.attributes["data-workspace-id"] === "project--abc--study-plans"
+  ));
+  assert.ok(deleteButton);
+
+  globalThis.confirm = () => true;
+  deleteButton.onclick();
+  assert.equal(deleted[0].workspace_id, "project--abc--study-plans");
+  delete globalThis.confirm;
+});
+
+test("renderWorkspacePanel omits delete action for final remaining workspace", () => {
+  const container = node();
+
+  renderWorkspacePanel(
+    container,
+    {
+      status: "ready",
+      selectedWorkspaceId: "agent-col",
+      items: [
+        {
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+        },
+      ],
+    },
+  );
+
+  const deleteButton = findTree(container, (child) => (
+    child.attributes["data-workspace-action"] === "delete"
+  ));
+  assert.equal(deleteButton, null);
+});
+
 test("renderWorkspacePanel submits a bounded workspace display name", () => {
   const created = [];
   const container = node();

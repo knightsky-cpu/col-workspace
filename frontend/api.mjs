@@ -405,6 +405,22 @@ export function createWorkspace(
   );
 }
 
+export function deleteWorkspace(
+  userId,
+  workspaceId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("workspace_id", workspaceId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+    { method: "DELETE", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
 export function revokeMemorySignal(
   userId,
   signalId,

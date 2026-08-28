@@ -8,6 +8,7 @@ import {
   createWorkspace,
   deleteNote,
   deleteMemorySignal,
+  deleteWorkspace,
   getArtifact,
   getAuthConfig,
   getAuthSession,
@@ -78,6 +79,7 @@ import {
   completeChatSessionDetailLoad,
   completeChatSessionListLoad,
   completeWorkspaceCreate,
+  completeWorkspaceDelete,
   completeWorkspaceListLoad,
   completeWorkArchive,
   completeWorkDetailLoad,
@@ -726,6 +728,33 @@ function ensureWorkspaceView() {
           await loadNotes();
           await loadMemory();
           await loadChatSessions();
+        } catch (error) {
+          showWorkspaceError(error.message);
+        }
+      },
+      async onDeleteWorkspace(workspace) {
+        if (!state.context || state.pendingTurn !== null) {
+          return;
+        }
+        clearWorkspaceError();
+        const deletedSelected = (
+          workspace.workspace_id === state.workspaces.selectedWorkspaceId
+        );
+        try {
+          await deleteWorkspace(
+            state.context.user_id,
+            workspace.workspace_id,
+            authOptions(),
+          );
+          state = completeWorkspaceDelete(state, workspace.workspace_id);
+          renderWorkspace();
+          await loadWorkspaces();
+          if (deletedSelected) {
+            await loadWorkList();
+            await loadNotes();
+            await loadMemory();
+            await loadChatSessions();
+          }
         } catch (error) {
           showWorkspaceError(error.message);
         }

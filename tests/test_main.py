@@ -86,6 +86,8 @@ from database import (
     MemoryClarificationStateError,
     MemorySignalConflictError,
     MemorySignalNotFoundError,
+    WorkspaceDeletionConflictError,
+    WorkspaceNotFoundError,
 )
 from memory_proposals import ProposalTurnLease
 from schemas import (
@@ -471,6 +473,9 @@ class FakeMemoryEngine:
     workspace_create_calls: list[
         tuple[str, str, WorkspaceCreateRequest]
     ] = field(default_factory=list)
+    workspace_delete_calls: list[
+        tuple[str, str, str, str]
+    ] = field(default_factory=list)
     decision_action_calls: list[
         tuple[ChatTurnClaim, AgentActionReceipt, datetime]
     ] = field(default_factory=list)
@@ -646,6 +651,21 @@ class FakeMemoryEngine:
         if self.workspace_error is not None:
             raise self.workspace_error
         return self.workspace_create_result
+
+    async def delete_workspace(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        default_workspace_id: str,
+        default_display_name: str,
+    ) -> None:
+        self.workspace_delete_calls.append(
+            (user_id, workspace_id, default_workspace_id, default_display_name)
+        )
+        self.events.append(("workspace_delete", user_id, workspace_id))
+        if self.workspace_error is not None:
+            raise self.workspace_error
 
     async def claim_chat_turn(
         self,
@@ -2380,6 +2400,87 @@ async def test_google_mode_rejects_raw_internal_user_locator(
         "detail": "Authenticated user does not own this request."
     }
     assert service_state.database.workspace_list_calls == []
+
+
+@pytest.mark.asyncio
+async def test_workspace_delete_returns_no_content(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.delete(
+        "/api/users/wifiknight/workspaces/project--abc--study-plans"
+    )
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert service_state.database.workspace_delete_calls == [
+        ("wifiknight", "project--abc--study-plans", "agent-col", "Agent Col")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_workspace_delete_uses_effective_owner_and_default(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+    public_user_id = public_user_locator(subject)
+    default_workspace_id = google_subject_to_workspace_project_id(subject)
+
+    response = await client.delete(
+        f"/api/users/{public_user_id}/workspaces/{default_workspace_id}",
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 204
+    assert service_state.database.workspace_delete_calls == [
+        (
+            "google--109876543210",
+            default_workspace_id,
+            default_workspace_id,
+            "Private Google workspace",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_workspace_delete_rejects_last_workspace(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.workspace_error = WorkspaceDeletionConflictError(
+        "Cannot delete the last workspace."
+    )
+
+    response = await client.delete(
+        "/api/users/wifiknight/workspaces/agent-col"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "At least one workspace must remain."
+    }
+
+
+@pytest.mark.asyncio
+async def test_workspace_delete_missing_workspace_returns_not_found(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.workspace_error = WorkspaceNotFoundError(
+        "Workspace is unavailable."
+    )
+
+    response = await client.delete(
+        "/api/users/wifiknight/workspaces/project--missing"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Workspace was not found."}
 
 
 @pytest.mark.asyncio

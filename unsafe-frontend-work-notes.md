@@ -98,3 +98,61 @@ Deferred:
 - Add secure attachment intake.
 - Add safe Markdown response/artifact rendering.
 - Restructure the Artifact Viewer toward the reference screenshot.
+
+## 2026-08-28 - Accepted Workspace Permanent Deletion Pass
+
+Status: accepted after user manual runtime verification.
+
+Scope:
+- Implemented the third approved unsafe frontend behavior pass.
+- Added owner-scoped permanent workspace deletion.
+- Preserved the rule that at least one workspace must remain.
+- Allowed deletion of any owned workspace, including the synthesized original/default workspace, when another visible workspace remains.
+- Used a deleted-default tombstone so a deleted synthesized default workspace does not reappear through automatic default synthesis.
+- Added workspace Delete actions only when more than one workspace is visible.
+- Preserved the existing workspace selection/reset path when the deleted workspace was selected.
+- Preserved auth, ownership resolution, notes, memory, artifacts, chats, receipts, model behavior, drawer mechanics, and existing workspace creation behavior.
+- Did not add workspace Archive semantics.
+- Did not recursively delete workspace-scoped subcollections.
+
+Source changed:
+- `database.py`: added workspace deletion errors, hidden deleted-default tombstone handling in workspace listing, and a transaction-backed `delete_workspace(...)` method.
+- `main.py`: added `DELETE /api/users/{user_id}/workspaces/{workspace_id}` returning `204 No Content` with bounded `404` and `409` errors.
+- `frontend/api.mjs`: added `deleteWorkspace(...)`.
+- `frontend/state.mjs`: added `completeWorkspaceDelete(...)` and reused `selectWorkspace(...)` for surviving-workspace context reset.
+- `frontend/workspace-view.mjs`: added separate workspace Delete action rendering with confirmation and no Archive action.
+- `frontend/app.mjs`: wired workspace deletion, refresh, and selected-workspace recovery.
+- `frontend/styles.css`: added compact workspace action styling.
+- `tests/test_main.py`, `tests/test_database.py`, `tests/frontend/api.test.mjs`, `tests/frontend/state.test.mjs`, and `tests/frontend/workspace-view.test.mjs`: added focused U3 regression coverage.
+
+TDD evidence:
+- RED: `venv/bin/pytest tests/test_main.py -k "workspace and delete" -q` initially failed because the workspace deletion errors and route did not exist.
+- RED: `venv/bin/pytest tests/test_database.py -k "workspace and delete" -q` initially failed because deleted-default suppression, `delete_workspace(...)`, and workspace deletion errors did not exist.
+- RED: `node --test tests/frontend/api.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-view.test.mjs` initially failed because `deleteWorkspace(...)`, `completeWorkspaceDelete(...)`, and workspace Delete UI did not exist.
+- GREEN: implemented the backend route, database tombstone/delete transaction, frontend helper/state/view/app wiring, and compact workspace action styling; focused tests passed.
+- REFACTOR: no broader refactor; implementation stayed inside the approved U3 boundary.
+
+Verification:
+- `venv/bin/pytest tests/test_main.py -k "workspace and delete" -q` passed: 4 tests, 211 deselected, with one existing `BaseAgentConfig` deprecation warning.
+- `venv/bin/pytest tests/test_database.py -k "workspace and delete" -q` passed: 4 tests, 44 deselected.
+- `node --test tests/frontend/api.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-view.test.mjs` passed: 72 tests.
+- `venv/bin/python -m py_compile main.py database.py` passed.
+- `node --check frontend/app.mjs`, `node --check frontend/api.mjs`, `node --check frontend/state.mjs`, and `node --check frontend/workspace-view.mjs` passed.
+- `git diff --check` passed.
+
+Screenshot evidence:
+- User-provided manual verification screenshot showed the workspace Delete action working but also revealed that the Create button in the New Workspace form is too large and interferes with the input field.
+
+Manual verification result:
+- User confirmed the workspace permanent deletion pass was successful.
+
+Deferred:
+- Reduce the New Workspace Create button size and layout so it no longer interferes with the input field.
+- Add governed direct user-authored note proposal creation.
+- Establish standard collapsed-by-default subcard disclosure for Notes, Memory, and Chats.
+- Add chat pending wave animation.
+- Add collapsed adaptation receipt disclosure.
+- Tune chat icons/text colors/counter severity.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.

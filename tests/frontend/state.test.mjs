@@ -18,6 +18,7 @@ import {
   completeWorkArchive,
   completeWorkRestore,
   completeWorkspaceCreate,
+  completeWorkspaceDelete,
   completeWorkspaceListLoad,
   completeWorkListLoad,
   completeMemoryLoad,
@@ -185,6 +186,100 @@ test("created workspace is selected without exposing project id as the label", (
 
   assert.equal(selected.context.project_id, "project--abc--study-plans");
   assert.equal(selected.workspaces.items[0].display_name, "Study Plans");
+});
+
+test("deleted unselected workspace is removed without changing context", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const loaded = completeWorkspaceListLoad(state, {
+    workspace_contract_version: "1.0",
+    workspaces: [
+      {
+        workspace_id: "agent-col",
+        display_name: "Agent Col",
+        is_default: true,
+      },
+      {
+        workspace_id: "project--abc--study-plans",
+        display_name: "Study Plans",
+        is_default: false,
+      },
+    ],
+  });
+
+  const deleted = completeWorkspaceDelete(
+    loaded,
+    "project--abc--study-plans",
+    cryptoStub,
+  );
+
+  assert.equal(deleted.context.project_id, "agent-col");
+  assert.deepEqual(
+    deleted.workspaces.items.map((workspace) => workspace.workspace_id),
+    ["agent-col"],
+  );
+});
+
+test("deleted selected workspace lands on surviving workspace and clears scoped panels", () => {
+  const state = acceptContext(
+    createInitialState(),
+    {
+      user_id: "wifiknight",
+      project_id: "project--abc--study-plans",
+      crypto: cryptoStub,
+    },
+  );
+  const loaded = {
+    ...completeWorkspaceListLoad(state, {
+      workspace_contract_version: "1.0",
+      workspaces: [
+        {
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        },
+        {
+          workspace_id: "project--abc--study-plans",
+          display_name: "Study Plans",
+          is_default: false,
+        },
+      ],
+    }),
+    transcript: [{ request: {}, response: {} }],
+    work: {
+      ...state.work,
+      list: {
+        status: "ready",
+        items: [{ reference: { artifact_id: "artifact--1" } }],
+        next_before: null,
+        error: null,
+      },
+    },
+    notes: {
+      ...state.notes,
+      notes: [{ note_id: "note-1" }],
+    },
+    chats: {
+      ...state.chats,
+      sessions: [{ session_id: "session-1" }],
+    },
+  };
+
+  const deleted = completeWorkspaceDelete(
+    loaded,
+    "project--abc--study-plans",
+    cryptoStub,
+  );
+
+  assert.equal(deleted.context.project_id, "agent-col");
+  assert.equal(deleted.context.session_id, "session--123e4567-e89b-12d3-a456-426614174000");
+  assert.equal(deleted.workspaces.selectedWorkspaceId, "agent-col");
+  assert.equal(deleted.transcript.length, 0);
+  assert.equal(deleted.work.list.items.length, 0);
+  assert.equal(deleted.notes.notes.length, 0);
+  assert.equal(deleted.chats.sessions.length, 0);
 });
 
 test("pending turn lifecycle preserves exact retry envelope on failure", () => {
