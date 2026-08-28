@@ -75,6 +75,16 @@ def load_auth_settings(
     )
     if client_id is not None:
         client_id = client_id.strip() or None
+    cloud_run_service = source.get("K_SERVICE", "").strip()
+    if cloud_run_service:
+        if raw_mode != "google_oidc":
+            raise AuthConfigurationError(
+                "AGENT_COL_AUTH_MODE must be google_oidc on Cloud Run."
+            )
+        if client_id is None:
+            raise AuthConfigurationError(
+                "Google OAuth client ID is not configured."
+            )
     return AuthSettings(
         mode=raw_mode,  # type: ignore[arg-type]
         google_client_id=client_id,

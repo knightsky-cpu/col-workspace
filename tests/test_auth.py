@@ -8,6 +8,7 @@ from auth import (
     Authenticator,
     google_subject_owns_workspace_project_id,
     google_subject_to_workspace_project_id,
+    load_auth_settings,
 )
 
 
@@ -18,6 +19,66 @@ def test_local_development_auth_uses_supplied_user_without_token() -> None:
         supplied_user_id="wifiknight",
         authorization_header=None,
     ) == "wifiknight"
+
+
+def test_load_auth_settings_preserves_local_default_outside_cloud_run() -> None:
+    settings = load_auth_settings({})
+
+    assert settings == AuthSettings(mode="local_dev")
+
+
+@pytest.mark.parametrize(
+    ("environment", "match"),
+    (
+        (
+            {"K_SERVICE": "agent-col"},
+            "AGENT_COL_AUTH_MODE must be google_oidc on Cloud Run.",
+        ),
+        (
+            {
+                "K_SERVICE": "agent-col",
+                "AGENT_COL_AUTH_MODE": "local_dev",
+            },
+            "AGENT_COL_AUTH_MODE must be google_oidc on Cloud Run.",
+        ),
+        (
+            {
+                "K_SERVICE": "agent-col",
+                "AGENT_COL_AUTH_MODE": "google_oidc",
+            },
+            "Google OAuth client ID is not configured.",
+        ),
+        (
+            {
+                "K_SERVICE": "agent-col",
+                "AGENT_COL_AUTH_MODE": "google_oidc",
+                "GOOGLE_OAUTH_CLIENT_ID": "   ",
+            },
+            "Google OAuth client ID is not configured.",
+        ),
+    ),
+)
+def test_load_auth_settings_rejects_unsafe_cloud_run_auth_config(
+    environment: dict[str, str],
+    match: str,
+) -> None:
+    with pytest.raises(AuthConfigurationError, match=match):
+        load_auth_settings(environment)
+
+
+def test_load_auth_settings_accepts_google_oidc_on_cloud_run() -> None:
+    settings = load_auth_settings(
+        {
+            "K_SERVICE": "agent-col",
+            "AGENT_COL_AUTH_MODE": "google_oidc",
+            "GOOGLE_OAUTH_CLIENT_ID": " client-123 ",
+        }
+    )
+
+    assert settings == AuthSettings(
+        mode="google_oidc",
+        google_client_id="client-123",
+    )
 
 
 def test_google_oidc_requires_bearer_token() -> None:
