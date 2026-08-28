@@ -147,6 +147,11 @@ p {
   font-weight: 720;
 }
 
+.workspace-indicator {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .top-bar [data-new-conversation] {
   border-color: transparent;
   background: linear-gradient(180deg, var(--accent-strong), #2aa998);

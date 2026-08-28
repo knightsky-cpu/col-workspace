@@ -40,6 +40,7 @@ import { createMemoryView } from "./memory-view.mjs";
 import { createNotesView } from "./notes-view.mjs";
 import { createWorkView } from "./work-view.mjs";
 import { createWorkspaceView } from "./workspace-view.mjs";
+import { renderWorkspaceIndicator } from "./workspace-indicator.mjs";
 import {
   buildArtifactFeedbackChatRequest,
   buildCollaborativeNoteDecisionChatRequest,
@@ -322,6 +323,7 @@ async function bootstrapAuth() {
 }
 
 function renderWorkspace() {
+  renderTopBarWorkspaceIndicator();
   ensureWorkspaceView().render(state);
   ensureChatView().render(state);
   ensureWorkView().render(state);
@@ -329,6 +331,13 @@ function renderWorkspace() {
   ensureMemoryView().render(state);
   ensureChatsView().render(state);
   renderLayout();
+}
+
+function renderTopBarWorkspaceIndicator() {
+  renderWorkspaceIndicator(
+    document.querySelector("[data-workspace-indicator]"),
+    state,
+  );
 }
 
 function renderLayout() {
@@ -392,6 +401,7 @@ async function loadWorkspaces() {
     state = failWorkspaceListLoad(state, error);
     showWorkspaceError(error.message);
   }
+  renderTopBarWorkspaceIndicator();
   ensureWorkspaceView().render(state);
 }
 

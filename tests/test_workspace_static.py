@@ -27,7 +27,8 @@ async def test_workspace_route_serves_html_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert response.headers["cache-control"] == "no-store"
-    assert "<h1>Agent Col</h1>" in response.text
+    assert "<h1>Agent Col" in response.text
+    assert "data-workspace-indicator" in response.text
     assert "Ask Agent Col for help" in response.text
     assert ">Agent_Col<" not in response.text
     assert "Ask Agent_Col" not in response.text

@@ -84,6 +84,40 @@ Deferred to later bounded passes:
 - Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
 - Activity styling remains dormant/non-visible in the current UI.
 
+## 2026-08-28 - Accepted Workspace Indicator Pass
+
+Status: accepted after user verification.
+
+Scope:
+- Implemented a minimal top-bar workspace indicator pass.
+- Rendered the selected workspace as `Agent Col | <workspace name>`.
+- Reused existing authoritative workspace state from `state.workspaces.items` and `state.workspaces.selectedWorkspaceId`.
+- Did not create duplicate frontend state or add backend/API behavior.
+- Preserved auth, workspace selection, Notes, Chats, Memory, artifacts, routing, persistence, layout behavior, request construction, and existing workspace list behavior.
+
+Source changed:
+- `frontend/index.html`: added a hidden top-bar indicator span beside `Agent Col`.
+- `frontend/workspace-indicator.mjs`: added a small renderer that derives the selected display name from existing workspace state.
+- `frontend/app.mjs`: refreshed the indicator during workspace render and after workspace list load.
+- `frontend/styles.css`: added compact muted indicator styling.
+- `tests/frontend/workspace-indicator.test.mjs`: covered selected-workspace display updates and hidden unknown selection state.
+- `tests/test_workspace_static.py`: updated the stale exact `<h1>` assertion and checked that the indicator placeholder exists.
+
+Verification:
+- `node --test tests/frontend/workspace-indicator.test.mjs` failed before implementation with `ERR_MODULE_NOT_FOUND`, then passed after implementation: 2 tests.
+- `git diff --check` passed.
+- `node --check frontend/app.mjs` passed.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/workspace-view.test.mjs` passed: 2 tests.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+- `node --test tests/frontend/auth-view.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/chat-view.test.mjs` passed: 9 tests.
+- `venv/bin/pytest tests/test_workspace_static.py -q` passed: 4 tests, with one existing `BaseAgentConfig` deprecation warning.
+
+Screenshot:
+- `/tmp/agent-col-workspace-indicator.png`
+- The screenshot used a temporary HTML preview with current real HTML/CSS and injected sample indicator text.
+
 ## 2026-08-28 - Accepted Left Drawer Density And Navigation Rows Pass
 
 Status: accepted after user visual verification.
