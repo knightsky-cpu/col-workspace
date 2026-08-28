@@ -7,6 +7,12 @@ and Target B are considered demo-ready; remaining pre-submission priority is
 single-service production hardening, Cloud Run deployment proof, and targeted
 latency measurement without broad refactoring.
 
+Detailed implementation planning lives in
+`docs/superpowers/plans/2026-08-28-cloud-run-production-hardening-deployment.md`.
+Use that plan before proposing or implementing Cloud Run production-hardening
+passes, so the deployment work remains research-backed and source-backed rather
+than reinvented.
+
 ## Scope
 
 - Harden the existing request-bound FastAPI application for one public Cloud Run service.
