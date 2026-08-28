@@ -328,3 +328,61 @@ Deferred to later bounded passes:
 - Responsive, focus, motion, and accessibility verification.
 - Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
 - Activity styling remains dormant/non-visible in the current UI.
+
+## Pending Unsafe Visual Structure Plan
+
+Status: not planned or approved.
+
+Scope note:
+- The current safe frontend visual work intentionally remains CSS-only.
+- The visual target image includes structural UI details that cannot be faithfully implemented inside the safe CSS-only boundary, including richer artifact headers, tab-like Preview/Info sections, icon action bars, real left-drawer icons/chevrons, and safe Markdown rendering.
+- Any future unsafe visual-structure plan must be source-backed, cite the behavior-bearing frontend files it would touch, include official documentation research where relevant, compare the current DOM/rendering behavior against the target image, and define focused tests plus manual verification before implementation.
+- Until that separate plan is approved, `frontend/index.html`, `frontend/*.mjs`, backend routes, schemas, prompts, persistence, auth, memory, notes, artifacts, working state, and request/response behavior remain out of scope for CSS-only visual passes.
+
+## 2026-08-28 - Accepted Artifact Drawer CSS-Only Pass
+
+Status: accepted after user visual verification, with limitations noted.
+
+Scope:
+- Implemented the seventh bounded CSS-only visual pass.
+- Touched implementation source only in `frontend/styles.css`.
+- Made the right artifact drawer somewhat closer to the visual target within the safe CSS-only boundary.
+- Strengthened `.work-panel`, `.work-panel__body`, artifact list items, selected artifact state, export controls, feedback forms, artifact creation form, feedback events, link buttons, artifact headings, and raw `.artifact-content` readability.
+- Preserved raw artifact content, artifact selection, export/download/print behavior, edit/save/version/rename behavior, feedback behavior, archive/restore behavior, HTML, JavaScript, backend routes, schemas, prompts, persistence, auth, memory, notes, working state, and request/response behavior.
+
+CSS surface changed:
+- `.work-panel`
+- `.work-panel__body`
+- `.work-list-item`
+- `.work-list-item[aria-current="true"]`
+- `.button-link`
+- `.work-heading`
+- `.export-controls`
+- `.export-controls h4`
+- `.feedback-form`
+- `.artifact-create-form`
+- `.feedback-event`
+- `.artifact-content`
+- `.work-panel h3`
+- `.work-panel h4`
+
+Verification:
+- Temporary Pass 7 CSS assertion failed before implementation for the missing artifact drawer visual treatment, then passed after the CSS patch.
+- Temporary correction assertion failed for the missing stronger CSS-only hierarchy rules, then passed after the correction patch.
+- `git diff --check` passed.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/work-view.test.mjs` passed: 24 tests.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+- `venv/bin/pytest tests/test_workspace_static.py -q` passed: 4 tests, with one existing `BaseAgentConfig` deprecation warning.
+
+Screenshot:
+- `/tmp/agent-col-pass7-artifacts-corrected.png`
+- The screenshot used a temporary HTML preview generated from the real `frontend/index.html` and current `frontend/styles.css`, with sample artifact content. The in-app Browser plugin was unavailable, so Microsoft Edge headless was used as the fallback screenshot surface.
+
+Limitation:
+- This pass improved the artifact drawer but still does not fully match the visual target image. Remaining photo-level drawer and navigation improvements that require structural/rendering changes must be included in the future non-safe visual improvements plan with source-backed evidence, official documentation research, and validation comparisons.
+
+Deferred to later bounded passes:
+- Notes, Memory, Chats, continuity, memory clarification, error, and empty-state CSS-only polish.
+- Responsive, focus, motion, and accessibility verification.
+- Non-safe visual-structure plan for photo-level artifact drawer/header/tabs/icons, real left-drawer icons/chevrons, and safe Markdown rendering.
