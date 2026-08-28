@@ -6,9 +6,8 @@ browser Google OIDC. Firestore and Vertex AI calls use Application Default
 Credentials in both modes.
 
 The current runtime is still request-bound. Cloud Tasks and a private worker
-remain planned durable-artifact work; Docker and Cloud Run deployment remain
-planned production-hardening work. None are current local runtime
-requirements.
+are deferred until after submission; Docker and Cloud Run deployment remain
+production-hardening work. None are current local runtime requirements.
 
 ## Prerequisites
 

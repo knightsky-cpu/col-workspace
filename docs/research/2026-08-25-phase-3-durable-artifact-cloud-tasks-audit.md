@@ -4,6 +4,13 @@ Date: August 25, 2026
 Pass: M10-RSCH.1
 Status: Approved read-only research audit; no Phase 3 implementation authorized
 
+Status note, August 27, 2026: this audit remains useful future engineering
+provenance, but durable asynchronous artifacts, Cloud Tasks, and private worker
+execution are deferred until after submission under the current finalization
+strategy. Use
+[`../final-checklist-planning.md`](../final-checklist-planning.md) for the
+current pre-submission roadmap.
+
 ## TL;DR
 
 Phase 3 is feasible, but Cloud Tasks cannot simply wrap the existing

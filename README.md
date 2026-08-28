@@ -43,14 +43,18 @@ Implemented in the current source:
 
 Still planned:
 
-- durable asynchronous artifact jobs with queued/running/completed/failed/
-  cancelled states;
-- Google Cloud Tasks and private Cloud Run worker execution;
+- evidence-governed preference learning from corrections through user-confirmed
+  memory;
+- stronger visible collaboration leadership using existing working state;
 - production hardening for ownership, limits, logging, retention, startup, and
   hosted security;
 - Dockerfile, production startup scripts, Cloud Run service configuration, and
   hosted deployment evidence;
 - hosted reproducibility/submission evidence and demo freeze.
+
+Durable asynchronous artifact jobs, Google Cloud Tasks, and private worker
+execution are deferred until after submission under the current finalization
+strategy.
 
 ## Contest Category
 
@@ -177,6 +181,7 @@ boundaries.
 ## Documentation
 
 - [Current state](docs/current-state.md)
+- [Final checklist planning](docs/final-checklist-planning.md)
 - [Architecture](docs/architecture.md)
 - [Local development setup](docs/development/local-setup.md)
 - [Testing](docs/development/testing.md)

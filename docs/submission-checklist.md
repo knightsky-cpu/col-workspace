@@ -2,81 +2,99 @@
 
 Last reconciled: August 27, 2026.
 
-Current source status is summarized in
-[`current-state.md`](current-state.md). This checklist tracks remaining
-submission evidence and hosted-build readiness; unchecked items are not
-implemented or not yet proven for the judged deployment.
+Current roadmap authority:
+[`final-checklist-planning.md`](final-checklist-planning.md).
 
-## Deadlines
+Current source status:
+[`current-state.md`](current-state.md).
 
-- [ ] Request available Google Cloud credits before August 28, 2026, at
-  12:00 PM Pacific if credits are needed.
-- [ ] Freeze the judged build by August 30, 2026.
+This checklist tracks the actual judged submission path for the Collaborative
+Partner category. Durable asynchronous artifact jobs, Google Cloud Tasks, and
+private worker execution are deferred until after submission and are not
+current submission requirements.
+
+## Official Deadline
+
 - [ ] Submit before August 31, 2026, at 5:00 PM Pacific.
+- [ ] Freeze the judged build and submitted materials before final submission.
+- [ ] Preserve the submitted repo, video, and hosted/testing state through the
+  judging window.
 
 ## Stage One Eligibility
 
 - [x] Category selected: Collaborative Partner.
 - [x] Gemini 3.6 Flash satisfies the Gemini 3.5-or-newer requirement.
-- [x] Google GenAI SDK is an allowed Google agent framework.
+- [x] Google ADK satisfies the Google agent-framework requirement.
+- [x] Google GenAI SDK is also in the allowed framework list.
 - [x] Firestore satisfies the Google Cloud infrastructure requirement.
-- [ ] Deploy the functioning application to Google Cloud.
+- [ ] Deploy and prove the functioning application on Google Cloud.
 - [ ] Confirm every depicted feature works consistently in the judged build.
 - [ ] Confirm all submitted work was created during the contest period or
-  disclose any pre-existing material.
-- [x] Select and add the Apache License, Version 2.0.
+  disclose any permitted pre-existing material.
+- [x] Apache License, Version 2.0 is present.
 - [ ] Audit third-party code, fonts, icons, libraries, and media for license
   compliance.
 
-## Repository and Reproduction
-
-- [x] Repository contains local setup instructions.
-- [x] Repository contains an architecture document and diagram source.
-- [x] Repository contains a current source-state inventory.
-- [ ] Pin and verify the production Python runtime.
-- [ ] Add Dockerfile and container startup instructions.
-- [ ] Add Cloud Run, Firestore, Cloud Tasks, and authentication setup steps.
-- [x] Add local environment-variable reference without secrets.
-- [ ] Add production Cloud Run environment-variable reference without secrets.
-- [ ] Run the complete offline suite from a clean clone.
-- [ ] Run a hosted smoke test against the final deployment.
-- [ ] Confirm `.env`, credentials, virtual environments, and generated data are
-  ignored and absent from Git history.
-
 ## Collaborative Partner Proof
 
-- [ ] Ingest a messy project or academic document.
-- [ ] Ask a consequential clarifying question with meaningful options.
-- [ ] Generate a strict structured blueprint rather than plain prose.
-- [ ] Persist the blueprint and execution state to Firestore.
-- [ ] Capture accepted, rejected, or edited feedback.
-- [ ] Show the resulting approved profile change.
-- [ ] Generate a later blueprint that visibly uses that profile signal.
-- [ ] Show failure handling for invalid model output or a failed job.
+- [ ] Show messy or complex user input.
+- [ ] Show Agent Col asking or resolving a meaningful clarification.
+- [ ] Show Agent Col synthesizing or mutating data into a useful artifact,
+  plan, structured answer, or workspace output.
+- [ ] Show governed workspace notes or receipt-backed continuity.
+- [ ] Show Target A if implemented: correction/evidence creates a
+  non-authoritative preference hypothesis, the user confirms it, and existing
+  governed memory handles approval and later adaptation.
+- [ ] Show Target B if implemented: Agent Col recommends or continues the next
+  useful step using existing working-state understanding.
+- [ ] Show memory or receipt provenance so the adaptation is inspectable.
+- [ ] Show a controlled failure, limitation, or rejection path that proves
+  bounded behavior without relying on background jobs.
 
 ## Production Controls
 
 - [x] Derive user identity from a verified Google ID token in `google_oidc`
   mode.
-- [ ] Complete production project, session, artifact, note, memory, and job
-  ownership hardening.
-- [ ] Enforce text, upload, and request-rate limits.
-- [ ] Make synthesis requests idempotent.
-- [ ] Authenticate Cloud Tasks to the private worker.
-- [ ] Configure Cloud Run maximum instances and budget alerts.
-- [ ] Verify logs exclude source text, chat text, profile values, feedback, and
-  generated blueprint content.
-- [ ] Document data retention and deletion behavior.
+- [ ] Require fail-closed production configuration.
+- [ ] Require `google_oidc` in production.
+- [ ] Replace raw-subject user identifiers with opaque production-safe user
+  identity.
+- [ ] Complete canonical workspace ownership and cross-owner denial checks.
+- [ ] Enforce request/body size limits.
+- [ ] Add bounded per-user or per-principal rate limiting.
+- [ ] Add production CSP and security headers.
+- [ ] Remove content-bearing validation details from logs.
+- [ ] Document retention and deletion behavior.
+- [ ] Configure Cloud Run maximum instances, timeouts, and budget controls.
 
-## Devpost Submission
+## Repository And Reproduction
 
-- [ ] Hosted project URL.
-- [ ] Public repository URL, or grant the required private-repository access.
+- [x] Repository contains local setup instructions.
+- [x] Repository contains an architecture document and diagram source.
+- [x] Repository contains a current source-state inventory.
+- [x] Repository contains current finalization planning.
+- [ ] Pin and verify the production Python runtime.
+- [ ] Add Dockerfile and container startup instructions.
+- [ ] Add `.dockerignore`.
+- [ ] Add Cloud Run deployment setup.
+- [x] Add local environment-variable reference without secrets.
+- [ ] Add production Cloud Run environment-variable reference without secrets.
+- [ ] Run the complete relevant offline suite from a clean clone.
+- [ ] Run hosted smoke and security checks against the final deployment.
+- [ ] Confirm `.env`, credentials, virtual environments, and generated data are
+  ignored and absent from Git history.
+
+## Devpost Materials
+
+- [ ] Hosted project URL if available for judging/testing.
+- [ ] Public repository URL, or private-repository access granted to
+  `testing@devpost.com` and `cloudhackathons@google.com`.
 - [ ] English project summary and value proposition.
 - [ ] Features and functionality description.
 - [ ] Technology and Google Cloud services description.
 - [ ] Data-source and third-party integration disclosure.
 - [ ] Findings and learning summary.
+- [ ] Step-by-step spin-up instructions in `README.md`.
 - [ ] Architecture diagram uploaded in a judge-readable format.
 - [ ] Public YouTube or Vimeo demo URL.
 - [ ] Confirm the video is four minutes or shorter.
@@ -85,18 +103,14 @@ implemented or not yet proven for the judged deployment.
 
 ## Four-Minute Demo Runbook
 
-- [ ] `0:00-0:25` — State the user friction and value proposition.
-- [ ] `0:25-0:55` — Load a messy rubric, notes file, or PDF.
-- [ ] `0:55-1:20` — Show Agent_Col ask and receive one critical clarification.
-- [ ] `1:20-1:50` — Start artifact work and show the accepted state boundary
-  available in the judged build. Durable job-state transitions require Phase 3
-  completion.
-- [ ] `1:50-2:30` — Inspect the generated structured blueprint.
-- [ ] `2:30-3:05` — Reject or edit one recommendation and show the profile
-  signal change.
-- [ ] `3:05-3:30` — Show a later result adapting to that signal.
-- [ ] `3:30-3:50` — Show Firestore and Cloud Run execution evidence.
-- [ ] `3:50-4:00` — Show the hosted URL and close with the value proposition.
+- [ ] `0:00-0:20` - State the friction and Collaborative Partner value.
+- [ ] `0:20-0:55` - Give Agent Col messy work and show clarification/guidance.
+- [ ] `0:55-1:30` - Show synthesis or artifact work with receipts.
+- [ ] `1:30-2:10` - Show notes, continuity, or retrieval-backed context.
+- [ ] `2:10-2:55` - Show Target A preference-learning proof if implemented.
+- [ ] `2:55-3:20` - Show Target B next-step leadership if implemented.
+- [ ] `3:20-3:45` - Show memory/receipt proof and Firestore evidence.
+- [ ] `3:45-4:00` - Show Cloud Run or Google Cloud proof and close.
 
 ## Optional Bonus Work
 
@@ -104,7 +118,7 @@ implemented or not yet proven for the judged deployment.
   disclosure.
 - [ ] Publish a social post using `#AllThingsAgenticHackathon`.
 - [ ] Add another eligible Google AI model only if the core judged workflow is
-  already stable and polished.
+  already stable, deployed, polished, and documented.
 
-Optional bonus work must not displace reliability, feedback adaptation,
-deployment evidence, or demo quality.
+Optional bonus work must not displace Collaborative Partner proof, deployment
+evidence, documentation clarity, or demo quality.

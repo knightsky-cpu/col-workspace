@@ -10,6 +10,14 @@
 dependency, data-migration, Google Cloud, IAM, billing, container, or deployment
 changes.
 
+**Superseded for current submission finalization:** This plan remains valuable
+production-hardening provenance, but its dependency on a Phase 3 Cloud
+Tasks/private-worker architecture no longer controls the judged-build path.
+The current path is single-service Cloud Run hardening without worker or queue
+requirements. Use
+[`../../final-checklist-planning.md`](../../final-checklist-planning.md) as the
+current pre-submission roadmap.
+
 **August 27, 2026 reconciliation note:** Phase 1 memory lifecycle, Phase 2
 workspace notes/continuity, internal working state, and the four specialist
 expert surfaces are accepted in current source. Winning Core Phase 3 durable

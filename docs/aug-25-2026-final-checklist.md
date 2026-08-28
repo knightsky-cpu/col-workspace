@@ -7,6 +7,13 @@ This checklist records the approved Winning Core direction as of August 25,
 alignment document. It does not authorize any source change described by a
 pending phase plan.
 
+**Superseded for current submission finalization:** The sequential Winning Core
+roadmap below is historical. It no longer controls the pre-submission order.
+Durable asynchronous artifact work, Google Cloud Tasks, and a private worker
+are deferred until after submission unless explicitly reopened. Use
+[`final-checklist-planning.md`](final-checklist-planning.md) as the current
+contest-finalization reference.
+
 For the current source-level feature inventory, see
 [`current-state.md`](current-state.md).
 
@@ -16,10 +23,10 @@ Implementation remains governed by:
 - [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
 - [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md).
 
-Every phase below requires its own investigation, bounded implementation plan,
-explicit user approval, test-driven implementation, focused automated
-verification, manual acceptance, and GitHub checkpoint. Phases execute
-sequentially. No parallel implementation is authorized.
+Every non-superseded source-changing pass still requires its own
+investigation, bounded implementation plan, explicit user approval,
+test-driven implementation, focused automated verification, manual acceptance,
+and GitHub checkpoint.
 
 ## Product north star
 
@@ -34,7 +41,7 @@ autonomy.
 
 ## Approved path
 
-The approved Winning Core path is:
+The historical Winning Core path was:
 
 1. finish clarification UI and judge-grade cross-session memory proof;
 2. complete governed workspace notes using the existing continuity design;

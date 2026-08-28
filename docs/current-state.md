@@ -263,91 +263,109 @@ Model constants currently use Gemini `gemini-3.6-flash`.
 
 ## Current Documentation Status
 
-Use this document and `README.md` for current status. Historical design and
-planning files under `docs/superpowers/` remain provenance. Files under
-`docs/legacy/` are historical snapshots and should not be used as current
-implementation descriptions.
+Use this document and `README.md` for implemented source status. Use
+[`final-checklist-planning.md`](final-checklist-planning.md) for the current
+contest-finalization roadmap. Historical design and planning files under
+`docs/superpowers/` remain provenance. Files under `docs/legacy/` are
+historical snapshots and should not be used as current implementation
+descriptions.
 
-## Remaining Winning Core Phases
+## Contest Finalization Track
 
-### Phase 3 - Durable Asynchronous Artifact Work
+The old Winning Core sequence that required durable asynchronous artifacts
+before production hardening is superseded for pre-submission work. Durable
+async artifacts, Google Cloud Tasks, and private worker execution remain
+post-submission future work unless explicitly reopened.
+
+Current ordered finalization path:
+
+1. Roadmap/documentation sanitation.
+2. Target A: evidence-governed preference learning.
+3. Target B: visible Agent Col leadership.
+4. Regression acceptance for A/B only.
+5. Single-service production hardening.
+6. Cloud Run deployment and hosted proof.
+7. Controlled frontend appearance pass.
+8. Documentation convergence and submission package.
+9. Architecture diagram.
+10. Four-minute demo.
+11. Submission verification.
+12. Freeze.
+
+### Target A - Evidence-Governed Preference Learning
 
 Pending.
 
-The four specialist expert surfaces are wired and accepted, but the Winning
-Core durable artifact-job phase is separate and remains unimplemented.
+This target intentionally revises the old M9 no-behavioral-inference boundary
+without weakening governed memory:
 
-Expected work includes:
+```text
+observation evidence != preference hypothesis != candidate memory != active memory
+```
 
-- one selected asynchronous artifact workflow;
-- durable Firestore job records;
-- `queued`, `running`, `completed`, `failed`, and `cancelled` states;
-- idempotent submission, worker execution, completion, retry, and
-  cancellation;
-- Google Cloud Tasks dispatch;
-- private Cloud Run worker authentication;
-- browser job progress, result, retry, and cancellation controls;
-- controlled failure and retry evidence.
+Observation evidence and preference hypotheses must be non-authoritative.
+They cannot adapt responses directly and cannot become durable memory until
+the user confirms them through the existing governed memory lifecycle.
 
-### Phase 4 - Production Hardening And Deployment
+### Target B - Visible Agent Leadership
 
-Pending after Phase 3 acceptance.
+Pending.
+
+This target uses existing same-session working state more visibly. Agent Col
+should recommend consequential next steps, continue obvious authorized work,
+identify blockers, and guide decisions without introducing a generalized
+planner.
+
+### Single-Service Production Hardening
+
+Pending.
 
 Expected work includes:
 
 - fail-closed production startup;
+- production-required `google_oidc`;
 - canonical workspace ownership and authorization;
 - cross-owner denial checks;
+- opaque user identity;
 - request/body size limits;
 - rate limiting;
 - security headers;
-- log privacy canaries;
+- privacy-safe logs;
 - retention and deletion behavior;
-- Dockerfile and production startup scripts;
+- Dockerfile and `.dockerignore`;
+- production startup scripts;
 - Cloud Run service configuration;
-- IAM/service accounts;
-- Cloud Tasks OIDC if the private worker remains in scope;
+- least-privilege service account;
 - hosted auth, ownership, failure, and smoke checks.
 
-### Phase 5 - Reproducibility And Submission Evidence
+### Evidence, Visual Polish, And Freeze
 
-Pending after Phase 4 acceptance.
+Pending after functional and production hardening acceptance.
 
 Expected work includes:
 
-- final hosted-build README and architecture reconciliation after deployment
-  work changes the source baseline;
 - clean-clone setup proof;
 - exact local and hosted commands;
-- full relevant test evidence;
-- dependency, licensing, and ignored-file audit;
-- judge-readable Cloud Run, Firestore, and Cloud Tasks evidence.
-
-### Phase 6 - Demo And Build Freeze
-
-Pending after Phase 5 acceptance.
-
-Expected work includes:
-
-- four-minute demo script;
-- visible memory adaptation;
-- governed workspace note demonstration;
-- consequential clarification;
-- artifact workflow and feedback demonstration;
-- controlled failure or retry proof;
-- hosted URL and Google Cloud evidence;
-- final submission copy and build freeze.
+- dependency, licensing, ignored-file, and secrets audit;
+- judge-readable Cloud Run, Firestore, Vertex AI, and architecture evidence;
+- controlled CSS-first visual polish under the safe visual guide;
+- final Devpost copy;
+- four-minute demo;
+- final submission verification and freeze.
 
 ## Known Gaps
 
 - No Dockerfile, `.dockerignore`, production start scripts, or Cloud Run
   service configuration are present.
 - No Google Cloud Tasks runtime dependency or private worker implementation is
-  present.
+  present; this is post-submission future work under the current finalization
+  strategy.
 - Durable asynchronous artifact jobs with queued/running/completed/failed/
-  cancelled states are still planned.
+  cancelled states are deferred from the judged core.
 - Production startup currently needs Phase 4 hardening; local development still
   defaults to `local_dev` unless explicitly configured.
+- Evidence-governed preference learning is not implemented.
+- Agent Col's visible leadership behavior still needs a focused final pass.
 - Source and Computation do not yet preserve detailed invalid-output reasons.
 - Some older docs remain historical and should not be used as current status.
 

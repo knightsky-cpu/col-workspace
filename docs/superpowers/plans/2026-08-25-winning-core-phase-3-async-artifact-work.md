@@ -9,6 +9,14 @@
 **Status:** Pending approval. Planning this phase does not authorize source,
 dependency, Google Cloud, IAM, queue, worker, or deployment changes.
 
+**Superseded for current submission finalization:** This durable asynchronous
+artifact plan is deferred until after submission. It remains future engineering
+provenance, but Google Cloud Tasks, private worker execution, job
+retry/cancellation, and durable job-state proof are not prerequisites for the
+judged build. Use
+[`../../final-checklist-planning.md`](../../final-checklist-planning.md) as the
+current pre-submission roadmap.
+
 **Goal:** Convert structured blueprint synthesis into one inspectable durable
 workflow that is accepted through chat, executes through Google Cloud Tasks in
 a private Cloud Run worker, survives duplicate delivery and worker failure,

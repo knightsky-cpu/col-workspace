@@ -13,7 +13,8 @@ Firestore persistence.
 Requests currently remain open while routing, expert execution, synthesis,
 artifact effects, note effects, continuity resolution, response generation, and
 persistence complete. Durable asynchronous jobs and private Cloud Run worker
-execution remain planned Phase 4 work.
+execution are deferred until after submission under the current finalization
+strategy.
 
 ```mermaid
 flowchart TD
@@ -166,7 +167,8 @@ The current source also supports:
 - chat-carried artifact feedback decisions.
 
 Durable background artifact jobs, Cloud Tasks, private worker execution, and
-queued/running/completed/failed/cancelled job states remain planned work.
+queued/running/completed/failed/cancelled job states remain post-submission
+future work.
 
 ## Firestore Responsibility
 
@@ -188,9 +190,9 @@ not the durable memory system.
 - No Dockerfile, `.dockerignore`, production start scripts, or Cloud Run
   service descriptors are present.
 - No Google Cloud Tasks runtime dependency or private worker implementation is
-  present.
-- Durable asynchronous jobs are planned, not implemented.
+  present; that work is deferred until after submission.
+- Durable asynchronous jobs are not part of the current judged-build path.
 - Full production ownership, rate limiting, security headers, retention,
-  deletion, and hosted verification remain Phase 4.
-- Phase 5 documentation and clean-clone evidence remain pending.
-- Phase 6 demo freeze remains pending.
+  deletion, and hosted verification remain production-hardening work.
+- Clean-clone evidence, final submission docs, visual polish, and demo freeze
+  remain pending.
