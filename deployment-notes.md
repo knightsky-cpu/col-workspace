@@ -453,3 +453,138 @@ The user reported: "pass 5 is successful".
 
 Checkpointed with this accepted Pass 5 handoff update. Use `git rev-parse HEAD`
 or the final checkpoint SHA reported after push as the authoritative commit.
+
+## 2026-08-28 - Pass 6: Deployment Packaging
+
+Status: accepted by manual verification.
+
+Previous checkpoint: `47dd6f1b95536eb050438128ed241874e7491060`.
+
+### Scope
+
+- Implemented the selected explicit Dockerfile/container-image packaging path.
+- Added a reproducible local Docker build for the existing FastAPI app.
+- Configured the production container to start Uvicorn on `0.0.0.0:$PORT`
+  without reload.
+- Used `sh -c` only for `${PORT:-8080}` expansion and `exec uvicorn` so
+  Cloud Run signals reach the server process.
+- Excluded local credentials, repository metadata, agent workspace state,
+  caches, tests, docs, screenshots, and evidence from the Docker build context.
+- Did not push an image to Artifact Registry.
+- Did not deploy to Cloud Run.
+- Did not enable Google Cloud APIs.
+- Did not change IAM, OAuth settings, Cloud Run service configuration, runtime
+  environment variables, application source behavior, or frontend code.
+
+### Source Changes
+
+- `Dockerfile`
+  - Added a `python:3.14-slim` runtime image.
+  - Installs runtime dependencies from `requirements.txt`.
+  - Copies the application into `/app`.
+  - Runs as non-root `appuser`.
+  - Exposes port `8080`.
+  - Starts with:
+
+```dockerfile
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+```
+
+- `.dockerignore`
+  - Excludes `.env`, `.env.*`, credential-looking files, `.git`, `.agents`,
+    virtual environments, Python caches, test directories, docs, screenshots,
+    evidence, logs, images, and broad JSON files.
+  - Allows the tracked `firestore.indexes.json` file back into the context.
+
+- `tests/test_deployment_packaging.py`
+  - Added focused static packaging contract tests for the Dockerfile startup
+    command, non-root user, runtime dependency install, absence of reload mode,
+    absence of `GOOGLE_APPLICATION_CREDENTIALS` in the Dockerfile, and required
+    `.dockerignore` exclusions.
+
+### TDD Evidence
+
+- RED command:
+
+```bash
+venv/bin/pytest tests/test_deployment_packaging.py -q
+```
+
+Observed result before implementation: `2 failed`. Both failures were expected:
+`Dockerfile` and `.dockerignore` did not exist.
+
+- GREEN command:
+
+```bash
+venv/bin/pytest tests/test_deployment_packaging.py -q
+```
+
+Observed result after implementation: `2 passed`.
+
+### Focused Verification
+
+```bash
+venv/bin/pytest tests/test_deployment_packaging.py -q
+```
+
+Observed result: `2 passed`.
+
+```bash
+docker build -t agent-col:pass6 .
+```
+
+Observed result: image built and tagged successfully as `agent-col:pass6`.
+The Docker build context was `1.774MB`. Docker emitted only the local
+legacy-builder deprecation warning.
+
+```bash
+docker run --rm --entrypoint sh agent-col:pass6 -c 'test ! -e /app/.env && test ! -d /app/.git && test ! -d /app/.agents && test ! -d /app/venv && test ! -d /app/.pytest_cache && test ! -d /app/scrnshot-evidence && test -d /app/frontend && test -f /app/main.py && test -f /app/requirements.txt'
+```
+
+Observed result: passed. The built image contains required application files and
+does not contain local secrets, repository metadata, agent workspace state,
+virtualenvs, pytest cache, or screenshot evidence.
+
+```bash
+docker run --rm --name agent-col-pass6-smoke -p 8080:8080 -e PORT=8080 -e K_SERVICE=agent-col -e AGENT_COL_AUTH_MODE=google_oidc -e GOOGLE_OAUTH_CLIENT_ID=pass6-local-client -e GOOGLE_CLOUD_PROJECT=project-e1e2a890-4566-48a8-a32 -e GOOGLE_CLOUD_LOCATION=global -e GOOGLE_GENAI_USE_ENTERPRISE=True -e GOOGLE_APPLICATION_CREDENTIALS=/var/run/secrets/google/application_default_credentials.json -v /home/sigmaknight/.config/gcloud/application_default_credentials.json:/var/run/secrets/google/application_default_credentials.json:ro agent-col:pass6
+```
+
+Then, from the host:
+
+```bash
+curl -fsS http://127.0.0.1:8080/
+```
+
+Observed result:
+
+```json
+{"status":"online"}
+```
+
+```bash
+git diff --check
+```
+
+Observed result: passed.
+
+### Limitations
+
+- Starting the container without ADC failed during FastAPI lifespan startup
+  because `MemoryEngine()` constructs a Firestore `AsyncClient()` and Google
+  auth could not find default credentials.
+- The successful local smoke used a read-only host ADC file mount. No ADC file,
+  OAuth client secret, service-account key, access token, or refresh token was
+  copied or baked into the image.
+- Artifact Registry push, Cloud Run deployment, service-account/IAM setup,
+  OAuth deployed-origin configuration, and hosted Google OIDC proof remain
+  deferred to later approved passes.
+
+### Manual Acceptance
+
+The user reported: "pass 6 accepted".
+
+### Checkpoint State
+
+Checkpointed with this accepted Pass 6 deployment packaging update. Use
+`git rev-parse HEAD` or the final checkpoint SHA reported after push as the
+authoritative commit.

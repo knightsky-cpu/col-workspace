@@ -1,0 +1,41 @@
+# Local credentials and environment
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*credentials*
+*service-account*
+application_default_credentials.json
+
+# Repository and agent workspace state
+.git
+.agents
+
+# Python environments and caches
+venv
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Tests, local diagnostics, and evidence
+tests
+live-tests
+docs
+scrnshot-evidence
+screenshots
+evidence
+*.log
+*.png
+*.jpg
+*.jpeg
+
+# JSON files may include local credential exports; allow the tracked Firestore index file.
+*.json
+!firestore.indexes.json
+
+# Keep packaging metadata available to the build.
+!.dockerignore
