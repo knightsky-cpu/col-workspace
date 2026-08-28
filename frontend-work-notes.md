@@ -452,3 +452,45 @@ Limitation:
 Deferred to later bounded passes:
 - Final CSS-only responsive, focus, motion, overflow, and accessibility verification.
 - Non-safe visual-structure plan for the remaining photo-level gaps.
+
+## 2026-08-28 - Accepted Final CSS-Only Responsive And Drawer State Pass
+
+Status: accepted after user visual verification.
+
+Scope:
+- Implemented the final bounded safe CSS-only visual pass.
+- Touched implementation source only in `frontend/styles.css`.
+- Completed the safe CSS-only visual improvement sequence. Remaining photo-level visual fidelity work is non-safe because it requires changes to HTML, JavaScript rendering, component structure, icons, accessibility semantics, Markdown/sanitization, or artifact presentation behavior.
+- Tightened transcript packing with `.chat-transcript { align-content: start; }` so empty vertical space is not stretched through the conversation body.
+- Added mobile/responsive shell corrections for top bar wrapping, development context gate width, stacked workspace grid areas, panel visibility, panel padding, conversation height, message card max width, and composer textarea sizing.
+- Added a reduced-motion guard.
+- Corrected drawer state styling so collapsed rows preserve category heading color while selection/highlight rail/background are tied only to the existing expanded state.
+- Restored the Workspace drawer heading to amber like the other collapsed drawer headings without restoring the old always-on Workspace rail.
+- Preserved HTML, JavaScript, backend routes, API routing, auth, artifacts, notes, memory, chats, persistence, request construction, model behavior, Markdown rendering, drawer behavior, and application state behavior.
+
+CSS surface changed:
+- `.chat-transcript`
+- `.drawer-section[data-section="workspace"] .section-heading h2`
+- `.drawer-section[data-section="work"] .section-heading h2`
+- `.drawer-section[data-section="notes"] .section-heading h2`
+- `.drawer-section[data-section="memory"] .section-heading h2`
+- `.drawer-section[data-section="chats"] .section-heading h2`
+- `.drawer-section:has([aria-expanded="true"]) .section-heading h2`
+- `@media (max-width: 900px)` shell, top bar, context gate, grid, panel, conversation, message-card, and composer rules
+- `@media (prefers-reduced-motion: reduce)`
+
+Verification:
+- Temporary CSS assertion for Workspace drawer heading color/state passed after the focused correction.
+- `git diff --check` passed.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/workspace-view.test.mjs` passed: 2 tests.
+- `node --test tests/frontend/chat-view.test.mjs` passed: 11 tests.
+- `node --test tests/frontend/work-view.test.mjs` passed: 24 tests.
+- `node --test tests/frontend/notes-view.test.mjs` passed: 2 tests.
+- `node --test tests/frontend/memory-view.test.mjs` passed: 8 tests.
+- `node --test tests/frontend/chats-view.test.mjs` passed: 2 tests.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+- Screenshot checks were intentionally not run for this final CSS-only correction because the user performed manual verification and explicitly requested no screenshot checks.
+
+Deferred:
+- Non-safe frontend visual polishing plan for the remaining visual target gaps: real drawer icons and chevrons, richer chat turn metadata, avatar/timestamp layout, artifact header metadata, Preview/Info tabs, artifact action bar, safe Markdown rendering, syntax/table rendering, composer utility icons, and any DOM/state changes needed to match the reference image.
