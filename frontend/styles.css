@@ -402,18 +402,39 @@ p {
 }
 
 .turn-user {
+  justify-self: end;
+  align-self: start;
+  inline-size: fit-content;
+  block-size: fit-content;
+  min-block-size: 0;
+  max-inline-size: min(36rem, 78%);
+  padding: 0.65rem 0.8rem;
+  padding-block: 0.55rem;
+  border: 1px solid rgba(148, 168, 165, 0.2);
+  border-radius: var(--radius);
+  background: rgba(20, 35, 43, 0.78);
   color: var(--text);
+  text-align: left;
+  line-height: 1.45;
   margin-block-end: 0.25rem;
 }
 
 .turn-model {
+  justify-self: start;
+  align-self: start;
+  inline-size: fit-content;
+  block-size: fit-content;
+  min-block-size: 0;
+  max-inline-size: min(44rem, 100%);
   border: 1px solid var(--border-soft);
   border-inline-start: 3px solid var(--accent);
   border-radius: var(--radius);
   background: rgba(12, 24, 31, 0.72);
   color: var(--text);
+  text-align: left;
   line-height: 1.55;
   padding: 1rem 1rem 1rem 1.1rem;
+  padding-block: 0.7rem;
 }
 
 .turn-receipts {

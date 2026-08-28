@@ -288,3 +288,43 @@ Deferred to later bounded passes:
 - Memory and notes drawer styling.
 - Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
 - Activity styling remains dormant/non-visible in the current UI.
+
+## 2026-08-28 - Accepted User Prompt Card And Message Card Sizing Pass
+
+Status: accepted after user visual verification.
+
+Scope:
+- Implemented a minimal CSS-only user-prompt card pass.
+- Touched implementation source only in `frontend/styles.css`.
+- Styled existing `.turn-user` elements as compact right-aligned cards.
+- Preserved left-aligned text inside user prompt cards.
+- Preserved the accepted `.turn-model` teal-rail response treatment from Pass 5.
+- Corrected message card sizing so user and model cards are content-sized in width and height, with max-width caps for long messages.
+- Tightened message-card vertical padding after visual review while leaving the accepted width behavior intact.
+- Did not modify frontend modules, `frontend/index.html`, tests, backend code, chat rendering, Markdown handling, receipts, submit behavior, Enter/Shift+Enter behavior, retry, memory/continuity controls, or request behavior.
+
+CSS surface changed:
+- `.turn-user`
+- `.turn-model`
+
+Verification:
+- Temporary user-card CSS assertion failed before implementation for the missing right-aligned card treatment, then passed after the CSS patch.
+- Temporary sizing assertion failed before implementation for missing content-sized card rules, then passed after the CSS patch.
+- Temporary height-only assertion failed before implementation for missing block-axis sizing rules, then passed after the CSS patch.
+- `git diff --check` passed.
+- `node --test tests/frontend/chat-view.test.mjs` passed: 11 tests.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+
+Screenshot:
+- `/tmp/agent-col-message-card-height.png`
+- The screenshot used a temporary HTML preview generated from the real `frontend/index.html` and current `frontend/styles.css`, with sample transcript content. The in-app Browser plugin reported no available browser, so Microsoft Edge headless was used as the fallback screenshot surface.
+
+Deferred to later bounded passes:
+- Artifact list/detail surfaces.
+- Memory and notes drawer styling.
+- Continuity and memory clarification choice styling.
+- Error and empty-state styling.
+- Responsive, focus, motion, and accessibility verification.
+- Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
+- Activity styling remains dormant/non-visible in the current UI.
