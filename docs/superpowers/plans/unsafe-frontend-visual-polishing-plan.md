@@ -38,7 +38,7 @@
   - Memory: brain/network-like icon, implemented as an icon, not emoji.
   - Chats: message bubble icon.
 - Change highlighted child-subcard selection color toward translucent neon amber. This remains subject to later visual tuning.
-- Add workspace deletion: workspaces need a delete action like memory, artifacts, and notes. Workspaces must have delete only, no archive option.
+- Add workspace deletion: workspaces need a delete action like memory, artifacts, and notes. Workspaces must have delete only, no archive option. Any owned workspace, including the original/default workspace, may be deleted as long as at least one workspace remains.
 - Move the manual Create Artifact form below the artifact list inside the Artifacts drawer section.
 - Add a Create Note button and functionality for user-authored authoritative note proposals. Direct create must bypass the model but must not bypass the collaborative-note security/policy contract; it must create a pending proposal for approval, not an immediately active note.
 - Make memory cards collapsible and collapsed by default. Clicking the card itself expands it to reveal revoke/delete settings; there should be no separate per-card expand button.
@@ -111,9 +111,11 @@
 
 - `main.py:1488-1565` exposes only list and create workspace routes.
 - `database.py:463-579` exposes only `list_workspaces(...)` and `create_workspace(...)`.
+- `database.py:513-524` currently synthesizes the default workspace into the returned list when no stored workspace document with that ID exists, so preserving the original/default workspace forever would conflict with the disposable-workspace model.
 - `frontend/workspace-view.mjs:23-35` renders each workspace as a selectable child button and marks the selected workspace with `aria-current="true"`.
 - `frontend/workspace-view.mjs:37-56` renders only a create form.
 - No delete workspace route, API helper, state transition, or frontend button exists today.
+- Firestore official documentation states that document deletes are supported in transactions, but deleting a document does not automatically delete documents in subcollections. This pass must therefore treat workspace data cleanup as an explicit server-side contract rather than assuming parent-document deletion removes all workspace-owned data. Sources: https://firebase.google.com/docs/firestore/manage-data/transactions and https://firebase.google.com/docs/firestore/manage-data/delete-data.
 
 ### Current Notes Behavior
 
@@ -260,7 +262,9 @@
 
 ## Pass U3: Workspace Permanent Deletion
 
-**Goal:** Add owner-scoped workspace deletion with no archive option.
+**Goal:** Add owner-scoped workspace deletion with no archive option and a last-workspace protection rule.
+
+**Approval status:** Approved by the user on August 28, 2026, after revision from default-workspace protection to last-workspace protection. Implementation is authorized for this bounded pass only; later passes still require separate approval.
 
 **Expected files:**
 - Modify: `schemas.py`
@@ -280,17 +284,24 @@
 **Implementation outline:**
 - Add `DELETE /api/users/{user_id}/workspaces/{workspace_id}`.
 - Require resolved effective user ownership exactly like list/create routes.
-- Reject deletion of the default workspace unless the approved pass explicitly chooses replacement/default behavior.
+- Enforce the invariant server-side: deletion is allowed for any owned workspace, including the original/default workspace, when at least one other owned workspace remains; deletion is rejected when it would leave zero workspaces.
+- Do not make `is_default` or the derived original workspace ID a deletion blocker. The default/original workspace is disposable; only the final remaining workspace is protected.
+- Use a Firestore transaction or equivalent server-side read-before-delete guard for the workspace-count check so two concurrent deletes cannot both pass based on stale list state.
 - Define deletion semantics explicitly: remove the workspace metadata record and fail closed if dependent workspace data would be orphaned without a documented cleanup strategy.
-- Because workspace subcollections may include notes/artifacts/chat state, do not implement broad recursive deletion until the data-retention and orphaning contract is approved.
-- Add frontend Delete action to workspace cards with confirmation.
+- Because workspace subcollections may include notes/artifacts/chat state, do not implement broad recursive deletion until the data-retention and orphaning contract is approved and testable.
+- Add frontend Delete action to workspace child cards with confirmation.
+- Disable or omit Delete when the current list has one workspace, while keeping the backend as the authority for the last-workspace rule.
+- If the deleted workspace was selected, refresh the workspace list and select a surviving workspace through the existing `selectWorkspace(...)` context-reset path.
 - Do not add archive.
 
 **RED tests:**
 - Backend route returns 404/403-style bounded error for non-owned or missing workspace.
-- Backend route deletes an owned non-default workspace and list no longer returns it.
-- Deleting default workspace is rejected with a bounded error unless a replacement policy is approved.
-- Frontend renders Delete for non-default workspace cards and does not render Archive.
+- Backend route deletes an owned non-final workspace and list no longer returns it.
+- Backend route deletes the original/default workspace when another workspace remains.
+- Backend route rejects deletion of the last remaining workspace with a bounded error.
+- Concurrent delete regression: two delete attempts against the final two workspaces cannot both succeed and leave zero workspaces.
+- Frontend renders Delete for workspace child cards when more than one workspace exists and does not render Archive.
+- Frontend omits or disables Delete for the final remaining workspace.
 - Frontend deletion refreshes selected workspace safely when the deleted workspace was selected.
 
 **Verification:**
@@ -300,10 +311,12 @@
 - `git diff --check`
 
 **Manual targets:**
-1. Create a throwaway workspace, delete it, and confirm it disappears.
+1. Create at least two workspaces, delete either workspace, and confirm it disappears.
 2. Confirm no Archive option exists for workspaces.
-3. Confirm default/current workspace deletion behavior matches the approved policy.
-4. Confirm chats, notes, memory, and artifacts for other workspaces are unchanged.
+3. Confirm the original/default workspace can be deleted when another workspace remains.
+4. Confirm deleting the currently selected workspace lands on a surviving workspace and resets the visible workspace context.
+5. Confirm the last remaining workspace cannot be deleted and presents a bounded user-facing error or disabled delete control.
+6. Confirm chats, notes, memory, and artifacts for other workspaces are unchanged.
 
 ## Pass U4: Direct User-Authored Note Proposal Creation
 
