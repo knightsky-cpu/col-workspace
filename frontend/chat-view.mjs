@@ -154,6 +154,13 @@ export function createChatView(elements, handlers) {
     event.preventDefault();
     handlers.onSubmit(elements.input.value);
   });
+  elements.input.addEventListener("keydown", (event) => {
+    if ((event.key !== "Enter" && event.key !== "Return") || event.shiftKey) {
+      return;
+    }
+    event.preventDefault();
+    elements.form.requestSubmit();
+  });
   elements.input.addEventListener("input", updateCharacterCount);
   elements.retryButton.addEventListener("click", () => {
     handlers.onRetry();

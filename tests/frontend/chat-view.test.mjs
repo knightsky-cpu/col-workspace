@@ -261,6 +261,88 @@ test("createChatView updates the character counter from prompt input", () => {
   assert.equal(counter.textContent, "5 / 10000");
 });
 
+test("createChatView submits the existing form path once on Enter", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+  const submitted = [];
+  let requestSubmitCount = 0;
+
+  form.requestSubmit = () => {
+    requestSubmitCount += 1;
+    form.onsubmit({ preventDefault() {} });
+  };
+
+  createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: (message) => submitted.push(message),
+    onRetry: () => {},
+  });
+
+  input.value = "Explain the current workspace.";
+  let defaultPrevented = false;
+  input.onkeydown({
+    key: "Enter",
+    shiftKey: false,
+    preventDefault() {
+      defaultPrevented = true;
+    },
+  });
+
+  assert.equal(defaultPrevented, true);
+  assert.equal(requestSubmitCount, 1);
+  assert.deepEqual(submitted, ["Explain the current workspace."]);
+});
+
+test("createChatView leaves Shift+Enter to the textarea newline behavior", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+  let requestSubmitCount = 0;
+  let defaultPrevented = false;
+
+  form.requestSubmit = () => {
+    requestSubmitCount += 1;
+  };
+
+  createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  input.value = "line one\n";
+  input.onkeydown({
+    key: "Enter",
+    shiftKey: true,
+    preventDefault() {
+      defaultPrevented = true;
+    },
+  });
+
+  assert.equal(defaultPrevented, false);
+  assert.equal(requestSubmitCount, 0);
+  assert.equal(input.value, "line one\n");
+});
+
 test("createChatView scrolls the transcript to the latest rendered turn", () => {
   const form = node("form");
   const input = node("textarea");

@@ -118,6 +118,28 @@ Screenshot:
 - `/tmp/agent-col-workspace-indicator.png`
 - The screenshot used a temporary HTML preview with current real HTML/CSS and injected sample indicator text.
 
+## 2026-08-28 - Accepted Composer Keyboard Submit Pass
+
+Status: accepted after user verification.
+
+Scope:
+- Implemented a minimal composer keyboard-submit behavior pass.
+- Pressing Enter or Return while the message textarea is focused submits through the existing form submit path.
+- Pressing Shift+Enter remains normal textarea newline behavior and does not submit.
+- Reused the existing `createChatView` form submit listener and `app.mjs` submit path instead of adding a second chat-request path.
+- Preserved request construction, idempotency, auth, retry behavior, character limit display, pending-turn rules, Send button behavior, persistence, and backend behavior.
+
+Source changed:
+- `frontend/chat-view.mjs`: added a textarea `keydown` listener that calls `elements.form.requestSubmit()` for Enter/Return without Shift.
+- `tests/frontend/chat-view.test.mjs`: added focused tests for Enter submitting once through the existing form path and Shift+Enter not submitting.
+
+Verification:
+- `node --test tests/frontend/chat-view.test.mjs` failed before implementation because the keydown handler was absent, then passed after implementation: 11 tests.
+- `git diff --check` passed.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+- `node --test tests/frontend/requests.test.mjs` passed: 19 tests.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+
 ## 2026-08-28 - Accepted Left Drawer Density And Navigation Rows Pass
 
 Status: accepted after user visual verification.
