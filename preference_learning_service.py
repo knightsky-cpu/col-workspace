@@ -97,13 +97,8 @@ class PreferenceLearningService:
             extracted = await self._extractor.extract(command)
         except Exception as exc:
             logger.error(
-                "Preference learning extraction failed "
-                "(%s, user_id=%s, project_id=%s, session_id=%s, turn_id=%s).",
+                "Preference learning extraction failed (%s).",
                 type(exc).__name__,
-                command.user_id,
-                command.project_id,
-                command.session_id,
-                command.turn_id,
             )
             return PreferenceLearningResult()
         if extracted is None:
@@ -139,13 +134,8 @@ class PreferenceLearningService:
                 await self._database.save_preference_hypothesis(hypothesis)
         except Exception as exc:
             logger.error(
-                "Preference learning capture failed "
-                "(%s, user_id=%s, project_id=%s, session_id=%s, turn_id=%s).",
+                "Preference learning capture failed (%s).",
                 type(exc).__name__,
-                command.user_id,
-                command.project_id,
-                command.session_id,
-                command.turn_id,
             )
             return PreferenceLearningResult()
 

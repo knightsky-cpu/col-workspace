@@ -71,7 +71,7 @@ The user reported: "pass successful".
 
 ### Checkpoint State
 
-Not checkpointed yet in this note. The accepted source changes and this deployment note are ready for an explicit GitHub checkpoint request.
+Checkpointed to `origin/main` at `71b8d5b69246d99be76183afe0e70fd537cb01c4`.
 
 ## 2026-08-28 - Pass 4: HTTP Body Limits, Scoped Rate Limiting, And Security Headers
 
@@ -175,7 +175,7 @@ The user reported: "Pass 4: accepted."
 
 ### Checkpoint State
 
-Not checkpointed yet in this note. The accepted source changes and this deployment note are ready for an explicit GitHub checkpoint request.
+Checkpointed to `origin/main` at `5554d28bd5f662a0bc6e3aebc75d792e088e33de`.
 
 ## 2026-08-28 - Pass 2: Ownership Audit And Gap Closure
 
@@ -357,4 +357,99 @@ The user accepted Pass 3 from automated verification and explicitly deferred liv
 
 ### Checkpoint State
 
-Not checkpointed yet in this note. The accepted source changes and this deployment note are ready for an explicit GitHub checkpoint request.
+Checkpointed to `origin/main` at `cba0f7d77eb21b53365deec70cabd3f4060437f9`.
+
+## 2026-08-28 - Pass 5: Production Logging Privacy Audit
+
+Status: accepted by manual verification.
+
+Previous checkpoint: `5554d28bd5f662a0bc6e3aebc75d792e088e33de`.
+
+### Scope
+
+- Audited production Python logging call sites for content-bearing or identity-bearing logs.
+- Patched only two source-proven leak surfaces.
+- Did not change Cloud Logging configuration, retention policy, deployment configuration, Google auth behavior, or hosted verification.
+- Left frontend behavior unchanged; `frontend/` has no `console.*` logging call sites in the audited source.
+
+### Source Changes
+
+- `preference_learning_service.py`
+  - Preference extraction failure logs no longer include `user_id`, `project_id`, `session_id`, or `turn_id`.
+  - Preference capture failure logs no longer include `user_id`, `project_id`, `session_id`, or `turn_id`.
+  - Logs preserve the exception class for operational diagnosis.
+
+- `generic_artifact_service.py`
+  - Stored artifact content validation warnings no longer stringify full Pydantic `ValidationError` objects.
+  - Stored artifact metadata validation warnings no longer stringify full Pydantic `ValidationError` objects.
+  - Logs preserve the failure location and exception class without including stored artifact values.
+
+- `tests/test_preference_learning_service.py`
+  - Added canary coverage proving preference extraction/capture failure logs omit internal Google-style user IDs, project/session/turn/source-message IDs, user messages, model responses, and backend exception text.
+
+- `tests/test_generic_artifact_service.py`
+  - Added canary coverage proving generic artifact content/metadata validation logs omit artifact IDs, project IDs, artifact content, filenames, display labels, and invalid stored metadata values.
+
+### TDD Evidence
+
+- RED command:
+
+```bash
+venv/bin/pytest tests/test_preference_learning_service.py tests/test_generic_artifact_service.py -k "extraction_failure_is_no_effect or capture_failure_logs_without_private_identifiers_or_content or generic_artifact_content_validation_logs_no_private_data or generic_artifact_metadata_validation_logs_no_private_data"
+```
+
+Observed result before implementation: `4 failed, 13 deselected`. Failures proved:
+
+- preference-learning logs exposed `google--109876543210`, project ID, session ID, and turn ID;
+- generic artifact validation logs exposed Pydantic input values including artifact content and invalid metadata.
+
+- GREEN command:
+
+```bash
+venv/bin/pytest tests/test_preference_learning_service.py tests/test_generic_artifact_service.py -k "extraction_failure_is_no_effect or capture_failure_logs_without_private_identifiers_or_content or generic_artifact_content_validation_logs_no_private_data or generic_artifact_metadata_validation_logs_no_private_data"
+```
+
+Observed result after implementation: `4 passed, 13 deselected`.
+
+### Focused Verification
+
+```bash
+venv/bin/pytest tests/test_preference_learning_service.py tests/test_generic_artifact_service.py
+```
+
+Observed result: `17 passed`.
+
+```bash
+venv/bin/pytest tests/test_main.py -k "preference_learning or generic_artifact or logs"
+```
+
+Observed result: `22 passed, 189 deselected, 1 warning`.
+
+```bash
+git diff --check
+```
+
+Observed result: passed.
+
+The one warning is the existing dependency/runtime `BaseAgentConfig` deprecation warning and was not introduced by this pass.
+
+### Logging Audit Findings
+
+- Fixed: `preference_learning_service.py` logged request identifiers on failure.
+- Fixed: `generic_artifact_service.py` logged full validation error details that can include persisted artifact input values.
+- Verified source-backed: `main.py`, `synthesis.py`, `generic_artifact_generation.py`, `source_expert_service.py`, `working_state_service.py`, `requirements_verification_service.py`, `computational_expert_service.py`, `research_expert_service.py`, `supervisor_runtime.py`, `agent_col_turn_service.py`, and `database.py` production logs use fixed messages plus exception class, bounded counts, operation labels, or allowlisted enum reasons.
+- Verified source-backed: no `console.*` logging call sites exist in `frontend/`.
+
+### Limitations
+
+- Hosted Cloud Logging canary verification is still required after Cloud Run deployment because source tests cannot prove what Cloud Run request/container logs will contain.
+- Cloud Logging retention, exclusions, sinks, and log-bucket settings remain infrastructure decisions for the deployment phase.
+
+### Manual Acceptance
+
+The user reported: "pass 5 is successful".
+
+### Checkpoint State
+
+Checkpointed with this accepted Pass 5 handoff update. Use `git rev-parse HEAD`
+or the final checkpoint SHA reported after push as the authoritative commit.

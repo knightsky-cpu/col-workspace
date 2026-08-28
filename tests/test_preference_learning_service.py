@@ -107,12 +107,84 @@ async def test_extraction_failure_is_no_effect(caplog):
         extractor=FailingExtractor(),
         clock=lambda: datetime(2026, 8, 28, tzinfo=UTC),
     )
+    caplog.set_level("ERROR", logger="preference_learning_service")
 
-    result = await service.capture(command())
+    result = await service.capture(
+        command(
+            user_id="google--109876543210",
+            project_id="private-project",
+            session_id="private-session",
+            turn_id="private-turn",
+            source_message_id="private-source-message",
+            user_message="private user message",
+            model_response="private model response",
+        )
+    )
 
     assert result.observation is None
     assert result.surfaced_hypothesis is None
-    assert "private response text" not in caplog.text
+    assert "RuntimeError" in caplog.text
+    for private_marker in [
+        "google--109876543210",
+        "private-project",
+        "private-session",
+        "private-turn",
+        "private-source-message",
+        "private user message",
+        "private model response",
+        "private response text",
+    ]:
+        assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_capture_failure_logs_without_private_identifiers_or_content(
+    caplog,
+):
+    from preference_learning_service import PreferenceLearningService
+
+    class FailingDatabase(FakeDatabase):
+        async def get_preference_hypothesis(
+            self,
+            user_id,
+            project_id,
+            hypothesis_id,
+        ):
+            raise RuntimeError("private database detail")
+
+    service = PreferenceLearningService(
+        database=FailingDatabase(),
+        extractor=FakeExtractor(),
+        clock=lambda: datetime(2026, 8, 28, tzinfo=UTC),
+    )
+    caplog.set_level("ERROR", logger="preference_learning_service")
+
+    result = await service.capture(
+        command(
+            user_id="google--109876543210",
+            project_id="private-project",
+            session_id="private-session",
+            turn_id="private-turn",
+            source_message_id="private-source-message",
+            user_message="private user message",
+            model_response="private model response",
+        )
+    )
+
+    assert result.observation is None
+    assert result.surfaced_hypothesis is None
+    assert "RuntimeError" in caplog.text
+    for private_marker in [
+        "google--109876543210",
+        "private-project",
+        "private-session",
+        "private-turn",
+        "private-source-message",
+        "private user message",
+        "private model response",
+        "private database detail",
+    ]:
+        assert private_marker not in caplog.text
 
 
 @pytest.mark.asyncio

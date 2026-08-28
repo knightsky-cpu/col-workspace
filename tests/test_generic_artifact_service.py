@@ -499,3 +499,95 @@ async def test_generic_artifact_service_rejects_blueprint_documents() -> None:
                 artifact_id="blueprint--abc",
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_content_validation_logs_no_private_data(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        ArtifactReadStateError,
+        GenericArtifactReadService,
+        GetGenericArtifactCommand,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="private-artifact-id",
+                document={
+                    **stored_single_file_document(),
+                    "content": "private artifact content\x00",
+                    "filename": "private_filename.py",
+                    "display_label": "Private Artifact Label",
+                },
+            ),
+        )
+    )
+    caplog.set_level("WARNING", logger="generic_artifact_service")
+
+    with pytest.raises(ArtifactReadStateError):
+        await GenericArtifactReadService(database=database).get_artifact(
+            GetGenericArtifactCommand(
+                project_id="private-project-id",
+                artifact_id="private-artifact-id",
+            )
+        )
+
+    assert "Stored generic artifact content is invalid" in caplog.text
+    for private_marker in [
+        "private-artifact-id",
+        "private-project-id",
+        "private artifact content",
+        "private_filename.py",
+        "Private Artifact Label",
+    ]:
+        assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_metadata_validation_logs_no_private_data(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        ArtifactReadStateError,
+        GenericArtifactReadService,
+        GetGenericArtifactCommand,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="private-artifact-id",
+                document={
+                    **stored_single_file_document(),
+                    "originating_session_id": "private session id",
+                    "display_label": "Private Artifact Label",
+                    "filename": "private_filename.py",
+                    "content": "private artifact content",
+                },
+            ),
+        )
+    )
+    caplog.set_level("WARNING", logger="generic_artifact_service")
+
+    with pytest.raises(ArtifactReadStateError):
+        await GenericArtifactReadService(database=database).get_artifact(
+            GetGenericArtifactCommand(
+                project_id="private-project-id",
+                artifact_id="private-artifact-id",
+            )
+        )
+
+    assert "Stored generic artifact metadata is invalid" in caplog.text
+    for private_marker in [
+        "private-artifact-id",
+        "private-project-id",
+        "private session id",
+        "private_filename.py",
+        "Private Artifact Label",
+        "private artifact content",
+    ]:
+        assert private_marker not in caplog.text

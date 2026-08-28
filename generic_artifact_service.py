@@ -308,7 +308,7 @@ class GenericArtifactReadService:
         except ValidationError as exc:
             logger.warning(
                 "Stored generic artifact content is invalid (%s).",
-                exc,
+                type(exc).__name__,
             )
             raise ArtifactReadStateError(
                 "Stored generic artifact is invalid."
@@ -355,7 +355,7 @@ class GenericArtifactReadService:
         except ValidationError as exc:
             logger.warning(
                 "Stored generic artifact metadata is invalid (%s).",
-                exc,
+                type(exc).__name__,
             )
             raise ArtifactReadStateError(
                 "Stored generic artifact is invalid."
