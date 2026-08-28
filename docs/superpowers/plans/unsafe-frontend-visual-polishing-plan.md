@@ -30,18 +30,19 @@
 ### Left Drawer
 
 - Replace text section `Expand` / `Collapse` controls with arrow or chevron icon treatment while preserving accessible expanded/collapsed state.
+- Parent menu cards are expandable disclosure containers, not selectable items. Selection/highlight styling belongs to child subcards that actually select or open records.
 - Add icons to the left of parent menu card titles. Requested icons should match the screenshot as closely as practical:
   - Workspace: folder-like icon.
   - Artifacts: cube/package-like icon.
   - Notes: document/list icon.
   - Memory: brain/network-like icon, implemented as an icon, not emoji.
   - Chats: message bubble icon.
-- Change highlighted selection/expanded color toward translucent neon amber. This remains subject to later visual tuning.
+- Change highlighted child-subcard selection color toward translucent neon amber. This remains subject to later visual tuning.
 - Add workspace deletion: workspaces need a delete action like memory, artifacts, and notes. Workspaces must have delete only, no archive option.
 - Move the manual Create Artifact form below the artifact list inside the Artifacts drawer section.
 - Add a Create Note button and functionality for user-authored authoritative note proposals. Direct create must bypass the model but must not bypass the collaborative-note security/policy contract; it must create a pending proposal for approval, not an immediately active note.
 - Make memory cards collapsible and collapsed by default. Clicking the card itself expands it to reveal revoke/delete settings; there should be no separate per-card expand button.
-- Use the same card-click-to-expand convention for left drawer parent/child subcards where practical.
+- Use the same card-click-to-expand convention for left drawer parent cards and for Notes, Memory, and Chat child subcards where practical.
 - Drawer-level collapse/expand can be iconized, but drawer behavior must remain intact.
 
 ### Chat Surface
@@ -93,22 +94,24 @@
 
 ### Current Static Shell
 
-- `frontend/index.html:12-20` has auth status, `Agent Col`, workspace indicator, and a plain text New conversation button. No pencil-in-box icon exists today.
-- `frontend/index.html:58-180` has drawer rows for Workspace, Artifacts, Notes, Memory, and Chats. Each has an `h2` plus a text `Expand` button. No leading icon or chevron icon exists today.
-- `frontend/index.html:89-143` places the `Create Artifact` form before `<div data-work-list>`, so moving Create Artifact below artifacts requires HTML/view work.
+- `frontend/index.html:12-26` has auth status, `Agent Col`, workspace indicator, and a New conversation button with an approved non-emoji inline SVG icon.
+- `frontend/index.html:75-227` has parent drawer cards for Workspace, Artifacts, Notes, Memory, and Chats. Each parent card header is now one native full-width `button.section-heading[data-section-toggle]` with an icon, label, integrated chevron, and `aria-expanded`.
+- `frontend/index.html:108-163` still places the `Create Artifact` form before `<div data-work-list>`, so moving Create Artifact below artifacts remains HTML work.
 - `frontend/index.html:184-213` contains the conversation intro, transcript, composer, character counter, and send button. There is no start-title icon, attachment input, drop target, paperclip button, or attachment state.
 - `frontend/index.html:217-227` has a right artifact drawer heading and detail target. It has no selected-artifact header card, metadata chips, Preview/Info tabs, Markdown rendering, or bottom action bar.
 
 ### Current Drawer Behavior
 
-- `frontend/app.mjs:343-384` owns drawer and section text/`aria-expanded` updates. Replacing visible Expand/Collapse text with icon controls touches behavior and accessibility logic.
-- `frontend/workspace-layout.mjs` owns left/right drawer and section expansion state. Card-level disclosure must reuse or extend this pattern rather than creating hidden parallel state.
+- `frontend/app.mjs:343-395` owns drawer and section `aria-expanded` updates. Parent drawer card disclosure is implemented through the full-card `data-section-toggle` button, not through separate small Expand buttons.
+- `frontend/app.mjs:1179-1186` attaches click behavior to every `data-section-toggle` button.
+- `frontend/workspace-layout.mjs` owns left/right drawer and independent section expansion state. It intentionally does not own a selected/highlighted parent drawer state.
+- Parent drawer cards are expandable containers. They are not selectable menu items. Visual active/current highlighting belongs to selectable child subcards and should use the existing selected/current signals, such as `aria-current`.
 
 ### Current Workspace Behavior
 
 - `main.py:1488-1565` exposes only list and create workspace routes.
 - `database.py:463-579` exposes only `list_workspaces(...)` and `create_workspace(...)`.
-- `frontend/workspace-view.mjs:23-35` renders each workspace as a select button.
+- `frontend/workspace-view.mjs:23-35` renders each workspace as a selectable child button and marks the selected workspace with `aria-current="true"`.
 - `frontend/workspace-view.mjs:37-56` renders only a create form.
 - No delete workspace route, API helper, state transition, or frontend button exists today.
 
@@ -122,6 +125,8 @@
 - `collaborative_note_policy.py:11-17` restricts note kinds to `decision`, `requirement`, `constraint`, `task_state`, and `working_context`.
 - `collaborative_note_policy.py:118-142` normalizes title/body text, limits title/body length, rejects control characters, requires note text to contain a letter, and reuses prohibited memory patterns plus note-specific blocked phrases.
 - `frontend/notes-view.mjs:16-66` renders pending proposals with approve/reject.
+- `frontend/notes-view.mjs:68-107` renders note-list child buttons and marks the selected note with `aria-current="true"`.
+- `frontend/notes-view.mjs:172-215` renders selected note detail with Archive/Restore/Delete actions immediately visible.
 - `frontend/notes-view.mjs:110-150` has correction proposal UI for selected notes.
 - There is no direct Create Note button or direct user-authored note proposal route today.
 
@@ -134,6 +139,7 @@
 
 ### Current Chat Behavior
 
+- `frontend/chats-view.mjs:39-59` renders chat-session child buttons and marks the selected session with `aria-current="true"`.
 - `frontend/chat-view.mjs:69-82` renders each turn as `article.turn`, `p.turn-user`, `p.turn-model`, and `div.turn-receipts`.
 - `frontend/chat-view.mjs:75-76` writes user/model text via `setText`.
 - `frontend/render.mjs:1-3` writes `textContent`, preserving current HTML-injection safety.
@@ -147,7 +153,7 @@
 
 ### Current Artifact Viewer Behavior
 
-- `frontend/work-view.mjs:345-407` renders artifact list and selected state.
+- `frontend/work-view.mjs:345-407` renders artifact-list child buttons and marks the selected artifact with `aria-current="true"`.
 - `frontend/work-view.mjs:468-490` renders single-file artifact content as raw text in `<pre><code>` using `setText`.
 - `frontend/work-view.mjs:719-763` renders artifact detail, export controls, content/detail, lifecycle/edit/version/feedback forms, and feedback history.
 - `frontend/work-view.mjs:131-263` owns export strings and download behavior. Preview rendering must not alter exports.
@@ -209,35 +215,48 @@
 3. Start a new conversation; behavior remains unchanged.
 4. Confirm no emoji appears anywhere in the UI.
 
-## Pass U2: Drawer Card Selection Color And Artifact Form Position
+## Pass U2: Drawer Subcard Selection Color, Compact Actions, And Artifact Form Position
 
-**Goal:** Apply translucent neon amber selection/expanded styling and move manual Create Artifact below the artifact list.
+**Goal:** Move active/current visual emphasis from parent drawer cards to selectable child subcards, tune those selected child subcards to translucent neon amber, reduce drawer action-button size, and move manual Create Artifact below the artifact list.
 
 **Expected files:**
 - Modify: `frontend/index.html`
 - Modify: `frontend/styles.css`
 - Test: `tests/frontend/workspace-static.test.mjs`
 - Test: `tests/frontend/work-view.test.mjs`
+- Test: `tests/frontend/workspace-view.test.mjs`
+- Test: `tests/frontend/chats-view.test.mjs`
+- Test: `tests/frontend/notes-view.test.mjs`
+- Test: `tests/frontend/memory-view.test.mjs`
 
 **Implementation outline:**
 - Move `<form data-artifact-create-form>` below `<div data-work-list>`.
 - Preserve all form fields, names, `required`, `maxlength`, select options, and `data-artifact-create-form`.
-- Update CSS selected/current/expanded drawer treatment toward translucent amber while keeping teal available for primary action and model rails only where approved.
+- Treat parent drawer cards as expandable disclosure containers only. Do not add parent selection/highlight state.
+- Update selected/current child subcard treatment toward translucent neon amber using existing selected signals such as `aria-current="true"`.
+- Apply child subcard amber selected styling to workspace buttons, artifact buttons, note buttons, and chat-session buttons where they are currently selectable.
+- Keep expanded parent drawer cards visually open but not selected. If expanded-parent styling remains, it must be subordinate to child selected/current styling and must not use the stronger selected-card treatment.
+- Reduce visible drawer action buttons inside child/detail cards to approximately half their current visual weight using compact sizing. This applies to existing note, memory, artifact, and drawer secondary action buttons where the pass can do so with CSS only.
+- Do not hide action buttons in this pass; hiding actions behind collapsed cards belongs to Pass U5.
 - Do not change artifact request construction or backend routes.
 
 **RED tests:**
 - Static test proves `data-work-list` appears before `data-artifact-create-form`.
 - Existing artifact create request tests remain unchanged and pass after the DOM move.
-- CSS/static assertion proves amber selected/expanded variables or selectors exist without removing current hooks.
+- CSS/static assertion proves selected child subcards use amber selected/current styling keyed to `aria-current="true"`.
+- CSS/static assertion proves parent drawer-card expanded styling is not described as selectable and does not use the primary selected subcard selector.
+- CSS/static assertion proves compact drawer action button styles apply to `.notes-actions`, `.memory-actions`, export/action controls, and drawer list/detail controls without changing handlers.
 
 **Verification:**
-- `node --test tests/frontend/workspace-static.test.mjs tests/frontend/work-view.test.mjs`
+- `node --test tests/frontend/workspace-static.test.mjs tests/frontend/work-view.test.mjs tests/frontend/workspace-view.test.mjs tests/frontend/chats-view.test.mjs tests/frontend/notes-view.test.mjs tests/frontend/memory-view.test.mjs`
 - `git diff --check`
 
 **Manual targets:**
 1. Open Artifacts drawer; list appears above Create Artifact.
 2. Create a manual artifact; payload and result remain unchanged.
-3. Selected/expanded drawer cards read as translucent amber, not teal.
+3. Select a workspace, artifact, note, or chat subcard; the selected child subcard reads as translucent amber rather than teal.
+4. Parent menu cards expand/collapse but do not read as selected menu items.
+5. Existing action buttons in drawer cards/details are visibly smaller and less dominant.
 
 ## Pass U3: Workspace Permanent Deletion
 
@@ -337,48 +356,62 @@
 4. Try prohibited or overlong content and confirm it is rejected safely.
 5. Confirm no model response is generated by direct note creation.
 
-## Pass U5: Collapsible Memory And Left-Drawer Subcards
+## Pass U5: Standard Collapsible Notes, Memory, And Chat Subcards
 
-**Goal:** Make memory and left-drawer child cards collapsed by default, with card-click disclosure and hidden actions until expanded.
+**Goal:** Establish one standard child-card disclosure convention for Notes, Memory, and Chats: cards are collapsed by default, clicking the collapsed card expands it, and each card's respective actions appear only while expanded.
 
 **Expected files:**
 - Modify: `frontend/memory-view.mjs`
 - Modify: `frontend/notes-view.mjs`
-- Modify: `frontend/workspace-view.mjs`
-- Modify: `frontend/work-view.mjs` only for artifact list/card disclosure if approved
+- Modify: `frontend/chats-view.mjs`
 - Modify: `frontend/state.mjs`
 - Modify: `frontend/styles.css`
 - Test: `tests/frontend/memory-view.test.mjs`
 - Test: `tests/frontend/notes-view.test.mjs`
-- Test: `tests/frontend/workspace-view.test.mjs`
-- Test: `tests/frontend/work-view.test.mjs` if artifact cards are included
+- Test: `tests/frontend/chats-view.test.mjs`
+- Test: `tests/frontend/state.test.mjs`
 
 **Implementation outline:**
 - Add frontend-only expanded-card state keyed by stable record IDs.
-- Render each card as a native button or a focusable card with a native button control. Prefer native buttons.
-- Clicking the card toggles details and action controls.
+- Render each collapsible subcard with a native button header or a focusable card with a native button control. Prefer native buttons.
+- Clicking the collapsed card/header toggles details and action controls.
 - Set accurate `aria-expanded` and `aria-controls`.
 - Keep destructive Revoke/Delete confirmation checks unchanged.
-- Keep pending proposal Approve/Reject hidden until expanded if approved; otherwise only hide destructive settings for active records.
-- Apply the same convention consistently to Workspace, Notes, Memory, Chats, and optionally Artifacts only where it does not hide primary navigation too deeply.
+- Notes:
+  - Note-list child buttons still select notes; selected note detail card becomes collapsed by default and expands to show Archive/Restore/Delete and correction controls.
+  - Pending note proposal cards collapse by default and expand to show Approve/Reject.
+- Memory:
+  - Active memory cards collapse by default and expand to show Revoke/Delete.
+  - Pending memory proposal cards collapse by default and expand to show Approve/Reject.
+- Chats:
+  - Chat-session cards collapse by default. The collapsed surface should still show the preview/title; expansion reveals timestamp/metadata and any future chat-session actions.
+  - Selecting/opening a chat must remain reachable and unambiguous. If one click cannot safely both select and expand, split the card into a primary Select/Open button plus a details disclosure button and return for approval.
+- Exclusions:
+  - Workspace child buttons remain simple select buttons; they do not expand in this pass.
+  - Artifact child buttons already select/open artifact detail and do not get an additional collapse layer in this pass.
+  - Action-button size reduction is handled in Pass U2 and should be preserved here.
 
 **RED tests:**
 - Memory active preference actions are absent/hidden before expansion.
 - Clicking a memory card reveals Revoke/Delete controls and keeps confirmation behavior.
-- Pending proposal card expansion reveals Approve/Reject controls if included in the approved scope.
-- Keyboard activation toggles the same state.
-- Existing human label and ID-secondary tests still pass.
+- Pending memory proposal card expansion reveals Approve/Reject controls.
+- Pending note proposal card expansion reveals Approve/Reject controls.
+- Selected note detail card expansion reveals Archive/Restore/Delete and correction controls.
+- Chat session collapsed card shows the human preview; expansion reveals metadata without breaking session opening.
+- Keyboard activation toggles the same state where the card is a disclosure control.
+- Existing human label, selected/current state, and ID-secondary tests still pass.
 
 **Verification:**
-- `node --test tests/frontend/memory-view.test.mjs tests/frontend/notes-view.test.mjs tests/frontend/workspace-view.test.mjs`
-- Add `tests/frontend/work-view.test.mjs` only if artifact cards are included.
+- `node --test tests/frontend/memory-view.test.mjs tests/frontend/notes-view.test.mjs tests/frontend/chats-view.test.mjs tests/frontend/state.test.mjs`
 - `git diff --check`
 
 **Manual targets:**
 1. Open Memory; cards are collapsed by default.
-2. Click a memory card; settings appear.
-3. Revoke/Delete still require confirmation.
-4. Notes, Workspace, Chats, and included child cards use the same mechanical convention without making navigation confusing.
+2. Click a memory card; Revoke/Delete settings appear and still require confirmation.
+3. Open Notes; pending proposal and selected-note detail actions are hidden until the relevant card is expanded.
+4. Open Chats; chat cards are not visually overwhelming, and metadata/details appear only after expansion.
+5. Confirm Workspace child buttons still only select workspaces.
+6. Confirm Artifact child buttons still only select/open artifacts.
 
 ## Pass U6: Chat Pending Status Wave Animation
 

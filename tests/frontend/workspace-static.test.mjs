@@ -32,6 +32,15 @@ test("workspace exposes a bounded generic artifact creation form", () => {
   assert.match(html, /name="source_text"/);
 });
 
+test("artifacts drawer lists artifacts before the create form", () => {
+  const listIndex = html.indexOf("data-work-list");
+  const createIndex = html.indexOf("data-artifact-create-form");
+
+  assert.notEqual(listIndex, -1);
+  assert.notEqual(createIndex, -1);
+  assert.equal(listIndex < createIndex, true);
+});
+
 test("workspace print stylesheet prints only the artifact detail surface", () => {
   assert.match(styles, /@media print/);
   assert.match(styles, /\.work-panel/);
@@ -88,4 +97,15 @@ test("drawer parent cards are full header disclosure controls without selected s
   }
 
   assert.doesNotMatch(html, /<button type="button" class="drawer-toggle" data-section-toggle/);
+});
+
+test("drawer selected child subcards use amber current styling and compact actions", () => {
+  assert.match(styles, /\.work-list-item\[aria-current="true"\]/);
+  assert.match(styles, /border-inline-start-color:\s*var\(--amber\)/);
+  assert.match(styles, /background:\s*var\(--amber-soft\)/);
+  assert.doesNotMatch(styles, /\.work-list-item\[aria-current="true"\]\s*\{[\s\S]*?border-inline-start-color:\s*var\(--accent\)/);
+
+  assert.match(styles, /\.memory-actions button,\s*\.notes-actions button/);
+  assert.match(styles, /min-height:\s*1\.35rem/);
+  assert.match(styles, /font-size:\s*0\.72rem/);
 });

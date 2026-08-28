@@ -654,18 +654,6 @@ p {
   color: var(--amber);
 }
 
-@supports selector(:has(*)) {
-  .drawer-section:has(.section-heading[aria-expanded="true"]) {
-    border-color: rgba(54, 214, 194, 0.38);
-    border-inline-start-color: var(--accent);
-    background: var(--accent-soft);
-  }
-
-  .drawer-section:has(.section-heading[aria-expanded="true"]) .section-heading {
-    color: #bceee6;
-  }
-}
-
 .work-list-item {
   display: block;
   margin-block: 0.5rem;
@@ -677,10 +665,11 @@ p {
   width: 100%;
 }
 
-.work-list-item[aria-current="true"] {
-  border-color: rgba(54, 214, 194, 0.4);
-  border-inline-start-color: var(--accent);
-  background: var(--accent-soft);
+.work-list-item[aria-current="true"],
+.notes-card[aria-current="true"] {
+  border-color: rgba(243, 182, 75, 0.44);
+  border-inline-start-color: var(--amber);
+  background: var(--amber-soft);
 }
 
 .work-list-item,
@@ -853,6 +842,15 @@ p {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-block-start: 0.65rem;
+}
+
+.memory-actions button,
+.notes-actions button,
+.export-controls button,
+.artifact-create-form button {
+  font-size: 0.72rem;
+  min-height: 1.35rem;
+  padding: 0.12rem 0.32rem;
 }
 
 .notes-card {
