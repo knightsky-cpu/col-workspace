@@ -588,3 +588,232 @@ The user reported: "pass 6 accepted".
 Checkpointed with this accepted Pass 6 deployment packaging update. Use
 `git rev-parse HEAD` or the final checkpoint SHA reported after push as the
 authoritative commit.
+
+## 2026-08-28 - Pass 7: Artifact Registry, IAM, And Cloud Run First Deploy
+
+Status: accepted by manual verification.
+
+Previous checkpoint: `7f3e3daa9593fc1a57e9b42ab82a9def11851164`.
+
+### Scope
+
+- Performed the approved deployment-plumbing pass for the selected explicit
+  Dockerfile/image path.
+- Enabled the approved Google Cloud APIs.
+- Stopped after API enablement and re-read Cloud Run, Artifact Registry, and
+  effective org-policy state before continuing.
+- Created the approved Artifact Registry Docker repository in `us-east4`.
+- Created the approved dedicated Cloud Run runtime service account.
+- Applied the approved runtime IAM roles for Firestore and Vertex AI.
+- Applied the approved deployer `Service Account User` binding on the runtime
+  service account.
+- Configured Docker authentication for the regional Artifact Registry hostname.
+- Verified the local image platform before push.
+- Tagged and pushed the accepted Pass 6 image to Artifact Registry.
+- Verified the pushed image and digest.
+- Deployed one public Cloud Run service using application-level Google OIDC.
+- Did not change repository source code.
+- Did not configure Google OAuth authorized JavaScript origins.
+- Did not perform authenticated browser login or hosted chat proof.
+
+### Google Cloud Changes
+
+- Enabled APIs in project `project-e1e2a890-4566-48a8-a32`:
+  - `run.googleapis.com`
+  - `artifactregistry.googleapis.com`
+  - `orgpolicy.googleapis.com`
+
+- Created Artifact Registry repository:
+  - Name: `agent-col`
+  - Location: `us-east4`
+  - Format: Docker
+
+- Created runtime service account:
+  - `agent-col-cloud-run@project-e1e2a890-4566-48a8-a32.iam.gserviceaccount.com`
+
+- Granted runtime service account project roles:
+  - `roles/datastore.user`
+  - `roles/aiplatform.user`
+
+- Granted deployer binding:
+  - Principal: `user:ritroy16@gmail.com`
+  - Role: `roles/iam.serviceAccountUser`
+  - Resource:
+    `agent-col-cloud-run@project-e1e2a890-4566-48a8-a32.iam.gserviceaccount.com`
+
+- Pushed Artifact Registry image:
+  - Tag:
+    `us-east4-docker.pkg.dev/project-e1e2a890-4566-48a8-a32/agent-col/agent-col:7f3e3daa959`
+  - Digest:
+    `sha256:3c219a6cd592b5d3ebfe7da8a7c59cdb06e019efb103cc507c523e0e08102e6e`
+  - Size reported by Artifact Registry: `84652173` bytes
+
+- Deployed Cloud Run service:
+  - Name: `agent-col`
+  - Region: `us-east4`
+  - Revision: `agent-col-00001-bft`
+  - Stable service URL:
+    `https://agent-col-994154906699.us-east4.run.app`
+  - Status URL:
+    `https://agent-col-oc7iq4errq-uk.a.run.app`
+  - Runtime service account:
+    `agent-col-cloud-run@project-e1e2a890-4566-48a8-a32.iam.gserviceaccount.com`
+  - Public access mode: `run.googleapis.com/invoker-iam-disabled: "true"`
+  - Ingress: `all`
+  - Port: `8080`
+  - Concurrency: `8`
+  - Max instances: `1`
+  - Min instances: `0`
+  - Request timeout: `180s`
+  - Startup CPU boost: `true`
+  - Traffic: `100%` to `agent-col-00001-bft`
+
+- Cloud Run environment variables configured:
+  - `AGENT_COL_AUTH_MODE=google_oidc`
+  - `GOOGLE_OAUTH_CLIENT_ID=994154906699-jh6jkqprffr941im0mhq09efa3kj2p0a.apps.googleusercontent.com`
+  - `GOOGLE_CLOUD_PROJECT=project-e1e2a890-4566-48a8-a32`
+  - `GOOGLE_CLOUD_LOCATION=global`
+  - `GOOGLE_GENAI_USE_ENTERPRISE=True`
+
+### Gate Evidence After API Enablement
+
+After enabling Cloud Run, Artifact Registry, and Org Policy APIs, the required
+stop-and-recheck gate produced:
+
+```bash
+gcloud services list --enabled --project=project-e1e2a890-4566-48a8-a32 --filter='config.name:(run.googleapis.com OR artifactregistry.googleapis.com OR orgpolicy.googleapis.com OR firestore.googleapis.com OR aiplatform.googleapis.com OR logging.googleapis.com OR serviceusage.googleapis.com)' --format='value(config.name)'
+```
+
+Observed enabled services:
+
+```text
+aiplatform.googleapis.com
+artifactregistry.googleapis.com
+firestore.googleapis.com
+logging.googleapis.com
+orgpolicy.googleapis.com
+run.googleapis.com
+serviceusage.googleapis.com
+```
+
+```bash
+gcloud run services list --project=project-e1e2a890-4566-48a8-a32 --region=us-east4 --platform=managed --format=json
+```
+
+Observed result before deployment: `[]`.
+
+```bash
+gcloud artifacts repositories list --project=project-e1e2a890-4566-48a8-a32 --location=us-east4 --format=json
+```
+
+Observed result before repository creation: `[]`.
+
+```bash
+gcloud org-policies describe constraints/run.managed.requireInvokerIam --project=project-e1e2a890-4566-48a8-a32 --effective --format=json
+```
+
+Observed effective policy: `enforce: false`.
+
+```bash
+gcloud org-policies describe constraints/iam.allowedPolicyMemberDomains --project=project-e1e2a890-4566-48a8-a32 --effective --format=json
+```
+
+Observed effective policy: `allowAll: true`.
+
+### Focused Verification
+
+```bash
+gcloud auth configure-docker us-east4-docker.pkg.dev --quiet
+```
+
+Observed result: Docker configuration was updated. The first push attempt then
+failed because `docker-credential-gcloud` was not on this shell's `PATH`; the
+helper existed at `/home/sigmaknight/.local/google-cloud-sdk/bin/docker-credential-gcloud`.
+The push was retried with that Cloud SDK bin directory scoped into `PATH`.
+
+```bash
+docker image inspect agent-col:pass6 --format '{{.Os}}/{{.Architecture}}'
+```
+
+Observed result:
+
+```text
+linux/amd64
+```
+
+```bash
+docker push us-east4-docker.pkg.dev/project-e1e2a890-4566-48a8-a32/agent-col/agent-col:7f3e3daa959
+```
+
+Observed result after scoped `PATH` retry: push succeeded with digest
+`sha256:3c219a6cd592b5d3ebfe7da8a7c59cdb06e019efb103cc507c523e0e08102e6e`.
+
+```bash
+gcloud artifacts docker images describe us-east4-docker.pkg.dev/project-e1e2a890-4566-48a8-a32/agent-col/agent-col:7f3e3daa959 --project=project-e1e2a890-4566-48a8-a32 --format=json
+```
+
+Observed result: Artifact Registry reported the same digest and fully qualified
+digest.
+
+```bash
+gcloud run deploy agent-col --image=us-east4-docker.pkg.dev/project-e1e2a890-4566-48a8-a32/agent-col/agent-col:7f3e3daa959 --region=us-east4 --service-account=agent-col-cloud-run@project-e1e2a890-4566-48a8-a32.iam.gserviceaccount.com --no-invoker-iam-check --port=8080 --concurrency=8 --max-instances=1 --min-instances=0 --timeout=180s --update-env-vars=AGENT_COL_AUTH_MODE=google_oidc,GOOGLE_OAUTH_CLIENT_ID=994154906699-jh6jkqprffr941im0mhq09efa3kj2p0a.apps.googleusercontent.com,GOOGLE_CLOUD_PROJECT=project-e1e2a890-4566-48a8-a32,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_ENTERPRISE=True --project=project-e1e2a890-4566-48a8-a32 --quiet
+```
+
+Observed result: service `agent-col` revision `agent-col-00001-bft` deployed
+and served `100%` of traffic.
+
+```bash
+curl -fsS https://agent-col-994154906699.us-east4.run.app/
+```
+
+Observed result:
+
+```json
+{"status":"online"}
+```
+
+```bash
+curl -fsS -o /tmp/agent-col-workspace.html -w '%{http_code} %{content_type}\n' https://agent-col-994154906699.us-east4.run.app/workspace
+```
+
+Observed result:
+
+```text
+200 text/html; charset=utf-8
+```
+
+```bash
+curl -fsS https://agent-col-994154906699.us-east4.run.app/api/auth/config
+```
+
+Observed result: `auth_mode` was `google_oidc`,
+`google_signin_required` was `true`, and `local_development` was `false`.
+
+```bash
+curl -fsS -o /tmp/agent-col-auth-session.json -w '%{http_code}\n' https://agent-col-994154906699.us-east4.run.app/api/auth/session
+```
+
+Observed result: `401`, expected for unauthenticated Google OIDC mode.
+
+### Limitations
+
+- Google browser login is not expected to work until
+  `https://agent-col-994154906699.us-east4.run.app` is added to the OAuth Web
+  Client's Authorized JavaScript Origins.
+- Hosted authenticated chat, Firestore persistence, Vertex response proof,
+  ownership proof, and Cloud Logging privacy canary verification remain deferred
+  to Pass 8.
+- Cloud Run `metadata.annotations["run.googleapis.com/maxScale"]` displayed
+  `"20"` at the service metadata level, while the revision template annotation
+  `autoscaling.knative.dev/maxScale` displayed `"1"`. The template annotation is
+  the configured revision scaling control applied by the deploy command.
+
+### Manual Acceptance
+
+The user reported: "Pass 7 accepted."
+
+### Checkpoint State
+
+Checkpointed with this accepted Pass 7 deployment update. Use `git rev-parse
+HEAD` or the final checkpoint SHA reported after push as the authoritative
+commit.
