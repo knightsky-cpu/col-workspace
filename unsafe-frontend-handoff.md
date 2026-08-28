@@ -2,9 +2,11 @@
 
 ## Current status
 
-The unsafe frontend visual polishing work is proceeding through approval-gated bounded passes. The safe CSS-only sequence is already complete. Passes U1 and U2 have been manually accepted by the user and checkpointed to `origin/main`.
+The unsafe frontend visual polishing work is proceeding through approval-gated bounded passes. The safe CSS-only sequence is complete. Passes U1, U2, U3, the Workspace Create button compactness fix, and Pass U4 have been manually accepted by the user.
 
-The next approved implementation pass is Pass U3, Workspace Permanent Deletion, in `docs/superpowers/plans/unsafe-frontend-visual-polishing-plan.md`. The user approved the revised U3 rule: workspaces are disposable, including the original/default workspace, but the last remaining workspace must not be deleted.
+The latest accepted pass is Pass U4, Direct User-Authored Note Proposal Creation. The Notes drawer now has a `Create note` form under saved notes. Direct note creation bypasses the model but still creates only a pending collaborative-note proposal, preserves real chat-session/source-message provenance, and does not change the collaborative-note policy contract.
+
+The next proposed implementation pass is Pass U5, the standard collapsed-by-default subcard disclosure convention for Notes, Memory, and Chats, in `docs/superpowers/plans/unsafe-frontend-visual-polishing-plan.md`. This pass is not yet approved for implementation.
 
 ## Required documentation
 
@@ -18,24 +20,30 @@ Read these before source changes:
 
 ## Next pass boundary
 
-Pass U3 is approved for implementation only within this scope:
+Pass U5 should be proposed for approval before implementation within this scope:
 
-- Add owner-scoped permanent workspace deletion.
-- Do not add archive semantics for workspaces.
-- Allow deletion of any owned workspace, including the original/default workspace, when another workspace remains.
-- Reject deletion when it would leave zero workspaces.
-- Keep the backend authoritative for the last-workspace rule.
-- If the deleted workspace is selected, refresh and land on a surviving workspace using the existing workspace selection/reset path.
-- Preserve existing auth, ownership, notes, memory, artifacts, chats, receipts, model behavior, and drawer mechanics unless the U3 plan explicitly requires a change.
+- Establish one standard child-card disclosure convention for Notes, Memory, and Chats.
+- Cards should be collapsed by default where practical.
+- Clicking the collapsed card/header should expand details and action controls.
+- Pending note proposal cards should collapse by default and expand to show Approve/Reject.
+- Selected note detail should be collapsed by default and expand to show Archive/Restore/Delete and correction controls.
+- Active memory cards should collapse by default and expand to show Revoke/Delete.
+- Pending memory proposal cards should collapse by default and expand to show Approve/Reject.
+- Chat-session cards should keep their preview/title visible and expand to reveal metadata or future actions.
+- Workspace child buttons remain simple select buttons in this pass.
+- Artifact child buttons remain select/open controls in this pass.
+- Preserve existing selected/current state, auth, ownership, proposal policy, notes, memory, artifacts, chats, receipts, model behavior, and drawer mechanics unless the approved U5 plan explicitly requires a change.
 
 ## Key evidence
 
-- `main.py:1488-1565` currently exposes only list/create workspace routes.
-- `database.py:463-579` currently exposes only `list_workspaces(...)` and `create_workspace(...)`.
-- `database.py:513-524` synthesizes the default workspace into the returned list when no stored default workspace document exists. Do not treat this synthesized default as immortal.
-- `frontend/workspace-view.mjs:23-35` renders workspace child buttons and uses `aria-current="true"` for selected subcard highlighting.
-- `frontend/state.mjs:175-232` already has the workspace selection/create state-reset path to preserve when handling delete.
-- Firestore official docs state that deleting a document does not delete subcollection documents. Workspace deletion must not assume parent deletion cleans up notes/artifacts/chats.
+- `docs/superpowers/plans/unsafe-frontend-visual-polishing-plan.md` defines Pass U5 as the standard child-card disclosure pass for Notes, Memory, and Chats.
+- The plan explicitly says Workspace child buttons remain simple select buttons and Artifact child buttons do not get an added collapse layer in U5.
+- `frontend/notes-view.mjs` currently renders pending proposal cards, saved note buttons, selected note detail, and correction controls.
+- `frontend/memory-view.mjs` currently renders pending memory proposals and active memory cards with visible actions.
+- `frontend/chats-view.mjs` currently renders chat-session child cards.
+- Existing layout tests cover drawer section expansion state; U5 should add focused child-card disclosure tests without broadening unrelated behavior.
+- Pass U4 source evidence: direct note proposals use `CollaborativeNoteProposalRequest`, `CollaborativeNoteProposalCommand`, and `createNoteProposal(...)`; direct submissions save real source provenance before pending proposal creation.
+- Policy evidence: `collaborative_note_policy.py` remains unchanged at contract/policy version `1.0`.
 
 ## Implementation cautions
 
@@ -45,13 +53,22 @@ Pass U3 is approved for implementation only within this scope:
 - Use explicit path staging for checkpoints. Do not use `git add -A`.
 - Do not checkpoint unaccepted source behavior. Documentation checkpoints are allowed when explicitly requested, as in this handoff.
 
-## Manual verification targets for U3
+## Manual verification targets for completed Pass U4
+
+Already verified by the user:
+
+1. `Create note` appears below saved notes in the Notes drawer.
+2. A direct note submission no longer returns `500 Internal Server Error`.
+3. The submitted note appears as a pending proposal first.
+4. Approving the proposal makes it an active saved note.
+
+## Manual verification targets for proposed U5
 
 After implementation, ask the user to verify:
 
-1. Create at least two workspaces, delete either workspace, and confirm it disappears.
-2. Confirm no Archive option exists for workspaces.
-3. Confirm the original/default workspace can be deleted when another workspace remains.
-4. Confirm deleting the currently selected workspace lands on a surviving workspace and resets the visible workspace context.
-5. Confirm the last remaining workspace cannot be deleted and presents a bounded user-facing error or disabled delete control.
-6. Confirm chats, notes, memory, and artifacts for other workspaces are unchanged.
+1. Open Notes; pending proposals and selected-note detail are collapsed by default, with title/summary visible.
+2. Expand a pending note proposal; Approve/Reject appear only after expansion and still work.
+3. Expand selected note detail; Archive/Restore/Delete and correction controls appear only after expansion and still work.
+4. Open Memory; active memory and pending proposal cards are collapsed by default and expand to reveal their actions.
+5. Open Chats; session preview/title remains visible while expansion reveals metadata without breaking session opening.
+6. Confirm Workspace and Artifact child buttons remain simple select/open controls.

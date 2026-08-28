@@ -86,6 +86,7 @@ class FakeNoteDatabase:
     )
     list_calls: list[dict[str, object]] = field(default_factory=list)
     detail_calls: list[dict[str, object]] = field(default_factory=list)
+    save_message_calls: list[dict[str, object]] = field(default_factory=list)
     proposal_calls: list[dict[str, object]] = field(default_factory=list)
     approve_calls: list[dict[str, object]] = field(default_factory=list)
     reject_calls: list[dict[str, object]] = field(default_factory=list)
@@ -100,6 +101,26 @@ class FakeNoteDatabase:
     async def get_collaborative_note_detail(self, **kwargs: object):
         self.detail_calls.append(kwargs)
         return self.note, self.events
+
+    async def save_message(
+        self,
+        session_id: str,
+        role: str,
+        text: str,
+        *,
+        project_id: str,
+        user_id: str,
+    ) -> str:
+        self.save_message_calls.append(
+            {
+                "session_id": session_id,
+                "role": role,
+                "text": text,
+                "project_id": project_id,
+                "user_id": user_id,
+            }
+        )
+        return "message-3"
 
     async def create_collaborative_note_proposal(self, **kwargs: object):
         self.proposal_calls.append(kwargs)
@@ -224,6 +245,67 @@ async def test_note_service_creates_correction_without_mutating_active_note() ->
             "idempotency_key": "idem-1",
             "expected_note_id": "note-1",
             "expected_revision": 1,
+            "observed_at": NOW,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_note_service_creates_direct_proposal_without_mutating_notes(
+) -> None:
+    from collaborative_note_service import (
+        CollaborativeNoteProposalCommand,
+        CollaborativeNoteService,
+    )
+
+    database = FakeNoteDatabase(
+        proposal=CollaborativeNoteProposal.model_validate(
+            {
+                **proposal_payload(),
+                "expected_note_id": None,
+                "expected_revision": None,
+            }
+        )
+    )
+    service = CollaborativeNoteService(database=database)
+
+    result = await service.create_proposal(
+        CollaborativeNoteProposalCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-3",
+            note_kind="constraint",
+            title="API version",
+            body="Use API version 2.",
+            idempotency_key="note-proposal--1",
+            observed_at=NOW,
+        )
+    )
+
+    assert result.proposal.status == "pending"
+    assert result.proposal.expected_note_id is None
+    assert database.approve_calls == []
+    assert database.save_message_calls == [
+        {
+            "session_id": "session-3",
+            "role": "user",
+            "text": "Create note proposal: API version\n\nUse API version 2.",
+            "project_id": "workspace-1",
+            "user_id": "user-1",
+        }
+    ]
+    assert database.proposal_calls == [
+        {
+            "user_id": "user-1",
+            "workspace_id": "workspace-1",
+            "session_id": "session-3",
+            "source_message_ids": ("message-3",),
+            "note_kind": "constraint",
+            "title": "API version",
+            "body": "Use API version 2.",
+            "idempotency_key": "note-proposal--1",
+            "expected_note_id": None,
+            "expected_revision": None,
             "observed_at": NOW,
         }
     ]

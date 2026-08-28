@@ -107,6 +107,57 @@ function renderNoteList(container, notes, state, disabled, handlers) {
   }
 }
 
+function renderNoteProposalForm(container, disabled, handlers) {
+  const form = element("form", "notes-proposal-form contain-text");
+  form.setAttribute("data-note-proposal-form", "true");
+  appendTextElement(form, "h3", "work-heading contain-text", "Create note");
+  const kindLabel = element("label", "", "Kind");
+  const kind = element("select");
+  kind.setAttribute("name", "note_kind");
+  for (const [value, label] of [
+    ["decision", "Decision"],
+    ["requirement", "Requirement"],
+    ["constraint", "Constraint"],
+    ["task_state", "Task state"],
+    ["working_context", "Working context"],
+  ]) {
+    const option = element("option", "", label);
+    option.value = value;
+    kind.append(option);
+  }
+  kindLabel.append(kind);
+  const titleLabel = element("label", "", "Title");
+  const title = element("input");
+  title.setAttribute("name", "title");
+  title.setAttribute("maxlength", "120");
+  title.required = true;
+  titleLabel.append(title);
+  const bodyLabel = element("label", "", "Body");
+  const body = element("textarea");
+  body.setAttribute("name", "body");
+  body.setAttribute("maxlength", "2000");
+  body.required = true;
+  bodyLabel.append(body);
+  const submit = element("button", "", "Create note proposal");
+  submit.setAttribute("type", "submit");
+  submit.disabled = disabled;
+  form.append(kindLabel, titleLabel, bodyLabel, submit);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const nextTitle = String(title.value ?? "").trim();
+    const nextBody = String(body.value ?? "").trim();
+    if (!nextTitle || !nextBody || nextTitle.length > 120 || nextBody.length > 2000) {
+      return;
+    }
+    handlers.onCreateNoteProposal?.({
+      note_kind: kind.value,
+      title: nextTitle,
+      body: nextBody,
+    });
+  });
+  container.append(form);
+}
+
 function renderCorrectionForm(container, note, disabled, handlers) {
   const form = element("form", "notes-correction-form contain-text");
   appendTextElement(form, "h3", "work-heading contain-text", "Propose correction");
@@ -251,6 +302,7 @@ export function renderNotesPanel(container, notesState, handlers = {}) {
     disabled,
     handlers,
   );
+  renderNoteProposalForm(container, disabled, handlers);
   renderNoteDetail(container, state, disabled, handlers);
 }
 

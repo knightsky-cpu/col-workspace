@@ -738,6 +738,18 @@ class CollaborativeNoteCorrectionRequest(StrictModel):
         return self
 
 
+class CollaborativeNoteProposalRequest(StrictModel):
+    session_id: IdentifierStr
+    note_kind: CollaborativeNoteKind
+    title: str
+    body: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, data: object) -> object:
+        return _normalize_collaborative_note_text(data)
+
+
 class CollaborativeNoteMutationRequest(StrictModel):
     expected_revision: StrictInt = Field(ge=1)
 

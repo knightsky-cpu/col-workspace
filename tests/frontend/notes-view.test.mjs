@@ -168,3 +168,53 @@ test("renderNotesPanel shows active note detail and lifecycle controls", () => {
     ["delete", "note-1", 2],
   ]);
 });
+
+test("renderNotesPanel places direct note proposal form after saved notes", () => {
+  const container = node();
+  const submissions = [];
+
+  renderNotesPanel(container, {
+    status: "ready",
+    statusFilter: "active",
+    pendingProposals: [],
+    notes: [activeNote],
+    selectedNoteId: null,
+    detail: { status: "idle", note: null, events: [], error: null },
+    pendingRequest: null,
+    error: null,
+  }, {
+    onCreateNoteProposal: (request) => submissions.push(request),
+  });
+
+  const noteIndex = container.children.findIndex((child) => (
+    child.attributes["data-note-id"] === "note-1"
+  ));
+  const formIndex = container.children.findIndex((child) => (
+    child.attributes["data-note-proposal-form"] === "true"
+  ));
+  assert.ok(noteIndex >= 0);
+  assert.ok(formIndex > noteIndex);
+
+  const kind = findTree(container, (child) => child.attributes.name === "note_kind");
+  const title = findTree(container, (child) => child.attributes.name === "title");
+  const body = findTree(container, (child) => child.attributes.name === "body");
+  const submit = findTree(container, (child) => child.attributes.type === "submit");
+
+  assert.deepEqual(
+    kind.children.map((child) => child.value),
+    ["decision", "requirement", "constraint", "task_state", "working_context"],
+  );
+  assert.equal(title.attributes.maxlength, "120");
+
+  kind.value = "constraint";
+  title.value = "API version";
+  body.value = "Use API version 2.";
+  container.children[formIndex].onsubmit({ preventDefault() {} });
+
+  assert.equal(submit.textContent, "Create note proposal");
+  assert.deepEqual(submissions, [{
+    note_kind: "constraint",
+    title: "API version",
+    body: "Use API version 2.",
+  }]);
+});

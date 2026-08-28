@@ -903,6 +903,35 @@ p {
   padding: 0.65rem;
 }
 
+.notes-proposal-form {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: rgba(12, 24, 31, 0.66);
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 0.75rem 1rem;
+  padding: 0.65rem;
+}
+
+.notes-proposal-form label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.notes-proposal-form input,
+.notes-proposal-form textarea,
+.notes-proposal-form select {
+  inline-size: 100%;
+  border-color: var(--border-soft);
+  background: #071014;
+  color: var(--text);
+}
+
+.notes-proposal-form textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
 .notes-correction-form input,
 .notes-correction-form textarea {
   inline-size: 100%;

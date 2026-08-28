@@ -54,6 +54,18 @@ class CollaborativeNoteCorrectionCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class CollaborativeNoteProposalCommand:
+    user_id: str
+    workspace_id: str
+    session_id: str
+    note_kind: CollaborativeNoteKind
+    title: str
+    body: str
+    idempotency_key: str
+    observed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class NaturalCollaborativeNoteCommand:
     user_id: str
     workspace_id: str
@@ -169,6 +181,35 @@ class CollaborativeNoteService:
             idempotency_key=command.idempotency_key,
             expected_note_id=command.note_id,
             expected_revision=command.expected_revision,
+            observed_at=command.observed_at,
+        )
+        return CollaborativeNoteProposalResult(proposal=proposal)
+
+    async def create_proposal(
+        self,
+        command: CollaborativeNoteProposalCommand,
+    ) -> CollaborativeNoteProposalResult:
+        source_text = (
+            f"Create note proposal: {command.title}\n\n{command.body}"
+        )
+        source_message_id = await self._database.save_message(
+            command.session_id,
+            "user",
+            source_text,
+            project_id=command.workspace_id,
+            user_id=command.user_id,
+        )
+        proposal = await self._database.create_collaborative_note_proposal(
+            user_id=command.user_id,
+            workspace_id=command.workspace_id,
+            session_id=command.session_id,
+            source_message_ids=(source_message_id,),
+            note_kind=command.note_kind,
+            title=command.title,
+            body=command.body,
+            idempotency_key=command.idempotency_key,
+            expected_note_id=None,
+            expected_revision=None,
             observed_at=command.observed_at,
         )
         return CollaborativeNoteProposalResult(proposal=proposal)

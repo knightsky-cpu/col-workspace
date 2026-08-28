@@ -53,6 +53,65 @@ Deferred:
 - Add safe Markdown response/artifact rendering.
 - Restructure the Artifact Viewer toward the reference screenshot.
 
+## 2026-08-28 - Accepted Direct User-Authored Note Proposal Pass
+
+Status: accepted after user manual runtime verification.
+
+Scope:
+- Implemented Pass U4, direct user-authored note proposal creation.
+- Added a `Create note` form in the Notes drawer under the saved notes list, matching the existing Artifacts drawer convention.
+- Direct note creation bypasses the model but does not bypass the governed collaborative-note proposal policy.
+- Direct note submissions create pending collaborative note proposals only; they do not become active saved notes until approved.
+- Fixed the runtime `500 Internal Server Error` found during manual verification by preserving real chat-session/source-message provenance.
+- Preserved the existing collaborative-note policy contract and did not modify `collaborative_note_policy.py`.
+
+Source changed:
+- `schemas.py`: added `CollaborativeNoteProposalRequest` with `session_id`, `note_kind`, `title`, and `body`, using the existing collaborative-note text normalizer.
+- `main.py`: added `POST /api/users/{user_id}/projects/{project_id}/notes/proposals` with idempotency, auth/project resolution, and collaborative-note HTTP error mapping.
+- `collaborative_note_service.py`: added `CollaborativeNoteProposalCommand`; direct proposals save a real user-authored source message in the current session before creating a pending proposal.
+- `frontend/api.mjs`: added `createNoteProposal(...)`.
+- `frontend/app.mjs`: wired Notes drawer submission to the direct proposal API and included the current `session_id`.
+- `frontend/notes-view.mjs`: rendered the bottom `Create note` form with existing policy note kinds only.
+- `frontend/styles.css`: styled the direct note form consistently with existing drawer forms.
+- `tests/frontend/api.test.mjs`, `tests/frontend/notes-view.test.mjs`, `tests/test_collaborative_note_service.py`, and `tests/test_main.py`: added focused coverage for form placement, request shape, provenance, pending-only proposal creation, and policy rejection.
+
+TDD evidence:
+- RED: `node --test tests/frontend/notes-view.test.mjs` failed because the bottom note proposal form was missing.
+- RED: `node --test tests/frontend/api.test.mjs` failed because `createNoteProposal(...)` did not exist.
+- RED: `venv/bin/pytest tests/test_main.py -k "collaborative_note_proposal_returns_pending_proposal" -q` failed because the direct proposal schema/command did not exist.
+- RED for reported runtime failure: `venv/bin/pytest tests/test_collaborative_note_service.py -k "direct_proposal" -q` failed because `CollaborativeNoteProposalCommand` had no `session_id`, and `venv/bin/pytest tests/test_main.py -k "collaborative_note_proposal" -q` failed with route-level `422` until the request carried session provenance.
+- GREEN: added the direct proposal route/schema/API/form and then fixed provenance by saving a real user-authored source message before proposal creation; focused tests passed.
+- REFACTOR: no broad refactor; changes stayed inside the approved U4 note proposal boundary.
+
+Verification:
+- `node --test tests/frontend/notes-view.test.mjs tests/frontend/api.test.mjs tests/frontend/workspace-static.test.mjs` passed: 39 tests.
+- `venv/bin/pytest tests/test_main.py -k "collaborative_note_proposal" -q` passed: 4 tests, 214 deselected, with one existing `BaseAgentConfig` deprecation warning.
+- `venv/bin/pytest tests/test_collaborative_note_service.py -k "direct_proposal or creates_correction" -q` passed: 2 tests.
+- `venv/bin/python -m py_compile main.py collaborative_note_service.py schemas.py && node --check frontend/app.mjs && node --check frontend/api.mjs && node --check frontend/notes-view.mjs` passed.
+- `git diff --check` passed.
+
+Policy and privacy evidence:
+- `collaborative_note_policy.py` was not modified.
+- The direct form exposes only the existing policy note kinds: `decision`, `requirement`, `constraint`, `task_state`, and `working_context`.
+- Invalid note kind and prohibited note text are rejected with `422` before service mutation.
+- The storage path still creates proposals with `policy_version="1.0"` and `status="pending"`.
+- The storage path still verifies an owned chat session and source message before writing the proposal.
+
+Runtime evidence:
+- User-provided screenshot showed the `Create note` form under saved notes.
+- Initial manual submission produced `500 Internal Server Error` because the direct route used synthetic idempotency-key provenance instead of a real owned session/message.
+- The approved fix saved a real user-authored source message in the current chat session before proposal creation.
+- User confirmed the corrected pass was successful after manual runtime verification, including approval into an active saved note.
+
+Deferred:
+- Establish standard collapsed-by-default subcard disclosure for Notes, Memory, and Chats.
+- Add chat pending wave animation.
+- Add collapsed adaptation receipt disclosure.
+- Tune chat icons/text colors/counter severity.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+
 ## 2026-08-28 - Accepted Workspace Create Button Compactness Pass
 
 Status: accepted after user manual visual verification.

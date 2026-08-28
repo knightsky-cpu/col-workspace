@@ -118,6 +118,7 @@ from schemas import (
     CollaborativeNoteLifecycleResponse,
     CollaborativeNoteListResponse,
     CollaborativeNoteMutationRequest,
+    CollaborativeNoteProposalRequest,
     CollaborativeNoteProposal,
     CollaborativeNoteProposalResponse,
     ContinuityChoice,
@@ -146,6 +147,7 @@ from schemas import (
 )
 from collaborative_note_service import (
     CollaborativeNoteCorrectionCommand,
+    CollaborativeNoteProposalCommand,
     CollaborativeNoteDecisionCommand,
     CollaborativeNoteDecisionResult,
     CollaborativeNoteDeletionResult,
@@ -1317,6 +1319,9 @@ class FakeCollaborativeNoteService:
     correction_calls: list[CollaborativeNoteCorrectionCommand] = field(
         default_factory=list
     )
+    proposal_calls: list[CollaborativeNoteProposalCommand] = field(
+        default_factory=list
+    )
     decision_calls: list[CollaborativeNoteDecisionCommand] = field(
         default_factory=list
     )
@@ -1353,6 +1358,15 @@ class FakeCollaborativeNoteService:
         command: CollaborativeNoteCorrectionCommand,
     ) -> CollaborativeNoteProposalResult:
         self.correction_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        return self.proposal_result
+
+    async def create_proposal(
+        self,
+        command: CollaborativeNoteProposalCommand,
+    ) -> CollaborativeNoteProposalResult:
+        self.proposal_calls.append(command)
         if self.error is not None:
             raise self.error
         return self.proposal_result
@@ -2646,6 +2660,82 @@ async def test_collaborative_note_correction_returns_pending_proposal(
             ].observed_at,
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_proposal_returns_pending_proposal(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/proposals",
+        headers={"Idempotency-Key": "idem-note-proposal-1"},
+        json={
+            "session_id": "session-1",
+            "note_kind": "constraint",
+            "title": "API version",
+            "body": "Use API version 2.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == CollaborativeNoteProposalResponse(
+        proposal=service_state.collaborative_note_service.proposal_result.proposal
+    ).model_dump(mode="json")
+    assert service_state.collaborative_note_service.proposal_calls == [
+        CollaborativeNoteProposalCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            session_id="session-1",
+            note_kind="constraint",
+            title="API version",
+            body="Use API version 2.",
+            idempotency_key="idem-note-proposal-1",
+            observed_at=service_state.collaborative_note_service.proposal_calls[
+                0
+            ].observed_at,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_proposal_rejects_invalid_policy_kind(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/proposals",
+        headers={"Idempotency-Key": "idem-note-proposal-1"},
+        json={
+            "session_id": "session-1",
+            "note_kind": "preference",
+            "title": "API version",
+            "body": "Use API version 2.",
+        },
+    )
+
+    assert response.status_code == 422
+    assert service_state.collaborative_note_service.proposal_calls == []
+
+
+@pytest.mark.asyncio
+async def test_collaborative_note_proposal_rejects_prohibited_policy_text(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/proposals",
+        headers={"Idempotency-Key": "idem-note-proposal-1"},
+        json={
+            "session_id": "session-1",
+            "note_kind": "constraint",
+            "title": "API version",
+            "body": "note everything",
+        },
+    )
+
+    assert response.status_code == 422
+    assert service_state.collaborative_note_service.proposal_calls == []
 
 
 @pytest.mark.asyncio

@@ -521,6 +521,28 @@ export function createNoteCorrection(
   );
 }
 
+export function createNoteProposal(
+  userId,
+  projectId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes/proposals`,
+    {
+      method: "POST",
+      idempotencyKey: options.idempotencyKey,
+      authToken: options.authToken,
+      body: request,
+    },
+    fetchLike,
+  );
+}
+
 export function archiveNote(
   userId,
   projectId,

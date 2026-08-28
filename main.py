@@ -95,6 +95,7 @@ from chat_turns import (
 )
 from collaborative_note_service import (
     CollaborativeNoteCorrectionCommand,
+    CollaborativeNoteProposalCommand,
     CollaborativeNoteDecisionCommand,
     CollaborativeNoteLifecycleCommand,
     CollaborativeNoteService,
@@ -170,6 +171,7 @@ from schemas import (
     CollaborativeNoteLifecycleResponse,
     CollaborativeNoteListResponse,
     CollaborativeNoteMutationRequest,
+    CollaborativeNoteProposalRequest,
     CollaborativeNoteProposalResponse,
     IdentifierStr,
     MemoryClarificationReceipt,
@@ -1742,6 +1744,69 @@ async def get_collaborative_note(
         effective_user_id=effective_user_id,
         public_user_id=user_id,
     )
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/notes/proposals",
+    response_model=CollaborativeNoteProposalResponse,
+)
+async def create_collaborative_note_proposal(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    payload: CollaborativeNoteProposalRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+) -> CollaborativeNoteProposalResponse:
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+    try:
+        validated_idempotency_key = validate_idempotency_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Idempotency key is invalid.",
+        ) from exc
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = await request.app.state.collaborative_note_service.create_proposal(
+            CollaborativeNoteProposalCommand(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                session_id=payload.session_id,
+                note_kind=payload.note_kind,
+                title=payload.title,
+                body=payload.body,
+                idempotency_key=validated_idempotency_key,
+                observed_at=datetime.now(UTC),
+            )
+        )
+    except (
+        MemoryProposalNotFoundError,
+        MemoryProposalConflictError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        _raise_collaborative_note_http_error(exc)
+    return CollaborativeNoteProposalResponse(proposal=result.proposal)
 
 
 @app.post(

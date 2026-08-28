@@ -5,6 +5,7 @@ import {
   createArtifact,
   createArtifactVersion,
   createNoteCorrection,
+  createNoteProposal,
   createWorkspace,
   deleteNote,
   deleteMemorySignal,
@@ -972,6 +973,9 @@ function ensureNotesView() {
       onCreateCorrection(note, request) {
         createCollaborativeNoteCorrection(note, request);
       },
+      onCreateNoteProposal(request) {
+        createCollaborativeNoteProposal(request);
+      },
       onArchiveNote(note) {
         changeCollaborativeNoteLifecycle("archive", note);
       },
@@ -1055,6 +1059,35 @@ async function createCollaborativeNoteCorrection(note, request) {
       {
         ...authOptions(),
         idempotencyKey: `note-correction--${crypto.randomUUID()}`,
+      },
+    );
+    state = completeNoteRequest(storePendingNoteProposal(state, response.proposal));
+    await loadNotes();
+  } catch (error) {
+    state = failNoteRequest(state, error);
+    showNotesError(error.message);
+  }
+  renderWorkspace();
+}
+
+async function createCollaborativeNoteProposal(request) {
+  if (!state.context || !selectCanSubmit(state)) {
+    return;
+  }
+  clearNotesError();
+  state = beginNoteRequest(state, "proposal:create");
+  ensureNotesView().render(state);
+  try {
+    const response = await createNoteProposal(
+      state.context.user_id,
+      state.context.project_id,
+      {
+        ...request,
+        session_id: state.context.session_id,
+      },
+      {
+        ...authOptions(),
+        idempotencyKey: `note-proposal--${crypto.randomUUID()}`,
       },
     );
     state = completeNoteRequest(storePendingNoteProposal(state, response.proposal));
