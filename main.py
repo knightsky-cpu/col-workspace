@@ -143,6 +143,10 @@ from database import (
 from memory_context import MemoryContextRenderer
 from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
 from memory_proposals import ProposalTurnLease
+from preference_learning_service import (
+    PreferenceLearningCommand,
+    PreferenceLearningService,
+)
 from research_expert_service import ResearchExpertService
 from requirements_verification_service import RequirementsVerificationService
 from schemas import (
@@ -197,6 +201,7 @@ from trusted_memory_service import (
     MemoryDecisionCommand,
     NaturalMemoryClarificationResult,
     NaturalMemoryCommand,
+    NaturalMemoryNoEffectResult,
     RevokeMemorySignalCommand,
     SelectMemoryClarificationCommand,
     TrustedMemoryService,
@@ -915,6 +920,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             term_expander=GeminiContinuityTermExpander(client=client),
         )
         working_state_service = WorkingStateService(client=client)
+        preference_learning_service = PreferenceLearningService(
+            database=database,
+            clock=lambda: datetime.now(UTC),
+        )
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
             vertex_settings
@@ -972,6 +981,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.collaborative_note_service = collaborative_note_service
     app.state.continuity_service = continuity_service
     app.state.working_state_service = working_state_service
+    app.state.preference_learning_service = preference_learning_service
     app.state.turn_service = turn_service
     app.state.authenticator = Authenticator(load_auth_settings())
 
@@ -2236,6 +2246,7 @@ async def chat(
     memory_service = request.app.state.memory_service
     continuity_service = request.app.state.continuity_service
     working_state_service = request.app.state.working_state_service
+    preference_learning_service = request.app.state.preference_learning_service
     turn_service = request.app.state.turn_service
     decision_actions = ()
     decision_memory_proposals: tuple[
@@ -2674,8 +2685,12 @@ async def chat(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Memory clarification selection is invalid.",
             ) from exc
-        decision_actions = (selection_result.action,)
-        decision_memory_proposals = (selection_result.proposal,)
+        if isinstance(selection_result, NaturalMemoryNoEffectResult):
+            decision_actions = ()
+            decision_memory_proposals = ()
+        else:
+            decision_actions = (selection_result.action,)
+            decision_memory_proposals = (selection_result.proposal,)
 
     if (
         chat_turn_claim is not None
@@ -3172,6 +3187,58 @@ async def chat(
             )
         ),
     )
+    if (
+        chat_turn_claim is not None
+        and payload.memory_decision is None
+        and payload.memory_clarification_selection is None
+        and payload.artifact_feedback_decision is None
+        and payload.collaborative_note_decision is None
+        and payload.continuity_selection is None
+        and not chat_response.memory_proposals
+        and not chat_response.memory_clarifications
+        and not chat_response.collaborative_note_proposals
+        and not chat_response.collaborative_note_events
+        and not chat_response.artifact_feedback
+        and not chat_response.continuity_choices
+    ):
+        try:
+            preference_result = await preference_learning_service.capture(
+                PreferenceLearningCommand(
+                    user_id=effective_user_id,
+                    project_id=effective_project_id,
+                    session_id=payload.session_id,
+                    turn_id=chat_turn_claim.ids.turn_id,
+                    source_message_id=user_message_id,
+                    user_message=payload.message,
+                    model_response=result.response,
+                )
+            )
+            if (
+                preference_result.surfaced_hypothesis is not None
+                and not chat_response.memory_proposals
+                and not chat_response.memory_clarifications
+            ):
+                confirmation = (
+                    await memory_service.open_preference_hypothesis_confirmation(
+                        user_id=effective_user_id,
+                        project_id=effective_project_id,
+                        session_id=payload.session_id,
+                        source_message_id=user_message_id,
+                        turn_lease=ProposalTurnLease(
+                            turn_id=chat_turn_claim.ids.turn_id,
+                            owner_token=chat_turn_claim.owner_token,
+                        ),
+                        hypothesis=preference_result.surfaced_hypothesis,
+                    )
+                )
+                chat_response = chat_response.model_copy(
+                    update={"memory_clarifications": [confirmation]}
+                )
+        except Exception as exc:
+            logger.error(
+                "Preference learning failed (%s).",
+                type(exc).__name__,
+            )
     if chat_turn_claim is None:
         try:
             await database.save_message(

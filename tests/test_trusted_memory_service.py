@@ -20,14 +20,34 @@ from schemas import (
 )
 from trusted_memory_service import (
     DeleteMemorySignalCommand,
+    InspectMemoryCommand,
     MemoryDecisionCommand,
     RevokeMemorySignalCommand,
+    SelectMemoryClarificationCommand,
     TrustedMemoryService,
 )
 
 
 NOW = datetime(2026, 8, 20, 20, 0, tzinfo=UTC)
 PROPOSAL_ID = "response_length--proposal-1"
+
+
+def preference_hypothesis():
+    from preference_learning import PreferenceHypothesis
+
+    return PreferenceHypothesis(
+        hypothesis_id="pref-hyp--user-1--project-1--response_length",
+        user_id="user-1",
+        project_id="project-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_count=2,
+        contradiction_count=0,
+        confidence=0.75,
+        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-2"),
+        first_observed_at=NOW,
+        last_observed_at=NOW,
+    )
 
 
 def rejected_proposal() -> MemoryProposal:
@@ -64,6 +84,105 @@ def approved_event() -> MemoryEvent:
             "created_at": NOW,
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_preference_hypothesis_confirmation_opens_unsaved_memory_choice():
+    from memory_proposals import ProposalTurnLease
+
+    database = MagicMock()
+    database.create_memory_clarification = AsyncMock(
+        side_effect=lambda *, envelope, **kwargs: envelope
+    )
+    service = TrustedMemoryService(database=database, clock=lambda: NOW)
+
+    receipt = await service.open_preference_hypothesis_confirmation(
+        user_id="user-1",
+        project_id="project-1",
+        session_id="session-1",
+        source_message_id="message-3",
+        turn_lease=ProposalTurnLease(
+            turn_id="a" * 64,
+            owner_token="owner-1",
+        ),
+        hypothesis=preference_hypothesis(),
+    )
+
+    assert receipt.choices[0].category_label == "Response length"
+    assert receipt.choices[0].value_label == "concise"
+    assert receipt.choices[1].category_label == "Do not save"
+    assert "feedback only" in receipt.choices[1].value_label
+    assert "saved" not in receipt.choices[0].value_label.lower()
+    database.create_memory_clarification.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_confirmed_hypothesis_creates_pending_proposal_not_active_memory():
+    from memory_proposals import ProposalTurnLease
+
+    proposal = MemoryProposalV2(
+        proposal_id="response_length--from-preference-confirmation",
+        category="response_length",
+        proposed_value="concise",
+        expected_signal_id=None,
+        status="pending",
+        source_session_id="session-1",
+        source_message_id="message-4",
+        evidence_message_id="message-3",
+        clarification_id="memory-clarification--pref-hyp",
+        created_at=NOW,
+        expires_at=NOW + timedelta(hours=24),
+    )
+    database = MagicMock()
+    database.create_memory_clarification = AsyncMock(
+        side_effect=lambda *, envelope, **kwargs: envelope
+    )
+    database.consume_memory_clarification_to_proposal_v2 = AsyncMock(
+        return_value=proposal
+    )
+    database.get_memory_inspection = AsyncMock(
+        return_value=SimpleNamespace(
+            profile=CollaborationProfileV2(),
+            unresolved_proposals=(proposal,),
+            events=(),
+            next_event_id=None,
+        )
+    )
+    service = TrustedMemoryService(database=database, clock=lambda: NOW)
+    receipt = await service.open_preference_hypothesis_confirmation(
+        user_id="user-1",
+        project_id="project-1",
+        session_id="session-1",
+        source_message_id="message-3",
+        turn_lease=ProposalTurnLease(
+            turn_id="a" * 64,
+            owner_token="owner-1",
+        ),
+        hypothesis=preference_hypothesis(),
+    )
+
+    result = await service.select_memory_clarification(
+        SelectMemoryClarificationCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            session_id="session-1",
+            source_message_id="message-4",
+            clarification_id=receipt.clarification_id,
+            selected_candidate_index=0,
+            turn_lease=ProposalTurnLease(
+                turn_id="b" * 64,
+                owner_token="owner-2",
+            ),
+        )
+    )
+    inspection = await service.inspect_memory(
+        InspectMemoryCommand(user_id="user-1")
+    )
+
+    assert result.status == "pending"
+    assert result.proposal.category == "response_length"
+    assert result.proposal.proposed_value == "concise"
+    assert inspection.profile.active_preferences == {}
 
 
 @pytest.mark.asyncio

@@ -145,7 +145,10 @@ M9-MEM.1 does not:
 - store project decisions, requirements, task state, or artifact content in
   profile memory;
 - infer preferences from behavior, history, artifacts, searches, expert
-  results, or model-authored text;
+  results, or model-authored text outside the Target A governed preference
+  learning boundary;
+- create active memory from Target A observation evidence or hypotheses without
+  user confirmation and the existing governed approval lifecycle;
 - store sensitive PII, credentials, health facts, financial facts, protected
   traits, exact employer/school, precise location, or account identifiers;
 - make Google identity attributes available as model memory;
@@ -156,6 +159,14 @@ M9-MEM.1 does not:
 - redesign the collaborative-note contract;
 - claim that all allowed memory is PII-free;
 - add autonomous background memory extraction.
+
+Target A may add bounded, workspace-scoped observation evidence and
+non-authoritative preference hypotheses from user corrections, explicit
+feedback patterns, or repeated collaboration preferences. This does not allow
+silent active memory, raw transcript mining, broad profiling, autonomous
+background extraction, or direct response adaptation from hypotheses. A
+hypothesis can only feed the existing governed memory path after user
+confirmation.
 
 ## Domain classification
 

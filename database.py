@@ -60,6 +60,7 @@ from memory_proposals import (
     parse_proposal_origin,
     proposal_origin_id_from_signal_id,
 )
+from preference_learning import PreferenceHypothesis, PreferenceObservation
 from collaborative_notes import derive_note_proposal_ids
 from collaborative_note_policy import (
     CollaborativeNoteKind,
@@ -5017,6 +5018,126 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_working_state", exc)
 
+    async def save_preference_observation(
+        self,
+        observation: PreferenceObservation,
+    ) -> None:
+        """Persist one workspace-scoped non-authoritative observation."""
+        if not isinstance(observation, PreferenceObservation):
+            raise ValueError("observation must be a PreferenceObservation.")
+        self._validate_string(observation.user_id, "user_id")
+        self._validate_string(observation.project_id, "project_id")
+        self._validate_string(observation.observation_id, "observation_id")
+
+        try:
+            observation_ref = (
+                self._client.collection("users")
+                .document(observation.user_id)
+                .collection("workspaces")
+                .document(observation.project_id)
+                .collection("preference_observations")
+                .document(observation.observation_id)
+            )
+            await observation_ref.set(observation.model_dump(mode="python"))
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "save_preference_observation",
+                exc,
+            )
+
+    async def list_recent_preference_observations(
+        self,
+        user_id: str,
+        project_id: str,
+        *,
+        limit: int = 20,
+    ) -> tuple[PreferenceObservation, ...]:
+        """Return recent non-authoritative observations for one workspace."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_limit(limit, "limit", maximum=20)
+
+        try:
+            observations_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(project_id)
+                .collection("preference_observations")
+            )
+            query = observations_ref.order_by(
+                "created_at",
+                direction=firestore.Query.DESCENDING,
+            ).limit(limit)
+            observations: list[PreferenceObservation] = []
+            async for snapshot in query.stream():
+                if snapshot.exists:
+                    observations.append(
+                        PreferenceObservation.model_validate(
+                            snapshot.to_dict()
+                        )
+                    )
+            return tuple(observations)
+        except (GoogleAPIError, ValidationError, ValueError) as exc:
+            self._raise_firestore_error(
+                "list_recent_preference_observations",
+                exc,
+            )
+
+    async def save_preference_hypothesis(
+        self,
+        hypothesis: PreferenceHypothesis,
+    ) -> None:
+        """Persist one workspace-scoped non-authoritative hypothesis."""
+        if not isinstance(hypothesis, PreferenceHypothesis):
+            raise ValueError("hypothesis must be a PreferenceHypothesis.")
+        self._validate_string(hypothesis.user_id, "user_id")
+        self._validate_string(hypothesis.project_id, "project_id")
+        self._validate_string(hypothesis.hypothesis_id, "hypothesis_id")
+
+        try:
+            hypothesis_ref = (
+                self._client.collection("users")
+                .document(hypothesis.user_id)
+                .collection("workspaces")
+                .document(hypothesis.project_id)
+                .collection("preference_hypotheses")
+                .document(hypothesis.hypothesis_id)
+            )
+            await hypothesis_ref.set(hypothesis.model_dump(mode="python"))
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "save_preference_hypothesis",
+                exc,
+            )
+
+    async def get_preference_hypothesis(
+        self,
+        user_id: str,
+        project_id: str,
+        hypothesis_id: str,
+    ) -> PreferenceHypothesis | None:
+        """Return one workspace-scoped non-authoritative hypothesis."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_string(hypothesis_id, "hypothesis_id")
+
+        try:
+            hypothesis_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(project_id)
+                .collection("preference_hypotheses")
+                .document(hypothesis_id)
+            )
+            snapshot = await hypothesis_ref.get()
+            if not snapshot.exists:
+                return None
+            return PreferenceHypothesis.model_validate(snapshot.to_dict())
+        except (GoogleAPIError, ValidationError, ValueError) as exc:
+            self._raise_firestore_error("get_preference_hypothesis", exc)
+
     async def update_user_profile(
         self, user_id: str, updates: dict[str, object]
     ) -> None:
@@ -5801,7 +5922,7 @@ class MemoryEngine:
         observed_at: datetime,
         turn_lease: ProposalTurnLease,
         expected_clarification_id: str | None = None,
-    ) -> MemoryProposalV2:
+    ) -> MemoryProposalV2 | None:
         """Consume the first subsequent clarification turn into one proposal."""
         self._validate_memory_user_id(user_id)
         for field_name, value in (
@@ -5933,6 +6054,39 @@ class MemoryEngine:
                     )
                     raise error_type(str(exc)) from exc
 
+            if candidate.kind == "no_save":
+                transaction.set(
+                    clarification_ref,
+                    {
+                        "status": "consumed",
+                        "consuming_turn_id": turn_lease.turn_id,
+                        "consuming_message_id": source_message_id,
+                        "selected_candidate_index": (
+                            selection.selected_candidate_index
+                        ),
+                    },
+                    merge=True,
+                )
+                transaction.set(
+                    session_ref,
+                    {
+                        "active_memory_clarification_id": (
+                            firestore.DELETE_FIELD
+                        ),
+                        "last_consumed_memory_clarification_id": (
+                            envelope.clarification_id
+                        ),
+                        "last_consuming_memory_turn_id": turn_lease.turn_id,
+                        "updated_at": firestore.SERVER_TIMESTAMP,
+                    },
+                    merge=True,
+                )
+                return None
+
+            if candidate.category is None:
+                raise MemoryClarificationStateError(
+                    "Stored clarification candidate is invalid."
+                )
             origin_ids = derive_proposal_origin_ids_v2(
                 user_id,
                 session_id,

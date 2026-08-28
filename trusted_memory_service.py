@@ -35,6 +35,7 @@ from memory_policy import (
     MemoryDecision,
     validate_memory_value,
 )
+from preference_learning import PreferenceHypothesis
 from schemas import (
     AgentActionReceipt,
     CollaborationProfile,
@@ -441,7 +442,7 @@ class TrustedMemoryService:
     async def select_memory_clarification(
         self,
         command: SelectMemoryClarificationCommand,
-    ) -> NaturalMemoryProposalResult:
+    ) -> NaturalMemoryProposalResult | NaturalMemoryNoEffectResult:
         """Select one server-owned candidate from a public clarification."""
         self._validate_identifier(command.user_id, "user_id")
         self._validate_identifier(command.workspace_id, "workspace_id")
@@ -482,6 +483,8 @@ class TrustedMemoryService:
                 turn_lease=command.turn_lease,
             )
         )
+        if stored is None:
+            return NaturalMemoryNoEffectResult(status="no_memory")
         return NaturalMemoryProposalResult(
             status="pending",
             action=AgentActionReceipt(
@@ -495,6 +498,60 @@ class TrustedMemoryService:
                 expires_at=stored.expires_at,
             ),
         )
+
+    async def open_preference_hypothesis_confirmation(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        source_message_id: str,
+        turn_lease: ProposalTurnLease,
+        hypothesis: PreferenceHypothesis,
+    ) -> MemoryClarificationReceipt:
+        """Ask the user before a preference hypothesis can become a proposal."""
+        self._validate_identifier(user_id, "user_id")
+        self._validate_identifier(project_id, "project_id")
+        self._validate_identifier(session_id, "session_id")
+        self._validate_identifier(source_message_id, "source_message_id")
+        if not isinstance(turn_lease, ProposalTurnLease):
+            raise ValueError(
+                "A preference confirmation requires retry-safe turn ownership."
+            )
+        if not isinstance(hypothesis, PreferenceHypothesis):
+            raise ValueError("hypothesis must be a PreferenceHypothesis.")
+        if hypothesis.user_id != user_id or hypothesis.project_id != project_id:
+            raise ValueError("Preference hypothesis scope does not match.")
+        observed_at = self._clock()
+        envelope = MemoryClarificationEnvelope(
+            clarification_id=derive_memory_clarification_id(
+                user_id=user_id,
+                session_id=session_id,
+                evidence_message_id=source_message_id,
+                clarification_turn_id=turn_lease.turn_id,
+            ),
+            user_id=user_id,
+            session_id=session_id,
+            workspace_id=project_id,
+            evidence_message_id=source_message_id,
+            clarification_turn_id=turn_lease.turn_id,
+            candidates=[
+                {
+                    "category": hypothesis.category,
+                    "canonical_value": hypothesis.canonical_value,
+                },
+                {"kind": "no_save"},
+            ],
+            created_at=observed_at,
+            expires_at=observed_at + timedelta(minutes=15),
+            status="open",
+        )
+        stored = await self._database.create_memory_clarification(
+            envelope=envelope,
+            observed_at=observed_at,
+            turn_lease=turn_lease,
+        )
+        return clarification_receipt(stored)
 
     async def decide_memory_proposal(
         self,

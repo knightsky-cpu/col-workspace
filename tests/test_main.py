@@ -869,6 +869,25 @@ class FakeWorkingStateService:
 
 
 @dataclass
+class FakePreferenceLearningService:
+    events: list[tuple[Any, ...]]
+    result: object | None = None
+    calls: list[object] = field(default_factory=list)
+    error: Exception | None = None
+
+    async def capture(self, command: object) -> object:
+        self.calls.append(command)
+        self.events.append(("preference_learning",))
+        if self.error is not None:
+            raise self.error
+        if self.result is not None:
+            return self.result
+        from preference_learning_service import PreferenceLearningResult
+
+        return PreferenceLearningResult()
+
+
+@dataclass
 class FakeTrustedMemoryService:
     events: list[tuple[Any, ...]]
     result: TrustedMemoryInspectionResult
@@ -880,6 +899,7 @@ class FakeTrustedMemoryService:
         NaturalMemoryProposalResult | NaturalMemoryClarificationResult | None
     ) = None
     selection_result: NaturalMemoryProposalResult | None = None
+    preference_confirmation_result: MemoryClarificationReceipt | None = None
     calls: list[InspectMemoryCommand] = field(default_factory=list)
     revoke_calls: list[RevokeMemorySignalCommand] = field(
         default_factory=list
@@ -894,6 +914,9 @@ class FakeTrustedMemoryService:
         default_factory=list
     )
     selection_calls: list[SelectMemoryClarificationCommand] = field(
+        default_factory=list
+    )
+    preference_confirmation_calls: list[dict[str, object]] = field(
         default_factory=list
     )
 
@@ -942,6 +965,18 @@ class FakeTrustedMemoryService:
         if self.selection_result is None:
             raise AssertionError("Missing fake clarification result.")
         return self.selection_result
+
+    async def open_preference_hypothesis_confirmation(
+        self,
+        **kwargs: object,
+    ) -> MemoryClarificationReceipt:
+        self.preference_confirmation_calls.append(kwargs)
+        self.events.append(("preference_confirmation",))
+        if self.error is not None:
+            raise self.error
+        if self.preference_confirmation_result is None:
+            raise AssertionError("Missing fake preference confirmation result.")
+        return self.preference_confirmation_result
 
     async def revoke_memory_signal(
         self,
@@ -1350,6 +1385,7 @@ class ServiceState:
     turn_service: FakeAgentColTurnService
     continuity_service: FakeContinuityService
     working_state_service: FakeWorkingStateService
+    preference_learning_service: FakePreferenceLearningService
     memory_service: FakeTrustedMemoryService
     collaborative_note_service: FakeCollaborativeNoteService
     artifact_service: FakeArtifactReadService
@@ -1374,6 +1410,7 @@ class ServiceState:
     responder_note_services: list[object]
     continuity_service_dependencies: list[object]
     working_state_service_dependencies: list[object]
+    preference_learning_service_dependencies: list[object]
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ]
@@ -1396,6 +1433,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     turn_service = FakeAgentColTurnService(events)
     continuity_service = FakeContinuityService(events)
     working_state_service = FakeWorkingStateService(events)
+    preference_learning_service = FakePreferenceLearningService(events)
     pending_proposal = MemoryProposal(
         proposal_id="example_usage--proposal-1",
         category="example_usage",
@@ -1620,6 +1658,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     responder_note_services: list[object] = []
     continuity_service_dependencies: list[object] = []
     working_state_service_dependencies: list[object] = []
+    preference_learning_service_dependencies: list[object] = []
     turn_service_dependencies: list[
         tuple[object, object, object, object, object]
     ] = []
@@ -1639,6 +1678,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         turn_service=turn_service,
         continuity_service=continuity_service,
         working_state_service=working_state_service,
+        preference_learning_service=preference_learning_service,
         memory_service=memory_service,
         collaborative_note_service=note_service,
         artifact_service=artifact_service,
@@ -1666,6 +1706,9 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         continuity_service_dependencies=continuity_service_dependencies,
         working_state_service_dependencies=(
             working_state_service_dependencies
+        ),
+        preference_learning_service_dependencies=(
+            preference_learning_service_dependencies
         ),
         turn_service_dependencies=turn_service_dependencies,
     )
@@ -1882,6 +1925,23 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         main,
         "WorkingStateService",
         create_working_state_service,
+        raising=False,
+    )
+
+    def create_preference_learning_service(
+        *,
+        database: object,
+        clock: object,
+    ) -> object:
+        preference_learning_service_dependencies.extend([database, clock])
+        if database is not state.database:
+            pytest.fail("Unexpected preference learning database.")
+        return preference_learning_service
+
+    monkeypatch.setattr(
+        main,
+        "PreferenceLearningService",
+        create_preference_learning_service,
         raising=False,
     )
     monkeypatch.setattr(
@@ -4883,6 +4943,186 @@ async def test_chat_uses_hidden_working_state_without_public_response_fields(
 
 
 @pytest.mark.asyncio
+async def test_chat_records_preference_observation_without_active_memory(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    from preference_learning import PreferenceObservation
+    from preference_learning_service import PreferenceLearningResult
+
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    observation = PreferenceObservation(
+        observation_id=f"pref-obs--{DEFAULT_TURN_ID}",
+        user_id="user-1",
+        project_id="project-1",
+        session_id="session-1",
+        source_turn_id=DEFAULT_TURN_ID,
+        source_message_id=f"turn--{DEFAULT_TURN_ID}--user",
+        category="response_length",
+        canonical_value="concise",
+        evidence_kind="user_correction",
+        evidence_summary="User corrected the response to be shorter.",
+        confidence_delta=0.35,
+        created_at=MEMORY_NOW,
+    )
+    service_state.preference_learning_service.result = (
+        PreferenceLearningResult(observation=observation)
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "pref-chat-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "That was too long; be shorter here.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["memory_proposals"] == []
+    assert body["memory_clarifications"] == []
+    assert body["adaptations"] == []
+    assert len(service_state.preference_learning_service.calls) == 1
+    command = service_state.preference_learning_service.calls[0]
+    assert command.user_id == "user-1"
+    assert command.project_id == "project-1"
+    assert command.session_id == "session-1"
+    assert command.turn_id == DEFAULT_TURN_ID
+    assert command.source_message_id == f"turn--{DEFAULT_TURN_ID}--user"
+    assert command.user_message == "That was too long; be shorter here."
+    assert command.model_response == "Generated answer"
+
+
+@pytest.mark.asyncio
+async def test_chat_surfaces_preference_confirmation_without_saving_memory(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    from preference_learning import PreferenceHypothesis
+    from preference_learning_service import PreferenceLearningResult
+
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    hypothesis = PreferenceHypothesis(
+        hypothesis_id="pref-hyp--user-1--project-1--response_length",
+        user_id="user-1",
+        project_id="project-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_count=2,
+        contradiction_count=0,
+        confidence=0.75,
+        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-2"),
+        first_observed_at=MEMORY_NOW,
+        last_observed_at=MEMORY_NOW,
+    )
+    clarification = MemoryClarificationReceipt(
+        clarification_id="memory-clarification--pref-hyp-1",
+        choices=[
+            MemoryClarificationChoice(
+                candidate_index=0,
+                category_label="Response length",
+                value_label="concise",
+            ),
+            MemoryClarificationChoice(
+                candidate_index=1,
+                category_label="Do not save",
+                value_label="Keep this as feedback only",
+            ),
+        ],
+        expires_at=MEMORY_NOW + timedelta(minutes=15),
+    )
+    service_state.preference_learning_service.result = (
+        PreferenceLearningResult(surfaced_hypothesis=hypothesis)
+    )
+    service_state.memory_service.preference_confirmation_result = clarification
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "pref-chat-key-2"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Again, concise practical answers please.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["memory_clarifications"] == [
+        clarification.model_dump(mode="json")
+    ]
+    assert body["memory_proposals"] == []
+    assert body["adaptations"] == []
+    assert len(service_state.memory_service.preference_confirmation_calls) == 1
+    confirmation_call = (
+        service_state.memory_service.preference_confirmation_calls[0]
+    )
+    assert confirmation_call["user_id"] == "user-1"
+    assert confirmation_call["project_id"] == "project-1"
+    assert confirmation_call["session_id"] == "session-1"
+    assert confirmation_call["source_message_id"] == (
+        f"turn--{DEFAULT_TURN_ID}--user"
+    )
+    assert confirmation_call["hypothesis"] == hypothesis
+
+
+@pytest.mark.asyncio
+async def test_chat_does_not_capture_preference_on_replay_or_structured_decision(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = MemoryDecisionRequest(
+        proposal_id="response_length--proposal-1",
+        decision="approve",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim(
+        memory_decision=decision,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "pref-chat-key-3"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Approve this memory.",
+            "memory_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.preference_learning_service.calls == []
+    completed_response = ChatResponse(
+        response="Replay answer",
+        memory_clarifications=[],
+        memory_proposals=[],
+    )
+    service_state.database.chat_turn_result = ChatTurnReplay(
+        response=completed_response,
+    )
+
+    replay = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "pref-chat-key-4"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "That was too long; be shorter here.",
+        },
+    )
+
+    assert replay.status_code == 200
+    assert replay.json()["response"] == "Replay answer"
+    assert service_state.preference_learning_service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_headerless_chat_returns_proposal_from_persisted_source_message(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -5576,6 +5816,7 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
         ("continuity_service",),
         ("renew_chat_turn_lease",),
         ("turn_service",),
+        ("preference_learning",),
         ("complete_chat_turn",),
     ]
     assert not any(event[0] == "save" for event in service_state.events)

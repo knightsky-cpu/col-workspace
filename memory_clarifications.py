@@ -49,11 +49,23 @@ class _ClarificationIdentity(StrictModel):
 
 
 class MemoryClarificationCandidate(StrictModel):
-    category: MemoryCategoryV2
-    canonical_value: object
+    kind: Literal["memory_candidate", "no_save"] = "memory_candidate"
+    category: MemoryCategoryV2 | None = None
+    canonical_value: object | None = None
 
     @model_validator(mode="after")
     def validate_canonical_value(self) -> Self:
+        if self.kind == "no_save":
+            if self.category is not None or self.canonical_value is not None:
+                raise ValueError(
+                    "Do-not-save clarification choices cannot contain "
+                    "memory values."
+                )
+            return self
+        if self.category is None:
+            raise ValueError("Memory clarification candidate requires a category.")
+        if self.canonical_value is None:
+            raise ValueError("Memory clarification candidate requires a value.")
         normalized = validate_memory_value_for_policy(
             "2.0",
             self.category,
@@ -102,6 +114,7 @@ class MemoryClarificationEnvelope(StrictModel):
 
         identities = [
             (
+                candidate.kind,
                 candidate.category,
                 json.dumps(
                     candidate.canonical_value,
@@ -201,10 +214,18 @@ def clarification_receipt(
         choices=[
             MemoryClarificationChoice(
                 candidate_index=index,
-                category_label=_CATEGORY_LABELS[candidate.category],
-                value_label=_human_value_label(
-                    candidate.category,
-                    candidate.canonical_value,
+                category_label=(
+                    "Do not save"
+                    if candidate.kind == "no_save"
+                    else _CATEGORY_LABELS[candidate.category]
+                ),
+                value_label=(
+                    "Keep this as feedback only"
+                    if candidate.kind == "no_save"
+                    else _human_value_label(
+                        candidate.category,
+                        candidate.canonical_value,
+                    )
                 ),
             )
             for index, candidate in enumerate(envelope.candidates)
