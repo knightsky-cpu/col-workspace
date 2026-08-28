@@ -84,6 +84,44 @@ Deferred to later bounded passes:
 - Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
 - Activity styling remains dormant/non-visible in the current UI.
 
+## 2026-08-28 - Accepted Left Drawer Density And Navigation Rows Pass
+
+Status: accepted after user visual verification.
+
+Scope:
+- Implemented the fourth bounded CSS-only visual pass.
+- Touched implementation source only in `frontend/styles.css`.
+- Made left drawer sections read as structured navigation rows while preserving existing Expand/Hide behavior.
+- Preserved Hide/Refresh actions, Expand semantics, `aria-expanded`, `data-section` values, collapsed/expanded behavior, and independent drawer scrolling.
+- Did not modify frontend modules, `frontend/index.html`, tests, backend code, chat styling, artifact styling, memory/notes behavior, or Google Sign-In internals.
+
+CSS surface changed:
+- `.supporting-panel`
+- `.drawer-heading`
+- `.drawer-toggle`
+- `.section-heading h2`
+- `.drawer-section`
+- `@supports selector(:has(*)) .drawer-section:has([aria-expanded="true"])`
+
+Verification:
+- Temporary Pass 4 CSS assertion failed before implementation for the missing drawer navigation-row treatment, then passed after the CSS patch.
+- `git diff --check` passed.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/auth-view.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/chat-view.test.mjs` passed: 9 tests.
+- `venv/bin/pytest tests/test_workspace_static.py -q` passed: 4 tests, with one existing `BaseAgentConfig` deprecation warning.
+
+Screenshot:
+- `/tmp/agent-col-shell-pass4.png`
+- The screenshot used a temporary HTML preview generated from the real `frontend/index.html` and current `frontend/styles.css`, with the workspace grid unhidden and one drawer section marked expanded to show the active `:has()` state.
+
+Deferred to later bounded passes:
+- Chat transcript, turns, receipts, and composer.
+- Artifact list/detail surfaces.
+- Memory and notes drawer styling.
+- Expanded artifact width changes only if a later plan explicitly updates and justifies `tests/test_workspace_static.py`.
+- Activity styling remains dormant/non-visible in the current UI.
+
 ## 2026-08-28 - Accepted Workspace Grid Proportions Pass
 
 Status: accepted after user visual verification.

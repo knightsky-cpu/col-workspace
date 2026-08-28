@@ -254,6 +254,7 @@ p {
 }
 
 .supporting-panel {
+  background: #0b151b;
   border-inline-end: 1px solid var(--border);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -337,7 +338,7 @@ p {
   display: flex;
   gap: 0.5rem;
   justify-content: space-between;
-  margin-block-end: 0.75rem;
+  margin-block-end: 0.95rem;
 }
 
 .drawer-heading h2 {
@@ -345,6 +346,8 @@ p {
 }
 
 .drawer-toggle {
+  border-color: var(--border-soft);
+  background: var(--surface-raised);
   font-size: 0.8125rem;
   min-height: 1.75rem;
   padding: 0.15rem 0.35rem;
@@ -471,10 +474,24 @@ p {
   flex-wrap: wrap;
 }
 
+.section-heading h2 {
+  font-size: 0.98rem;
+  font-weight: 650;
+}
+
 .drawer-section {
-  border-block-end: 1px solid var(--border);
-  margin-block-end: 1rem;
-  padding-block-end: 1rem;
+  margin: 0 0 0.55rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+@supports selector(:has(*)) {
+  .drawer-section:has([aria-expanded="true"]) {
+    border-color: rgba(54, 214, 194, 0.38);
+    background: var(--accent-soft);
+  }
 }
 
 .work-list-item {
