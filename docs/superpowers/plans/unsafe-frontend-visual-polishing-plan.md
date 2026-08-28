@@ -2,111 +2,180 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Finish the Agent Col workspace visual polish toward the reference image while making the required HTML, JavaScript, rendering, accessibility, and dependency changes explicitly instead of hiding them inside CSS-only work.
+**Goal:** Finish the Agent Col workspace visual and interaction polish requested on August 28, 2026, while making every HTML, JavaScript, backend, schema, accessibility, file-handling, and security-policy change explicit and approval gated.
 
-**Architecture:** The safe CSS-only sequence is complete. This plan crosses the safe visual boundary only where current source proves CSS cannot create the target UI: drawer icons and chevrons, chat turn metadata/structure, rendered Markdown/code/table previews, artifact header/tabs/actions, and composer utility icons. Each pass must preserve existing backend routes, request payloads, idempotency, auth, persistence, workspace selection, Notes, Memory, Chats, artifact lifecycle, retry, and model behavior.
+**Architecture:** The accepted safe CSS-only sequence is complete. This plan crosses that boundary only in named passes where current source proves CSS cannot implement the requested behavior: iconized drawer rows, card-level disclosure mechanics, workspace deletion, direct user-authored note proposals, attachment drag-and-drop, character-count state coloring, safe Markdown rendering, and artifact viewer structural fidelity. Every pass preserves existing auth, persistence, request ownership, idempotency, memory, notes, artifacts, receipts, routing, prompts, model behavior, Google Sign-In, and hidden working-state boundaries unless that pass explicitly says otherwise.
 
-**Tech Stack:** Static HTML, CSS, browser-native JavaScript ES modules, FastAPI static serving, Node `node --test` frontend tests, Python static-route tests, manual browser verification, and one approved Markdown/sanitization dependency path before any HTML rendering.
+**Tech Stack:** Static HTML, CSS, browser-native JavaScript ES modules, FastAPI, Firestore-backed services, Node `node --test` frontend tests, pytest backend tests, manual browser verification, and approved vendored frontend assets only when a pass explicitly authorizes them.
 
-**Spec:** `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md`, `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md`, `frontend-work-notes.md`, current frontend source, current frontend tests, and the reference image `agent-col-visual-target.jpeg`.
+**Spec:** `AGENTS.md`, `frontend-work-notes.md`, `post-deployment-handoff.md`, `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md`, `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md`, current frontend/backend source, current tests, user-provided screenshot `/home/sigmaknight/Pictures/Screenshots/Screenshot From 2026-08-28 10-58-04.png`, and root visual target `agent-col-visual-target.jpeg`.
 
 ## Current Boundary
 
-- Safe CSS-only visual work is complete and checkpointed at `eb1736b`.
-- Remaining target fidelity requires non-safe frontend work because the current DOM/renderers do not contain the elements shown in the reference image.
-- Plan status: approved for planning purposes.
-- This plan does not authorize implementation by itself. Each pass requires separate explicit user approval before implementation and manual acceptance before checkpointing.
+- Safe CSS-only visual work is complete and manually accepted.
+- Remaining target fidelity requires source changes outside the visual-only boundary.
+- This plan is not implementation approval. Approve only one bounded pass at a time.
+- Every source-changing pass must follow `AGENTS.md`: investigate, propose, wait for approval, write a failing test first, verify RED, implement GREEN, refactor only after GREEN, run focused verification, report as `implemented, pending manual verification`, and wait for user acceptance.
+- Do not checkpoint any pass until the user accepts manual verification.
+
+## User Requirements Captured For This Revision
+
+### Global
+
+- Do not put emoji in code, UI copy, tests, fixtures, screenshots, or generated documentation examples for this application. Icons are allowed; emoji are not.
+- The provided screenshot and `agent-col-visual-target.jpeg` are visual targets, not permission to invent behavior or expose hidden state.
+- The existing chat conversation structure and layout are preferred and must not be broadly restructured during visual polish.
+- Right drawer Artifact Viewer should move toward the screenshot structure and quality.
+
+### Left Drawer
+
+- Replace text section `Expand` / `Collapse` controls with arrow or chevron icon treatment while preserving accessible expanded/collapsed state.
+- Add icons to the left of parent menu card titles. Requested icons should match the screenshot as closely as practical:
+  - Workspace: folder-like icon.
+  - Artifacts: cube/package-like icon.
+  - Notes: document/list icon.
+  - Memory: brain/network-like icon, implemented as an icon, not emoji.
+  - Chats: message bubble icon.
+- Change highlighted selection/expanded color toward translucent neon amber. This remains subject to later visual tuning.
+- Add workspace deletion: workspaces need a delete action like memory, artifacts, and notes. Workspaces must have delete only, no archive option.
+- Move the manual Create Artifact form below the artifact list inside the Artifacts drawer section.
+- Add a Create Note button and functionality for user-authored authoritative note proposals. Direct create must bypass the model but must not bypass the collaborative-note security/policy contract; it must create a pending proposal for approval, not an immediately active note.
+- Make memory cards collapsible and collapsed by default. Clicking the card itself expands it to reveal revoke/delete settings; there should be no separate per-card expand button.
+- Use the same card-click-to-expand convention for left drawer parent/child subcards where practical.
+- Drawer-level collapse/expand can be iconized, but drawer behavior must remain intact.
+
+### Chat Surface
+
+- Preserve current chat surface structure and layout.
+- Add an icon to the `Start a conversation` title.
+- Change New conversation button icon treatment to a pencil-in-box or close equivalent.
+- Keep model and user cards differentiated. Move model message accents toward purple; keep user prompt accents amber.
+- Model response text and user prompt text may be tuned toward amber if readability and contrast remain acceptable.
+- Add an Agent Col icon next to the Agent Col name/title in model response cards when that structural pass is approved.
+- User prompt cards should use a computer-with-keyboard icon when that structural pass is approved.
+- While a prompt is waiting on Agent Col, keep the text `Waiting for Agent Col` but add a three-dot wave animation and make the status text move in a gentle sine-wave-like vertical motion.
+- Adaptation receipts/cards should live inside a parent disclosure card that is collapsed by default so profile adaptation proof remains inspectable without distracting from the conversation.
+- Clean up visible model response formatting so Markdown markers such as heading hashes, asterisks, and table syntax render as structure rather than raw symbols. This means safe Markdown rendering, not changing stored response text or model output.
+- Wire drag-and-drop file/image attachments into the chat box through an explicit attachment pass.
+- Keep the send button treatment close to the screenshot.
+- Keep character count underneath if desired, but color it:
+  - green under 5,000 characters;
+  - yellow from 5,000 through 8,999 characters;
+  - red from 9,000 through 10,000 characters.
+- Show a paperclip attachment affordance.
+- Do not add an emoji menu.
+- Remove or omit the `@` affordance.
+
+### Right Drawer - Artifact Viewer
+
+- The screenshot's Artifact Viewer is the target direction.
+- Add artifact header/card, metadata chips, preview/info structure, Markdown/code/table readability, and compact action bar only through explicit source-backed passes.
 
 ## Official Documentation Evidence
 
-- WAI-ARIA accordion pattern: expansion controls must expose `aria-expanded`; an accordion header's button controls the related panel. This matters because the left drawer currently uses separate heading text and separate Expand buttons, so an iconized row/header rewrite is an accessibility/behavior structure pass, not CSS-only.
-  - https://www.w3.org/WAI/ARIA/apg/patterns/accordion/
-- WAI-ARIA tabs pattern: real Preview/Info tabs require tablist/tab/tabpanel semantics and keyboard behavior if implemented as tabs, not just visual labels.
-  - https://w3c.github.io/wai-website/ARIA/apg/patterns/tabs/
-- MDN `innerHTML`: assigning generated strings to HTML parses markup and is an XSS injection-sink risk; MDN recommends `TrustedHTML` plus Trusted Types enforcement, and notes `textContent` is appropriate when content should remain plain text.
-  - https://developer.mozilla.org/en-US/docs/Web/API/Element/innerHTML
-- MDN Trusted Types: Trusted Types centralize transformations for HTML injection sinks, but the application must still provide a sanitizer policy.
-  - https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API
-- DOMPurify official README: DOMPurify sanitizes dirty HTML strings and warns that post-sanitization mutation can void sanitization.
-  - https://github.com/cure53/DOMPurify/blob/main/README.md
-- CommonMark spec: Markdown includes raw HTML handling, so Markdown rendering is not automatically safe.
-  - https://spec.commonmark.org/spec
-- commonmark.js official README: the JavaScript reference implementation can render CommonMark, and its `safe` option suppresses raw HTML and unsafe URLs.
-  - https://github.com/commonmark/commonmark.js/
-- markdown-it official README: default JavaScript configuration has `html: false` and includes GFM table support; table support matters because the visual target artifact preview includes a Markdown table.
-  - https://github.com/markdown-it/markdown-it
-- MDN `<button>` accessibility: icon-only buttons need accessible names; visible text is safer when icon meaning may be unfamiliar.
-  - https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/button
-- Google Identity Services integration docs: websites should not use their own Sign in with Google button; the Google-rendered button flow is handled by Google.
-  - https://developers.google.com/identity/gsi/web/guides/integrate
+- WAI-ARIA accordion pattern: accordion headers are controls for showing/hiding panels, and expanded panels require accurate `aria-expanded`. This controls drawer row and card disclosure design. https://www.w3.org/WAI/ARIA/apg/patterns/accordion/
+- MDN `aria-expanded`: a focusable control that toggles content should expose current expanded/collapsed state, commonly with `aria-controls`. https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-expanded
+- MDN button role and accessible names: prefer native `button`; icon-only buttons need an accessible name. https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/button_role and https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-label
+- MDN CSS animations: keyframes and animation properties can animate visual values such as transforms over time. https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Animations
+- MDN CSS transforms and `translateY()`: vertical wave motion should use transform translation so the animation does not change document flow. https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/transform and https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Values/transform-function/translateY
+- MDN `prefers-reduced-motion`: nonessential motion must respect reduced-motion preferences. https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/%40media/prefers-reduced-motion
+- MDN File API: web apps access files only when the user provides them through file input or drag and drop; files expose metadata and content through `File`/`FileList`. https://developer.mozilla.org/en-US/docs/Web/API/File_API
+- MDN DataTransfer.files: dropped files are available through `DataTransfer.files`, but only during `drop` and `paste` events because other phases use protected mode. https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer/files
+- MDN `<input type="file">`: file input supports `accept`, `multiple`, and user-selected `files`; the value does not expose the true local path. https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/file
+- OWASP File Upload Cheat Sheet: file upload must use allowlisted extensions/types, size limits, generated storage names, authorization, non-webroot or mediated storage, and content validation appropriate to risk. https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html
+- MDN `innerHTML` and Trusted Types: generated strings assigned to HTML sinks are injection risks; prefer text APIs or sanitized `TrustedHTML`. https://developer.mozilla.org/en-US/docs/Web/API/Element/innerHTML and https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API
+- DOMPurify README: DOMPurify sanitizes dirty HTML and warns that post-sanitization mutation can void sanitization. https://github.com/cure53/DOMPurify/blob/main/README.md
+- markdown-it README: `html: false` default plus table support is the preferred browser Markdown path if vendored and approved. https://github.com/markdown-it/markdown-it
+- Google Identity Services: do not replace the Google-rendered sign-in button with a custom button. https://developers.google.com/identity/gsi/web/guides/display-button
+- Lucide: if the project approves vendored icon SVGs, Lucide provides consistent SVG icons under permissive licenses, but it adds license attribution and source-tracking obligations. https://lucide.dev/ and https://github.com/lucide-icons/lucide/blob/main/LICENSE
 
 ## Source-Backed Evidence
 
-### Safe Guide Boundary
+### Current Static Shell
 
-- `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md:19` says CSS-only changes are the default safe path and HTML/JavaScript changes are not visual-only unless explicitly limited.
-- `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md:43-58` marks `frontend/app.mjs`, `frontend/auth-view.mjs`, `frontend/state.mjs`, `frontend/api.mjs`, `frontend/requests.mjs`, `frontend/render.mjs`, `frontend/workspace-layout.mjs`, `frontend/chat-view.mjs`, `frontend/work-view.mjs`, `frontend/workspace-view.mjs`, `frontend/notes-view.mjs`, `frontend/memory-view.mjs`, `frontend/chats-view.mjs`, and dormant `frontend/activity-view.mjs` as behavior-bearing surfaces.
-- `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md:284-305` forbids API, event-handler, reducer, hidden/disabled/expanded, content parsing, Markdown generation, and `innerHTML` changes in visual-only passes.
-- `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md:307-327` distinguishes styling already-rendered content from changing response parsing, Markdown/export generation, or model behavior.
+- `frontend/index.html:12-20` has auth status, `Agent Col`, workspace indicator, and a plain text New conversation button. No pencil-in-box icon exists today.
+- `frontend/index.html:58-180` has drawer rows for Workspace, Artifacts, Notes, Memory, and Chats. Each has an `h2` plus a text `Expand` button. No leading icon or chevron icon exists today.
+- `frontend/index.html:89-143` places the `Create Artifact` form before `<div data-work-list>`, so moving Create Artifact below artifacts requires HTML/view work.
+- `frontend/index.html:184-213` contains the conversation intro, transcript, composer, character counter, and send button. There is no start-title icon, attachment input, drop target, paperclip button, or attachment state.
+- `frontend/index.html:217-227` has a right artifact drawer heading and detail target. It has no selected-artifact header card, metadata chips, Preview/Info tabs, Markdown rendering, or bottom action bar.
 
-### Existing Visual Plan Boundary
+### Current Drawer Behavior
 
-- `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md:5-8` defines the first visual plan as behavior-preserving and locks HTML, JavaScript, backend routes, prompts, schemas, persistence, auth, memory, notes, artifacts, and working-state behavior.
-- `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md:38-45` already corrected stale assumptions around dark tokens, `:has()`, Google Sign-In internals, and raw artifact previews.
-- `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md:528-607` says Pass 5 preserved `textContent` and did not implement Markdown rendering.
-- `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md:685-759` says Pass 7 styled raw artifact content but did not add Markdown parsing, syntax highlighting, tabs, content transformation, or truncation.
-- `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md:766-833` keeps Activity styling dormant because the current app has no Activity section.
+- `frontend/app.mjs:343-384` owns drawer and section text/`aria-expanded` updates. Replacing visible Expand/Collapse text with icon controls touches behavior and accessibility logic.
+- `frontend/workspace-layout.mjs` owns left/right drawer and section expansion state. Card-level disclosure must reuse or extend this pattern rather than creating hidden parallel state.
 
-### Current Source Gaps Against The Reference Image
+### Current Workspace Behavior
 
-- Static shell:
-  - `frontend/index.html:12-20` has a top bar with auth text, `Agent Col | <workspace>`, and a plain New conversation button. The reference image's plus icon is not a real DOM/icon element today.
-  - `frontend/index.html:58-180` has left drawer rows with text headings and text Expand buttons. There are no leading icons or chevron controls like the reference image.
-  - `frontend/index.html:217-227` has the right artifact panel heading and two text buttons. There is no selected-artifact header card, no metadata-chip row, no Preview/Info tab structure, and no bottom icon action bar in static HTML.
-- Drawer behavior:
-  - `frontend/workspace-layout.mjs:1-19` defines only left/right drawer state and five drawer sections: workspace, work, notes, memory, chats.
-  - `frontend/app.mjs:343-384` toggles layout classes and writes `aria-expanded` plus visible text for drawer and section controls. Replacing Expand/Collapse text with chevrons or making the entire row a button touches behavior/accessibility logic.
-- Chat transcript:
-  - `frontend/chat-view.mjs:69-82` renders each turn as `article.turn`, `p.turn-user`, `p.turn-model`, then receipts. It does not render avatars, actor labels, timestamp elements, nested message bodies, or model-card headers.
-  - `frontend/chat-view.mjs:75-76` uses `setText(...)`, and `frontend/render.mjs:1-3` writes `textContent`. This preserves safety but exposes raw Markdown syntax.
-  - `frontend/state.mjs:263-301` stores a live completed turn as `{ request, response }` without display timestamp metadata.
-  - `schemas.py:903-908` includes `ChatMessageRecord.timestamp`, and `database.py:1450-1476` returns persisted session messages ordered by timestamp, but `frontend/state.mjs:487-543` rebuilds reopened transcript without preserving timestamps.
-- Artifact viewer:
-  - `frontend/work-view.mjs:719-763` renders artifact detail as export controls followed by content/detail/forms/feedback. It does not create the target image's artifact-header card, Preview/Info tab model, or action toolbar.
-  - `frontend/work-view.mjs:468-490` renders single-file artifact content as raw `<pre class="artifact-content"><code>...</code></pre>` with `setText`, not rendered Markdown.
-  - `frontend/work-view.mjs:131-263` already builds Markdown/Text/HTML export links. Changing preview rendering must not change these export payloads.
-  - `schemas.py:198-225` supports code, document, and data artifact formats including Markdown, HTML, Bash, JSON, and text, so renderer selection must be format-aware.
-- Google Sign-In:
-  - `frontend/auth-view.mjs:42-70` initializes Google Identity Services and calls `accounts.renderButton(...)`.
-  - `tests/frontend/auth-view.test.mjs:98-134` asserts that initialization calls `renderButton` and passes credentials through. The plan must not replace this with a custom Google button.
-- Dependency/build shape:
-  - There is no `package.json` or frontend bundler in the current repo.
-  - `requirements.txt:1-8` and `requirements-dev.txt:1-4` only pin Python/runtime/test dependencies.
-  - `frontend/index.html:7-8` loads one CSS file and one JavaScript module from `/static/agent-col`.
-  - Existing project specs repeatedly avoid package dependencies for the lightweight browser workspace. A Markdown/sanitizer dependency must therefore be separately approved and pinned or vendored deliberately.
+- `main.py:1488-1565` exposes only list and create workspace routes.
+- `database.py:463-579` exposes only `list_workspaces(...)` and `create_workspace(...)`.
+- `frontend/workspace-view.mjs:23-35` renders each workspace as a select button.
+- `frontend/workspace-view.mjs:37-56` renders only a create form.
+- No delete workspace route, API helper, state transition, or frontend button exists today.
 
-## Required Unsafe Work
+### Current Notes Behavior
 
-1. Add real presentational structure for drawer/top/action icons while preserving accessible names and existing controls.
-2. Restructure chat turn rendering enough to show actor labels, optional timestamps, avatar/identity marks, model headers, message bodies, and receipt attachment without changing request/response content.
-3. Preserve or project chat timestamps from existing persisted message records where available; decide explicitly how live newly submitted turns display time without changing backend behavior.
-4. Add a safe Markdown rendering pipeline for model responses and Markdown artifacts, including sanitizer policy, XSS tests, and raw-text fallback.
-5. Add artifact viewer structure for a header card, metadata chips, Preview/Info affordance, preview body, details body, and compact action controls while preserving selection, export, print, edit, rename, version, archive, restore, and feedback behavior.
-6. Add visual affordances for composer utility controls only if real behavior exists or the controls are explicitly disabled/non-interactive with accessible explanation. Do not fake upload, mention, or emoji behavior.
-7. Keep Google Sign-In as the Google-rendered button; style only the surrounding app shell.
+- `main.py:1590-1905` exposes note list/detail/correction/archive/restore/delete routes.
+- `main.py:1696-1762` creates correction proposals through the collaborative note service.
+- `collaborative_note_service.py:157-174` routes corrections to `database.create_collaborative_note_proposal(...)`.
+- `collaborative_note_service.py:176-219` creates model/natural note proposals after validating candidate evidence.
+- `database.py:581-759` creates pending note proposals with session ownership validation, source-message validation, text normalization, conflict detection, and pending proposal cap.
+- `collaborative_note_policy.py:11-17` restricts note kinds to `decision`, `requirement`, `constraint`, `task_state`, and `working_context`.
+- `collaborative_note_policy.py:118-142` normalizes title/body text, limits title/body length, rejects control characters, requires note text to contain a letter, and reuses prohibited memory patterns plus note-specific blocked phrases.
+- `frontend/notes-view.mjs:16-66` renders pending proposals with approve/reject.
+- `frontend/notes-view.mjs:110-150` has correction proposal UI for selected notes.
+- There is no direct Create Note button or direct user-authored note proposal route today.
+
+### Current Memory Behavior
+
+- `frontend/memory-view.mjs:58-95` renders active memory cards with visible Revoke/Delete actions immediately inside each card.
+- `frontend/memory-view.mjs:97-133` renders pending proposal cards with visible Approve/Reject actions.
+- `frontend/memory-view.mjs:158-195` renders pending proposals before identity context, active preferences, and recent events.
+- `tests/frontend/memory-view.test.mjs` currently expects visible destructive buttons and confirmation behavior. Collapsible cards require test changes first.
+
+### Current Chat Behavior
+
+- `frontend/chat-view.mjs:69-82` renders each turn as `article.turn`, `p.turn-user`, `p.turn-model`, and `div.turn-receipts`.
+- `frontend/chat-view.mjs:75-76` writes user/model text via `setText`.
+- `frontend/render.mjs:1-3` writes `textContent`, preserving current HTML-injection safety.
+- `frontend/chat-view.mjs:145-150` updates the character counter text only; no severity class or color state exists today.
+- `frontend/chat-view.mjs:153-163` submits through the existing form path and supports Enter/Shift+Enter behavior.
+- `frontend/app.mjs:589-624` sets `data-chat-status` to the static text `Waiting for Agent Col` while `/api/chat` is pending, then clears it after completion or failure.
+- `frontend/index.html:196` renders chat status as `<p class="chat-status" data-chat-status role="status"></p>`.
+- `frontend/chat-view.mjs:48-63` renders adaptation receipts as flat `li.receipt-item` entries inside the same receipt list as actions, citations, artifacts, memory, notes, continuity, and other proof.
+- `frontend/app.mjs:627-678` wires only form, input, submit, retry, transcript, character count, clarification choices, and continuity choices into `createChatView`.
+- No attachment route, attachment schema, file input, drop handler, upload store, or image preview pipeline exists today.
+
+### Current Artifact Viewer Behavior
+
+- `frontend/work-view.mjs:345-407` renders artifact list and selected state.
+- `frontend/work-view.mjs:468-490` renders single-file artifact content as raw text in `<pre><code>` using `setText`.
+- `frontend/work-view.mjs:719-763` renders artifact detail, export controls, content/detail, lifecycle/edit/version/feedback forms, and feedback history.
+- `frontend/work-view.mjs:131-263` owns export strings and download behavior. Preview rendering must not alter exports.
+- Existing artifact archive/restore/version/rename/feedback behavior must remain reachable if artifact detail is visually restructured.
+
+### Dependency And Build Shape
+
+- There is no `package.json` or frontend bundler.
+- `frontend/index.html:7-8` loads only `/static/agent-col/styles.css` and `/static/agent-col/app.mjs`.
+- Any icon library, Markdown library, sanitizer, or attachment dependency must be explicitly approved, vendored or pinned, licensed, and served through the existing static asset model.
 
 ## Global Invariants
 
-- No backend route, schema, prompt, model, routing, persistence, memory, notes, artifact lifecycle, idempotency, retry, auth, or working-state behavior changes unless a later pass explicitly says so and receives approval.
-- No private working-state or hidden model context may become visible.
-- No generated/user content may be inserted with unsanitized `innerHTML`.
-- No custom Sign in with Google button may replace the Google-rendered button.
-- Every JavaScript/HTML pass must start with a failing focused test and report RED/GREEN evidence.
-- The user manually accepts each visual pass before checkpointing.
+- No emoji in application code, visible UI strings, CSS generated content, tests, fixtures, screenshots, or plan examples.
+- No backend route, schema, prompt, model, routing, persistence, memory, notes, artifact lifecycle, idempotency, retry, auth, or working-state behavior changes except in the pass that explicitly owns that change.
+- No generated/user content may enter the DOM through unsanitized HTML sinks.
+- Markdown cleanup must be a presentation layer only: do not mutate stored model responses, request payloads, artifact content, exports, prompts, or responder instructions to remove symbols.
+- Motion must be disabled or reduced under `prefers-reduced-motion`.
+- Google Sign-In must remain Google-rendered.
+- Direct user note creation must create a pending governed proposal. It must not create an active note directly.
+- Workspace deletion must be permanent delete semantics, not archive semantics, and must be owner-scoped.
+- Attachment support must not send arbitrary files to the model or storage without allowlist, size, type, authorization, and privacy decisions.
+- Existing `/api/chat` text behavior, final responses, receipts, artifacts, notes, memory, continuity choices, retry, and persistence remain authoritative.
+- Manual acceptance is required for every visual pass.
 
 ## Pass U1: Drawer And Top-Bar Structural Icons
 
-**Goal:** Match the reference image's drawer row affordances and top-bar action icon treatment without changing drawer state behavior.
+**Goal:** Add the requested icon treatment to the drawer and New conversation/start title without changing drawer state, chat layout, Google Sign-In, or backend behavior.
 
 **Expected files:**
 - Modify: `frontend/index.html`
@@ -117,58 +186,370 @@
 - Test: `tests/frontend/auth-view.test.mjs`
 
 **Implementation outline:**
-- Add decorative icon spans with `aria-hidden="true"` inside existing drawer section headings and top-bar New conversation button.
-- Keep visible text labels: Workspace, Artifacts, Notes, Memory, Chats, Hide, Refresh, New conversation.
-- Keep the existing `data-section-toggle`, `data-drawer-toggle`, `data-left-refresh`, and `data-new-conversation` hooks.
-- Do not replace Google Sign-In internals or `[data-google-button]`.
-- If replacing Expand/Collapse text with a chevron, keep an accessible text label in the button and test that `aria-expanded` still changes in `frontend/app.mjs:377-384`.
+- Add inline SVG icon spans or an approved small local icon helper for Workspace, Artifacts, Notes, Memory, Chats, Hide, Refresh, New conversation, and Start a conversation.
+- Use decorative icons with `aria-hidden="true"` where visible text remains.
+- Use `aria-label` only for icon-only buttons where no visible text remains.
+- Replace section toggle visible text with chevron/arrow visual treatment only if tests prove `aria-expanded` still changes and the accessible name remains meaningful.
+- Use no emoji. Do not use Unicode emoji as icons.
+- Keep Google `[data-google-button]` untouched.
 
 **RED tests:**
-- Add an assertion that drawer sections contain decorative icon elements without removing `data-section` and `data-section-toggle`.
-- Add an assertion that top-bar New conversation still has visible/accessible text and the same data hook.
-- Preserve `initializeGoogleSignIn` tests proving Google button rendering still uses `accounts.renderButton`.
+- Assert drawer section headings include decorative icon nodes while preserving `data-section`, `data-section-toggle`, and section title text.
+- Assert New conversation keeps `data-new-conversation`, has accessible text/name, and includes a decorative icon.
+- Assert Start a conversation includes a decorative icon without changing the `data-chat-transcript` or composer hooks.
+- Assert Google Sign-In initialization still calls `accounts.renderButton`.
 
 **Verification:**
 - `node --test tests/frontend/workspace-static.test.mjs tests/frontend/workspace-layout.test.mjs tests/frontend/auth-view.test.mjs`
 - `git diff --check`
-- Manual: expand/collapse each left drawer section, collapse/restore left drawer, start a new conversation, verify no custom Google button was introduced.
 
-## Pass U2: Chat Turn Structure, Metadata, And Receipt Attachment
+**Manual targets:**
+1. Expand/collapse each drawer section with mouse and keyboard; chevrons/arrows must reflect state.
+2. Collapse/restore the left drawer and right drawer; controls remain reachable.
+3. Start a new conversation; behavior remains unchanged.
+4. Confirm no emoji appears anywhere in the UI.
 
-**Goal:** Give user and Agent Col turns the structural pieces visible in the reference image while preserving request construction and response content.
+## Pass U2: Drawer Card Selection Color And Artifact Form Position
+
+**Goal:** Apply translucent neon amber selection/expanded styling and move manual Create Artifact below the artifact list.
+
+**Expected files:**
+- Modify: `frontend/index.html`
+- Modify: `frontend/styles.css`
+- Test: `tests/frontend/workspace-static.test.mjs`
+- Test: `tests/frontend/work-view.test.mjs`
+
+**Implementation outline:**
+- Move `<form data-artifact-create-form>` below `<div data-work-list>`.
+- Preserve all form fields, names, `required`, `maxlength`, select options, and `data-artifact-create-form`.
+- Update CSS selected/current/expanded drawer treatment toward translucent amber while keeping teal available for primary action and model rails only where approved.
+- Do not change artifact request construction or backend routes.
+
+**RED tests:**
+- Static test proves `data-work-list` appears before `data-artifact-create-form`.
+- Existing artifact create request tests remain unchanged and pass after the DOM move.
+- CSS/static assertion proves amber selected/expanded variables or selectors exist without removing current hooks.
+
+**Verification:**
+- `node --test tests/frontend/workspace-static.test.mjs tests/frontend/work-view.test.mjs`
+- `git diff --check`
+
+**Manual targets:**
+1. Open Artifacts drawer; list appears above Create Artifact.
+2. Create a manual artifact; payload and result remain unchanged.
+3. Selected/expanded drawer cards read as translucent amber, not teal.
+
+## Pass U3: Workspace Permanent Deletion
+
+**Goal:** Add owner-scoped workspace deletion with no archive option.
+
+**Expected files:**
+- Modify: `schemas.py`
+- Modify: `database.py`
+- Modify: `main.py`
+- Modify: `frontend/api.mjs`
+- Modify: `frontend/state.mjs`
+- Modify: `frontend/workspace-view.mjs`
+- Modify: `frontend/app.mjs`
+- Modify: `frontend/styles.css`
+- Test: `tests/test_main.py`
+- Test: `tests/test_database.py`
+- Test: `tests/frontend/api.test.mjs`
+- Test: `tests/frontend/state.test.mjs`
+- Test: `tests/frontend/workspace-view.test.mjs`
+
+**Implementation outline:**
+- Add `DELETE /api/users/{user_id}/workspaces/{workspace_id}`.
+- Require resolved effective user ownership exactly like list/create routes.
+- Reject deletion of the default workspace unless the approved pass explicitly chooses replacement/default behavior.
+- Define deletion semantics explicitly: remove the workspace metadata record and fail closed if dependent workspace data would be orphaned without a documented cleanup strategy.
+- Because workspace subcollections may include notes/artifacts/chat state, do not implement broad recursive deletion until the data-retention and orphaning contract is approved.
+- Add frontend Delete action to workspace cards with confirmation.
+- Do not add archive.
+
+**RED tests:**
+- Backend route returns 404/403-style bounded error for non-owned or missing workspace.
+- Backend route deletes an owned non-default workspace and list no longer returns it.
+- Deleting default workspace is rejected with a bounded error unless a replacement policy is approved.
+- Frontend renders Delete for non-default workspace cards and does not render Archive.
+- Frontend deletion refreshes selected workspace safely when the deleted workspace was selected.
+
+**Verification:**
+- `venv/bin/pytest tests/test_main.py -k "workspace and delete" -q`
+- `venv/bin/pytest tests/test_database.py -k "workspace and delete" -q`
+- `node --test tests/frontend/api.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-view.test.mjs`
+- `git diff --check`
+
+**Manual targets:**
+1. Create a throwaway workspace, delete it, and confirm it disappears.
+2. Confirm no Archive option exists for workspaces.
+3. Confirm default/current workspace deletion behavior matches the approved policy.
+4. Confirm chats, notes, memory, and artifacts for other workspaces are unchanged.
+
+## Pass U4: Direct User-Authored Note Proposal Creation
+
+**Goal:** Add a Create Note button/form that bypasses the model but does not bypass the governed collaborative-note proposal policy.
+
+**Expected files:**
+- Modify: `schemas.py`
+- Modify: `collaborative_note_service.py`
+- Modify: `database.py` only if the existing proposal primitive needs a source/provenance-safe extension
+- Modify: `main.py`
+- Modify: `frontend/api.mjs`
+- Modify: `frontend/state.mjs`
+- Modify: `frontend/notes-view.mjs`
+- Modify: `frontend/app.mjs`
+- Modify: `frontend/styles.css`
+- Test: `tests/test_collaborative_note_policy.py`
+- Test: `tests/test_collaborative_note_service.py`
+- Test: `tests/test_main.py`
+- Test: `tests/frontend/api.test.mjs`
+- Test: `tests/frontend/state.test.mjs`
+- Test: `tests/frontend/notes-view.test.mjs`
+
+**Implementation outline:**
+- Add a user-authored note proposal request model with `note_kind`, `title`, and `body`.
+- Validate `note_kind` through `CollaborativeNoteKind`.
+- Validate title/body with existing collaborative note policy normalization and prohibited-content checks.
+- Create a pending `CollaborativeNoteProposal`, never an active `CollaborativeNote`.
+- Preserve 24-hour proposal lifetime and approval/rejection flow.
+- Use the active browser session and a source message/provenance strategy approved for direct user-created notes. If no valid source message exists, stop and revise; do not invent provenance.
+- Add Create Note UI under Notes with explicit pending-proposal language.
+- After creation, show the proposal in Pending proposals and require user approval.
+
+**RED tests:**
+- Direct create returns a pending proposal for policy-valid note text.
+- Prohibited note text is rejected by policy before persistence.
+- Direct create does not call model/router/responder code.
+- Direct create does not create an active note until approved.
+- Frontend Create Note form submits through the new API helper and appends the returned proposal to pending proposals.
+
+**Verification:**
+- `venv/bin/pytest tests/test_collaborative_note_policy.py tests/test_collaborative_note_service.py -k "direct or user_authored or proposal" -q`
+- `venv/bin/pytest tests/test_main.py -k "collaborative_note and direct" -q`
+- `node --test tests/frontend/api.test.mjs tests/frontend/state.test.mjs tests/frontend/notes-view.test.mjs`
+- `git diff --check`
+
+**Manual targets:**
+1. Create a safe note proposal from the Notes drawer.
+2. Confirm it appears under Pending proposals.
+3. Approve it and confirm it becomes an active note.
+4. Try prohibited or overlong content and confirm it is rejected safely.
+5. Confirm no model response is generated by direct note creation.
+
+## Pass U5: Collapsible Memory And Left-Drawer Subcards
+
+**Goal:** Make memory and left-drawer child cards collapsed by default, with card-click disclosure and hidden actions until expanded.
+
+**Expected files:**
+- Modify: `frontend/memory-view.mjs`
+- Modify: `frontend/notes-view.mjs`
+- Modify: `frontend/workspace-view.mjs`
+- Modify: `frontend/work-view.mjs` only for artifact list/card disclosure if approved
+- Modify: `frontend/state.mjs`
+- Modify: `frontend/styles.css`
+- Test: `tests/frontend/memory-view.test.mjs`
+- Test: `tests/frontend/notes-view.test.mjs`
+- Test: `tests/frontend/workspace-view.test.mjs`
+- Test: `tests/frontend/work-view.test.mjs` if artifact cards are included
+
+**Implementation outline:**
+- Add frontend-only expanded-card state keyed by stable record IDs.
+- Render each card as a native button or a focusable card with a native button control. Prefer native buttons.
+- Clicking the card toggles details and action controls.
+- Set accurate `aria-expanded` and `aria-controls`.
+- Keep destructive Revoke/Delete confirmation checks unchanged.
+- Keep pending proposal Approve/Reject hidden until expanded if approved; otherwise only hide destructive settings for active records.
+- Apply the same convention consistently to Workspace, Notes, Memory, Chats, and optionally Artifacts only where it does not hide primary navigation too deeply.
+
+**RED tests:**
+- Memory active preference actions are absent/hidden before expansion.
+- Clicking a memory card reveals Revoke/Delete controls and keeps confirmation behavior.
+- Pending proposal card expansion reveals Approve/Reject controls if included in the approved scope.
+- Keyboard activation toggles the same state.
+- Existing human label and ID-secondary tests still pass.
+
+**Verification:**
+- `node --test tests/frontend/memory-view.test.mjs tests/frontend/notes-view.test.mjs tests/frontend/workspace-view.test.mjs`
+- Add `tests/frontend/work-view.test.mjs` only if artifact cards are included.
+- `git diff --check`
+
+**Manual targets:**
+1. Open Memory; cards are collapsed by default.
+2. Click a memory card; settings appear.
+3. Revoke/Delete still require confirmation.
+4. Notes, Workspace, Chats, and included child cards use the same mechanical convention without making navigation confusing.
+
+## Pass U6: Chat Pending Status Wave Animation
+
+**Goal:** Keep the pending text `Waiting for Agent Col` while adding a three-dot wave animation and gentle sine-wave-like text motion during active model wait only.
+
+**Expected files:**
+- Modify: `frontend/app.mjs`
+- Modify: `frontend/index.html` only if a static status child structure is approved
+- Modify: `frontend/styles.css`
+- Test: `tests/frontend/workspace-static.test.mjs`
+- Test: `tests/frontend/chat-view.test.mjs` only if status rendering moves into `chat-view.mjs`
+
+**Implementation outline:**
+- Preserve the visible text `Waiting for Agent Col`.
+- Add a pending-state attribute such as `data-chat-status-state="pending"` when `submitRequest(...)` is waiting, and clear it when status is cleared.
+- Add three decorative dot elements only if the static text cannot be animated cleanly with CSS pseudo-elements.
+- Use CSS keyframes and `transform: translateY(...)` for the wave motion so layout does not reflow.
+- Use staggered animation delays for the dots and status text spans to approximate a sine-wave motion.
+- Add or preserve a `prefers-reduced-motion: reduce` rule that disables the wave animation and leaves readable static text.
+- Do not change `/api/chat`, request timing, submit/retry behavior, pending-turn state, or final response rendering.
+
+**RED tests:**
+- Pending submit path sets a pending status state while preserving the exact text `Waiting for Agent Col`.
+- Successful completion clears the pending status state and text.
+- Failure clears or removes the pending animation state before showing the error.
+- Static/CSS test proves a reduced-motion guard exists for the pending animation.
+
+**Verification:**
+- `node --test tests/frontend/chat-view.test.mjs tests/frontend/workspace-static.test.mjs`
+- `git diff --check`
+
+**Manual targets:**
+1. Submit a chat request; `Waiting for Agent Col` appears with wave text and three-dot motion.
+2. Enable reduced motion in the browser/OS and confirm the status remains readable without motion.
+3. Confirm retry, errors, and successful responses still behave unchanged.
+
+## Pass U7: Chat Receipt And Adaptation Disclosure
+
+**Goal:** Make adaptation proof collapsible by default inside a parent receipt/disclosure card so it remains inspectable without distracting from the conversation.
 
 **Expected files:**
 - Modify: `frontend/chat-view.mjs`
-- Modify: `frontend/state.mjs`
+- Modify: `frontend/state.mjs` only if disclosure state must persist across render cycles
 - Modify: `frontend/styles.css`
 - Test: `tests/frontend/chat-view.test.mjs`
-- Test: `tests/frontend/state.test.mjs`
+- Test: `tests/frontend/state.test.mjs` only if disclosure state is stored outside the DOM
 
 **Implementation outline:**
-- Replace the current `p.turn-user`/`p.turn-model` direct pair with nested DOM that keeps the same text but adds presentational wrappers:
-  - user row with actor label "You", body, and optional timestamp;
-  - model row with actor label "Agent Col", body container, optional timestamp, and receipt region under the model body.
-- Preserve `setText` for user/model body content in this pass; Markdown rendering waits for Pass U3.
-- Preserve `aria-live="polite"` on the existing transcript container.
-- Preserve `createChatView` submit, Enter/Shift+Enter, retry, memory clarification, and continuity behavior.
-- Preserve persisted session timestamps from `ChatMessageRecord.timestamp` when `completeChatSessionDetailLoad(...)` rebuilds transcript.
-- For live just-completed turns, either omit timestamps or add a frontend-only display timestamp through an approved state field. Do not invent server authority.
+- Keep action, citation, artifact, memory proposal, note, and continuity receipts visible as currently approved unless this pass explicitly scopes additional receipt disclosure.
+- Group only adaptation receipts under a native disclosure control or an accessible button with `aria-expanded` and `aria-controls`.
+- Default the adaptation parent card to collapsed.
+- Use the visible label `Adaptations` or `Verified adaptations` and include a count when available.
+- Keep individual adaptation values text-safe through `humanLabel(...)`, `humanValue(...)`, and text nodes.
+- Do not remove adaptation data from responses or activity projection.
+- Do not hide memory or continuity proof needed for user trust; this pass only reduces visual distraction.
 
 **RED tests:**
-- `renderTranscript` produces actor labels, separate user/model body nodes, and receipts attached beneath the model row.
-- `renderTranscript` still uses text-safe rendering for malicious user/model strings.
-- `completeChatSessionDetailLoad` preserves existing message timestamps if timestamp display is approved for this pass.
+- `renderReceipts(...)` renders adaptation receipts inside one collapsed parent when adaptations exist.
+- The collapsed parent exposes a count and no raw signal IDs as primary text.
+- Expanding the parent reveals individual adaptation labels and values.
+- Non-adaptation receipts remain visible and unchanged.
+- Malicious adaptation values remain text-safe.
 
 **Verification:**
-- `node --test tests/frontend/chat-view.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-static.test.mjs`
+- `node --test tests/frontend/chat-view.test.mjs`
+- `node --test tests/frontend/state.test.mjs` only if disclosure state changes state projection.
 - `git diff --check`
-- Manual: send a normal message, verify one request is sent, receipts still appear, retry still works after a forced failure, and reopened chat sessions still load.
 
-## Pass U3: Safe Markdown Rendering Foundation
+**Manual targets:**
+1. Trigger a response with adaptations; adaptation proof is collapsed by default.
+2. Expand the adaptation parent card; individual adaptation proof appears.
+3. Confirm other receipts remain readable and no raw internal IDs become primary labels.
 
-**Goal:** Render model responses and Markdown artifacts as readable headings, lists, code blocks, and tables without introducing XSS or changing stored/exported content.
+## Pass U8: Chat Icons, Text Colors, And Counter Severity
 
-**Expected files for the recommended path:**
+**Goal:** Add requested chat icons, amber/purple text and accent tuning, and character-count severity colors while preserving the current chat structure/layout.
+
+**Expected files:**
+- Modify: `frontend/index.html`
+- Modify: `frontend/chat-view.mjs`
+- Modify: `frontend/styles.css`
+- Test: `tests/frontend/workspace-static.test.mjs`
+- Test: `tests/frontend/chat-view.test.mjs`
+
+**Implementation outline:**
+- Add a decorative icon to `Start a conversation`.
+- Add an Agent Col icon next to model author labeling only if the pass adds a minimal label wrapper without changing message order.
+- Add a user computer/keyboard icon only if it can be added without changing turn ordering or request text rendering.
+- Change `.turn-model` accent color toward purple.
+- Change `.turn-user` accent and/or text color toward amber.
+- Optionally tune model text toward amber only after checking contrast against the dark model card and purple accent.
+- Update character counter to set one of `data-character-count-level="safe" | "warn" | "danger"` based on length thresholds.
+- Do not add an emoji menu or `@` affordance.
+- Keep `setText`/`textContent` for all user/model message content until the safe Markdown pass is approved.
+
+**RED tests:**
+- Character counter starts safe, becomes warn at 5,000 characters, and danger at 9,000 characters.
+- Counter text remains `N / 10000`.
+- Transcript still renders text safely for malicious strings.
+- Static test proves no emoji-menu or at-sign control is introduced.
+- Static/CSS test proves model and user color/accent variables are distinct.
+
+**Verification:**
+- `node --test tests/frontend/chat-view.test.mjs tests/frontend/workspace-static.test.mjs`
+- `git diff --check`
+
+**Manual targets:**
+1. Type under 5,000 characters; counter is green.
+2. Type 5,000 through 8,999 characters; counter is yellow.
+3. Type 9,000 through 10,000 characters; counter is red.
+4. Confirm model and user text/accent colors are readable.
+5. Confirm no emoji menu or `@` control appears.
+6. Confirm chat layout still matches the accepted current structure.
+
+## Pass U9: Chat Attachment Input And Drag-Drop Intake
+
+**Goal:** Add paperclip/file and image drag-and-drop intake to the chat box through a security-bounded attachment contract.
+
+**Expected files:**
+- Modify: `schemas.py`
+- Modify: `main.py`
+- Modify: `frontend/index.html`
+- Modify: `frontend/api.mjs`
+- Modify: `frontend/requests.mjs`
+- Modify: `frontend/state.mjs`
+- Modify: `frontend/chat-view.mjs`
+- Modify: `frontend/app.mjs`
+- Modify: `frontend/styles.css`
+- Test: `tests/test_main.py`
+- Test: `tests/frontend/api.test.mjs`
+- Test: `tests/frontend/requests.test.mjs`
+- Test: `tests/frontend/state.test.mjs`
+- Test: `tests/frontend/chat-view.test.mjs`
+
+**Implementation outline:**
+- First decision required before implementation: attachment mode.
+  - Option A: local-only attachment chips for copied filename/content into the prompt.
+  - Option B: server-uploaded attachments with storage, malware-risk policy, and model/context projection.
+  - Option C: defer upload/storage and add disabled paperclip only.
+- Recommended first pass: Option C or a narrow Option A for text files only. Image upload is higher risk and needs a storage/model contract.
+- Use a real `<input type="file">` behind a paperclip button if active attachments are approved.
+- Use `accept` allowlists and explicit size/count limits.
+- Handle `dragenter`, `dragover`, `dragleave`, and `drop`; read `DataTransfer.files` only during `drop`.
+- Reject unsupported types locally and server-side.
+- Do not send binary/image data to the model unless a separate model-projection policy is approved.
+- Do not log filenames or file contents in production logs.
+
+**RED tests:**
+- Dropping no files does not submit.
+- Dropping unsupported file types shows a bounded error and does not call chat submit.
+- Dropping allowed files records attachment chips/state without changing message text until the approved projection path runs.
+- Sending a chat with attachments uses the approved request shape and preserves idempotency key behavior.
+- Server rejects over-limit attachment payloads before model/service execution.
+
+**Verification:**
+- `venv/bin/pytest tests/test_main.py -k "attachment or upload" -q`
+- `node --test tests/frontend/api.test.mjs tests/frontend/requests.test.mjs tests/frontend/state.test.mjs tests/frontend/chat-view.test.mjs`
+- `git diff --check`
+
+**Manual targets:**
+1. Click paperclip and choose an allowed file; chip appears.
+2. Drag an allowed file onto the composer; chip appears.
+3. Try unsupported or oversized files; bounded error appears and no request is sent.
+4. Send a normal no-attachment chat; unchanged behavior.
+5. Confirm no emoji or `@` controls exist.
+
+## Pass U10: Safe Markdown Response And Artifact Rendering Foundation
+
+**Goal:** Render model responses and Markdown artifacts as readable headings, lists, code blocks, and tables so raw Markdown markers are not visually distracting, without XSS, stored text changes, prompt changes, or export changes.
+
+**Expected files:**
 - Create: `frontend/markdown-renderer.mjs`
 - Create: `frontend/vendor/markdown-it.min.js`
 - Create: `frontend/vendor/purify.min.js`
@@ -183,118 +564,107 @@
 - Test: `tests/test_workspace_static.py`
 
 **Implementation outline:**
-- Use vendored browser-ready `markdown-it` and DOMPurify assets under `frontend/vendor/` after explicit approval to fetch, pin, verify license text, and record source URLs/checksums in `frontend/vendor/THIRD_PARTY_NOTICES.md`.
-- Configure `markdown-it` with `html: false`, because the target preview needs tables and the official README documents table support while keeping raw HTML disabled by default.
-- Add a renderer helper that returns sanitized DOM or `TrustedHTML` output using DOMPurify before any insertion into an HTML sink.
-- Add a raw-text fallback for missing parser/sanitizer so the app fails closed.
-- Do not change model prompts, API response text, artifact storage, export/download payloads, or print behavior.
-- Do not render raw HTML from Markdown unless the sanitizer policy explicitly allows it and tests prove unsafe attributes/elements are removed.
-
-**Rejected path for this plan:**
-- Do not add `package.json`, a bundler, or runtime CDN dependencies in this pass. That would expand the build/deploy surface beyond the current static module app.
-- Do not use `commonmark.js` for the recommended path unless the user accepts losing table fidelity or approves a separate table plugin/renderer decision.
+- Vendored `markdown-it` and DOMPurify require explicit approval to fetch, pin, checksum, license, and serve static assets.
+- Configure Markdown rendering with raw HTML disabled.
+- Sanitize rendered HTML before insertion.
+- Fail closed to text rendering if parser/sanitizer is unavailable.
+- This is the pass that addresses visible asterisks, heading markers, table pipes, and other Markdown syntax by rendering structure.
+- Do not strip symbols out of model output strings.
+- Do not change stored response text, artifact content, export/download strings, print behavior, prompts, or model output.
 
 **RED tests:**
-- Markdown headings, bold text, lists, fenced code, and table syntax render into structured DOM.
-- `<img onerror>`, `<script>`, `javascript:` URLs, and raw HTML payloads do not execute and do not survive into unsafe output.
-- Export builders still emit the same Markdown/Text/HTML download strings as before.
-- Existing `renderTranscript uses textContent...` test is revised into a safety test for sanitized Markdown rendering, with RED evidence before production code changes.
+- Markdown headings, lists, fenced code, and tables render as structured DOM.
+- Script tags, event attributes, and `javascript:` URLs are removed or rendered harmlessly.
+- Existing export builders produce unchanged output strings.
+- Missing renderer dependency falls back to text-safe output.
 
 **Verification:**
 - `node --test tests/frontend/markdown-renderer.test.mjs tests/frontend/chat-view.test.mjs tests/frontend/work-view.test.mjs tests/frontend/workspace-static.test.mjs`
 - `venv/bin/pytest tests/test_workspace_static.py -q`
 - `git diff --check`
-- Manual: verify raw `###`, `**`, and `---` no longer show in model Markdown responses, artifact Markdown preview renders headings/table/code, and malicious sample text is displayed harmlessly.
 
-## Pass U4: Artifact Viewer Header, Tabs, Details, And Action Bar
+**Manual targets:**
+1. Markdown response renders headings, emphasis, lists, code blocks, and tables as structure instead of raw markers where safe.
+2. Markdown artifact preview shows heading/table/code structure.
+3. Malicious sample text is harmless.
+4. Exported artifact content is unchanged.
 
-**Goal:** Match the reference image's artifact drawer structure: selected artifact card, metadata chips, Preview/Info tabs, preview body, detail body, and compact action bar.
+## Pass U11: Artifact Viewer Header, Preview/Info, Metadata, And Action Bar
+
+**Goal:** Move the right Artifact Viewer toward the screenshot's exact structure while preserving all artifact lifecycle behavior.
 
 **Expected files:**
 - Modify: `frontend/work-view.mjs`
+- Modify: `frontend/state.mjs`
 - Modify: `frontend/styles.css`
 - Test: `tests/frontend/work-view.test.mjs`
 - Test: `tests/frontend/workspace-static.test.mjs`
 
 **Implementation outline:**
-- Split current `renderWorkDetail(...)` into explicit sub-renderers:
-  - selected artifact header;
-  - metadata chip row;
-  - tab controls;
-  - Preview panel;
-  - Info panel;
-  - action toolbar;
-  - existing edit/rename/version/lifecycle/feedback controls.
-- Use current artifact detail fields only: reference display label, filename, format, family, byte size, summary, lifecycle status, and content.
-- Add tab state only in frontend view state if required; do not call new backend routes.
-- Keep export/download/print actions wired to existing export builders and handlers.
-- Keep archive/restore/edit/rename/version forms available even if moved under Info.
+- Add selected artifact header card with icon, title, metadata chips, and lifecycle status.
+- Add Preview/Info tabs only with proper tab semantics and keyboard behavior, or implement them as segmented buttons if full tab semantics are not approved.
+- Add compact action bar for copy/download/open/print-style actions, wired only to existing supported actions.
+- Preserve export/download/print, edit, rename, version, archive, restore, feedback, and feedback history.
+- Do not hide existing controls without a replacement path.
+- Do not change artifact storage, schemas, MIME types, filenames, export payloads, or lifecycle routes.
 
 **RED tests:**
-- `renderWorkDetail` renders selected artifact title, metadata chips, Preview and Info controls, and one preview panel.
-- Switching tabs changes visible panel only and does not fetch, save, export, rename, edit, archive, restore, or submit feedback.
-- Existing artifact export, print, rename, version, archive, restore, feedback tests still pass.
+- Detail renders artifact header, metadata chips, Preview and Info controls, one visible panel, and action bar.
+- Switching Preview/Info changes only visible panel state and does not fetch, save, export, rename, edit, archive, restore, or submit feedback.
+- Existing artifact export/print/rename/version/archive/restore/feedback tests still pass.
 
 **Verification:**
 - `node --test tests/frontend/work-view.test.mjs tests/frontend/workspace-static.test.mjs`
 - `git diff --check`
-- Manual: select a Markdown artifact, switch Preview/Info, export/download/print, rename, save a version, archive/restore, and verify the right drawer visually matches the target more closely.
 
-## Pass U5: Composer Utility Icon Boundary
+**Manual targets:**
+1. Select a Markdown artifact; right drawer visually matches the screenshot direction.
+2. Switch Preview/Info.
+3. Export/download/print, rename, save version, archive/restore, and feedback still work.
+4. Long content remains readable and contained.
 
-**Goal:** Decide whether the paperclip, mention, and emoji affordances in the reference image are real controls, disabled placeholders, or excluded from the product.
+## Pass U12: Final Visual Fidelity And Accessibility Audit
 
-**Expected files:**
-- Modify only after approval: `frontend/index.html`, `frontend/chat-view.mjs`, `frontend/styles.css`
-- Test: `tests/frontend/chat-view.test.mjs`
-- Test: `tests/frontend/workspace-static.test.mjs`
-
-**Implementation outline:**
-- If no upload/mention/emoji behavior is approved, do not render active controls that imply unavailable features.
-- If disabled visual placeholders are approved, render disabled buttons with accessible names and no event handlers.
-- If real utility behavior is approved, split it into separate behavior plans; this visual plan must not add upload, mention, or emoji workflows.
-
-**RED tests:**
-- Disabled utility placeholders, if approved, are disabled, have accessible names, and do not call submit.
-- Enter/Shift+Enter and Send button behavior remain unchanged.
-
-**Verification:**
-- `node --test tests/frontend/chat-view.test.mjs tests/frontend/workspace-static.test.mjs`
-- `git diff --check`
-- Manual: verify utility icons do not imply working upload/mention/emoji behavior unless those behaviors are separately implemented and accepted.
-
-## Pass U6: Final Visual Fidelity And Accessibility Audit
-
-**Goal:** Verify the unsafe visual polish against the target image after structural passes land.
+**Goal:** Verify the completed unsafe polish against the screenshot and `agent-col-visual-target.jpeg`.
 
 **Expected files:**
-- Modify: `frontend/styles.css` only if audit fixes are CSS-only.
-- Modify behavior-bearing files only with a new approved fix plan if audit finds structural/accessibility regressions.
-- Test: directly affected frontend tests.
+- Modify: `frontend/styles.css` only for CSS-only corrections.
+- Modify behavior-bearing files only under a new approved fix plan if audit finds structural or accessibility regressions.
+- Test: directly affected frontend/backend tests.
 
 **Implementation outline:**
-- Compare live `/workspace` against `agent-col-visual-target.jpeg` at desktop and narrow widths.
-- Verify keyboard focus order through drawer, transcript controls, artifact tabs/actions, and composer.
-- Verify reduced motion, overflow, focus visibility, and target size.
-- Verify Google sign-in still uses the Google-rendered button.
-- Verify no private working-state data appears.
+- Compare live `/workspace` against the provided screenshot and target image at desktop and narrow widths.
+- Verify keyboard focus order through drawer controls, card disclosures, chat composer, attachment affordances, artifact viewer controls, tabs/buttons, and destructive actions.
+- Verify no emoji, no `@` control, no fake unavailable controls, and no private working state.
+- Verify Google sign-in remains Google-rendered.
+- Verify reduced motion, overflow, focus visibility, and target sizes.
 
 **Verification:**
-- `node --test tests/frontend/*.test.mjs` only if the prior passes touched multiple shared frontend modules.
-- `venv/bin/pytest tests/test_workspace_static.py -q`
-- `git diff --check`
-- Manual: target-image comparison on the same browser/viewport the user uses for acceptance.
+- Run directly affected focused frontend tests.
+- Run `venv/bin/pytest tests/test_workspace_static.py -q` if static serving or HTML changed.
+- Run `git diff --check`.
+- Broader `node --test tests/frontend/*.test.mjs` only if multiple shared frontend modules changed across prior accepted unsafe passes.
+
+**Manual targets:**
+1. Inspect `/workspace` against the screenshot at the user's browser/viewport.
+2. Confirm no emoji appears.
+3. Confirm no chat layout regression.
+4. Confirm drawers, workspace delete, note proposal creation, memory disclosure, attachments, and artifact viewer behavior all match accepted pass behavior.
 
 ## Stop Conditions
 
-- Stop if implementation requires backend route/schema/model/prompt changes.
-- Stop if Markdown rendering cannot be made safe without a dependency or CSP decision.
-- Stop if a dependency cannot be pinned, vendored, licensed, and served through the existing static asset model.
-- Stop if changing drawer rows breaks keyboard or screen-reader semantics.
-- Stop if artifact tabs hide existing edit/export/archive/version/feedback actions.
+- Stop if implementation would add emoji.
+- Stop if workspace deletion cannot avoid orphaning or cross-owner data risk under a clear policy.
+- Stop if direct note creation cannot produce a governed pending proposal with valid provenance.
+- Stop if attachment support cannot be made secure with allowlists, limits, authorization, and privacy-safe logging.
+- Stop if Markdown rendering cannot be made safe without a pinned, licensed, sanitized dependency path.
+- Stop if drawer/card disclosure breaks keyboard or screen-reader semantics.
+- Stop if artifact viewer tabs/action bars hide existing lifecycle controls.
 - Stop if Google Sign-In would require a custom button.
-- Stop if tests cannot reproduce the intended behavior before production changes.
+- Stop if any pass cannot produce a valid failing test before production changes.
 
-## Approval Request
+## Recommended Next Approval Request
 
-Approve only the next bounded pass, not the whole unsafe plan. Recommended first unsafe pass is **Pass U1: Drawer And Top-Bar Structural Icons**, because it improves visible fidelity while avoiding Markdown sanitization and artifact view-state decisions.
+Recommended first pass: **Pass U1: Drawer And Top-Bar Structural Icons**.
+
+Reason: it implements visible target-alignment work from the user's screenshot while avoiding the larger backend deletion, governed note creation, attachment security, and Markdown sanitization decisions. It still requires source changes and TDD because iconized controls affect HTML, JavaScript-rendered labels, and accessibility semantics.
