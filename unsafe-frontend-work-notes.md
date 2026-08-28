@@ -53,6 +53,44 @@ Deferred:
 - Add safe Markdown response/artifact rendering.
 - Restructure the Artifact Viewer toward the reference screenshot.
 
+## 2026-08-28 - Accepted Workspace Create Button Compactness Pass
+
+Status: accepted after user manual visual verification.
+
+Scope:
+- Implemented a small CSS-only visual fix for the New Workspace form in the Workspace drawer.
+- Reduced the New Workspace `Create` button from the global default button scale to compact drawer scale.
+- Kept the `Create` button below the input and aligned to the start of the form so it no longer crowds or overlaps the text input.
+- Preserved existing workspace creation behavior, workspace deletion behavior, backend/API behavior, drawer mechanics, and auth behavior.
+
+Source changed:
+- `frontend/styles.css`: added scoped `.workspace-create-form` layout, input sizing, and compact button styling.
+- `tests/frontend/workspace-static.test.mjs`: added static coverage for the compact create-form CSS and updated the compact drawer action selector assertion to include the accepted workspace delete action.
+
+TDD evidence:
+- RED: `node --test tests/frontend/workspace-static.test.mjs` failed on the new create-form compactness assertion because `.workspace-create-form` CSS did not exist.
+- GREEN: added scoped create-form CSS; `node --test tests/frontend/workspace-static.test.mjs` passed.
+- REFACTOR: no production refactor; refreshed one stale static assertion from the accepted workspace deletion pass.
+
+Verification:
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 12 tests.
+- `node --test tests/frontend/workspace-view.test.mjs` passed: 4 tests.
+- `git diff --check` passed.
+
+Screenshot/manual evidence:
+- User-provided screenshot showed the oversized `Create` button interfering with the New Workspace input field before the pass.
+- User confirmed the compact create-button pass was successful after implementation.
+
+Deferred:
+- Add governed direct user-authored note proposal creation.
+- Establish standard collapsed-by-default subcard disclosure for Notes, Memory, and Chats.
+- Add chat pending wave animation.
+- Add collapsed adaptation receipt disclosure.
+- Tune chat icons/text colors/counter severity.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+
 ## 2026-08-28 - Accepted Drawer Subcard Selection And Artifact Form Position Pass
 
 Status: accepted after user manual visual verification.

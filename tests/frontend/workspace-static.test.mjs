@@ -105,7 +105,17 @@ test("drawer selected child subcards use amber current styling and compact actio
   assert.match(styles, /background:\s*var\(--amber-soft\)/);
   assert.doesNotMatch(styles, /\.work-list-item\[aria-current="true"\]\s*\{[\s\S]*?border-inline-start-color:\s*var\(--accent\)/);
 
-  assert.match(styles, /\.memory-actions button,\s*\.notes-actions button/);
+  assert.match(styles, /\.memory-actions button,\s*\.workspace-actions button,\s*\.notes-actions button/);
   assert.match(styles, /min-height:\s*1\.35rem/);
   assert.match(styles, /font-size:\s*0\.72rem/);
+});
+
+test("workspace create form keeps input and create button compact", () => {
+  assert.match(styles, /\.workspace-create-form\s*\{/);
+  assert.match(styles, /\.workspace-create-form label\s*\{/);
+  assert.match(styles, /\.workspace-create-form input\s*\{/);
+  assert.match(styles, /\.workspace-create-form button\s*\{/);
+  assert.match(styles, /\.workspace-create-form button\s*\{[\s\S]*?min-height:\s*1\.75rem/);
+  assert.match(styles, /\.workspace-create-form button\s*\{[\s\S]*?font-size:\s*0\.8125rem/);
+  assert.match(styles, /\.workspace-create-form button\s*\{[\s\S]*?justify-self:\s*start/);
 });

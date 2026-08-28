@@ -673,6 +673,30 @@ p {
   margin-block-end: 0.35rem;
 }
 
+.workspace-create-form {
+  display: grid;
+  gap: 0.35rem;
+  margin-block-start: 0.75rem;
+}
+
+.workspace-create-form label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.workspace-create-form input {
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: 0.45rem 0.55rem;
+}
+
+.workspace-create-form button {
+  justify-self: start;
+  font-size: 0.8125rem;
+  min-height: 1.75rem;
+  padding: 0.18rem 0.5rem;
+}
+
 .work-list-item[aria-current="true"],
 .notes-card[aria-current="true"] {
   border-color: rgba(243, 182, 75, 0.44);
