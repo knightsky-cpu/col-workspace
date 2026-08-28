@@ -1,13 +1,16 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import re
+import time
+from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal, NoReturn, TypeVar
+from typing import Annotated, Callable, Literal, NoReturn, TypeVar
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -23,6 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
+from starlette.datastructures import MutableHeaders
 
 from agent_col_artifact_executor import AgentColArtifactExecutor
 from agent_col_artifact_feedback_executor import (
@@ -212,8 +216,189 @@ from vertex_config import load_vertex_ai_settings
 logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
+MAX_REQUEST_BODY_BYTES = 64 * 1024
+RATE_LIMIT_MAX_REQUESTS = 20
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMITED_METHODS = frozenset({"POST", "PATCH", "DELETE"})
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; "
+        "script-src 'self' https://accounts.google.com/gsi/client; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https://*.googleusercontent.com; "
+        "connect-src 'self'; "
+        "frame-src https://accounts.google.com/gsi/; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+}
 
 load_dotenv()
+
+
+class InMemoryRateLimiter:
+    """Best-effort per-process limiter; not distributed across Cloud Run instances."""
+
+    def __init__(
+        self,
+        *,
+        max_requests: int,
+        window_seconds: int,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if max_requests < 1:
+            raise ValueError("max_requests must be positive.")
+        if window_seconds < 1:
+            raise ValueError("window_seconds must be positive.")
+        self._max_requests = max_requests
+        self._window_seconds = window_seconds
+        self._clock = clock
+        self._requests: defaultdict[str, deque[float]] = defaultdict(deque)
+
+    def retry_after_seconds(self, key: str) -> int | None:
+        now = self._clock()
+        window_start = now - self._window_seconds
+        requests = self._requests[key]
+        while requests and requests[0] <= window_start:
+            requests.popleft()
+        if len(requests) >= self._max_requests:
+            retry_after = requests[0] + self._window_seconds - now
+            return max(1, math.ceil(retry_after))
+        requests.append(now)
+        return None
+
+
+def _apply_security_headers(response: Response) -> Response:
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    return response
+
+
+def _request_is_rate_limited(request: Request) -> bool:
+    path = request.url.path
+    method = request.method.upper()
+    if method == "POST" and path in {"/api/chat", "/api/synthesize"}:
+        return True
+    return (
+        method in RATE_LIMITED_METHODS
+        and (
+            path.startswith("/api/users/")
+            or path.startswith("/api/projects/")
+        )
+    )
+
+
+def _rate_limit_key(request: Request) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"{client_host}:expensive-api"
+
+
+def _body_too_large_response() -> Response:
+    return _apply_security_headers(
+        JSONResponse(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            content={"detail": "Request body is too large."},
+        )
+    )
+
+
+def _rate_limited_response(retry_after_seconds: int) -> Response:
+    return _apply_security_headers(
+        JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"detail": "Rate limit exceeded."},
+            headers={"Retry-After": str(retry_after_seconds)},
+        )
+    )
+
+
+class RequestPerimeterMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                body_bytes = int(content_length)
+            except ValueError:
+                body_bytes = MAX_REQUEST_BODY_BYTES + 1
+            if body_bytes > MAX_REQUEST_BODY_BYTES:
+                response = _body_too_large_response()
+                await response(scope, receive, send)
+                return
+
+        if _request_is_rate_limited(request):
+            app_state = scope["app"].state
+            rate_limiter = getattr(app_state, "rate_limiter", None)
+            if rate_limiter is None:
+                rate_limiter = InMemoryRateLimiter(
+                    max_requests=RATE_LIMIT_MAX_REQUESTS,
+                    window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+                )
+                app_state.rate_limiter = rate_limiter
+            retry_after_seconds = rate_limiter.retry_after_seconds(
+                _rate_limit_key(request)
+            )
+            if retry_after_seconds is not None:
+                response = _rate_limited_response(retry_after_seconds)
+                await response(scope, receive, send)
+                return
+
+        replay_receive = receive
+        if scope["method"].upper() in {"POST", "PUT", "PATCH", "DELETE"}:
+            body_messages = []
+            body_bytes = 0
+            while True:
+                message = await receive()
+                body_messages.append(message)
+                if message["type"] != "http.request":
+                    break
+                body = message.get("body", b"")
+                if isinstance(body, bytes):
+                    body_bytes += len(body)
+                if body_bytes > MAX_REQUEST_BODY_BYTES:
+                    response = _body_too_large_response()
+                    await response(scope, receive, send)
+                    return
+                if not message.get("more_body", False):
+                    break
+
+            body_message_index = 0
+
+            async def replay_body():
+                nonlocal body_message_index
+                if body_message_index < len(body_messages):
+                    message = body_messages[body_message_index]
+                    body_message_index += 1
+                    return message
+                return await receive()
+
+            replay_receive = replay_body
+
+        async def send_with_security_headers(message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                for header, value in SECURITY_HEADERS.items():
+                    headers.setdefault(header, value)
+                path = scope["path"]
+                if path == "/workspace" or path.startswith(
+                    "/static/agent-col/"
+                ):
+                    headers["Cache-Control"] = "no-store"
+            await send(message)
+
+        await self.app(scope, replay_receive, send_with_security_headers)
 
 
 def _validate_chat_history(
@@ -1194,6 +1379,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.preference_learning_service = preference_learning_service
     app.state.turn_service = turn_service
     app.state.authenticator = Authenticator(load_auth_settings())
+    app.state.rate_limiter = InMemoryRateLimiter(
+        max_requests=RATE_LIMIT_MAX_REQUESTS,
+        window_seconds=RATE_LIMIT_WINDOW_SECONDS,
+    )
 
     try:
         yield
@@ -1213,17 +1402,7 @@ app.mount(
     StaticFiles(directory=FRONTEND_DIR),
     name="agent_col_static",
 )
-
-
-@app.middleware("http")
-async def add_workspace_cache_headers(request: Request, call_next):
-    response = await call_next(request)
-    if (
-        request.url.path == "/workspace"
-        or request.url.path.startswith("/static/agent-col/")
-    ):
-        response.headers["Cache-Control"] = "no-store"
-    return response
+app.add_middleware(RequestPerimeterMiddleware)
 
 
 @app.get("/workspace", response_class=HTMLResponse)

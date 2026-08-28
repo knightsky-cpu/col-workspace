@@ -2058,6 +2058,141 @@ async def test_health_check(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_oversized_raw_body_is_rejected_before_json_parsing(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    oversized_invalid_json = b"{" + (
+        b"x" * (main.MAX_REQUEST_BODY_BYTES + 1)
+    )
+
+    response = await client.post(
+        "/api/chat",
+        content=oversized_invalid_json,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Request body is too large."}
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_streamed_oversized_raw_body_is_rejected_before_json_parsing(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    async def oversized_stream():
+        yield b"{"
+        yield b"x" * (main.MAX_REQUEST_BODY_BYTES + 1)
+
+    response = await client.post(
+        "/api/chat",
+        content=oversized_stream(),
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Request body is too large."}
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_schema_chat_limit_remains_distinct_from_raw_body_limit(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    too_long_message = "x" * 10_001
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": too_long_message,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "message"]
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_scoped_rate_limiter_returns_retry_after_for_expensive_routes(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    main.app.state.rate_limiter = main.InMemoryRateLimiter(
+        max_requests=1,
+        window_seconds=30,
+        clock=lambda: 100.0,
+    )
+    payload = {
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "message": "What should I work on next?",
+    }
+
+    first_response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "rate-limit-chat-key-1"},
+        json=payload,
+    )
+    second_response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "rate-limit-chat-key-2"},
+        json=payload,
+    )
+    health_response = await client.get("/")
+    workspace_response = await client.get("/workspace")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+    assert second_response.headers["Retry-After"] == "30"
+    assert second_response.json() == {"detail": "Rate limit exceeded."}
+    assert health_response.status_code == 200
+    assert workspace_response.status_code == 200
+    assert service_state.events.count(("claim_chat_turn",)) == 1
+
+
+@pytest.mark.asyncio
+async def test_security_headers_cover_workspace_static_and_api(
+    client: httpx.AsyncClient,
+) -> None:
+    expected_headers = {
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "strict-origin-when-cross-origin",
+        "permissions-policy": "camera=(), microphone=(), geolocation=()",
+    }
+
+    responses = [
+        await client.get("/workspace"),
+        await client.get("/static/agent-col/app.mjs"),
+        await client.get("/api/auth/config"),
+    ]
+
+    for response in responses:
+        assert response.status_code == 200
+        for header, expected_value in expected_headers.items():
+            assert response.headers[header] == expected_value
+        content_security_policy = response.headers[
+            "content-security-policy"
+        ]
+        assert "script-src 'self' https://accounts.google.com/gsi/client" in (
+            content_security_policy
+        )
+        assert "frame-src https://accounts.google.com/gsi/" in (
+            content_security_policy
+        )
+        assert "connect-src 'self'" in content_security_policy
+
+
+@pytest.mark.asyncio
 async def test_auth_session_requires_bearer_in_google_mode(
     client: httpx.AsyncClient,
 ) -> None:

@@ -73,6 +73,110 @@ The user reported: "pass successful".
 
 Not checkpointed yet in this note. The accepted source changes and this deployment note are ready for an explicit GitHub checkpoint request.
 
+## 2026-08-28 - Pass 4: HTTP Body Limits, Scoped Rate Limiting, And Security Headers
+
+Status: accepted by manual verification.
+
+Previous checkpoint: `cba0f7d77eb21b53365deec70cabd3f4060437f9`.
+
+### Scope
+
+- Implemented request perimeter hardening only.
+- Did not change deployment configuration.
+- Did not change Google auth behavior.
+- Did not run or depend on live Google Sign-In or Cloud Run behavior checks; those remain deferred to the hosted integration verification phase.
+- Preserved the existing schema-level 10,000-character chat message limit as a separate application validation layer.
+
+### Source Changes
+
+- `main.py`
+  - Added a 64 KiB raw HTTP body cap enforced by ASGI middleware before FastAPI JSON parsing and before route/service execution.
+  - Covered both `Content-Length` rejection and streamed/no-`Content-Length` request bodies.
+  - Added deterministic `429 Too Many Requests` responses with `Retry-After`.
+  - Added an in-memory rate limiter scoped to expensive or mutating API routes only:
+    - `POST /api/chat`
+    - `POST /api/synthesize`
+    - `POST`, `PATCH`, and `DELETE` under `/api/users/...`
+    - `POST`, `PATCH`, and `DELETE` under `/api/projects/...`
+  - Left health, workspace, static assets, and cheap read-only API traffic outside the rate-limit bucket.
+  - Added security headers to workspace, static assets, and API responses:
+    - `Content-Security-Policy`
+    - `X-Content-Type-Options`
+    - `X-Frame-Options`
+    - `Referrer-Policy`
+    - `Permissions-Policy`
+  - Preserved `/workspace` and `/static/agent-col/...` `Cache-Control: no-store` behavior.
+
+- `tests/test_main.py`
+  - Added coverage for raw oversized request rejection before JSON parsing.
+  - Added coverage for streamed oversized request rejection before JSON parsing.
+  - Added coverage proving the existing 10,000-character chat schema limit remains distinct from the raw body limit.
+  - Added coverage proving scoped rate limiting returns deterministic `429` plus `Retry-After` while health/workspace requests remain unaffected.
+  - Added coverage proving security headers apply to workspace, static, and API responses while allowing Google Identity Services script/frame origins and same-origin future streaming/fetch.
+
+### TDD Evidence
+
+- RED command:
+
+```bash
+venv/bin/pytest tests/test_main.py -k "oversized_raw_body or schema_chat_limit_remains_distinct or scoped_rate_limiter or security_headers"
+```
+
+Observed result before implementation: `3 failed, 1 passed, 206 deselected`. Failures proved the raw body limit constant, in-memory limiter, and security headers did not exist. The schema-limit test already passed, proving the existing application/schema limit was separate and should remain unchanged.
+
+- Additional RED command after the first body-limit implementation:
+
+```bash
+venv/bin/pytest tests/test_main.py -k "streamed_oversized_raw_body"
+```
+
+Observed result before the ASGI receive-path fix: failed with `422` instead of `413`, proving streamed oversized bodies could still reach FastAPI JSON/validation handling.
+
+- GREEN command:
+
+```bash
+venv/bin/pytest tests/test_main.py -k "streamed_oversized_raw_body"
+```
+
+Observed result after the ASGI middleware fix: `1 passed, 210 deselected`.
+
+- GREEN command:
+
+```bash
+venv/bin/pytest tests/test_main.py -k "oversized_raw_body or schema_chat_limit_remains_distinct or scoped_rate_limiter or security_headers"
+```
+
+Observed result after implementation: `5 passed, 206 deselected`.
+
+### Focused Verification
+
+```bash
+venv/bin/pytest tests/test_main.py
+```
+
+Observed result: `211 passed, 1 warning`.
+
+```bash
+git diff --check
+```
+
+Observed result: passed.
+
+The one warning is the existing dependency/runtime `BaseAgentConfig` deprecation warning and was not introduced by this pass.
+
+### Limitations
+
+- The rate limiter is explicitly best-effort, in-memory, per-process, and per Cloud Run instance. It is not distributed, durable, or globally authoritative across scaled Cloud Run instances.
+- Google Sign-In/CSP behavior and real Cloud Run behavior remain deferred to hosted integration verification, where they provide meaningful evidence.
+
+### Manual Acceptance
+
+The user reported: "Pass 4: accepted."
+
+### Checkpoint State
+
+Not checkpointed yet in this note. The accepted source changes and this deployment note are ready for an explicit GitHub checkpoint request.
+
 ## 2026-08-28 - Pass 2: Ownership Audit And Gap Closure
 
 Status: accepted by manual verification.
