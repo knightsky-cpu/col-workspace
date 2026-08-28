@@ -43,6 +43,7 @@ changes by itself.
 These files should be treated as off-limits for visual-only work except for a separately approved behavior pass:
 
 - `frontend/app.mjs`: application startup, event wiring, auth/session flow, workspace loading, chat submission, section rendering, and API orchestration.
+- `frontend/auth-view.mjs`: Google OIDC frontend helpers, Google Identity Services script loading, verified session-to-context mapping, and Google-rendered sign-in button initialization.
 - `frontend/state.mjs`: state transitions, selection, workspace/session/artifact/note/memory state, request tracking, and UI refresh decisions.
 - `frontend/api.mjs`: backend paths, request methods, headers, payloads, same-origin checks, response parsing, and error normalization.
 - `frontend/requests.mjs`: request identifiers, idempotency keys, chat/artifact/note/memory request construction, and frontend validation.
@@ -54,7 +55,7 @@ These files should be treated as off-limits for visual-only work except for a se
 - `frontend/notes-view.mjs`: user-facing Notes rendering, proposal approval/rejection, archival, deletion, correction, and form behavior.
 - `frontend/memory-view.mjs`: Memory rendering, approval/rejection, revocation, deletion confirmation, and feedback behavior.
 - `frontend/chats-view.mjs`: chat-session list rendering and session selection.
-- `frontend/activity-view.mjs`: activity rendering.
+- `frontend/activity-view.mjs`: activity rendering. Current workspace HTML does not expose an Activity section, so `.activity-event` styling is dormant/non-visible unless a separate behavior/UI pass adds an Activity surface.
 
 ### Backend Static Serving Boundary
 
@@ -193,16 +194,17 @@ Do not:
 - change export file generation, MIME types, download names, Markdown conversion, print behavior, or save-version behavior;
 - sanitize, transform, truncate, or rewrite artifact content as a visual workaround.
 
-### Notes, Memory, Activity, and Continuity Presentation
+### Notes, Memory, Dormant Activity, and Continuity Presentation
 
 Safe:
 
-- style existing Notes cards, Memory cards, activity events, continuity choices, proposal cards, approval/rejection buttons, archive/delete buttons, and correction forms;
+- style existing Notes cards, Memory cards, continuity choices, proposal cards, approval/rejection buttons, archive/delete buttons, and correction forms;
+- style `.activity-event` only as dormant CSS for the currently non-visible Activity renderer; do not claim Activity is user-facing unless the workspace HTML and app orchestration expose it through a separately approved pass;
 - adjust empty-state presentation and card density.
 
 Expected result:
 
-- user-facing Notes, Memory, activity, and continuity surfaces look different but preserve the same data and approval flows.
+- user-facing Notes, Memory, and continuity surfaces look different but preserve the same data and approval flows. Dormant Activity styling, if touched, has no current visible workspace effect.
 
 Do not:
 
@@ -360,7 +362,7 @@ Manual runtime checks:
 2. Toggle side panel collapse/expand and artifact viewer normal/expanded modes.
 3. Send a normal chat request and confirm the same request flow, response area, receipts, and retry behavior remain available.
 4. Create, select, rename, edit, save, export, and print/save an artifact using existing controls.
-5. Open Notes, Memory, Chats, and Activity sections and verify controls still appear and behave normally.
+5. Open Notes, Memory, and Chats sections and verify controls still appear and behave normally. Activity is not currently exposed as a workspace section.
 6. Check visible focus styling by tabbing through buttons, inputs, textareas, selects, and links.
 7. Check narrow and wide viewport layouts for overflow, inaccessible controls, clipped text, and hidden scroll areas.
 8. Check light and dark system appearances if the change touched color variables.

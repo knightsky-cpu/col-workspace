@@ -100,6 +100,13 @@ Current source also defines:
 - responsive behavior at `@media (max-width: 900px)`;
 - print behavior that depends on `[data-work-detail]`.
 
+Current source also confirms `.activity-event` is dormant/non-visible in the
+workspace UI: `frontend/activity-view.mjs` defines an Activity renderer, but
+`frontend/index.html` exposes no `data-activity-list` or Activity drawer section,
+and `frontend/app.mjs` does not instantiate `createActivityView(...)`. Styling
+`.activity-event` is allowed only as dormant CSS unless a separate approved
+behavior/UI pass exposes Activity.
+
 ### Locked HTML Boundary
 
 `frontend/index.html` defines the application skeleton and behavior hooks. Do not alter these anchors in this visual-only pass:
@@ -141,6 +148,7 @@ Locked HTML includes:
 The safe guide identifies the JavaScript modules as behavior-bearing. Do not edit:
 
 - `frontend/app.mjs`
+- `frontend/auth-view.mjs`
 - `frontend/state.mjs`
 - `frontend/api.mjs`
 - `frontend/requests.mjs`
@@ -154,7 +162,7 @@ The safe guide identifies the JavaScript modules as behavior-bearing. Do not edi
 - `frontend/chats-view.mjs`
 - `frontend/activity-view.mjs`
 
-Source confirms the risk: `frontend/app.mjs` mutates layout classes and `aria-expanded`; `frontend/chat-view.mjs` constructs transcript turns, receipts, retry controls, memory clarification controls, and continuity controls; `frontend/work-view.mjs` constructs artifact detail, metadata, export, edit, save, rename, and feedback surfaces.
+Source confirms the risk: `frontend/app.mjs` mutates layout classes and `aria-expanded`; `frontend/auth-view.mjs` loads Google Identity Services, maps verified Google sessions to workspace context, and initializes the Google-rendered sign-in button; `frontend/chat-view.mjs` constructs transcript turns, receipts, retry controls, memory clarification controls, and continuity controls; `frontend/work-view.mjs` constructs artifact detail, metadata, export, edit, save, rename, and feedback surfaces.
 
 ### Locked Backend Boundary
 
@@ -199,6 +207,10 @@ Expected unchanged files:
 - `main.py`
 - backend/application Python modules
 - tests, unless a later approved visual-regression/static test pass is added
+
+`tests/frontend/auth-view.test.mjs` is relevant review coverage for the Google
+Sign-In boundary. Do not change it in a CSS-only pass unless a separately
+approved behavior/test pass changes Google auth presentation or initialization.
 
 Reference image file:
 
@@ -415,7 +427,7 @@ body {
 }
 
 .workspace-grid--artifacts-expanded {
-  grid-template-columns: 0 minmax(14rem, 18rem) minmax(20rem, 1fr) minmax(30rem, 78vw) 0;
+  grid-template-columns: 0 minmax(14rem, 18rem) minmax(20rem, 1fr) minmax(32rem, 80vw) 0;
 }
 
 .supporting-panel,
@@ -433,6 +445,10 @@ body {
 - restore buttons;
 - independent scroll ownership;
 - mobile behavior unless separately verified.
+- current expanded artifact width behavior using `80vw`, because
+  `tests/test_workspace_static.py` asserts that invariant. Do not change it to
+  `78vw` or another value unless the approved pass explicitly includes and
+  justifies a narrow update to that static test.
 
 **Manual target:**
 
@@ -747,7 +763,7 @@ body {
 - Markdown/code/data artifacts should be more readable.
 - Long content should wrap or scroll correctly without changing stored content.
 
-### Pass 8: Notes, Memory, Chats, Activity, Continuity, Empty/Error States
+### Pass 8: Notes, Memory, Chats, Dormant Activity, Continuity, Empty/Error States
 
 **Goal:** Make secondary panels and state surfaces match the polished visual system.
 
@@ -756,6 +772,8 @@ body {
 - `.memory-card`, `.memory-event`, `.notes-card`, `.notes-event`, and `.activity-event` are existing CSS selectors.
 - `.continuity-choices`, `.continuity-choice`, `.memory-clarification-choices`, and `.memory-clarification-choice` are existing CSS selectors.
 - `.form-error` and `.muted` are existing CSS selectors.
+- `.activity-event` is dormant in the current workspace because no Activity
+  section is exposed by `frontend/index.html` or wired by `frontend/app.mjs`.
 
 **Safe selectors:**
 
@@ -806,11 +824,13 @@ body {
 - correction forms;
 - continuity selection;
 - memory clarification selection;
-- activity data.
+- dormant activity data only if rendered by a future approved UI pass.
 
 **Manual target:**
 
 - Pending and choice surfaces should be visible without implying state changes not present in data.
+- Do not ask the reviewer to inspect an Activity section in the current UI; it
+  does not exist yet.
 
 ### Pass 9: Responsive, Focus, Motion, And Accessibility Verification
 
@@ -887,6 +907,7 @@ Run after implementation:
 ```bash
 git diff --check
 node --test tests/frontend/workspace-static.test.mjs
+node --test tests/frontend/auth-view.test.mjs
 node --test tests/frontend/chat-view.test.mjs
 pytest tests/test_workspace_static.py
 ```
@@ -894,6 +915,7 @@ pytest tests/test_workspace_static.py
 Why these checks:
 
 - `workspace-static.test.mjs` protects critical HTML/style hooks, Google auth boundaries, print stylesheet expectations, Notes, Memory, and continuity anchors.
+- `auth-view.test.mjs` protects the Google Sign-In boundary, including verified session context mapping and Google-rendered button initialization.
 - `chat-view.test.mjs` protects transcript text safety and receipt rendering behavior while CSS changes the appearance.
 - `tests/test_workspace_static.py` verifies `/workspace`, static CSS/JS serving, cache headers, layout CSS invariants, independent scroll ownership, and static route expectations.
 - `git diff --check` catches whitespace and patch hygiene issues.
@@ -912,6 +934,9 @@ Do not run the full suite by default for this CSS-only pass unless focused verif
 8. Verify keyboard focus is visible on buttons, form fields, drawer controls, composer, and artifact controls.
 9. Verify scroll ownership remains intact: left drawer, chat transcript, and right drawer scroll independently.
 10. Verify artifact print/export behavior remains unchanged, including the `[data-work-detail]` print surface.
+
+Activity is not a current manual visual verification target because the
+workspace does not expose an Activity section.
 
 ## Stop Conditions
 
