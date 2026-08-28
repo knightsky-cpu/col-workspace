@@ -33,7 +33,7 @@ test("identifier validation mirrors the backend locator shape", () => {
 
 test("context form rejects raw Google token fields", () => {
   const formData = new FormData();
-  formData.set("user_id", "google--109876543210");
+  formData.set("user_id", "user--fbea9ffc3b3e25366ddfd4fe47be9bc5");
   formData.set("project_id", "agent-col");
   formData.set("auth_token", "  google-id-token  ");
 

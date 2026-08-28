@@ -342,6 +342,197 @@ def _resolve_effective_project_id(
         _raise_auth_http_error(exc)
 
 
+def _public_user_id_for_response(
+    *,
+    internal_user_id: str,
+    effective_user_id: str,
+    public_user_id: str,
+) -> str:
+    if internal_user_id != effective_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user does not own this response.",
+        )
+    return public_user_id
+
+
+def _public_chat_session_summary(
+    *,
+    session: ChatSessionSummary,
+    effective_user_id: str,
+    public_user_id: str,
+) -> ChatSessionSummary:
+    return session.model_copy(
+        update={
+            "user_id": _public_user_id_for_response(
+                internal_user_id=session.user_id,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            )
+        }
+    )
+
+
+def _public_chat_session_list_response(
+    *,
+    response: ChatSessionListResponse,
+    effective_user_id: str,
+    public_user_id: str,
+) -> ChatSessionListResponse:
+    return response.model_copy(
+        update={
+            "sessions": [
+                _public_chat_session_summary(
+                    session=session,
+                    effective_user_id=effective_user_id,
+                    public_user_id=public_user_id,
+                )
+                for session in response.sessions
+            ]
+        }
+    )
+
+
+def _public_chat_session_detail_response(
+    *,
+    response: ChatSessionDetailResponse,
+    effective_user_id: str,
+    public_user_id: str,
+) -> ChatSessionDetailResponse:
+    return response.model_copy(
+        update={
+            "user_id": _public_user_id_for_response(
+                internal_user_id=response.user_id,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            )
+        }
+    )
+
+
+def _public_collaborative_note(
+    *,
+    note: CollaborativeNote,
+    effective_user_id: str,
+    public_user_id: str,
+) -> CollaborativeNote:
+    return note.model_copy(
+        update={
+            "owner_user_id": _public_user_id_for_response(
+                internal_user_id=note.owner_user_id,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            )
+        }
+    )
+
+
+def _public_collaborative_note_event(
+    *,
+    event: CollaborativeNoteEvent,
+    effective_user_id: str,
+    public_user_id: str,
+) -> CollaborativeNoteEvent:
+    return event.model_copy(
+        update={
+            "owner_user_id": _public_user_id_for_response(
+                internal_user_id=event.owner_user_id,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            )
+        }
+    )
+
+
+def _public_collaborative_note_list_response(
+    *,
+    response: CollaborativeNoteListResponse,
+    effective_user_id: str,
+    public_user_id: str,
+) -> CollaborativeNoteListResponse:
+    return response.model_copy(
+        update={
+            "notes": [
+                _public_collaborative_note(
+                    note=note,
+                    effective_user_id=effective_user_id,
+                    public_user_id=public_user_id,
+                )
+                for note in response.notes
+            ]
+        }
+    )
+
+
+def _public_collaborative_note_detail_response(
+    *,
+    response: CollaborativeNoteDetailResponse,
+    effective_user_id: str,
+    public_user_id: str,
+) -> CollaborativeNoteDetailResponse:
+    return response.model_copy(
+        update={
+            "note": _public_collaborative_note(
+                note=response.note,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            ),
+            "events": [
+                _public_collaborative_note_event(
+                    event=event,
+                    effective_user_id=effective_user_id,
+                    public_user_id=public_user_id,
+                )
+                for event in response.events
+            ],
+        }
+    )
+
+
+def _public_collaborative_note_lifecycle_response(
+    *,
+    response: CollaborativeNoteLifecycleResponse,
+    effective_user_id: str,
+    public_user_id: str,
+) -> CollaborativeNoteLifecycleResponse:
+    return response.model_copy(
+        update={
+            "note": _public_collaborative_note(
+                note=response.note,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            ),
+            "event": _public_collaborative_note_event(
+                event=response.event,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            ),
+        }
+    )
+
+
+def _public_chat_response(
+    *,
+    response: ChatResponse,
+    effective_user_id: str,
+    public_user_id: str,
+) -> ChatResponse:
+    if not response.collaborative_note_events:
+        return response
+    return response.model_copy(
+        update={
+            "collaborative_note_events": [
+                _public_collaborative_note_event(
+                    event=event,
+                    effective_user_id=effective_user_id,
+                    public_user_id=public_user_id,
+                )
+                for event in response.collaborative_note_events
+            ]
+        }
+    )
+
+
 def _workspace_defaults_for_request(
     *,
     request: Request,
@@ -605,6 +796,8 @@ def _partial_failure_response(
     *,
     status_code: int,
     detail: str,
+    effective_user_id: str,
+    public_user_id: str,
     decision_actions: tuple[AgentActionReceipt, ...],
     decision_memory_proposals: tuple[VersionedMemoryProposalReceipt, ...],
     decision_memory_clarifications: tuple[
@@ -720,6 +913,23 @@ def _partial_failure_response(
         collaborative_note_events=list(note_events),
         adaptations=list(runtime_error.adaptations),
     )
+    if response.collaborative_note_events:
+        response = response.model_copy(
+            update={
+                "collaborative_note_events": (
+                    _public_chat_response(
+                        response=ChatResponse(
+                            response=detail,
+                            collaborative_note_events=(
+                                response.collaborative_note_events
+                            ),
+                        ),
+                        effective_user_id=effective_user_id,
+                        public_user_id=public_user_id,
+                    ).collaborative_note_events
+                )
+            }
+        )
     content = response.model_dump(mode="json")
     if not response.artifacts:
         content.pop("artifacts")
@@ -1243,9 +1453,13 @@ async def list_collaborative_notes(
         ValueError,
     ) as exc:
         _raise_collaborative_note_http_error(exc)
-    return CollaborativeNoteListResponse(
-        notes=result.notes,
-        next_note_id=result.next_note_id,
+    return _public_collaborative_note_list_response(
+        response=CollaborativeNoteListResponse(
+            notes=result.notes,
+            next_note_id=result.next_note_id,
+        ),
+        effective_user_id=effective_user_id,
+        public_user_id=user_id,
     )
 
 
@@ -1290,9 +1504,13 @@ async def get_collaborative_note(
         ValueError,
     ) as exc:
         _raise_collaborative_note_http_error(exc)
-    return CollaborativeNoteDetailResponse(
-        note=result.note,
-        events=result.events,
+    return _public_collaborative_note_detail_response(
+        response=CollaborativeNoteDetailResponse(
+            note=result.note,
+            events=result.events,
+        ),
+        effective_user_id=effective_user_id,
+        public_user_id=user_id,
     )
 
 
@@ -1405,9 +1623,13 @@ async def _change_collaborative_note_lifecycle(
         ValueError,
     ) as exc:
         _raise_collaborative_note_http_error(exc)
-    return CollaborativeNoteLifecycleResponse(
-        note=result.note,
-        event=result.event,
+    return _public_collaborative_note_lifecycle_response(
+        response=CollaborativeNoteLifecycleResponse(
+            note=result.note,
+            event=result.event,
+        ),
+        effective_user_id=effective_user_id,
+        public_user_id=user_id,
     )
 
 
@@ -1533,10 +1755,15 @@ async def list_chat_sessions(
         authorization_header=authorization,
     )
     try:
-        return await request.app.state.db.list_chat_sessions(
+        result = await request.app.state.db.list_chat_sessions(
             user_id=effective_user_id,
             project_id=effective_project_id,
             limit=limit,
+        )
+        return _public_chat_session_list_response(
+            response=result,
+            effective_user_id=effective_user_id,
+            public_user_id=user_id,
         )
     except MemoryEngineError as exc:
         _raise_database_http_error(exc)
@@ -1573,12 +1800,17 @@ async def get_chat_session(
         authorization_header=authorization,
     )
     try:
-        return await request.app.state.db.get_chat_session_detail(
+        result = await request.app.state.db.get_chat_session_detail(
             user_id=effective_user_id,
             project_id=effective_project_id,
             session_id=session_id,
             limit=limit,
             observed_at=datetime.now(UTC),
+        )
+        return _public_chat_session_detail_response(
+            response=result,
+            effective_user_id=effective_user_id,
+            public_user_id=user_id,
         )
     except MemoryEngineError as exc:
         _raise_database_http_error(exc)
@@ -2873,7 +3105,11 @@ async def chat(
                 MemoryEngineError,
             ) as exc:
                 _raise_chat_turn_operation_http_error(exc, "completion")
-        return chat_response
+        return _public_chat_response(
+            response=chat_response,
+            effective_user_id=effective_user_id,
+            public_user_id=payload.user_id,
+        )
 
     if continuity_resolution.status == "resolved":
         try:
@@ -3053,7 +3289,11 @@ async def chat(
                 failure_claim,
                 fallback_response,
             ):
-                return fallback_response
+                return _public_chat_response(
+                    response=fallback_response,
+                    effective_user_id=effective_user_id,
+                    public_user_id=payload.user_id,
+                )
         released_claim = None
         if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
@@ -3066,6 +3306,8 @@ async def chat(
             detail=(
                 "Agent_Col response timed out after a completed action."
             ),
+            effective_user_id=effective_user_id,
+            public_user_id=payload.user_id,
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
             decision_memory_clarifications=decision_memory_clarifications,
@@ -3104,7 +3346,11 @@ async def chat(
                 failure_claim,
                 fallback_response,
             ):
-                return fallback_response
+                return _public_chat_response(
+                    response=fallback_response,
+                    effective_user_id=effective_user_id,
+                    public_user_id=payload.user_id,
+                )
         released_claim = None
         if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
@@ -3115,6 +3361,8 @@ async def chat(
         partial_response = _partial_failure_response(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Agent_Col response failed after a completed action.",
+            effective_user_id=effective_user_id,
+            public_user_id=payload.user_id,
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
             decision_memory_clarifications=decision_memory_clarifications,
@@ -3302,4 +3550,8 @@ async def chat(
                 type(exc).__name__,
             )
 
-    return chat_response
+    return _public_chat_response(
+        response=chat_response,
+        effective_user_id=effective_user_id,
+        public_user_id=payload.user_id,
+    )

@@ -138,4 +138,119 @@ The user accepted Pass 2 after reviewing the explicit route-by-route ownership m
 
 ### Checkpoint State
 
-Not checkpointed yet in this note. This accepted audit note is ready for an explicit GitHub checkpoint request.
+Checkpointed to `origin/main` at `50b1951f33b7bdaf916b47dcf279301f93b577c0`.
+
+## 2026-08-28 - Pass 3: Public/Internal User Identity Split
+
+Status: accepted from automated verification. Live Google/OIDC integration confirmation deferred to hosted/browser verification.
+
+Previous checkpoint: `50b1951f33b7bdaf916b47dcf279301f93b577c0`.
+
+### Scope
+
+- Replaced public Google-mode browser/API `user_id` exposure with a deterministic opaque locator.
+- Preserved internal persisted user IDs as `google--{subject}`.
+- Made no Firestore migration.
+- Kept frontend identity behavior simple: the browser stores and sends the backend-provided `user_id` unchanged.
+- Patched only source-proven public response leak surfaces.
+
+### Source Changes
+
+- `auth.py`
+  - Added deterministic public locator generation as `user--{sha256(subject)[:32]}`.
+  - `/api/auth/session` public output now uses the opaque locator and does not include `subject` or `google--{subject}`.
+  - Google-mode `resolve_user_id()` now validates the supplied opaque public locator and returns the existing internal `google--{subject}` ID to downstream services and Firestore.
+  - Local-dev behavior remains unchanged.
+
+- `main.py`
+  - Added public response shapers for chat session list/detail `user_id`.
+  - Added public response shapers for collaborative note/detail/lifecycle `owner_user_id`.
+  - Added public response shaping for chat `collaborative_note_events`.
+  - Kept downstream service/database calls on the internal effective user ID.
+
+- Frontend tests
+  - Updated fixtures to use opaque public locators.
+  - No frontend identity translation logic was added.
+
+### TDD Evidence
+
+- RED command:
+
+```bash
+venv/bin/pytest tests/test_auth.py -k "public_session_uses_opaque_user_locator or resolves_public_user_locator_to_internal_id or rejects_raw_internal_user_locator" -q
+```
+
+Observed result before implementation: `3 failed, 13 deselected`. Failures proved the public session still returned `google--109876543210`, opaque locators were rejected, and raw internal locators were still accepted.
+
+- RED command:
+
+```bash
+venv/bin/pytest tests/test_main.py -k "auth_session_returns_google_principal or google_workspace_create_uses_subject_owned_workspace_prefix or google_mode_rejects_raw_internal_user_locator or list_chat_sessions_returns_project_user_sessions or get_chat_session_detail_returns_chronological_messages or google_collaborative_note_responses_hide_internal_owner or google_chat_propagates_verified_owner_to_claim_and_history or google_chat_note_event_receipts_hide_internal_owner" -q
+```
+
+Observed result before implementation/refinement: route tests failed because the backend rejected opaque locators or returned internal `google--{subject}` IDs in public responses. The chat note-event receipt test failed because `collaborative_note_events[0].owner_user_id` exposed `google--109876543210`.
+
+- GREEN command:
+
+```bash
+venv/bin/pytest tests/test_auth.py -k "public_session_uses_opaque_user_locator or resolves_public_user_locator_to_internal_id or rejects_raw_internal_user_locator" -q
+```
+
+Observed result after implementation: `3 passed, 13 deselected`.
+
+- GREEN command:
+
+```bash
+venv/bin/pytest tests/test_main.py -k "auth_session_returns_google_principal or google_workspace_create_uses_subject_owned_workspace_prefix or google_mode_rejects_raw_internal_user_locator or list_chat_sessions_returns_project_user_sessions or get_chat_session_detail_returns_chronological_messages or google_collaborative_note_responses_hide_internal_owner or google_chat_propagates_verified_owner_to_claim_and_history or google_chat_note_event_receipts_hide_internal_owner" -q
+```
+
+Observed result after implementation: `8 passed, 198 deselected, 1 warning`.
+
+### Focused Verification
+
+```bash
+venv/bin/python -m py_compile auth.py main.py
+```
+
+Observed result: passed.
+
+```bash
+venv/bin/pytest tests/test_auth.py -q
+```
+
+Observed result: `16 passed`.
+
+```bash
+venv/bin/pytest tests/test_main.py -q
+```
+
+Observed result: `206 passed, 1 warning`.
+
+```bash
+node --test tests/frontend/auth-view.test.mjs tests/frontend/state.test.mjs tests/frontend/api.test.mjs tests/frontend/requests.test.mjs tests/frontend/workspace-static.test.mjs
+```
+
+Observed result: `98 passed`.
+
+```bash
+git diff --check
+```
+
+Observed result: passed.
+
+### Public Leak Audit
+
+- Patched `/api/auth/session` so Google mode returns an opaque public `user_id` and never returns `subject`.
+- Patched chat session list/detail responses so persisted internal `user_id` values are replaced by the public route locator.
+- Patched collaborative note list/detail/lifecycle responses so persisted `owner_user_id` values are replaced by the public route locator.
+- Patched chat responses and partial-failure responses so `collaborative_note_events` do not expose internal `owner_user_id`.
+- Left inbound request schema fields unchanged because they now carry the public locator and are translated at the auth boundary.
+- Left artifact response models unchanged because the audited artifact metadata responses do not serialize `user_id`.
+
+### Manual Acceptance
+
+The user accepted Pass 3 from automated verification and explicitly deferred live Google/OIDC integration confirmation to the existing hosted/browser verification phase.
+
+### Checkpoint State
+
+Not checkpointed yet in this note. The accepted source changes and this deployment note are ready for an explicit GitHub checkpoint request.

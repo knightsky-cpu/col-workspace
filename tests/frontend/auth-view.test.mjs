@@ -24,7 +24,7 @@ test("googleSessionToContext derives user ID from verified backend session", () 
   const context = googleSessionToContext(
     {
       authenticated: true,
-      user_id: "google--109876543210",
+      user_id: "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
       workspace_project_id: "project--abcdef123456",
     },
     "agent-col",
@@ -32,7 +32,7 @@ test("googleSessionToContext derives user ID from verified backend session", () 
   );
 
   assert.deepEqual(context, {
-    user_id: "google--109876543210",
+    user_id: "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
     project_id: "project--abcdef123456",
     auth_token: "google-id-token",
   });
@@ -41,7 +41,10 @@ test("googleSessionToContext derives user ID from verified backend session", () 
 test("googleSessionToContext requires a server-owned workspace project in Google mode", () => {
   assert.throws(
     () => googleSessionToContext(
-      { authenticated: true, user_id: "google--109876543210" },
+      {
+        authenticated: true,
+        user_id: "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
+      },
       "agent-col",
       "google-id-token",
     ),
@@ -54,7 +57,7 @@ test("googleSessionToContext validates project locator and auth token", () => {
     () => googleSessionToContext(
       {
         authenticated: true,
-        user_id: "google--109876543210",
+        user_id: "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
         workspace_project_id: "bad/project",
       },
       "bad/project",
@@ -66,7 +69,7 @@ test("googleSessionToContext validates project locator and auth token", () => {
     () => googleSessionToContext(
       {
         authenticated: true,
-        user_id: "google--109876543210",
+        user_id: "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
         workspace_project_id: "project--abcdef123456",
       },
       "agent-col",
@@ -80,7 +83,7 @@ test("googleSessionDisplayLabel hides Google subject from user-facing UI", () =>
   assert.equal(
     googleSessionDisplayLabel({
       authenticated: true,
-      user_id: "google--109876543210",
+      user_id: "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
       email: "user@example.com",
       display_name: "WiFi Knight",
     }),

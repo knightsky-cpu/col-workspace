@@ -86,11 +86,11 @@ test("getAuthSession calls the canonical auth session path", async () => {
       auth_mode: "google_oidc",
       authenticated: true,
       local_development: false,
-      user_id: "google--123",
+      user_id: "user--opaque123",
     });
   });
 
-  assert.equal(result.user_id, "google--123");
+  assert.equal(result.user_id, "user--opaque123");
   assert.equal(calls[0][0], "/api/auth/session");
   assert.equal(calls[0][1].method, "GET");
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");

@@ -45,14 +45,16 @@ class AuthenticatedPrincipal:
     local_development: bool
 
     def public_dict(self) -> dict[str, object]:
+        public_user_id = self.user_id
+        if self.provider == "google_oidc" and self.subject is not None:
+            public_user_id = google_subject_to_public_user_id(self.subject)
         return {
             "auth_contract_version": "1.0",
             "auth_mode": self.provider,
             "authenticated": self.authenticated,
             "local_development": self.local_development,
-            "user_id": self.user_id,
+            "user_id": public_user_id,
             "workspace_project_id": self.workspace_project_id,
-            "subject": self.subject,
             "email": self.email,
             "display_name": self.display_name,
         }
@@ -112,6 +114,14 @@ def google_subject_to_user_id(subject: str) -> str:
     ):
         raise AuthForbiddenError("Google subject contains unsupported characters.")
     return f"google--{normalized}"
+
+
+def google_subject_to_public_user_id(subject: str) -> str:
+    normalized = subject.strip()
+    if not normalized:
+        raise AuthForbiddenError("Google subject is invalid.")
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+    return f"user--{digest}"
 
 
 def google_subject_to_workspace_project_id(subject: str) -> str:
@@ -211,11 +221,16 @@ class Authenticator:
         if self._settings.mode == "local_dev":
             return supplied_user_id
         principal = self.authenticate(authorization_header)
-        if principal.user_id != supplied_user_id:
+        if (
+            principal.subject is None
+            or principal.user_id is None
+            or google_subject_to_public_user_id(principal.subject)
+            != supplied_user_id
+        ):
             raise AuthForbiddenError(
                 "Authenticated user does not own this request."
             )
-        return supplied_user_id
+        return principal.user_id
 
     def resolve_project_id(
         self,

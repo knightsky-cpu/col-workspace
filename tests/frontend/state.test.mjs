@@ -88,14 +88,17 @@ test("acceptContext stores verified auth token separately from request locators"
   const state = acceptContext(
     createInitialState(),
     {
-      user_id: "google--109876543210",
+      user_id: "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
       project_id: "agent-col",
       auth_token: "google-id-token",
       crypto: cryptoStub,
     },
   );
 
-  assert.equal(state.context.user_id, "google--109876543210");
+  assert.equal(
+    state.context.user_id,
+    "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
+  );
   assert.equal(state.context.auth_token, "google-id-token");
 });
 

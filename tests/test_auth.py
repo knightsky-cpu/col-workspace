@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 
 from auth import (
@@ -10,6 +12,11 @@ from auth import (
     google_subject_to_workspace_project_id,
     load_auth_settings,
 )
+
+
+def public_user_locator(subject: str) -> str:
+    digest = hashlib.sha256(subject.encode("utf-8")).hexdigest()[:32]
+    return f"user--{digest}"
 
 
 def test_local_development_auth_uses_supplied_user_without_token() -> None:
@@ -122,6 +129,60 @@ def test_google_oidc_verifies_token_and_derives_stable_user_id() -> None:
     assert "109876543210" not in principal.workspace_project_id
     assert principal.email == "user@example.com"
     assert principal.display_name == "WiFi Knight"
+
+
+def test_google_oidc_public_session_uses_opaque_user_locator() -> None:
+    authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {
+            "sub": "109876543210",
+            "email": "user@example.com",
+            "name": "WiFi Knight",
+        },
+    )
+
+    principal = authenticator.authenticate("Bearer token-abc")
+    public_user_id = public_user_locator("109876543210")
+
+    assert principal.subject == "109876543210"
+    assert principal.user_id == "google--109876543210"
+    assert principal.public_dict() == {
+        "auth_contract_version": "1.0",
+        "auth_mode": "google_oidc",
+        "authenticated": True,
+        "local_development": False,
+        "user_id": public_user_id,
+        "workspace_project_id": google_subject_to_workspace_project_id(
+            "109876543210"
+        ),
+        "email": "user@example.com",
+        "display_name": "WiFi Knight",
+    }
+
+
+def test_google_oidc_resolves_public_user_locator_to_internal_id() -> None:
+    authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    assert authenticator.resolve_user_id(
+        supplied_user_id=public_user_locator("109876543210"),
+        authorization_header="Bearer token-abc",
+    ) == "google--109876543210"
+
+
+def test_google_oidc_rejects_raw_internal_user_locator() -> None:
+    authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    with pytest.raises(AuthForbiddenError):
+        authenticator.resolve_user_id(
+            supplied_user_id="google--109876543210",
+            authorization_header="Bearer token-abc",
+        )
 
 
 def test_google_oidc_rejects_request_user_mismatch() -> None:

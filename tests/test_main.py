@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -250,6 +251,11 @@ VALID_BLUEPRINT_PAYLOAD = {
 
 MEMORY_NOW = datetime(2026, 8, 20, 23, 0, tzinfo=UTC)
 DEFAULT_TURN_ID = "b" * 64
+
+
+def public_user_locator(subject: str) -> str:
+    digest = hashlib.sha256(subject.encode("utf-8")).hexdigest()[:32]
+    return f"user--{digest}"
 
 
 def make_chat_turn_claim(
@@ -2106,6 +2112,7 @@ async def test_auth_session_returns_google_principal(
         "/api/auth/session",
         headers={"Authorization": "Bearer token-abc"},
     )
+    public_user_id = public_user_locator("109876543210")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -2113,11 +2120,10 @@ async def test_auth_session_returns_google_principal(
         "auth_mode": "google_oidc",
         "authenticated": True,
         "local_development": False,
-        "user_id": "google--109876543210",
+        "user_id": public_user_id,
         "workspace_project_id": (
             google_subject_to_workspace_project_id("109876543210")
         ),
-        "subject": "109876543210",
         "email": "user@example.com",
         "display_name": "WiFi Knight",
     }
@@ -2179,12 +2185,13 @@ async def test_google_workspace_create_uses_subject_owned_workspace_prefix(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
+    subject = "109876543210"
     main.app.state.authenticator = Authenticator(
         AuthSettings(mode="google_oidc", google_client_id="client-123"),
-        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+        token_verifier=lambda token, client_id: {"sub": subject},
     )
     default_workspace_id = google_subject_to_workspace_project_id(
-        "109876543210"
+        subject
     )
     workspace_id = f"{default_workspace_id}--study-plans"
     service_state.database.workspace_create_result = WorkspaceSummary(
@@ -2192,9 +2199,10 @@ async def test_google_workspace_create_uses_subject_owned_workspace_prefix(
         display_name="Study Plans",
         is_default=False,
     )
+    public_user_id = public_user_locator(subject)
 
     response = await client.post(
-        "/api/users/google--109876543210/workspaces",
+        f"/api/users/{public_user_id}/workspaces",
         json={"display_name": "Study Plans"},
         headers={"Authorization": "Bearer token-abc"},
     )
@@ -2215,6 +2223,28 @@ async def test_google_workspace_create_uses_subject_owned_workspace_prefix(
             WorkspaceCreateRequest(display_name="Study Plans"),
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_google_mode_rejects_raw_internal_user_locator(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    response = await client.get(
+        "/api/users/google--109876543210/workspaces",
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "Authenticated user does not own this request."
+    }
+    assert service_state.database.workspace_list_calls == []
 
 
 @pytest.mark.asyncio
@@ -2264,6 +2294,57 @@ async def test_collaborative_note_detail_returns_note_and_lifecycle_events(
             workspace_id="project-1",
             note_id="note-1",
             limit=10,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_collaborative_note_responses_hide_internal_owner(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    internal_user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    project_id = google_subject_to_workspace_project_id(subject)
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+    note = CollaborativeNote.model_validate(
+        {
+            **collaborative_note_payload(),
+            "owner_user_id": internal_user_id,
+            "workspace_id": project_id,
+        }
+    )
+    event = CollaborativeNoteEvent.model_validate(
+        {
+            **collaborative_note_event_payload(),
+            "owner_user_id": internal_user_id,
+            "workspace_id": project_id,
+        }
+    )
+    service_state.collaborative_note_service.detail_result = (
+        CollaborativeNoteDetailResult(note=note, events=[event])
+    )
+
+    response = await client.get(
+        f"/api/users/{public_user_id}/projects/{project_id}/notes/note-1",
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["note"]["owner_user_id"] == public_user_id
+    assert payload["events"][0]["owner_user_id"] == public_user_id
+    assert internal_user_id not in str(payload)
+    assert service_state.collaborative_note_service.detail_calls == [
+        GetCollaborativeNoteCommand(
+            user_id=internal_user_id,
+            workspace_id=project_id,
+            note_id="note-1",
+            limit=20,
         )
     ]
 
@@ -2516,12 +2597,20 @@ async def test_list_chat_sessions_returns_project_user_sessions(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
+    subject = "109876543210"
+    internal_user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    project_id = google_subject_to_workspace_project_id(subject)
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
     service_state.database.chat_session_list_result = ChatSessionListResponse(
         sessions=[
             ChatSessionSummary(
                 session_id="session-1",
-                project_id="project-1",
-                user_id="user-1",
+                project_id=project_id,
+                user_id=internal_user_id,
                 updated_at=MEMORY_NOW,
                 last_message_preview="Earlier planning question",
                 last_message_role="user",
@@ -2530,18 +2619,16 @@ async def test_list_chat_sessions_returns_project_user_sessions(
     )
 
     response = await client.get(
-        "/api/users/user-1/projects/project-1/chat-sessions",
+        f"/api/users/{public_user_id}/projects/{project_id}/chat-sessions",
+        headers={"Authorization": "Bearer token-abc"},
         params={"limit": 10},
     )
 
     assert response.status_code == 200
-    assert response.json() == (
-        service_state.database.chat_session_list_result.model_dump(
-            mode="json"
-        )
-    )
+    assert response.json()["sessions"][0]["user_id"] == public_user_id
+    assert internal_user_id not in str(response.json())
     assert service_state.database.chat_session_list_calls == [
-        ("user-1", "project-1", 10)
+        (internal_user_id, project_id, 10)
     ]
 
 
@@ -2550,11 +2637,19 @@ async def test_get_chat_session_detail_returns_chronological_messages(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
+    subject = "109876543210"
+    internal_user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    project_id = google_subject_to_workspace_project_id(subject)
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
     service_state.database.chat_session_detail_result = (
         ChatSessionDetailResponse(
             session_id="session-1",
-            project_id="project-1",
-            user_id="user-1",
+            project_id=project_id,
+            user_id=internal_user_id,
             messages=[
                 ChatMessageRecord(
                     message_id="message-1",
@@ -2576,21 +2671,22 @@ async def test_get_chat_session_detail_returns_chronological_messages(
     )
 
     response = await client.get(
-        "/api/users/user-1/projects/project-1/chat-sessions/session-1",
+        (
+            f"/api/users/{public_user_id}/projects/{project_id}"
+            "/chat-sessions/session-1"
+        ),
+        headers={"Authorization": "Bearer token-abc"},
         params={"limit": 50},
     )
 
     assert response.status_code == 200
-    assert response.json() == (
-        service_state.database.chat_session_detail_result.model_dump(
-            mode="json"
-        )
-    )
+    assert response.json()["user_id"] == public_user_id
+    assert internal_user_id not in str(response.json())
     assert len(service_state.database.chat_session_detail_calls) == 1
     detail_call = service_state.database.chat_session_detail_calls[0]
     assert detail_call[:4] == (
-        "user-1",
-        "project-1",
+        internal_user_id,
+        project_id,
         "session-1",
         50,
     )
@@ -5433,7 +5529,7 @@ async def test_google_chat_requires_idempotency_key_before_service_access(
         json={
             "project_id": google_subject_to_workspace_project_id(subject),
             "session_id": "private-google-session",
-            "user_id": f"google--{subject}",
+            "user_id": public_user_locator(subject),
             "message": "private-google-message",
         },
     )
@@ -5730,6 +5826,7 @@ async def test_google_chat_propagates_verified_owner_to_claim_and_history(
 ) -> None:
     subject = "109876543210"
     user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
     project_id = google_subject_to_workspace_project_id(subject)
     main.app.state.authenticator = Authenticator(
         AuthSettings(mode="google_oidc", google_client_id="client-123"),
@@ -5746,7 +5843,7 @@ async def test_google_chat_propagates_verified_owner_to_claim_and_history(
         json={
             "project_id": project_id,
             "session_id": "google-session-1",
-            "user_id": user_id,
+            "user_id": public_user_id,
             "message": "New question",
         },
     )
@@ -6260,6 +6357,96 @@ async def test_chat_completes_structured_collaborative_note_decision_turn(
     assert command.collaborative_note_decision_present is True
     assert command.precompleted_collaborative_note_events == (event,)
     assert service_state.database.complete_calls[0][0] is effect_claim
+    assert service_state.database.complete_calls[0][1].collaborative_note_events == [
+        event
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_chat_note_event_receipts_hide_internal_owner(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    internal_user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    project_id = google_subject_to_workspace_project_id(subject)
+    decision = CollaborativeNoteDecisionRequest(
+        proposal_id="note-proposal-1",
+        decision="approve",
+    )
+    claim = make_chat_turn_claim(collaborative_note_decision=decision)
+    renewed_claim = replace(
+        claim,
+        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
+    )
+    action = AgentActionReceipt(
+        action_name="approve_collaborative_note",
+        status="completed",
+    )
+    event = CollaborativeNoteEvent.model_validate(
+        {
+            **collaborative_note_event_payload("approved"),
+            "owner_user_id": internal_user_id,
+            "workspace_id": project_id,
+        }
+    )
+    effect_claim = replace(
+        renewed_claim,
+        precompleted_actions=(action,),
+        precompleted_collaborative_note_events=(event,),
+    )
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+    service_state.database.chat_turn_result = claim
+    service_state.database.renewed_claim = renewed_claim
+    service_state.collaborative_note_service.decision_result = (
+        CollaborativeNoteDecisionResult(
+            action=action,
+            note=CollaborativeNote.model_validate(
+                {
+                    **collaborative_note_payload(),
+                    "owner_user_id": internal_user_id,
+                    "workspace_id": project_id,
+                }
+            ),
+            event=event,
+        )
+    )
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="I recorded that note.",
+        actions=(action,),
+        collaborative_note_events=(event,),
+        chat_turn_claim=effect_claim,
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={
+            "Authorization": "Bearer token-abc",
+            "Idempotency-Key": "google-note-decision-key-1",
+        },
+        json={
+            "project_id": project_id,
+            "session_id": "session-1",
+            "user_id": public_user_id,
+            "message": "Approve that note.",
+            "collaborative_note_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert (
+        payload["collaborative_note_events"][0]["owner_user_id"]
+        == public_user_id
+    )
+    assert internal_user_id not in str(payload)
+    assert service_state.collaborative_note_service.decision_calls[0].user_id == (
+        internal_user_id
+    )
     assert service_state.database.complete_calls[0][1].collaborative_note_events == [
         event
     ]
