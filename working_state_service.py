@@ -38,6 +38,15 @@ unresolved questions, clarification status, next-step hypothesis, and confidence
 when that would help a later response in the same chat. Do not store raw hidden
 chain-of-thought. Store only concise conclusions and rationale summaries.
 
+Make next_step_hypothesis action-oriented: name the next consequential step
+Agent Col should recommend or continue when the current user message already
+authorizes progress. If progress depends on a missing user decision or
+verification-needed external fact, mark blockers and do not invent work.
+The next-step hypothesis is not an authorization, may be possibly stale, and
+must stay subordinate to the current user message, approved memory, workspace
+notes, persisted artifacts, routing/expert context, and higher-priority
+instructions.
+
 Classify unresolved items as user-owned decisions, temporary assumptions, or
 verification-needed external facts. Verification-needed external facts include
 claims about software, dependencies, operating systems, programs, websites,

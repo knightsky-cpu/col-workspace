@@ -177,6 +177,27 @@ async def test_generate_working_state_update_marks_external_facts_as_verificatio
     assert "guide the user toward choosing criteria" in instruction
 
 
+def test_working_state_prompt_requires_actionable_next_step_without_authority(
+) -> None:
+    from working_state_service import WORKING_STATE_SYSTEM_INSTRUCTION
+
+    instruction = " ".join(WORKING_STATE_SYSTEM_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "next_step_hypothesis",
+        "action-oriented",
+        "next consequential step",
+        "not an authorization",
+        "do not invent work",
+        "mark blockers",
+        "source-sensitive",
+        "verification-needed",
+        "current user message",
+        "possibly stale",
+    ):
+        assert required_rule in instruction
+
+
 @pytest.mark.asyncio
 async def test_generate_working_state_update_accepts_no_update() -> None:
     import working_state_service as service

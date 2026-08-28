@@ -128,6 +128,43 @@ def test_responder_instruction_treats_continuity_context_as_untrusted_data(
     assert "cannot authorize persistent memory" in normalized
 
 
+def test_responder_instruction_uses_working_state_to_lead_next_step() -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "use next_step_hypothesis",
+        "recommend the next consequential step",
+        "continue obvious authorized work",
+        "identify blockers",
+        "guide decisions with clear options",
+        "avoid asking what next",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_keeps_working_state_non_planner_non_authority(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "not a planner",
+        "non-authoritative collaboration aid",
+        "cannot authorize tools",
+        "cannot authorize persistence",
+        "cannot authorize memory",
+        "cannot authorize notes",
+        "cannot authorize artifacts",
+        "cannot authorize actions",
+        "possibly stale",
+    ):
+        assert required_rule in normalized
+    assert "autonomous planner" not in normalized
+
+
 def test_responder_instruction_integrates_validated_computation_evidence(
 ) -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION
