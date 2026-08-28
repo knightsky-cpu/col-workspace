@@ -140,6 +140,42 @@ Verification:
 - `node --test tests/frontend/requests.test.mjs` passed: 19 tests.
 - `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
 
+## 2026-08-28 - Accepted Chat Transcript And Model Response Styling Pass
+
+Status: accepted after corrected user visual verification.
+
+Scope:
+- Implemented the fifth bounded CSS-only visual pass.
+- Corrected the initial visual miss by removing the card treatment from `.turn`.
+- Kept `.turn` structural so the user message and Agent Col response are not visually wrapped into one shared card.
+- Applied the raised response surface, border, radius, padding, readable line-height, and teal rail to `.turn-model` itself.
+- Kept `.turn-user` compact and visually minimal.
+- Kept receipt chips underneath as compact secondary metadata.
+- Did not modify Markdown rendering, response text, JavaScript, HTML, prompts, receipt construction, submit behavior, backend behavior, or selectors outside the approved Pass 5 boundary.
+
+CSS surface changed:
+- `.conversation`
+- `.chat-transcript`
+- `.turn`
+- `.turn-user`
+- `.turn-model`
+- `.turn-receipts`
+- `.receipt-list`
+- `.receipt-item`
+
+Verification:
+- Temporary Pass 5 CSS assertion failed before implementation for the missing chat transcript treatment, then passed after implementation.
+- Manual verification rejected the first attempt because `.turn` incorrectly grouped user and model content in one visual card.
+- Correction assertion failed before the fix because `.turn` still owned the card surface and `.turn-model` did not; the corrected assertion passed after moving the surface to `.turn-model`.
+- `git diff --check` passed.
+- `node --test tests/frontend/chat-view.test.mjs` passed: 11 tests.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+
+Screenshot:
+- `/tmp/agent-col-pass5-corrected.png`
+- The screenshot used a temporary HTML preview with current real HTML/CSS and sample chat content.
+
 ## 2026-08-28 - Accepted Left Drawer Density And Navigation Rows Pass
 
 Status: accepted after user visual verification.
