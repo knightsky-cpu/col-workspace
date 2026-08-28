@@ -359,3 +359,95 @@ Cloud Run detected with K_SERVICE
 ```
 
 This protects deployment without changing the local Google OIDC development path and without introducing a duplicate environment abstraction.
+
+##Potential conflicts:
+
+Yes. Most of the dragons are dead, but there are still a few Cloud Run-specific goblins I would expect. None look like architectural blockers.
+
+The ones I’d put red circles around are:
+
+1. Cloud Run IAM auth vs Agent Col’s Google OIDC. Your Cloud Run service itself should be publicly invokable while Agent Col enforces user authentication inside FastAPI. If you accidentally require Cloud Run IAM authentication, a normal browser Google ID token is not the same thing as Cloud Run invocation authorization, and judges/users may hit a Google 403 before Agent Col ever sees the request. Your intended architecture is:
+
+Internet → public Cloud Run endpoint → Agent Col Google OIDC → protected user data
+
+    not:
+
+Internet → Cloud Run IAM gate → Agent Col OIDC
+
+2. The first deployed URL will break Google Sign-In until you authorize its origin. Localhost already works because it is registered. Once Cloud Run gives you something like https://agent-col-....run.app, add that exact scheme + hostname to the OAuth Web Client’s Authorized JavaScript Origins. Google explicitly requires the site origin there.  Expect the first deployment to load fine while login complains about the origin; that is a configuration issue, not an Agent Col bug.
+3. --set-env-vars is a nasty little goblin. On Cloud Run, gcloud run deploy --set-env-vars ... replaces previously configured environment variables that aren’t included in that invocation. Google documents this as destructive.  So this:
+
+gcloud run deploy ... --set-env-vars AGENT_COL_AUTH_MODE=google_oidc
+
+    can unintentionally erase other env vars from the previous revision. For incremental changes, prefer --update-env-vars, or maintain the complete production configuration deterministically.
+4. Source-upload leakage if you choose --source. .dockerignore protects Docker build context, but gcloud run deploy --source . uses .gcloudignore for source upload. If .gcloudignore is absent, gcloud normally derives rules from the repository .gitignore, which helps because your .env is already ignored.  Still, before the first deployment I would explicitly inspect:
+
+gcloud meta list-files-for-upload
+
+    and make damn sure .env, screenshots, credentials, caches, and local evidence aren’t on the wagon headed to Google.
+5. Cloud Run’s default concurrency is much higher than “one request at a time.” A new CLI-deployed service can default to concurrency based on CPU, commonly effectively around 80 concurrent requests per instance. Google actually recommends starting lower, around 8, when you’re unsure about application concurrency behavior.  I would not deploy Agent Col at 80 and discover a shared-state gremlin during judging. Start deliberately conservative, verify concurrent chat/session behavior, then increase if necessary.
+6. Don’t blindly set concurrency to 1 either. That sounds safest, but it can force Cloud Run to create more instances under simultaneous traffic and amplify cold starts.  Something like a deliberately small concurrency is probably the saner hackathon starting point. Measure it rather than treating 1 as magically correct.
+7. Cold starts can look like Agent Col latency. Cloud Run scales to zero by default, so the first request after idleness may include container startup. Google specifically recommends minimum instances or startup CPU boost when cold-start latency matters.  For the demo, you have two choices:
+
+min instances = 0 → cheapest, occasional cold start
+min instances = 1 → warmer demo, small ongoing cost
+
+    I would decide intentionally before recording the demo rather than diagnosing a mysterious slow first response five minutes before submission.
+8. Don’t make the health check summon Gemini. A health/startup endpoint should answer, essentially, “the FastAPI process is alive and correctly initialized.” It should not perform a Vertex generation or expensive Firestore operation. Cloud Run supports startup/liveness/readiness probes, and a failing startup probe prevents the instance from serving traffic.  Keep the probe cheap:
+
+process running?
+config loaded?
+app initialized?
+→ healthy
+
+    Then your hosted smoke tests separately prove Firestore and Vertex.
+9. Request timeout and model timeout are different. Cloud Run currently defaults to a 300-second request timeout. If that expires, the client gets a 504, but Google warns that the container’s code may continue processing afterward.  Your internal Gemini/turn timeouts should therefore remain shorter than the Cloud Run request timeout so Agent Col aborts cleanly first:
+
+model/service timeout
+      <
+application turn timeout
+      <
+Cloud Run request timeout
+
+    You don’t want the browser giving up while the wizard is still burning Vertex tokens underground.
+10. Firestore geography may become visible as latency. Firestore recommends locating compute near the database and notes that the database location cannot later be changed.  Before choosing the Cloud Run region, check where the existing Firestore database lives. Don’t casually deploy Agent Col across the continent from its database because us-whatever sounded fine. This is one I would check before creating the Cloud Run service.
+
+A couple more small ones: keep max-instances intentionally bounded so a traffic spike cannot spawn a small army of Gemini-spending clones—Google explicitly positions maximum instances as both cost and abnormal-traffic protection.  And use the dedicated Cloud Run service account rather than the broad default compute identity; that’s where your least-privilege Firestore/Vertex access belongs.
+
+What I would expect the first deployment experience to look like
+
+Probably something like:
+
+Deploy
+  ↓
+container/start command issue?       maybe
+  ↓
+service becomes healthy
+  ↓
+/workspace loads                     likely
+  ↓
+Google Sign-In origin complaint      very plausible
+  ↓
+authorize Cloud Run origin
+  ↓
+login works
+  ↓
+first Vertex/Firestore call
+  ↓
+missing IAM role?                    plausible
+  ↓
+fix service-account role
+  ↓
+chat works
+  ↓
+discover cold-start/concurrency UX
+  ↓
+tune
+  ↓
+hosted proof
+
+That’s normal deployment debugging, not evidence the architecture was wrong.
+
+The three goblins I would be most alert for are OAuth origin configuration, Cloud Run service-account permissions, and concurrency/cold-start behavior. Everything else is mostly deterministic plumbing.
+
+And before the first actual deployment command, I would have Codex produce a “first deployment preflight” containing the exact project, region, Firestore location, service account, IAM roles, environment-variable names, OAuth client, concurrency/max-instance settings, and files that will be uploaded. That gives you one final dungeon map before pulling the lever.
