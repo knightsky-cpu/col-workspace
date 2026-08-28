@@ -205,19 +205,19 @@ p {
   display: grid;
   align-items: stretch;
   grid-template-areas: "left-restore support conversation work right-restore";
-  grid-template-columns: 0 minmax(16rem, 22rem) minmax(20rem, 1fr) minmax(18rem, 26rem) 0;
+  grid-template-columns: 0 minmax(14rem, 20rem) minmax(24rem, 1fr) minmax(16rem, 26rem) 0;
 }
 
 .workspace-grid--left-collapsed {
-  grid-template-columns: 3rem 0 minmax(20rem, 1fr) minmax(18rem, 26rem) 0;
+  grid-template-columns: 3rem 0 minmax(24rem, 1fr) minmax(16rem, 26rem) 0;
 }
 
 .workspace-grid--right-collapsed {
-  grid-template-columns: 0 minmax(16rem, 22rem) minmax(20rem, 1fr) 0 3rem;
+  grid-template-columns: 0 minmax(14rem, 20rem) minmax(24rem, 1fr) 0 3rem;
 }
 
 .workspace-grid--left-collapsed.workspace-grid--right-collapsed {
-  grid-template-columns: 3rem 0 minmax(20rem, 1fr) 0 3rem;
+  grid-template-columns: 3rem 0 minmax(24rem, 1fr) 0 3rem;
 }
 
 .workspace-grid--artifacts-expanded {
@@ -233,7 +233,7 @@ p {
 .work-panel {
   min-width: 0;
   min-height: 0;
-  padding: 1rem;
+  padding: 1.25rem;
 }
 
 .supporting-panel *,
