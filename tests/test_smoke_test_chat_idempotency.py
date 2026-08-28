@@ -370,7 +370,7 @@ def test_script_entrypoint_exposes_help_without_network() -> None:
     completed = subprocess.run(
         [
             sys.executable,
-            str(repository_root / "smoke_test_chat_idempotency.py"),
+            str(repository_root / "live-tests/smoke_test_chat_idempotency.py"),
             "--help",
         ],
         cwd=repository_root,

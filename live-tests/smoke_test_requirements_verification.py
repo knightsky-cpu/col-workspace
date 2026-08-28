@@ -1,3 +1,4 @@
+import _repo_path
 """Run the offline Requirements Verification validator acceptance check."""
 
 from collections.abc import Callable

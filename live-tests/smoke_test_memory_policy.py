@@ -1,3 +1,4 @@
+import _repo_path
 from datetime import UTC, datetime
 
 from memory_context import MemoryContextRenderer

@@ -151,8 +151,8 @@ for accepted evidence, limitations, and correction history.
 ## Static checks for Python scripts
 
 ```bash
-python -m py_compile smoke_test_chat_idempotency.py tests/test_smoke_test_chat_idempotency.py
-python smoke_test_chat_idempotency.py --help
+python -m py_compile live-tests/smoke_test_chat_idempotency.py tests/test_smoke_test_chat_idempotency.py
+python live-tests/smoke_test_chat_idempotency.py --help
 git diff --check
 ```
 
@@ -164,7 +164,7 @@ damage. They are supplements, not substitutes for behavioral tests.
 Start Uvicorn first, then run in another activated terminal:
 
 ```bash
-python3 smoke_test_chat_idempotency.py
+python3 live-tests/smoke_test_chat_idempotency.py
 ```
 
 Passing output contains:

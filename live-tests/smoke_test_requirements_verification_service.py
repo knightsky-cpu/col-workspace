@@ -1,3 +1,4 @@
+import _repo_path
 """Run one fixed live Requirements Verification provider request."""
 
 import asyncio

@@ -135,7 +135,7 @@ Keep Uvicorn running, activate the virtual environment in a second terminal,
 and run:
 
 ```bash
-python3 smoke_test_chat_idempotency.py
+python3 live-tests/smoke_test_chat_idempotency.py
 ```
 
 The runner performs a new chat request, an identical replay, and a changed-body
@@ -146,7 +146,7 @@ locators. It does not print the prompt, key, or model response.
 To verify a future hosted URL without changing code:
 
 ```bash
-python3 smoke_test_chat_idempotency.py --base-url https://YOUR_HOST
+python3 live-tests/smoke_test_chat_idempotency.py --base-url https://YOUR_HOST
 ```
 
 Do not use this against a public deployment until Phase 4 authentication,
@@ -169,7 +169,7 @@ node --test tests/frontend/*.test.mjs
 Direct structured synthesis smoke:
 
 ```bash
-python3 smoke_test_synthesis.py
+python3 live-tests/smoke_test_synthesis.py
 ```
 
 That script makes a live Gemini call and may print generated blueprint content,

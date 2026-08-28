@@ -1,3 +1,4 @@
+import _repo_path
 """Run one fixed live routing-v2 computation pipeline verification."""
 
 import asyncio

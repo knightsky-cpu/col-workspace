@@ -1,3 +1,4 @@
+import _repo_path
 """Live compatibility check for the parallel artifact routing v4 boundary."""
 
 import asyncio

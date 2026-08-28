@@ -1,3 +1,4 @@
+import _repo_path
 """Live compatibility runner for the parallel Agent_Col routing v3 contract."""
 
 import argparse

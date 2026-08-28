@@ -1,3 +1,4 @@
+import _repo_path
 import asyncio
 from collections.abc import AsyncIterator
 

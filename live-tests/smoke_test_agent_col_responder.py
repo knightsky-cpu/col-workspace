@@ -1,3 +1,4 @@
+import _repo_path
 from agent_col_responder import create_responder_app
 from agent_col_responder_context import (
     AgentColResponderContext,

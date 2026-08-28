@@ -7,7 +7,7 @@ def test_turn_service_smoke_runner_proves_offline_orchestration() -> None:
     repository_root = Path(__file__).resolve().parents[1]
 
     completed = subprocess.run(
-        [sys.executable, "smoke_test_agent_col_turn_service.py"],
+        [sys.executable, "live-tests/smoke_test_agent_col_turn_service.py"],
         cwd=repository_root,
         capture_output=True,
         check=False,

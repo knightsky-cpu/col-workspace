@@ -172,7 +172,7 @@ node --test tests/frontend/*.test.mjs
 Run the retry-safe chat smoke check against a local server:
 
 ```bash
-python3 smoke_test_chat_idempotency.py
+python3 live-tests/smoke_test_chat_idempotency.py
 ```
 
 See [Testing](docs/development/testing.md) for focused commands and test-layer

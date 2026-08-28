@@ -113,7 +113,7 @@ pytest -q tests/test_chat_turns.py tests/test_chat_turn_database.py
 With the local server running:
 
 ```bash
-python3 smoke_test_chat_idempotency.py
+python3 live-tests/smoke_test_chat_idempotency.py
 ```
 
 Success requires `first=200 replay=200 conflict=409 replay_equal=true`. Use the
