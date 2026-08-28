@@ -41,6 +41,15 @@ function signalDisplayLabel(signal) {
   ]);
 }
 
+function isExpanded(disclosure, key, id) {
+  return Array.isArray(disclosure?.[key])
+    && disclosure[key].includes(String(id ?? ""));
+}
+
+function disclosureId(prefix, id) {
+  return `${prefix}-${String(id ?? "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
 function confirmDestructiveMemoryAction(action, signal) {
   const label = signalDisplayLabel(signal);
   const copy = action === "revoke"
@@ -55,19 +64,36 @@ function confirmDestructiveMemoryAction(action, signal) {
   return globalThis.confirm(copy.join("\n\n"));
 }
 
-function renderMemorySignals(container, title, emptyText, signals, handlers) {
+function renderMemorySignals(container, title, emptyText, signals, handlers, disclosure) {
   appendTextElement(container, "h3", "work-heading contain-text", title);
   if (signals.length === 0) {
     appendTextElement(container, "p", "muted contain-text", emptyText);
     return;
   }
   for (const signal of signals) {
+    const expanded = isExpanded(disclosure, "signalIds", signal.signal_id);
     const card = element("div", "memory-card contain-text");
     card.setAttribute("data-memory-signal", signal.signal_id);
-    appendTextElement(card, "p", "work-heading contain-text", signalDisplayLabel(signal));
-    appendTextElement(card, "p", "muted contain-text", compactText([
-      "Saved memory",
-    ]));
+    if (expanded) {
+      card.setAttribute("data-disclosure-expanded", "true");
+    }
+    const panelId = disclosureId("memory-signal-details", signal.signal_id);
+    const toggle = element("button", "subcard-disclosure-toggle contain-text", signalDisplayLabel(signal));
+    toggle.setAttribute("type", "button");
+    toggle.setAttribute("data-disclosure-toggle", "memory-signal");
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.setAttribute("aria-controls", panelId);
+    toggle.addEventListener("click", () => {
+      handlers.onToggleSignalDisclosure?.(signal.signal_id);
+    });
+    card.append(toggle);
+    appendTextElement(card, "p", "muted contain-text", "Saved memory");
+    if (!expanded) {
+      container.append(card);
+      continue;
+    }
+    const details = element("div", "subcard-disclosure-panel contain-text");
+    details.setAttribute("id", panelId);
     const actions = element("div", "memory-actions contain-text");
     const revoke = element("button", "", "Revoke");
     revoke.setAttribute("type", "button");
@@ -88,23 +114,43 @@ function renderMemorySignals(container, title, emptyText, signals, handlers) {
       handlers.onDeleteSignal(signal);
     });
     actions.append(revoke, deleteButton);
-    card.append(actions);
+    details.append(actions);
+    card.append(details);
     container.append(card);
   }
 }
 
-function renderProposal(container, proposal, handlers) {
+function renderProposal(container, proposal, handlers, disclosure) {
+  const expanded = isExpanded(disclosure, "proposalIds", proposal.proposal_id);
   const card = element("div", "memory-card contain-text");
   card.setAttribute("data-memory-proposal", proposal.proposal_id);
-  appendTextElement(card, "p", "work-heading contain-text", compactText([
+  if (expanded) {
+    card.setAttribute("data-disclosure-expanded", "true");
+  }
+  const panelId = disclosureId("memory-proposal-details", proposal.proposal_id);
+  const toggle = element("button", "subcard-disclosure-toggle contain-text", compactText([
     humanLabel(proposal.category),
     stringValue(proposal.proposed_value),
   ]));
+  toggle.setAttribute("type", "button");
+  toggle.setAttribute("data-disclosure-toggle", "memory-proposal");
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", panelId);
+  toggle.addEventListener("click", () => {
+    handlers.onToggleProposalDisclosure?.(proposal.proposal_id);
+  });
+  card.append(toggle);
   appendTextElement(card, "p", "muted contain-text", compactText([
     humanLabel(proposal.status),
     proposal.expires_at,
   ]));
+  if (!expanded) {
+    container.append(card);
+    return;
+  }
 
+  const details = element("div", "subcard-disclosure-panel contain-text");
+  details.setAttribute("id", panelId);
   const actions = element("div", "memory-actions contain-text");
   const approve = element("button", "", "Approve");
   approve.setAttribute("type", "button");
@@ -125,18 +171,19 @@ function renderProposal(container, proposal, handlers) {
     });
   });
   actions.append(approve, reject);
-  card.append(actions);
+  details.append(actions);
+  card.append(details);
   container.append(card);
 }
 
-function renderProposals(container, proposals, handlers) {
+function renderProposals(container, proposals, handlers, disclosure) {
   appendTextElement(container, "h3", "work-heading contain-text", "Pending proposals");
   if (proposals.length === 0) {
     appendTextElement(container, "p", "muted contain-text", "No pending memory proposals.");
     return;
   }
   for (const proposal of proposals) {
-    renderProposal(container, proposal, handlers);
+    renderProposal(container, proposal, handlers, disclosure);
   }
 }
 
@@ -155,7 +202,7 @@ function renderEvents(container, events) {
   }
 }
 
-export function renderMemoryPanel(container, memory, handlers) {
+export function renderMemoryPanel(container, memory, handlers, disclosure = {}) {
   container.replaceChildren();
 
   if (memory.status === "loading") {
@@ -176,13 +223,14 @@ export function renderMemoryPanel(container, memory, handlers) {
     return;
   }
 
-  renderProposals(container, memory.unresolvedProposals ?? [], handlers);
+  renderProposals(container, memory.unresolvedProposals ?? [], handlers, disclosure);
   renderMemorySignals(
     container,
     "Identity context",
     "No identity context saved.",
     memorySignals(memory.profile, "identity_context"),
     handlers,
+    disclosure,
   );
   renderMemorySignals(
     container,
@@ -190,6 +238,7 @@ export function renderMemoryPanel(container, memory, handlers) {
     "No active preferences.",
     memorySignals(memory.profile, "active_preferences"),
     handlers,
+    disclosure,
   );
   renderEvents(container, memory.events ?? []);
 }
@@ -197,7 +246,7 @@ export function renderMemoryPanel(container, memory, handlers) {
 export function createMemoryView(elements, handlers) {
   return {
     render(state) {
-      renderMemoryPanel(elements.panel, state.memory, handlers);
+      renderMemoryPanel(elements.panel, state.memory, handlers, state.disclosure?.memory);
     },
   };
 }

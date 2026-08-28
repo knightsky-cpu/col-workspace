@@ -1,5 +1,72 @@
 # Unsafe Frontend Work Notes
 
+## 2026-08-28 - Accepted U5 Standard Subcard Disclosure And Compact Control Correction Pass
+
+Status: accepted after user manual visual verification.
+
+Scope:
+- Implemented Pass U5 for the left-drawer child subcards in Notes, Memory, and Chats.
+- Standardized child-subcard disclosure state using stable frontend-only IDs for pending notes, selected note details, memory proposals, memory signals, and chat sessions.
+- Preserved the accepted parent drawer-card convention: the menu card/header itself remains the expand/collapse control.
+- Removed the regressed parent menu-card arrows/chevrons after manual verification caught that they had been reintroduced.
+- Preserved Workspace and Artifact child cards as simple select/open controls in this pass.
+- Reduced oversized child action controls across Notes, Memory, Artifacts, export controls, feedback controls, and drawer action controls.
+- Corrected the compact control size after manual verification: the first reduction was too small, so the final convention is slightly larger while still compact.
+- Corrected the Notes selected-detail layout after manual verification: selected note details now expand in place above the `Create note` form and show Archive/Delete/correction controls inside the selected note subcard.
+- Corrected the Chats interaction after manual verification: unselected chat cards open/select the chat, while the selected chat card collapses/expands metadata without reloading the session.
+- Preserved destructive confirmation behavior for Memory Revoke/Delete and Notes Delete.
+- Preserved backend routes, schemas, persistence, auth, ownership, proposal policy, artifact behavior, and model behavior.
+
+Source changed:
+- `frontend/state.mjs`: added frontend disclosure state and helper functions for toggling and idempotently expanding Notes, Memory, and Chats subcards.
+- `frontend/app.mjs`: wired Notes, Memory, and Chats disclosure handlers; expanded selected note detail after note load; expanded a chat card before opening an unselected chat.
+- `frontend/notes-view.mjs`: collapsed pending proposals until expanded, rendered selected note detail in-place, exposed lifecycle/correction controls only while expanded, and kept action clicks from collapsing the card.
+- `frontend/memory-view.mjs`: collapsed pending memory proposals and active memory signals until expanded, while preserving Revoke/Delete confirmations.
+- `frontend/chats-view.mjs`: rendered chat session cards as the card-level disclosure/open surface; selected-card clicks now toggle metadata only.
+- `frontend/index.html`: removed parent menu-card chevron spans that manual verification identified as a regression.
+- `frontend/styles.css`: added subcard disclosure styling, removed parent chevron styling, preserved selected amber card styling, and finalized the compact child-control sizing at `0.73rem` font size and `1.21rem` minimum height.
+- `tests/frontend/state.test.mjs`: covered disclosure initial state, toggle behavior, and idempotent expand helpers.
+- `tests/frontend/notes-view.test.mjs`: covered collapsed/expanded pending proposals, selected note detail in-place, lifecycle controls, Delete confirmation, and form placement.
+- `tests/frontend/memory-view.test.mjs`: covered collapsed/expanded pending proposals, active memory actions, and destructive confirmations.
+- `tests/frontend/chats-view.test.mjs`: covered chat card selection, selected-card metadata collapse/expand, and absence of a separate Details button.
+- `tests/frontend/workspace-static.test.mjs`: covered no parent chevrons, no subcard pseudo-arrow regression, compact control selector coverage, and the final compact sizing convention.
+
+TDD evidence:
+- RED 1: `node --test tests/frontend/memory-view.test.mjs tests/frontend/notes-view.test.mjs tests/frontend/chats-view.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-static.test.mjs` failed because child-card disclosure state/rendering did not exist.
+- GREEN 1: added disclosure state, view rendering, handlers, and compact action sizing; focused frontend checks passed.
+- Manual verification failure 1: user reported that parent arrows were reintroduced and selected Notes detail opened as a separate card under `Create note`.
+- RED 2: focused Notes/Chats/static tests failed because selected note detail was not the same in-list card, Chats used the wrong selected/toggle behavior, and parent arrow CSS/markup remained.
+- GREEN 2: removed separate chat details behavior, rendered selected Notes detail in-place, and removed parent arrow/chevron markup and CSS; focused checks passed.
+- Manual verification failure 2: user reported Notes lacked visible Delete controls and Chats were selectable but did not collapse/expand as expected.
+- RED 3: focused tests failed because selected Notes could remain collapsed without controls and selected Chats still called select/load on collapse.
+- GREEN 3: expanded selected Notes after load, made selected Notes card/header toggle in place, and made selected Chat clicks toggle metadata without reloading; focused checks passed.
+- Manual verification correction: user reported `Create correction proposal` was still too large and the compact convention was slightly too small.
+- RED 4: `node --test tests/frontend/workspace-static.test.mjs` failed because `.notes-correction-form button` was missing from the compact selector and the final sizing values were absent.
+- GREEN 4: included correction-form submit in the compact convention, prevented it from stretching full-width, and raised compact controls to the final accepted size.
+- REFACTOR: no broad refactor; changes stayed inside the approved U5 subcard disclosure and compact-control correction boundary.
+
+Verification:
+- `node --test tests/frontend/notes-view.test.mjs tests/frontend/chats-view.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-static.test.mjs` passed: 63 tests.
+- `node --test tests/frontend/memory-view.test.mjs tests/frontend/notes-view.test.mjs tests/frontend/chats-view.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-static.test.mjs tests/frontend/work-view.test.mjs` passed: 97 tests.
+- `node --check frontend/app.mjs` passed.
+- `node --check frontend/state.mjs` passed.
+- `node --check frontend/memory-view.mjs` passed.
+- `node --check frontend/notes-view.mjs` passed.
+- `node --check frontend/chats-view.mjs` passed.
+- `git diff --check` passed.
+- `rg -n "section-heading__chevron|chat-session-details-toggle|subcard-disclosure-toggle::after|content:\\s*\\\">\\\"|content:\\s*\\\"v\\\"" frontend tests/frontend` found only negative test assertions and no production matches.
+
+Manual verification result:
+- User confirmed the U5 pass successful after the correction-form button sizing adjustment.
+
+Deferred:
+- Add chat pending wave animation.
+- Add collapsed adaptation receipt disclosure.
+- Tune chat icons/text colors/counter severity.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+
 ## 2026-08-28 - Accepted Drawer Parent Card Disclosure And Icon Pass
 
 Status: accepted after user manual visual verification.

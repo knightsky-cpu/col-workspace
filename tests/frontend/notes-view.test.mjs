@@ -104,9 +104,39 @@ test("renderNotesPanel shows pending proposals with approve and reject controls"
   assert.match(text, /Pending note proposal/);
   assert.match(text, /Constraint/);
   assert.match(text, /API version/);
-  assert.match(text, /Use API version 2\./);
+  assert.doesNotMatch(text, /Use API version 2\./);
   assert.doesNotMatch(text, /Saved note/);
   assert.doesNotMatch(text, /note-proposal-1/);
+
+  const proposalCard = findTree(container, (child) => (
+    child.attributes["data-note-proposal"] === "note-proposal-1"
+  ));
+  assert.notEqual(proposalCard, null);
+  const collapsedToggle = findTree(proposalCard, (child) => (
+    child.attributes["data-disclosure-toggle"] === "note-proposal"
+  ));
+  assert.notEqual(collapsedToggle, null);
+  assert.equal(collapsedToggle.attributes["aria-expanded"], "false");
+  assert.equal(
+    findTree(proposalCard, (child) => child.attributes["data-note-decision"]),
+    null,
+  );
+
+  renderNotesPanel(container, {
+    status: "ready",
+    statusFilter: "active",
+    pendingProposals: [pendingProposal],
+    notes: [],
+    selectedNoteId: null,
+    detail: { status: "idle", note: null, events: [], error: null },
+    pendingRequest: null,
+    error: null,
+  }, {
+    onSubmitDecision: (decision) => decisions.push(decision),
+  }, {
+    proposalIds: ["note-proposal-1"],
+    detailNoteIds: [],
+  });
 
   const approve = findTree(container, (child) => (
     child.attributes["data-note-decision"] === "approve"
@@ -114,6 +144,7 @@ test("renderNotesPanel shows pending proposals with approve and reject controls"
   const reject = findTree(container, (child) => (
     child.attributes["data-note-decision"] === "reject"
   ));
+  assert.match(textTree(container), /Use API version 2\./);
   approve.onclick();
   reject.onclick();
 
@@ -145,25 +176,81 @@ test("renderNotesPanel shows active note detail and lifecycle controls", () => {
     onSelectNote: (noteId) => events.push(["select", noteId]),
     onArchiveNote: (note) => events.push(["archive", note.note_id, note.revision]),
     onDeleteNote: (note) => events.push(["delete", note.note_id, note.revision]),
+    onToggleDetailDisclosure: (noteId) => events.push(["toggle", noteId]),
+  }, {
+    proposalIds: [],
+    detailNoteIds: ["note-1"],
   });
 
   assert.match(textTree(container), /Saved note/);
   const noteButton = findTree(container, (child) => (
     child.attributes["data-note-id"] === "note-1"
   ));
+  const detailCard = findTree(container, (child) => (
+    child.attributes["data-note-detail"] === "note-1"
+  ));
+  assert.notEqual(detailCard, null);
+  assert.equal(detailCard, noteButton);
+  const collapsedToggle = findTree(detailCard, (child) => (
+    child.attributes["data-disclosure-toggle"] === "note-detail"
+  ));
+  assert.notEqual(collapsedToggle, null);
+  assert.equal(collapsedToggle.attributes["aria-expanded"], "true");
+  assert.notEqual(
+    findTree(detailCard, (child) => child.attributes["data-note-action"] === "delete"),
+    null,
+  );
+
+  detailCard.onclick({ target: detailCard });
+  assert.deepEqual(events, [["toggle", "note-1"]]);
+
+  renderNotesPanel(container, {
+    status: "ready",
+    statusFilter: "active",
+    pendingProposals: [],
+    notes: [activeNote],
+    selectedNoteId: "note-1",
+    detail: {
+      status: "ready",
+      note: activeNote,
+      events: [{ event_id: "note-1--approved", event_type: "approved" }],
+      error: null,
+    },
+    pendingRequest: null,
+    error: null,
+  }, {
+    onSelectNote: (noteId) => events.push(["select", noteId]),
+    onArchiveNote: (note) => events.push(["archive", note.note_id, note.revision]),
+    onDeleteNote: (note) => events.push(["delete", note.note_id, note.revision]),
+  }, {
+    proposalIds: [],
+    detailNoteIds: ["note-1"],
+  });
+
   const archiveButton = findTree(container, (child) => (
     child.attributes["data-note-action"] === "archive"
   ));
   const deleteButton = findTree(container, (child) => (
     child.attributes["data-note-action"] === "delete"
   ));
+  const expandedDetailCard = findTree(container, (child) => (
+    child.attributes["data-note-detail"] === "note-1"
+  ));
+  const formIndex = container.children.findIndex((child) => (
+    child.attributes["data-note-proposal-form"] === "true"
+  ));
+  const detailIndex = container.children.indexOf(expandedDetailCard);
+  assert.ok(detailIndex >= 0);
+  assert.ok(formIndex > detailIndex);
+  assert.equal(findTree(expandedDetailCard, (child) => (
+    child.attributes["data-note-action"] === "archive"
+  )), archiveButton);
 
-  noteButton.onclick();
   archiveButton.onclick();
   deleteButton.onclick();
 
   assert.deepEqual(events, [
-    ["select", "note-1"],
+    ["toggle", "note-1"],
     ["archive", "note-1", 2],
     ["delete", "note-1", 2],
   ]);

@@ -73,6 +73,16 @@ function findTree(item, predicate) {
   return null;
 }
 
+function findAllTree(item, predicate, matches = []) {
+  if (predicate(item)) {
+    matches.push(item);
+  }
+  for (const child of item.children) {
+    findAllTree(child, predicate, matches);
+  }
+  return matches;
+}
+
 const memory = {
   status: "ready",
   profile: {
@@ -119,6 +129,9 @@ test("renderMemoryPanel renders active preferences, proposals, and events safely
 
   renderMemoryPanel(container, memory, {
     onSubmitDecision: (decision) => approvals.push(decision),
+  }, {
+    proposalIds: ["planning_granularity--proposal-1"],
+    signalIds: [],
   });
 
   const text = textTree(container);
@@ -152,6 +165,102 @@ test("renderMemoryPanel renders active preferences, proposals, and events safely
     proposal_id: "planning_granularity--proposal-1",
     decision: "approve",
   }]);
+});
+
+test("renderMemoryPanel keeps proposal decisions collapsed until expanded", () => {
+  const decisions = [];
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: (decision) => decisions.push(decision),
+  });
+
+  const proposalCard = findTree(container, (child) => (
+    child.attributes["data-memory-proposal"] === "planning_granularity--proposal-1"
+  ));
+  assert.notEqual(proposalCard, null);
+  const toggle = findTree(proposalCard, (child) => (
+    child.attributes["data-disclosure-toggle"] === "memory-proposal"
+  ));
+  assert.notEqual(toggle, null);
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  assert.equal(
+    findTree(proposalCard, (child) => child.attributes["data-memory-decision"]),
+    null,
+  );
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: (decision) => decisions.push(decision),
+  }, {
+    proposalIds: ["planning_granularity--proposal-1"],
+    signalIds: [],
+  });
+
+  const expandedCard = findTree(container, (child) => (
+    child.attributes["data-memory-proposal"] === "planning_granularity--proposal-1"
+  ));
+  const approveButton = findTree(expandedCard, (child) => (
+    child.attributes["data-memory-decision"] === "approve"
+  ));
+  assert.notEqual(approveButton, null);
+  approveButton.onclick();
+  assert.deepEqual(decisions, [{
+    proposal_id: "planning_granularity--proposal-1",
+    decision: "approve",
+  }]);
+});
+
+test("renderMemoryPanel keeps active memory actions collapsed until expanded", () => {
+  const revoked = [];
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+    onRevokeSignal: (signal) => revoked.push(signal),
+    onDeleteSignal: () => {},
+  });
+
+  const signalCard = findTree(container, (child) => (
+    child.attributes["data-memory-signal"] === "response_length--signal-1"
+  ));
+  assert.notEqual(signalCard, null);
+  const toggle = findTree(signalCard, (child) => (
+    child.attributes["data-disclosure-toggle"] === "memory-signal"
+  ));
+  assert.notEqual(toggle, null);
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  assert.equal(
+    findTree(signalCard, (child) => child.attributes["data-memory-signal-action"]),
+    null,
+  );
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+    onRevokeSignal: (signal) => revoked.push(signal),
+    onDeleteSignal: () => {},
+  }, {
+    proposalIds: [],
+    signalIds: ["response_length--signal-1"],
+  });
+
+  const expandedCard = findTree(container, (child) => (
+    child.attributes["data-memory-signal"] === "response_length--signal-1"
+  ));
+  assert.equal(
+    findTree(expandedCard, (child) => (
+      child.attributes["data-disclosure-toggle"] === "memory-signal"
+    )).attributes["aria-expanded"],
+    "true",
+  );
+  const revokeButton = findTree(expandedCard, (child) => (
+    child.attributes["data-memory-signal-action"] === "revoke"
+  ));
+  assert.notEqual(revokeButton, null);
+
+  withConfirm(() => true, () => {
+    revokeButton.onclick();
+  });
+  assert.equal(revoked[0].signal_id, "response_length--signal-1");
 });
 
 test("renderMemoryPanel renders and approves list-valued V2 memory", () => {
@@ -194,6 +303,9 @@ test("renderMemoryPanel renders and approves list-valued V2 memory", () => {
     onSubmitDecision: (decision) => approvals.push(decision),
     onRevokeSignal: () => {},
     onDeleteSignal: () => {},
+  }, {
+    proposalIds: ["development_environments--proposal-v2"],
+    signalIds: [],
   });
 
   const text = textTree(container);
@@ -244,6 +356,9 @@ test("renderMemoryPanel requires confirmation before revoking active preferences
     onSubmitDecision: () => {},
     onRevokeSignal: (signal) => revoked.push(signal),
     onDeleteSignal: () => {},
+  }, {
+    proposalIds: [],
+    signalIds: ["response_length--signal-1"],
   });
 
   const signalCard = findTree(container, (child) => (
@@ -293,6 +408,9 @@ test("renderMemoryPanel requires confirmation before deleting identity context",
     onSubmitDecision: () => {},
     onRevokeSignal: () => {},
     onDeleteSignal: (signal) => deleted.push(signal),
+  }, {
+    proposalIds: [],
+    signalIds: ["preferred_name--signal-1"],
   });
 
   const signalCard = findTree(container, (child) => (
@@ -357,6 +475,9 @@ test("renderMemoryPanel renders list-valued destructive confirmations cleanly", 
     onSubmitDecision: () => {},
     onRevokeSignal: () => {},
     onDeleteSignal: (signal) => deleted.push(signal),
+  }, {
+    proposalIds: [],
+    signalIds: ["development_environments--active-v2"],
   });
 
   const signalCard = findTree(container, (child) => (
@@ -393,7 +514,8 @@ test("renderMemoryPanel keeps active preference IDs secondary to human labels", 
     child.attributes["data-memory-signal"] === "response_length--signal-1"
   ));
   assert.equal(signalCard.children[0].textContent, "Response length · concise");
-  assert.equal(signalCard.children[1].textContent, "Saved memory");
+  assert.equal(textTree(signalCard).includes("Saved memory"), true);
+  assert.equal(findAllTree(signalCard, (child) => child.attributes["data-disclosure-toggle"]).length, 1);
 });
 
 test("renderMemoryPanel exposes useful empty, loading, and error states", () => {

@@ -24,7 +24,16 @@ function sessionMeta(session) {
   ]);
 }
 
-export function renderChatsPanel(container, chats, handlers = {}) {
+function isExpanded(disclosure, sessionId) {
+  return Array.isArray(disclosure?.sessionIds)
+    && disclosure.sessionIds.includes(String(sessionId ?? ""));
+}
+
+function disclosureId(prefix, id) {
+  return `${prefix}-${String(id ?? "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+export function renderChatsPanel(container, chats, handlers = {}, disclosure = {}) {
   container.replaceChildren();
   if (chats.status === "loading") {
     appendTextElement(container, "p", "muted", "Loading chats...");
@@ -40,35 +49,52 @@ export function renderChatsPanel(container, chats, handlers = {}) {
     return;
   }
   for (const session of sessions) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.classList.add("work-list-item", "contain-text");
-    button.setAttribute("data-session-id", session.session_id);
+    const expanded = isExpanded(disclosure, session.session_id);
+    const card = document.createElement("button");
+    card.type = "button";
+    card.classList.add("work-list-item", "chat-session-card", "contain-text");
+    card.setAttribute("data-session-id", session.session_id);
+    card.setAttribute("data-session-open", session.session_id);
+    card.setAttribute("data-disclosure-toggle", "chat-session");
+    card.setAttribute("aria-expanded", String(expanded));
     if (session.session_id === chats.selectedSessionId) {
-      button.setAttribute("aria-current", "true");
+      card.setAttribute("aria-current", "true");
+    }
+    if (expanded) {
+      card.setAttribute("data-disclosure-expanded", "true");
     }
     const label = appendTextElement(
-      button,
+      card,
       "strong",
       "",
       sessionLabel(session),
     );
     label.classList.add("contain-text");
-    const meta = sessionMeta(session);
-    if (meta) {
-      appendTextElement(button, "span", "muted contain-text", meta);
-    }
-    button.addEventListener("click", () => {
+    const panelId = disclosureId("chat-session-details", session.session_id);
+    card.setAttribute("aria-controls", panelId);
+    card.addEventListener("click", () => {
+      if (session.session_id === chats.selectedSessionId) {
+        handlers.onToggleSessionDisclosure?.(session.session_id);
+        return;
+      }
       handlers.onSelectSession?.(session.session_id);
     });
-    container.append(button);
+    const meta = sessionMeta(session);
+    if (expanded && meta) {
+      const details = document.createElement("span");
+      details.classList.add("subcard-disclosure-panel", "muted", "contain-text");
+      details.setAttribute("id", panelId);
+      setText(details, meta);
+      card.append(details);
+    }
+    container.append(card);
   }
 }
 
 export function createChatsView(elements, handlers = {}) {
   return {
     render(state) {
-      renderChatsPanel(elements.list, state.chats, handlers);
+      renderChatsPanel(elements.list, state.chats, handlers, state.disclosure?.chats);
     },
   };
 }

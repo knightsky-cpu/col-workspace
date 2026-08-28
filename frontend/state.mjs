@@ -56,6 +56,23 @@ export function createInitialState() {
     activity: {
       entries: [],
     },
+    disclosure: emptyDisclosureState(),
+  };
+}
+
+function emptyDisclosureState() {
+  return {
+    notes: {
+      proposalIds: [],
+      detailNoteIds: [],
+    },
+    memory: {
+      proposalIds: [],
+      signalIds: [],
+    },
+    chats: {
+      sessionIds: [],
+    },
   };
 }
 
@@ -193,6 +210,7 @@ export function selectWorkspace(
     work: emptyWorkState(),
     notes: emptyNotesState(),
     chats: emptyChatSessionState(),
+    disclosure: emptyDisclosureState(),
     workspaces: {
       ...state.workspaces,
       selectedWorkspaceId: workspace.workspace_id,
@@ -373,6 +391,122 @@ export function startNewConversation(state, cryptoLike = globalThis.crypto) {
       selectedSessionId: null,
       detailStatus: "idle",
       error: null,
+    },
+    disclosure: {
+      ...state.disclosure,
+      chats: { sessionIds: [] },
+    },
+  };
+}
+
+function toggleStableId(ids, id) {
+  const textId = String(id ?? "");
+  if (!textId) {
+    return ids;
+  }
+  return ids.includes(textId)
+    ? ids.filter((item) => item !== textId)
+    : [...ids, textId];
+}
+
+function expandStableId(ids, id) {
+  const textId = String(id ?? "");
+  if (!textId || ids.includes(textId)) {
+    return ids;
+  }
+  return [...ids, textId];
+}
+
+export function toggleNoteProposalDisclosure(state, proposalId) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      notes: {
+        ...state.disclosure.notes,
+        proposalIds: toggleStableId(
+          state.disclosure.notes.proposalIds,
+          proposalId,
+        ),
+      },
+    },
+  };
+}
+
+export function toggleNoteDetailDisclosure(state, noteId) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      notes: {
+        ...state.disclosure.notes,
+        detailNoteIds: toggleStableId(
+          state.disclosure.notes.detailNoteIds,
+          noteId,
+        ),
+      },
+    },
+  };
+}
+
+export function expandNoteDetailDisclosure(state, noteId) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      notes: {
+        ...state.disclosure.notes,
+        detailNoteIds: expandStableId(
+          state.disclosure.notes.detailNoteIds,
+          noteId,
+        ),
+      },
+    },
+  };
+}
+
+export function toggleMemoryDisclosure(state, id, kind) {
+  const key = kind === "proposal" ? "proposalIds" : "signalIds";
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      memory: {
+        ...state.disclosure.memory,
+        [key]: toggleStableId(state.disclosure.memory[key], id),
+      },
+    },
+  };
+}
+
+export function toggleChatDisclosure(state, sessionId) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      chats: {
+        ...state.disclosure.chats,
+        sessionIds: toggleStableId(
+          state.disclosure.chats.sessionIds,
+          sessionId,
+        ),
+      },
+    },
+  };
+}
+
+export function expandChatDisclosure(state, sessionId) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      chats: {
+        ...state.disclosure.chats,
+        sessionIds: expandStableId(
+          state.disclosure.chats.sessionIds,
+          sessionId,
+        ),
+      },
     },
   };
 }

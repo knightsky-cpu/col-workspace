@@ -28,6 +28,8 @@ import {
   completeChatSessionDetailLoad,
   completeChatSessionListLoad,
   createInitialState,
+  expandChatDisclosure,
+  expandNoteDetailDisclosure,
   failWorkDetailLoad,
   failWorkspaceListLoad,
   failWorkListLoad,
@@ -43,6 +45,10 @@ import {
   setWorkLifecycleStatus,
   storePendingNoteProposal,
   startNewConversation,
+  toggleChatDisclosure,
+  toggleMemoryDisclosure,
+  toggleNoteDetailDisclosure,
+  toggleNoteProposalDisclosure,
 } from "../../frontend/state.mjs";
 
 const cryptoStub = {
@@ -83,6 +89,45 @@ test("acceptContext stores local locators and creates a session", () => {
     "session--123e4567-e89b-12d3-a456-426614174000",
   );
   assert.equal(state.mode, "workspace");
+});
+
+test("initial subcard disclosure state is empty and toggles stable child ids", () => {
+  const initial = createInitialState();
+  assert.deepEqual(initial.disclosure, {
+    notes: { proposalIds: [], detailNoteIds: [] },
+    memory: { proposalIds: [], signalIds: [] },
+    chats: { sessionIds: [] },
+  });
+
+  const withNoteProposal = toggleNoteProposalDisclosure(initial, "proposal-1");
+  assert.deepEqual(withNoteProposal.disclosure.notes.proposalIds, ["proposal-1"]);
+  assert.deepEqual(
+    toggleNoteProposalDisclosure(withNoteProposal, "proposal-1")
+      .disclosure.notes.proposalIds,
+    [],
+  );
+
+  const withNoteDetail = toggleNoteDetailDisclosure(initial, "note-1");
+  assert.deepEqual(withNoteDetail.disclosure.notes.detailNoteIds, ["note-1"]);
+  const expandedNoteDetail = expandNoteDetailDisclosure(initial, "note-1");
+  assert.deepEqual(expandedNoteDetail.disclosure.notes.detailNoteIds, ["note-1"]);
+  assert.deepEqual(
+    expandNoteDetailDisclosure(expandedNoteDetail, "note-1")
+      .disclosure.notes.detailNoteIds,
+    ["note-1"],
+  );
+  const withMemoryProposal = toggleMemoryDisclosure(initial, "proposal-1", "proposal");
+  assert.deepEqual(withMemoryProposal.disclosure.memory.proposalIds, ["proposal-1"]);
+  const withSignal = toggleMemoryDisclosure(initial, "signal-1", "signal");
+  assert.deepEqual(withSignal.disclosure.memory.signalIds, ["signal-1"]);
+  const withChat = toggleChatDisclosure(initial, "session-1");
+  assert.deepEqual(withChat.disclosure.chats.sessionIds, ["session-1"]);
+  const expandedChat = expandChatDisclosure(initial, "session-1");
+  assert.deepEqual(expandedChat.disclosure.chats.sessionIds, ["session-1"]);
+  assert.deepEqual(
+    expandChatDisclosure(expandedChat, "session-1").disclosure.chats.sessionIds,
+    ["session-1"],
+  );
 });
 
 test("acceptContext stores verified auth token separately from request locators", () => {

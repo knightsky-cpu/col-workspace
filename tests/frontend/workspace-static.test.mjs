@@ -79,8 +79,8 @@ test("workspace shell provides persistent non-emoji icon hooks for primary navig
 
   assert.match(html, /data-new-conversation[\s\S]*class="button-icon"/);
   assert.match(html, /id="empty-conversation-title"[\s\S]*class="title-icon[^"]*"/);
-  assert.match(styles, /\.section-heading__chevron::before/);
-  assert.match(styles, /\.section-heading\[aria-expanded="true"\] \.section-heading__chevron::before/);
+  assert.doesNotMatch(html, /section-heading__chevron/);
+  assert.doesNotMatch(styles, /\.section-heading__chevron/);
   assert.match(app, /setButtonLabel/);
 });
 
@@ -99,15 +99,21 @@ test("drawer parent cards are full header disclosure controls without selected s
   assert.doesNotMatch(html, /<button type="button" class="drawer-toggle" data-section-toggle/);
 });
 
-test("drawer selected child subcards use amber current styling and compact actions", () => {
+test("drawer selected child subcards use amber current styling and standard compact controls", () => {
   assert.match(styles, /\.work-list-item\[aria-current="true"\]/);
   assert.match(styles, /border-inline-start-color:\s*var\(--amber\)/);
   assert.match(styles, /background:\s*var\(--amber-soft\)/);
   assert.doesNotMatch(styles, /\.work-list-item\[aria-current="true"\]\s*\{[\s\S]*?border-inline-start-color:\s*var\(--accent\)/);
 
-  assert.match(styles, /\.memory-actions button,\s*\.workspace-actions button,\s*\.notes-actions button/);
-  assert.match(styles, /min-height:\s*1\.35rem/);
-  assert.match(styles, /font-size:\s*0\.72rem/);
+  assert.match(styles, /\.drawer-action-control/);
+  assert.match(styles, /\.memory-actions button,\s*\.workspace-actions button,\s*\.notes-actions button,\s*\.export-controls button,\s*\.artifact-create-form button,\s*\.feedback-form button,\s*\.notes-correction-form button/);
+  assert.match(styles, /min-height:\s*1\.21rem/);
+  assert.match(styles, /font-size:\s*0\.73rem/);
+  assert.match(styles, /\.notes-correction-form button\s*\{[\s\S]*?justify-self:\s*start/);
+  assert.doesNotMatch(styles, /\.subcard-disclosure-toggle::after/);
+  assert.doesNotMatch(styles, /content:\s*">"/);
+  assert.doesNotMatch(styles, /content:\s*"v"/);
+  assert.doesNotMatch(styles, /\.chat-session-details-toggle/);
 });
 
 test("workspace create form keeps input and create button compact", () => {

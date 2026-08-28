@@ -611,31 +611,6 @@ p {
   color: var(--amber);
 }
 
-.section-heading__chevron {
-  align-items: center;
-  aspect-ratio: 1;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  display: inline-flex;
-  flex: 0 0 auto;
-  inline-size: 1.85rem;
-  justify-content: center;
-}
-
-.section-heading__chevron::before {
-  block-size: 0.48rem;
-  border-block-end: 1.5px solid currentColor;
-  border-inline-end: 1.5px solid currentColor;
-  content: "";
-  inline-size: 0.48rem;
-  transform: rotate(45deg) translate(-0.05rem, -0.05rem);
-  transition: transform 160ms ease;
-}
-
-.section-heading[aria-expanded="true"] .section-heading__chevron::before {
-  transform: rotate(225deg) translate(-0.05rem, -0.05rem);
-}
-
 .drawer-section {
   margin: 0;
   padding: 0.78rem 0.82rem;
@@ -877,20 +852,52 @@ p {
   margin-block-start: 0.65rem;
 }
 
+.drawer-action-control,
 .memory-actions button,
 .workspace-actions button,
 .notes-actions button,
 .export-controls button,
-.artifact-create-form button {
-  font-size: 0.72rem;
-  min-height: 1.35rem;
-  padding: 0.12rem 0.32rem;
+.artifact-create-form button,
+.feedback-form button,
+.notes-correction-form button,
+.work-panel .control-compact {
+  font-size: 0.73rem;
+  min-height: 1.21rem;
+  padding: 0.09rem 0.27rem;
 }
 
 .notes-card {
   display: block;
   inline-size: 100%;
   text-align: left;
+}
+
+.subcard-disclosure-toggle {
+  display: block;
+  width: 100%;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.35rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+  text-align: left;
+}
+
+.subcard-disclosure-panel {
+  margin-block-start: 0.45rem;
+}
+
+.memory-card[data-disclosure-expanded="true"],
+.notes-card[data-disclosure-expanded="true"],
+.chat-session-card[data-disclosure-expanded="true"] {
+  border-color: rgba(243, 182, 75, 0.34);
+  background: rgba(20, 35, 43, 0.88);
+}
+
+.chat-session-card {
+  display: grid;
+  gap: 0.35rem;
 }
 
 .notes-correction-form {
@@ -943,6 +950,12 @@ p {
 .notes-correction-form textarea {
   min-height: 5rem;
   resize: vertical;
+}
+
+.notes-correction-form button {
+  justify-self: start;
+  max-inline-size: 12rem;
+  white-space: normal;
 }
 
 .continuity-choices {

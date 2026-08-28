@@ -90,6 +90,8 @@ import {
   completeWorkRestore,
   completePendingTurn,
   createInitialState,
+  expandChatDisclosure,
+  expandNoteDetailDisclosure,
   failMemoryLoad,
   failNoteDetailLoad,
   failNoteRequest,
@@ -108,6 +110,10 @@ import {
   setWorkLifecycleStatus,
   storePendingNoteProposal,
   startNewConversation,
+  toggleChatDisclosure,
+  toggleMemoryDisclosure,
+  toggleNoteDetailDisclosure,
+  toggleNoteProposalDisclosure,
 } from "./state.mjs";
 import { setText } from "./render.mjs";
 
@@ -551,6 +557,7 @@ async function loadNoteDetail(noteId) {
       authOptions({ limit: 20 }),
     );
     state = completeNoteDetailLoad(state, response);
+    state = expandNoteDetailDisclosure(state, response.note?.note_id ?? noteId);
   } catch (error) {
     state = failNoteDetailLoad(state, error);
     showNotesError(error.message);
@@ -945,6 +952,14 @@ function ensureMemoryView() {
       onDeleteSignal(signal) {
         deleteActiveMemorySignal(signal);
       },
+      onToggleProposalDisclosure(proposalId) {
+        state = toggleMemoryDisclosure(state, proposalId, "proposal");
+        ensureMemoryView().render(state);
+      },
+      onToggleSignalDisclosure(signalId) {
+        state = toggleMemoryDisclosure(state, signalId, "signal");
+        ensureMemoryView().render(state);
+      },
     },
   );
   return memoryView;
@@ -976,6 +991,14 @@ function ensureNotesView() {
       onCreateNoteProposal(request) {
         createCollaborativeNoteProposal(request);
       },
+      onToggleProposalDisclosure(proposalId) {
+        state = toggleNoteProposalDisclosure(state, proposalId);
+        ensureNotesView().render(state);
+      },
+      onToggleDetailDisclosure(noteId) {
+        state = toggleNoteDetailDisclosure(state, noteId);
+        ensureNotesView().render(state);
+      },
       onArchiveNote(note) {
         changeCollaborativeNoteLifecycle("archive", note);
       },
@@ -1000,7 +1023,12 @@ function ensureChatsView() {
     },
     {
       onSelectSession(sessionId) {
+        state = expandChatDisclosure(state, sessionId);
         loadChatSession(sessionId);
+      },
+      onToggleSessionDisclosure(sessionId) {
+        state = toggleChatDisclosure(state, sessionId);
+        ensureChatsView().render(state);
       },
     },
   );

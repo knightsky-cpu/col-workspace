@@ -13,15 +13,53 @@ function proposalExpired(proposal) {
   return Number.isNaN(expiresAt) || expiresAt <= Date.now();
 }
 
-function renderPendingProposal(container, proposal, disabled, handlers) {
+function isExpanded(disclosure, key, id) {
+  return Array.isArray(disclosure?.[key])
+    && disclosure[key].includes(String(id ?? ""));
+}
+
+function disclosureId(prefix, id) {
+  return `${prefix}-${String(id ?? "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function eventTargetIsInteractive(event) {
+  const target = event?.target;
+  if (!target || typeof target.tagName !== "string") {
+    return false;
+  }
+  return ["button", "input", "select", "textarea", "label"].includes(
+    target.tagName.toLowerCase(),
+  );
+}
+
+function renderPendingProposal(container, proposal, disabled, handlers, disclosure) {
+  const expanded = isExpanded(disclosure, "proposalIds", proposal.proposal_id);
   const card = element("div", "notes-card contain-text");
   card.setAttribute("data-note-proposal", proposal.proposal_id);
+  if (expanded) {
+    card.setAttribute("data-disclosure-expanded", "true");
+  }
+  const panelId = disclosureId("note-proposal-details", proposal.proposal_id);
   appendTextElement(card, "p", "muted contain-text", "Pending note proposal");
-  appendTextElement(card, "h3", "work-heading contain-text", proposal.title);
+  const toggle = element("button", "subcard-disclosure-toggle contain-text", proposal.title);
+  toggle.setAttribute("type", "button");
+  toggle.setAttribute("data-disclosure-toggle", "note-proposal");
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", panelId);
+  toggle.addEventListener("click", () => {
+    handlers.onToggleProposalDisclosure?.(proposal.proposal_id);
+  });
+  card.append(toggle);
   appendTextElement(card, "p", "muted contain-text", humanLabel(proposal.note_kind));
-  appendTextElement(card, "p", "contain-text", proposal.body);
+  if (!expanded) {
+    container.append(card);
+    return;
+  }
+  const details = element("div", "subcard-disclosure-panel contain-text");
+  details.setAttribute("id", panelId);
+  appendTextElement(details, "p", "contain-text", proposal.body);
   appendTextElement(
-    card,
+    details,
     "p",
     "muted contain-text",
     proposalExpired(proposal)
@@ -45,11 +83,12 @@ function renderPendingProposal(container, proposal, disabled, handlers) {
     });
     actions.append(button);
   }
-  card.append(actions);
+  details.append(actions);
+  card.append(details);
   container.append(card);
 }
 
-function renderPendingProposals(container, proposals, disabled, handlers) {
+function renderPendingProposals(container, proposals, disabled, handlers, disclosure) {
   appendTextElement(container, "h3", "work-heading contain-text", "Pending proposals");
   if (!proposals.length) {
     appendTextElement(
@@ -61,11 +100,11 @@ function renderPendingProposals(container, proposals, disabled, handlers) {
     return;
   }
   for (const proposal of proposals) {
-    renderPendingProposal(container, proposal, disabled, handlers);
+    renderPendingProposal(container, proposal, disabled, handlers, disclosure);
   }
 }
 
-function renderNoteList(container, notes, state, disabled, handlers) {
+function renderNoteList(container, notes, state, disabled, handlers, disclosure) {
   appendTextElement(
     container,
     "h3",
@@ -91,6 +130,14 @@ function renderNoteList(container, notes, state, disabled, handlers) {
     return;
   }
   for (const note of notes) {
+    if (
+      note.note_id === state.selectedNoteId
+      && state.detail?.status === "ready"
+      && state.detail?.note?.note_id === note.note_id
+    ) {
+      renderSelectedNoteDetail(container, state.detail.note, state.detail, disabled, handlers, disclosure);
+      continue;
+    }
     const button = element("button", "notes-card contain-text", noteSummary(note));
     button.setAttribute("type", "button");
     button.setAttribute("data-note-id", note.note_id);
@@ -201,36 +248,46 @@ function renderCorrectionForm(container, note, disabled, handlers) {
   container.append(form);
 }
 
-function renderNoteDetail(container, state, disabled, handlers) {
-  const detail = state.detail ?? {};
-  if (detail.status === "loading") {
-    appendTextElement(container, "p", "muted contain-text", "Loading note detail...");
-    return;
-  }
-  if (detail.status === "error") {
-    appendTextElement(
-      container,
-      "p",
-      "form-error contain-text",
-      detail.error ?? "Note detail unavailable.",
-    );
-    return;
-  }
-  const note = detail.note;
-  if (!note) {
-    return;
-  }
+function renderSelectedNoteDetail(container, note, detail, disabled, handlers, disclosure) {
   const card = element("div", "notes-card contain-text");
+  card.setAttribute("data-note-id", note.note_id);
+  card.setAttribute("data-note-detail", note.note_id);
+  card.setAttribute("aria-current", "true");
+  const expanded = isExpanded(disclosure, "detailNoteIds", note.note_id);
+  if (expanded) {
+    card.setAttribute("data-disclosure-expanded", "true");
+  }
+  const panelId = disclosureId("note-detail-details", note.note_id);
+  card.addEventListener("click", (event) => {
+    if (!eventTargetIsInteractive(event)) {
+      handlers.onToggleDetailDisclosure?.(note.note_id);
+    }
+  });
   appendTextElement(
     card,
     "p",
     "muted contain-text",
     note.status === "archived" ? "Archived note" : "Saved note",
   );
-  appendTextElement(card, "h3", "work-heading contain-text", note.title);
+  const toggle = element("button", "subcard-disclosure-toggle contain-text", note.title);
+  toggle.setAttribute("type", "button");
+  toggle.setAttribute("data-disclosure-toggle", "note-detail");
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", panelId);
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation?.();
+    handlers.onToggleDetailDisclosure?.(note.note_id);
+  });
+  card.append(toggle);
   appendTextElement(card, "p", "muted contain-text", humanLabel(note.note_kind));
-  appendTextElement(card, "p", "contain-text", note.body);
-  appendTextElement(card, "p", "muted contain-text", `Revision ${note.revision}`);
+  if (!expanded) {
+    container.append(card);
+    return;
+  }
+  const details = element("div", "subcard-disclosure-panel contain-text");
+  details.setAttribute("id", panelId);
+  appendTextElement(details, "p", "contain-text", note.body);
+  appendTextElement(details, "p", "muted contain-text", `Revision ${note.revision}`);
   const actions = element("div", "notes-actions contain-text");
   if (note.status === "archived") {
     const restore = element("button", "", "Restore");
@@ -261,20 +318,38 @@ function renderNoteDetail(container, state, disabled, handlers) {
     handlers.onDeleteNote?.(note);
   });
   actions.append(deleteButton);
-  card.append(actions);
-  container.append(card);
+  details.append(actions);
   if (note.status !== "archived") {
-    renderCorrectionForm(container, note, disabled, handlers);
+    renderCorrectionForm(details, note, disabled, handlers);
   }
   if (Array.isArray(detail.events) && detail.events.length > 0) {
-    appendTextElement(container, "h3", "work-heading contain-text", "Recent note events");
+    appendTextElement(details, "h3", "work-heading contain-text", "Recent note events");
     for (const event of detail.events) {
-      appendTextElement(container, "p", "notes-event contain-text", humanLabel(event.event_type));
+      appendTextElement(details, "p", "notes-event contain-text", humanLabel(event.event_type));
     }
+  }
+  card.append(details);
+  container.append(card);
+}
+
+function renderNoteDetailStatus(container, state) {
+  const detail = state.detail ?? {};
+  if (detail.status === "loading") {
+    appendTextElement(container, "p", "muted contain-text", "Loading note detail...");
+    return;
+  }
+  if (detail.status === "error") {
+    appendTextElement(
+      container,
+      "p",
+      "form-error contain-text",
+      detail.error ?? "Note detail unavailable.",
+    );
+    return;
   }
 }
 
-export function renderNotesPanel(container, notesState, handlers = {}) {
+export function renderNotesPanel(container, notesState, handlers = {}, disclosure = {}) {
   container.replaceChildren();
   const state = notesState ?? {};
   if (state.status === "loading") {
@@ -294,6 +369,7 @@ export function renderNotesPanel(container, notesState, handlers = {}) {
     Array.isArray(state.pendingProposals) ? state.pendingProposals : [],
     disabled,
     handlers,
+    disclosure,
   );
   renderNoteList(
     container,
@@ -301,15 +377,16 @@ export function renderNotesPanel(container, notesState, handlers = {}) {
     state,
     disabled,
     handlers,
+    disclosure,
   );
+  renderNoteDetailStatus(container, state);
   renderNoteProposalForm(container, disabled, handlers);
-  renderNoteDetail(container, state, disabled, handlers);
 }
 
 export function createNotesView(elements, handlers = {}) {
   return {
     render(state) {
-      renderNotesPanel(elements.panel, state.notes, handlers);
+      renderNotesPanel(elements.panel, state.notes, handlers, state.disclosure?.notes);
     },
   };
 }
