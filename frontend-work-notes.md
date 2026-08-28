@@ -386,3 +386,69 @@ Deferred to later bounded passes:
 - Notes, Memory, Chats, continuity, memory clarification, error, and empty-state CSS-only polish.
 - Responsive, focus, motion, and accessibility verification.
 - Non-safe visual-structure plan for photo-level artifact drawer/header/tabs/icons, real left-drawer icons/chevrons, and safe Markdown rendering.
+
+## 2026-08-28 - Accepted Left Drawer And Secondary Surface CSS-Only Pass
+
+Status: accepted after user visual verification, with remaining photo-level work deferred.
+
+Scope:
+- Implemented the eighth bounded CSS-only visual pass.
+- Touched implementation source only in `frontend/styles.css`.
+- Tightened the existing left drawer rows toward the visual target using CSS-only treatment on current drawer selectors.
+- Added darker raised surfaces, compact drawer button treatment, section heading accent colors, and teal left-rail emphasis for the current Workspace section and expanded sections.
+- Styled Notes, Memory, Chats-adjacent list items, continuity choices, memory clarification choices, and form errors to look less raw and more consistent with the accepted dark visual system.
+- Kept `.activity-event` as dormant CSS only because the current workspace UI does not expose an Activity section.
+- Preserved HTML, JavaScript, backend routes, API routing, auth, artifacts, notes, memory, chats, persistence, request construction, model behavior, Markdown rendering, drawer behavior, and all application state behavior.
+
+CSS surface changed:
+- `.supporting-panel`
+- `.supporting-panel__body`
+- `.drawer-heading`
+- `.drawer-toggle`
+- `.section-heading h2`
+- `.drawer-section`
+- `.drawer-section[data-section="workspace"]`
+- `.drawer-section[data-section="work"] .section-heading h2`
+- `.drawer-section[data-section="notes"] .section-heading h2`
+- `.drawer-section[data-section="memory"] .section-heading h2`
+- `.drawer-section[data-section="chats"] .section-heading h2`
+- `.drawer-section[data-section="workspace"] .section-heading h2`
+- `.drawer-section:has([aria-expanded="true"])`
+- `.memory-card`
+- `.memory-event`
+- `.notes-card`
+- `.notes-event`
+- `.activity-event`
+- `.memory-actions`
+- `.notes-actions`
+- `.notes-correction-form`
+- `.notes-correction-form input`
+- `.notes-correction-form textarea`
+- `.continuity-choices`
+- `.continuity-choice`
+- `.memory-clarification-choice`
+- `.form-error`
+- `.muted`
+
+Verification:
+- Temporary Pass 8 CSS assertion failed before implementation for missing drawer accent, secondary raised cards, error card, and amber choice-chip styling, then passed after the CSS patch.
+- `git diff --check` passed.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 7 tests.
+- `node --test tests/frontend/workspace-view.test.mjs` passed: 2 tests.
+- `node --test tests/frontend/work-view.test.mjs` passed: 24 tests.
+- `node --test tests/frontend/notes-view.test.mjs` passed: 2 tests.
+- `node --test tests/frontend/memory-view.test.mjs` passed: 8 tests.
+- `node --test tests/frontend/chats-view.test.mjs` passed: 2 tests.
+- `node --test tests/frontend/chat-view.test.mjs` passed: 11 tests.
+- `node --test tests/frontend/state.test.mjs` passed: 42 tests.
+
+Screenshot:
+- `/tmp/agent-col-pass8-preview.png`
+- The in-app Browser connector reported `No browser is available`, and Playwright was not installed in this repo. The local FastAPI server was started in `local_dev` mode and returned `GET /workspace` 200 OK. Screenshot evidence used Microsoft Edge headless against a temporary preview file outside the repo that combined current `frontend/styles.css` with representative existing DOM/classes so secondary surfaces were visible.
+
+Limitation:
+- The actual app remains meaningfully different from the visual target image because icons, chevrons, artifact tabs, artifact action bars, richer artifact header structure, and Markdown rendering require non-safe structural/rendering work. Those items remain deferred to the future non-safe visual improvements plan.
+
+Deferred to later bounded passes:
+- Final CSS-only responsive, focus, motion, overflow, and accessibility verification.
+- Non-safe visual-structure plan for the remaining photo-level gaps.
