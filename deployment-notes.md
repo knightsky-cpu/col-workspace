@@ -817,3 +817,165 @@ The user reported: "Pass 7 accepted."
 Checkpointed with this accepted Pass 7 deployment update. Use `git rev-parse
 HEAD` or the final checkpoint SHA reported after push as the authoritative
 commit.
+
+## 2026-08-28 - Pass 8: Hosted OAuth And Authenticated Integration Proof
+
+Status: accepted by manual verification.
+
+Previous checkpoint: `f7f7edfc696b3662ea1e9f3e49a36c9d6a54b023`.
+
+### Scope
+
+- Resumed hosted verification after the Cloud Run origin was manually added to
+  the existing Web OAuth client's Authorized JavaScript origins.
+- Verified browser Google Sign-In reached the hosted workspace without the
+  prior `origin_mismatch` blocker.
+- Accepted the user's manual browser proof that hosted Google Sign-In,
+  workspace entry, and a minimal chat/response flow succeeded.
+- Verified authenticated backend behavior through Cloud Run request logs.
+- Verified Firestore chat-session continuity and ownership state through
+  read-only inspection.
+- Verified auth guards through unauthenticated and invalid-token hosted
+  requests.
+- Verified Cloud Logging privacy properties for the hosted chat window.
+- Did not change source code, deploy a new revision, modify IAM, push images,
+  enable APIs, or mutate Google Cloud configuration during this pass.
+
+### Hosted Configuration
+
+- Stable Cloud Run URL:
+  `https://agent-col-994154906699.us-east4.run.app`
+- OAuth Web Client:
+  `994154906699-jh6jkqprffr941im0mhq09efa3kj2p0a.apps.googleusercontent.com`
+- Required Authorized JavaScript origin added manually by the user:
+  `https://agent-col-994154906699.us-east4.run.app`
+- Deployed auth mode remained `google_oidc`.
+
+### Verification Evidence
+
+```bash
+curl -fsS https://agent-col-994154906699.us-east4.run.app/api/auth/config
+```
+
+Observed result: `auth_mode` was `google_oidc`,
+`google_signin_required` was `true`, and `local_development` was `false`.
+
+Browser Google Sign-In evidence:
+
+- Before the manual OAuth-origin fix, Google Sign-In failed with
+  `Error 400: origin_mismatch`.
+- After the origin was added, Google displayed the normal account sign-in page
+  for `agent-col-994154906699.us-east4.run.app`.
+- The user then completed browser sign-in manually and provided a screenshot
+  showing `Signed in with Google`, the hosted workspace loaded, and the message
+  composer enabled.
+
+Authenticated session evidence:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="agent-col" AND httpRequest.requestUrl:"/api/auth/session"' --project=project-e1e2a890-4566-48a8-a32 --freshness=3h --limit=20 --format='table(timestamp,httpRequest.status,httpRequest.latency,httpRequest.requestUrl,httpRequest.userAgent)'
+```
+
+Observed result: browser `GET /api/auth/session` returned `200` at
+`2026-08-28T15:17:34Z`; unauthenticated curl probes returned `401`.
+
+Hosted chat evidence:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="agent-col" AND httpRequest.requestMethod="POST" AND httpRequest.requestUrl:"/api/chat"' --project=project-e1e2a890-4566-48a8-a32 --freshness=2h --limit=20 --format='table(timestamp,httpRequest.status,httpRequest.latency,httpRequest.requestUrl,httpRequest.responseSize,httpRequest.userAgent)'
+```
+
+Observed result: hosted browser `POST /api/chat` returned `200` at
+`2026-08-28T15:20:03Z` with `4.266608894s` latency and response size `2563`.
+
+Model path evidence:
+
+- Cloud Run logs during the chat request emitted Google ADK/LLM runtime
+  warnings, including an automatic function-calling warning and an experimental
+  JSON schema function declaration warning.
+- The chat request completed `200` and Firestore contained a persisted model
+  message for the same turn.
+- No Vertex AI audit-log entries were returned in the narrow chat window, so
+  the accepted evidence is the successful hosted model response plus Cloud Run
+  ADK/LLM runtime logs and persisted model output.
+
+Firestore continuity evidence:
+
+- Latest hosted session:
+  `session--1f52b9af-4bcb-4b02-b610-863a3323dc70`
+- Updated at: `2026-08-28T15:20:07.528000+00:00`
+- Last message role: `model`
+- Last completed turn:
+  `5ac3580927073d73ea7ba4b4adce997fe12b550a2cf97cffab348f2190f3e676`
+- Persisted message sample:
+  - user message:
+    `turn--5ac3580927073d73ea7ba4b4adce997fe12b550a2cf97cffab348f2190f3e676--user`
+  - model message:
+    `turn--5ac3580927073d73ea7ba4b4adce997fe12b550a2cf97cffab348f2190f3e676--model`
+- Persisted turn status: `completed`
+
+Ownership evidence:
+
+- Browser-visible hosted API paths used the public opaque locator
+  `user--eb3e1d02bb1c9e01c59957622341f107`.
+- Firestore session ownership was stored under an internal `google--...` user
+  ID, not the public locator.
+- The public locator and internal Google owner split matched the intended
+  hosted ownership boundary.
+
+Auth guard evidence:
+
+```bash
+curl -fsS -o /tmp/agent-col-unauth-workspaces.json -w '%{http_code}\n' 'https://agent-col-994154906699.us-east4.run.app/api/users/user--eb3e1d02bb1c9e01c59957622341f107/workspaces?limit=20'
+```
+
+Observed result: `401`.
+
+```bash
+curl -fsS -o /tmp/agent-col-invalid-auth-session.json -w '%{http_code}\n' -H 'Authorization: Bearer invalid-pass8-token' https://agent-col-994154906699.us-east4.run.app/api/auth/session
+```
+
+Observed result: `403`.
+
+Cloud Logging privacy evidence:
+
+- Scanned nine Cloud Run entries in the hosted chat window from
+  `2026-08-28T15:19:50Z` through `2026-08-28T15:21:00Z`.
+- The scan found no `Authorization`, `Bearer`, credential, `id_token`,
+  `access_token`, or prompt-marker strings.
+- The scanned entries contained no structured request payload fields.
+
+### Limitations
+
+- The browser-side authenticated chat was manually verified by the user rather
+  than completed by agent browser automation because the authenticated Google
+  session lived in the user's normal browser.
+- A read-only Firestore inspection query combining `project_id` filtering with
+  `updated_at` ordering required a composite index. No index was created during
+  this pass; the verification used a read-only latest-session scan and
+  client-side filtering instead.
+- Vertex AI audit logs were not present in the narrow chat window, so Vertex
+  proof rests on hosted chat success, ADK/LLM runtime logs, and persisted model
+  output.
+
+### Deployment Phase Status
+
+Cloud Run deployment phase complete and accepted.
+
+- Cloud Run service is deployed and public at
+  `https://agent-col-994154906699.us-east4.run.app`.
+- Runtime auth mode is Google OIDC.
+- Browser sign-in, authenticated session, workspace entry, hosted chat response,
+  Firestore continuity, ownership boundaries, and log privacy checks have been
+  verified for the deployed service.
+- No additional deployment mutation is pending from Passes 6 through 8.
+
+### Manual Acceptance
+
+The user reported: "Pass 8 accepted. Cloud Run deployment phase complete."
+
+### Checkpoint State
+
+Checkpointed with this accepted Pass 8 deployment completion update. Use
+`git rev-parse HEAD` or the final checkpoint SHA reported after push as the
+authoritative commit.

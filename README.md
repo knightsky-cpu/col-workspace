@@ -14,7 +14,21 @@ For the detailed source-level status, see
 
 ## Current Status
 
-Agent Col is under active development and is not publicly deployed.
+Agent Col is under active development and has a verified Cloud Run deployment
+for the current hackathon productionization path.
+
+Hosted deployment:
+
+- URL: `https://agent-col-994154906699.us-east4.run.app`
+- Platform: Cloud Run in `us-east4`
+- Runtime auth mode: Google OIDC
+- Deployment phase status: complete and accepted as of August 28, 2026
+
+The hosted service has verified health, browser Google Sign-In, authenticated
+session handling, workspace entry, hosted chat response, Firestore continuity,
+ownership boundaries, and Cloud Logging privacy checks. The Cloud Run service is
+publicly reachable while Agent Col enforces Google OIDC at the application
+layer.
 
 Implemented in the current source:
 
@@ -46,11 +60,9 @@ Still planned:
 - evidence-governed preference learning from corrections through user-confirmed
   memory;
 - stronger visible collaboration leadership using existing working state;
-- production hardening for ownership, limits, logging, retention, startup, and
-  hosted security;
-- Dockerfile, production startup scripts, Cloud Run service configuration, and
-  hosted deployment evidence;
-- hosted reproducibility/submission evidence and demo freeze.
+- hosted reproducibility/submission evidence and demo freeze;
+- post-submission production hardening beyond the hackathon deployment baseline,
+  including retention operations and any needed distributed rate limiting.
 
 Durable asynchronous artifact jobs, Google Cloud Tasks, and private worker
 execution are deferred until after submission under the current finalization
@@ -194,9 +206,13 @@ Historical snapshots live under [docs/legacy](docs/legacy/README.md).
 
 ## Security Status
 
-Do not expose the current local-development configuration as a public service.
-Google OIDC support exists, but the full Phase 4 production hardening and
-Cloud Run deployment work is still pending.
+The Cloud Run deployment runs with Google OIDC application authentication and a
+dedicated runtime service account. Do not expose local-development auth mode as
+a public service, and do not commit `.env`, OAuth client secrets,
+service-account keys, access tokens, or ADC credential files.
+
+Deployment evidence and pass history are recorded in
+[deployment notes](deployment-notes.md).
 
 ## License
 
