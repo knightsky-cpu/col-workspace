@@ -162,6 +162,21 @@ test("chat pending status keeps live text while exposing per-letter reduced-moti
   );
 });
 
+test("chat final state renders before secondary refreshes", () => {
+  const submitStart = app.indexOf("async function submitRequest(request)");
+  const completion = app.indexOf("state = completePendingTurn(state, response);", submitStart);
+  const immediateRender = app.indexOf("renderWorkspace();", completion);
+  const effectRefresh = app.indexOf("await refreshAuthoritativeEffects(response);", completion);
+
+  assert.notEqual(submitStart, -1);
+  assert.notEqual(completion, -1);
+  assert.notEqual(immediateRender, -1);
+  assert.notEqual(effectRefresh, -1);
+  assert.equal(immediateRender < effectRefresh, true);
+  assert.match(app, /await refreshAuthoritativeEffects\(error\.partialFailure\)/);
+  assert.doesNotMatch(app, /refreshAuthoritativeEffects\(state\.pendingResponseText\)/);
+});
+
 test("chat adaptation receipts have compact disclosure styling hooks", () => {
   assert.match(styles, /\.receipt-disclosure\s*\{/);
   assert.match(styles, /\.receipt-disclosure__summary\s*\{/);

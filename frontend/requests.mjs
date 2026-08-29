@@ -108,6 +108,20 @@ export function buildExactRetryRequest(turn) {
   };
 }
 
+export function selectChatEndpoint(request) {
+  const body = request?.body ?? {};
+  const structuredFields = [
+    "memory_decision",
+    "memory_clarification_selection",
+    "artifact_feedback_decision",
+    "collaborative_note_decision",
+    "continuity_selection",
+  ];
+  return structuredFields.some((field) => body[field] != null)
+    ? "/api/chat"
+    : "/api/chat/stream";
+}
+
 export function buildOrdinaryChatRequest(
   context,
   message,

@@ -1,11 +1,12 @@
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 import json
 import logging
 import time
 from uuid import uuid4
 
-from google.adk.agents.run_config import RunConfig
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -109,6 +110,58 @@ class SupervisorTurnResult:
     collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = ()
 
 
+@dataclass(frozen=True)
+class SupervisorTextDelta:
+    text: str
+
+
+@dataclass(frozen=True)
+class SupervisorTurnCompleted:
+    result: SupervisorTurnResult
+
+
+class _AppendOnlyTextNormalizer:
+    def __init__(self) -> None:
+        self._delta_text = ""
+        self._snapshot_text: str | None = ""
+        self._emitted = ""
+
+    def append(self, text: str) -> str:
+        if not text:
+            return ""
+        self._delta_text += text
+        if self._snapshot_text is not None:
+            if text.startswith(self._snapshot_text):
+                self._snapshot_text = text
+            else:
+                self._snapshot_text = None
+        candidates = [self._delta_text]
+        if self._snapshot_text is not None:
+            candidates.append(self._snapshot_text)
+        return self._emit(self._common_prefix(candidates))
+
+    def finish(self, text: str) -> str:
+        return self._emit(text)
+
+    def _emit(self, text: str) -> str:
+        if not text.startswith(self._emitted):
+            return ""
+        delta = text[len(self._emitted) :]
+        self._emitted = text
+        return delta
+
+    @staticmethod
+    def _common_prefix(candidates: list[str]) -> str:
+        prefix = candidates[0]
+        for candidate in candidates[1:]:
+            limit = min(len(prefix), len(candidate))
+            index = 0
+            while index < limit and prefix[index] == candidate[index]:
+                index += 1
+            prefix = prefix[:index]
+        return prefix
+
+
 class SupervisorRuntime:
     def __init__(
         self,
@@ -141,6 +194,35 @@ class SupervisorRuntime:
         self,
         context: SupervisorTurnContext,
     ) -> SupervisorTurnResult:
+        result: SupervisorTurnResult | None = None
+        async for event in self._run_turn_events(
+            context,
+            streaming_mode=StreamingMode.NONE,
+        ):
+            if isinstance(event, SupervisorTurnCompleted):
+                result = event.result
+        if result is None:
+            raise SupervisorRuntimeError(
+                "Agent_Col did not produce a completed turn."
+            )
+        return result
+
+    async def stream_turn(
+        self,
+        context: SupervisorTurnContext,
+    ) -> AsyncIterator[SupervisorTextDelta | SupervisorTurnCompleted]:
+        async for event in self._run_turn_events(
+            context,
+            streaming_mode=StreamingMode.SSE,
+        ):
+            yield event
+
+    async def _run_turn_events(
+        self,
+        context: SupervisorTurnContext,
+        *,
+        streaming_mode: StreamingMode,
+    ) -> AsyncIterator[SupervisorTextDelta | SupervisorTurnCompleted]:
         invocation_session_id = uuid4().hex
         session_created = False
         final_responses: list[str] = []
@@ -156,6 +238,7 @@ class SupervisorRuntime:
         collaborative_note_events = list(
             context.precompleted_collaborative_note_events
         )
+        text_normalizer = _AppendOnlyTextNormalizer()
         delegation_budget = ExpertDelegationBudget()
         delegation_token = self._delegation_registry.register_turn(
             budget=delegation_budget,
@@ -241,6 +324,7 @@ class SupervisorRuntime:
                 config = RunConfig(
                     max_llm_calls=SUPERVISOR_MAX_LLM_CALLS,
                     model_input_context=model_input_context,
+                    streaming_mode=streaming_mode,
                 )
                 message = types.Content(
                     role="user",
@@ -420,6 +504,22 @@ class SupervisorRuntime:
                         text = self._extract_text(event)
                         if text:
                             final_responses.append(text)
+                            if streaming_mode is StreamingMode.SSE:
+                                delta = text_normalizer.finish(text)
+                                if delta:
+                                    yield SupervisorTextDelta(text=delta)
+                    elif (
+                        streaming_mode is StreamingMode.SSE
+                        and getattr(event, "author", "Agent_Col")
+                        == "Agent_Col"
+                        and getattr(event, "partial", False)
+                        and not event.get_function_calls()
+                        and not event.get_function_responses()
+                    ):
+                        text = self._extract_stream_text(event)
+                        delta = text_normalizer.append(text)
+                        if delta:
+                            yield SupervisorTextDelta(text=delta)
                 research_receipts = research_tracker.finalize()
                 actions.extend(research_receipts.actions)
                 citations.extend(research_receipts.citations)
@@ -439,18 +539,20 @@ class SupervisorRuntime:
                             collaborative_note_events
                         ),
                     )
-                return SupervisorTurnResult(
-                    response=final_responses[0],
-                    actions=tuple(actions),
-                    citations=tuple(citations),
-                    memory_proposals=tuple(memory_proposals),
-                    memory_clarifications=tuple(memory_clarifications),
-                    collaborative_note_proposals=tuple(
-                        collaborative_note_proposals
-                    ),
-                    collaborative_note_events=tuple(
-                        collaborative_note_events
-                    ),
+                yield SupervisorTurnCompleted(
+                    result=SupervisorTurnResult(
+                        response=final_responses[0],
+                        actions=tuple(actions),
+                        citations=tuple(citations),
+                        memory_proposals=tuple(memory_proposals),
+                        memory_clarifications=tuple(memory_clarifications),
+                        collaborative_note_proposals=tuple(
+                            collaborative_note_proposals
+                        ),
+                        collaborative_note_events=tuple(
+                            collaborative_note_events
+                        ),
+                    )
                 )
         except TimeoutError as exc:
             logger.error(
@@ -615,4 +717,16 @@ class SupervisorRuntime:
             part.text
             for part in parts
             if isinstance(getattr(part, "text", None), str)
+            and not getattr(part, "thought", False)
         ).strip()
+
+    @staticmethod
+    def _extract_stream_text(event: object) -> str:
+        content = getattr(event, "content", None)
+        parts = getattr(content, "parts", None) or []
+        return "".join(
+            part.text
+            for part in parts
+            if isinstance(getattr(part, "text", None), str)
+            and not getattr(part, "thought", False)
+        )

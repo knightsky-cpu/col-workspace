@@ -1,12 +1,21 @@
 import { isValidIdentifier } from "./requests.mjs";
 
 export class ApiError extends Error {
-  constructor({ status, message, detail, retryAfterSeconds }) {
+  constructor({
+    status,
+    message,
+    detail,
+    retryAfterSeconds,
+    provisional = false,
+    partialFailure = null,
+  }) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.detail = detail;
     this.retryAfterSeconds = retryAfterSeconds;
+    this.provisional = provisional;
+    this.partialFailure = partialFailure;
   }
 }
 
@@ -116,6 +125,142 @@ export async function apiFetchJson(
     throw normalizeApiError(response, body);
   }
   return body;
+}
+
+function nextSseFrame(buffer) {
+  const lfIndex = buffer.indexOf("\n\n");
+  const crlfIndex = buffer.indexOf("\r\n\r\n");
+  if (lfIndex === -1 && crlfIndex === -1) {
+    return null;
+  }
+  const useCrlf = crlfIndex !== -1 && (lfIndex === -1 || crlfIndex < lfIndex);
+  const index = useCrlf ? crlfIndex : lfIndex;
+  const delimiterLength = useCrlf ? 4 : 2;
+  return {
+    frame: buffer.slice(0, index),
+    rest: buffer.slice(index + delimiterLength),
+  };
+}
+
+function parseSseFrame(frame) {
+  let event = "message";
+  const dataLines = [];
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+  if (dataLines.length === 0) {
+    return null;
+  }
+  return { event, data: JSON.parse(dataLines.join("\n")) };
+}
+
+export async function apiFetchSse(
+  path,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  assertSameOriginPath(path);
+  const headers = { ...(options.headers ?? {}) };
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (options.idempotencyKey) {
+    headers["Idempotency-Key"] = options.idempotencyKey;
+  }
+  if (options.authToken) {
+    headers.Authorization = `Bearer ${options.authToken}`;
+  }
+  const response = await fetchLike(path, {
+    method: options.method ?? "GET",
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  if (!response.ok) {
+    throw normalizeApiError(response, await parseBody(response));
+  }
+  if (!response.body) {
+    throw new ApiError({
+      status: 0,
+      message: "Chat response stream was unavailable.",
+      detail: null,
+      retryAfterSeconds: null,
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      let pendingDelta = "";
+      const flushDelta = async () => {
+        if (pendingDelta) {
+          const text = pendingDelta;
+          pendingDelta = "";
+          await options.onDelta?.(text);
+        }
+      };
+      let extracted = nextSseFrame(buffer);
+      while (extracted !== null) {
+        buffer = extracted.rest;
+        const parsed = parseSseFrame(extracted.frame);
+        if (parsed?.event === "delta") {
+          const text = parsed.data?.text;
+          if (typeof text === "string" && text.length > 0) {
+            pendingDelta += text;
+          }
+        } else if (parsed?.event === "final") {
+          await flushDelta();
+          return parsed.data;
+        } else if (parsed?.event === "error") {
+          await flushDelta();
+          const detail = parsed.data?.detail;
+          const status = Number.isInteger(parsed.data?.status)
+            ? parsed.data.status
+            : 500;
+          throw new ApiError({
+            status,
+            message: detailToTimeoutMessage(status, detail) ?? detailToMessage(detail),
+            detail,
+            retryAfterSeconds: null,
+            provisional: parsed.data?.provisional === true,
+            partialFailure: parsed.data?.partial_failure ?? null,
+          });
+        }
+        extracted = nextSseFrame(buffer);
+      }
+      await flushDelta();
+      if (done) {
+        break;
+      }
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError({
+      status: 0,
+      message: "Chat response stream was interrupted.",
+      detail: null,
+      retryAfterSeconds: null,
+      provisional: true,
+    });
+  } finally {
+    reader.releaseLock();
+  }
+  throw new ApiError({
+    status: 0,
+    message: "Chat response stream ended before completion.",
+    detail: null,
+    retryAfterSeconds: null,
+    provisional: true,
+  });
 }
 
 export function getAuthSession(

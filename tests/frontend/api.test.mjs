@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   apiFetchJson,
+  apiFetchSse,
   archiveArtifact,
   createArtifact,
   createArtifactVersion,
@@ -38,6 +39,110 @@ function jsonResponse(status, body, headers = {}) {
     headers: { "content-type": "application/json", ...headers },
   });
 }
+
+function sseResponse(chunks) {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+test("apiFetchSse parses split delta frames and returns canonical final", async () => {
+  const calls = [];
+  const deltas = [];
+  const result = await apiFetchSse(
+    "/api/chat/stream",
+    {
+      method: "POST",
+      idempotencyKey: "chat--123",
+      authToken: "google-id-token",
+      body: { message: "hello" },
+      onDelta(text) {
+        deltas.push(text);
+      },
+    },
+    async (path, init) => {
+      calls.push([path, init]);
+      return sseResponse([
+        "event: delta\ndata: {\"text\":\"Agent \"}\n",
+        "\nevent: delta\ndata: {\"text\":\"C",
+        "ol\"}\n\nevent: fin",
+        "al\ndata: {\"response\":\"Agent Col\",\"actions\":[]}\n\n",
+      ]);
+    },
+  );
+
+  assert.deepEqual(deltas, ["Agent ", "Col"]);
+  assert.deepEqual(result, { response: "Agent Col", actions: [] });
+  assert.equal(calls[0][0], "/api/chat/stream");
+  assert.equal(calls[0][1].headers["Idempotency-Key"], "chat--123");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+  assert.equal(calls[0][1].body, JSON.stringify({ message: "hello" }));
+});
+
+test("apiFetchSse surfaces sanitized backend errors after provisional text", async () => {
+  await assert.rejects(
+    () => apiFetchSse(
+      "/api/chat/stream",
+      { body: { message: "hello" }, onDelta() {} },
+      async () => sseResponse([
+        "event: delta\ndata: {\"text\":\"Draft\"}\n\n",
+        "event: error\ndata: {\"detail\":\"Database operation failed.\",",
+        "\"status\":500,\"provisional\":true}\n\n",
+      ]),
+    ),
+    (error) => {
+      assert.equal(error.status, 500);
+      assert.equal(error.message, "Database operation failed.");
+      assert.equal(error.provisional, true);
+      return true;
+    },
+  );
+});
+
+test("apiFetchSse rejects an interrupted stream without canonical final", async () => {
+  const deltas = [];
+  await assert.rejects(
+    () => apiFetchSse(
+      "/api/chat/stream",
+      { onDelta(text) { deltas.push(text); } },
+      async () => sseResponse([
+        "event: delta\ndata: {\"text\":\"Incomplete\"}\n\n",
+      ]),
+    ),
+    (error) => {
+      assert.equal(error.status, 0);
+      assert.equal(error.provisional, true);
+      assert.match(error.message, /before completion/);
+      return true;
+    },
+  );
+  assert.deepEqual(deltas, ["Incomplete"]);
+});
+
+test("apiFetchSse batches delta frames from one network chunk", async () => {
+  const deltas = [];
+  const result = await apiFetchSse(
+    "/api/chat/stream",
+    { onDelta(text) { deltas.push(text); } },
+    async () => sseResponse([
+      "event: delta\ndata: {\"text\":\"Agent \"}\n\n"
+      + "event: delta\ndata: {\"text\":\"Col\"}\n\n"
+      + "event: final\ndata: {\"response\":\"Agent Col\"}\n\n",
+    ]),
+  );
+
+  assert.deepEqual(deltas, ["Agent Col"]);
+  assert.equal(result.response, "Agent Col");
+});
 
 test("apiFetchJson sends same-origin JSON with idempotency key", async () => {
   const calls = [];

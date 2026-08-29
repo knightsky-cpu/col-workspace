@@ -7,6 +7,7 @@ export function createInitialState() {
     context: null,
     transcript: [],
     pendingTurn: null,
+    pendingResponseText: "",
     lastFailure: null,
     activeMemoryClarification: null,
     activeContinuityChoices: [],
@@ -204,6 +205,7 @@ export function selectWorkspace(
     },
     transcript: [],
     pendingTurn: null,
+    pendingResponseText: "",
     lastFailure: null,
     activeMemoryClarification: null,
     activeContinuityChoices: [],
@@ -306,11 +308,27 @@ export function beginPendingTurn(state, request) {
   return {
     ...state,
     pendingTurn: request,
+    pendingResponseText: "",
     lastFailure: null,
   };
 }
 
+export function appendPendingResponseDelta(state, text) {
+  if (state.pendingTurn === null) {
+    throw new Error("A streamed response requires a pending turn.");
+  }
+  if (typeof text !== "string" || text.length === 0) {
+    return state;
+  }
+  return {
+    ...state,
+    pendingResponseText: `${state.pendingResponseText}${text}`,
+  };
+}
+
 export function failPendingTurn(state, error) {
+  const partialFailure = error.partialFailure ?? null;
+  const partialEffects = objectOrEmpty(partialFailure);
   return {
     ...state,
     lastFailure: {
@@ -318,6 +336,8 @@ export function failPendingTurn(state, error) {
       message: error.message,
       status: error.status ?? null,
       retryAfterSeconds: error.retryAfterSeconds ?? null,
+      provisionalResponseText: state.pendingResponseText,
+      partialFailure,
     },
     activity: appendActivityEntries(state.activity, [{
       kind: "error",
@@ -325,6 +345,18 @@ export function failPendingTurn(state, error) {
       detail: errorMessage(error),
     }]),
     pendingTurn: null,
+    pendingResponseText: "",
+    activeMemoryClarification: nextActiveMemoryClarification(
+      state.activeMemoryClarification,
+      partialEffects,
+      false,
+    ),
+    activeContinuityChoices: nextActiveContinuityChoices(
+      state.activeContinuityChoices,
+      partialEffects,
+      false,
+    ),
+    notes: storePendingNoteProposalsFromResponse(state.notes, partialEffects),
   };
 }
 
@@ -362,6 +394,7 @@ export function completePendingTurn(state, response) {
       error: null,
     },
     pendingTurn: null,
+    pendingResponseText: "",
     lastFailure: null,
     activeMemoryClarification: nextClarification,
     activeContinuityChoices: nextContinuityChoices,
@@ -383,6 +416,7 @@ export function startNewConversation(state, cryptoLike = globalThis.crypto) {
     },
     transcript: [],
     pendingTurn: null,
+    pendingResponseText: "",
     lastFailure: null,
     activeMemoryClarification: null,
     activeContinuityChoices: [],
@@ -566,6 +600,7 @@ export function completeChatSessionDetailLoad(state, response) {
     },
     transcript: transcriptFromMessages(response.messages),
     pendingTurn: null,
+    pendingResponseText: "",
     lastFailure: null,
     activeMemoryClarification: (
       response.active_memory_clarification ?? null

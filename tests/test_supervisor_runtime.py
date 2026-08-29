@@ -27,19 +27,29 @@ class FakeEvent:
         text: str | None,
         final: bool,
         function_responses: list[types.FunctionResponse] | None = None,
+        function_calls: list[types.FunctionCall] | None = None,
         author: str = "Agent_Col",
+        partial: bool = False,
+        thought: bool = False,
     ) -> None:
         parts = [] if text is None else [types.Part.from_text(text=text)]
+        if parts:
+            parts[0].thought = thought
         self.content = types.Content(role="model", parts=parts)
         self._final = final
         self._function_responses = function_responses or []
+        self._function_calls = function_calls or []
         self.author = author
+        self.partial = partial
 
     def is_final_response(self) -> bool:
         return self._final
 
     def get_function_responses(self) -> list[types.FunctionResponse]:
         return list(self._function_responses)
+
+    def get_function_calls(self) -> list[types.FunctionCall]:
+        return list(self._function_calls)
 
 
 def pending_function_response(
@@ -152,6 +162,232 @@ class FakeRunner:
             raise self.error
         for event in self.events:
             yield event
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_emits_true_adk_text_deltas_before_one_completion(
+) -> None:
+    from google.adk.agents.run_config import StreamingMode
+
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runner = FakeRunner(
+        events=[
+            FakeEvent(text="Agent ", final=False, partial=True),
+            FakeEvent(text="Col", final=False, partial=True),
+            FakeEvent(text="Agent Col", final=True),
+        ]
+    )
+    runtime = SupervisorRuntime(
+        runner=runner,
+        session_service=FakeSessionService(),
+    )
+
+    streamed = [
+        event
+        async for event in runtime.stream_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Help with this design.",
+            )
+        )
+    ]
+
+    assert [event.text for event in streamed[:-1]] == ["Agent ", "Col"]
+    assert streamed[-1].result.response == "Agent Col"
+    assert runner.calls[0]["run_config"].streaming_mode is StreamingMode.SSE
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_buffers_ambiguous_repeated_prefix_deltas() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(text="a", final=False, partial=True),
+                FakeEvent(text="abc", final=False, partial=True),
+                FakeEvent(text="!", final=False, partial=True),
+                FakeEvent(text="aabc!", final=True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    streamed = [
+        event
+        async for event in runtime.stream_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Help with this design.",
+            )
+        )
+    ]
+
+    deltas = [event.text for event in streamed[:-1]]
+    assert deltas == ["a", "abc!"]
+    assert "".join(deltas) == streamed[-1].result.response
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_normalizes_cumulative_snapshots_without_duplicates(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(text="Agent", final=False, partial=True),
+                FakeEvent(text="Agent Col", final=False, partial=True),
+                FakeEvent(text="Agent Col", final=True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    streamed = [
+        event
+        async for event in runtime.stream_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Help with this design.",
+            )
+        )
+    ]
+
+    deltas = [event.text for event in streamed[:-1]]
+    assert deltas == ["Agent", " Col"]
+    assert "".join(deltas) == streamed[-1].result.response
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_emits_only_the_missing_final_text_tail() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(text="Agent", final=False, partial=True),
+                FakeEvent(text="Agent Col", final=True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    streamed = [
+        event
+        async for event in runtime.stream_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Help with this design.",
+            )
+        )
+    ]
+
+    assert [event.text for event in streamed[:-1]] == ["Agent", " Col"]
+    assert streamed[-1].result.response == "Agent Col"
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_ignores_thought_tool_and_non_agent_text() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    text="hidden reasoning",
+                    final=False,
+                    partial=True,
+                    thought=True,
+                ),
+                FakeEvent(
+                    text="tool internals",
+                    final=False,
+                    partial=True,
+                    function_responses=[
+                        types.FunctionResponse(
+                            name="internal_tool",
+                            response={"private": "value"},
+                        )
+                    ],
+                ),
+                FakeEvent(
+                    text="tool request internals",
+                    final=False,
+                    partial=True,
+                    function_calls=[
+                        types.FunctionCall(
+                            name="internal_tool",
+                            args={"private": "value"},
+                        )
+                    ],
+                ),
+                FakeEvent(
+                    text="specialist draft",
+                    final=False,
+                    partial=True,
+                    author="ResearchExpert",
+                ),
+                FakeEvent(text="Safe answer.", final=True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    streamed = [
+        event
+        async for event in runtime.stream_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Help with this design.",
+            )
+        )
+    ]
+
+    assert [event.text for event in streamed[:-1]] == ["Safe answer."]
+    assert streamed[-1].result.response == "Safe answer."
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_excludes_thought_parts_from_the_final_response(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    final_event = FakeEvent(text="Safe answer.", final=True)
+    final_event.content.parts.insert(
+        0,
+        types.Part(text="hidden reasoning", thought=True),
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(events=[final_event]),
+        session_service=FakeSessionService(),
+    )
+
+    streamed = [
+        event
+        async for event in runtime.stream_turn(
+            SupervisorTurnContext(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Help with this design.",
+            )
+        )
+    ]
+
+    assert [event.text for event in streamed[:-1]] == ["Safe answer."]
+    assert streamed[-1].result.response == "Safe answer."
 
 
 @pytest.mark.asyncio

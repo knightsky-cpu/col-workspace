@@ -16,7 +16,11 @@ from schemas import (
     MemoryClarificationReceipt,
     MemoryProposalReceipt,
 )
-from supervisor_runtime import SupervisorTurnResult
+from supervisor_runtime import (
+    SupervisorTextDelta,
+    SupervisorTurnCompleted,
+    SupervisorTurnResult,
+)
 
 
 class RecordingRoutingRequest:
@@ -76,11 +80,13 @@ class RecordingResponder:
         result: SupervisorTurnResult | None = None,
         *,
         error: Exception | None = None,
+        deltas: tuple[str, ...] = ("Agent_Col ", "response."),
     ) -> None:
         self.result = result or SupervisorTurnResult(
             response="Agent_Col response."
         )
         self.error = error
+        self.deltas = deltas
         self.contexts: list[object] = []
 
     async def run_turn(self, context: object) -> SupervisorTurnResult:
@@ -88,6 +94,14 @@ class RecordingResponder:
         if self.error is not None:
             raise self.error
         return self.result
+
+    async def stream_turn(self, context: object):
+        self.contexts.append(context)
+        if self.error is not None:
+            raise self.error
+        for text in self.deltas:
+            yield SupervisorTextDelta(text=text)
+        yield SupervisorTurnCompleted(result=self.result)
 
 
 def memory_clarification_receipt() -> MemoryClarificationReceipt:
@@ -286,6 +300,155 @@ def command_with_precompleted_effects() -> object:
             ),
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_turn_service_streams_only_the_responder_after_existing_routing(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    routing_request = RecordingRoutingRequest(
+        AgentColRoutingDirective(route="direct")
+    )
+    executor = RecordingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=routing_request,
+    )
+
+    streamed = [
+        event
+        async for event in service.stream_turn(
+            AgentColTurnCommand(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Help with this design.",
+            )
+        )
+    ]
+
+    assert [event.text for event in streamed[:-1]] == [
+        "Agent_Col ",
+        "response.",
+    ]
+    assert streamed[-1].result.response == "Agent_Col response."
+    assert len(routing_request.calls) == 1
+    assert len(executor.calls) == 1
+    assert len(responder.contexts) == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_service_streams_after_artifact_routing_and_execution(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a timer artifact.",
+        ),
+        ids=derive_chat_turn_ids("artifact-stream-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    artifact_routing = RecordingRoutingRequest(
+        AgentColRoutingDirectiveV4.model_validate(
+            {
+                "schema_version": "4.0",
+                "route": "artifact",
+                "artifact_intent": {
+                    "operation": "create_blueprint",
+                    "objective": "Create the requested artifact.",
+                },
+            }
+        )
+    )
+    artifact_executor = RecordingArtifactExecutor()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=artifact_executor,
+        artifact_routing_request=artifact_routing,
+    )
+
+    streamed = [
+        event
+        async for event in service.stream_turn(
+            AgentColTurnCommand(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Create a timer artifact.",
+                chat_turn_claim=claim,
+            )
+        )
+    ]
+
+    assert [event.text for event in streamed[:-1]] == [
+        "Agent_Col ",
+        "response.",
+    ]
+    assert streamed[-1].result.artifacts[0].artifact_id == "artifact-1"
+    assert len(artifact_routing.calls) == 1
+    assert len(artifact_executor.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_service_closing_stream_cancels_in_flight_responder() -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    class BlockingResponder(RecordingResponder):
+        def __init__(self) -> None:
+            super().__init__(deltas=())
+            self.cancelled = False
+
+        async def stream_turn(self, context: object):
+            self.contexts.append(context)
+            yield SupervisorTextDelta(text="Provisional")
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    responder = BlockingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+    )
+    stream = service.stream_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Help with this design.",
+        )
+    )
+
+    first = await anext(stream)
+    await stream.aclose()
+
+    assert first.text == "Provisional"
+    assert responder.cancelled is True
 
 
 @pytest.mark.asyncio
@@ -1419,6 +1582,60 @@ async def test_executor_configuration_failure_is_content_safe_and_stops_responde
     ):
         assert secret not in str(captured.value)
         assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_stops_before_responder_on_specialist_failure() -> None:
+    from agent_col_expert_executor_v3 import (
+        AgentColExpertExecutorV3ConfigurationError,
+    )
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnService,
+        AgentColTurnServiceError,
+    )
+
+    executor_error = AgentColExpertExecutorV3ConfigurationError(
+        "private-specialist-configuration"
+    )
+
+    class ConfigurationFailingExecutor(RecordingExecutor):
+        async def execute(
+            self,
+            directive: AgentColRoutingDirective,
+            routing_input: object,
+        ) -> AgentColResponderContext:
+            self.calls.append((directive, routing_input))
+            raise executor_error
+
+    executor = ConfigurationFailingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+    )
+
+    with pytest.raises(AgentColTurnServiceError) as captured:
+        _ = [
+            event
+            async for event in service.stream_turn(
+                AgentColTurnCommand(
+                    project_id="private-project",
+                    session_id="private-session",
+                    user_id="private-user",
+                    message="private-message",
+                )
+            )
+        ]
+
+    assert captured.value.__cause__ is executor_error
+    assert len(executor.calls) == 1
+    assert responder.contexts == []
+    assert "private-specialist-configuration" not in str(captured.value)
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
 import asyncio
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -87,7 +88,9 @@ from schemas import (
 from source_expert import SourceExpertResult
 from supervisor_runtime import (
     SupervisorRuntimeError,
+    SupervisorTextDelta,
     SupervisorTimeoutError,
+    SupervisorTurnCompleted,
     SupervisorTurnContext,
     SupervisorTurnResult,
 )
@@ -153,6 +156,11 @@ class ResponderRuntime(Protocol):
         context: SupervisorTurnContext,
     ) -> SupervisorTurnResult: ...
 
+    def stream_turn(
+        self,
+        context: SupervisorTurnContext,
+    ) -> AsyncIterator[SupervisorTextDelta | SupervisorTurnCompleted]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class AgentColTurnCommand:
@@ -204,6 +212,16 @@ class AgentColTurnResult:
     continuity_choices: tuple[ContinuityChoice, ...] = ()
     adaptations: tuple[VersionedAdaptationReceipt, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentColTextDelta:
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentColTurnCompleted:
+    result: AgentColTurnResult
 
 
 class AgentColTurnServiceError(RuntimeError):
@@ -318,6 +336,51 @@ class AgentColTurnService:
         self,
         command: AgentColTurnCommand,
     ) -> AgentColTurnResult:
+        return await self._execute_turn(command)
+
+    async def stream_turn(
+        self,
+        command: AgentColTurnCommand,
+    ) -> AsyncIterator[AgentColTextDelta | AgentColTurnCompleted]:
+        queue: asyncio.Queue[object] = asyncio.Queue()
+
+        async def emit_delta(text: str) -> None:
+            await queue.put(AgentColTextDelta(text=text))
+
+        async def execute() -> None:
+            try:
+                result = await self._execute_turn(
+                    command,
+                    on_delta=emit_delta,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await queue.put(exc)
+            else:
+                await queue.put(AgentColTurnCompleted(result=result))
+
+        task = asyncio.create_task(execute())
+        try:
+            while True:
+                event = await queue.get()
+                if isinstance(event, Exception):
+                    raise event
+                yield event
+                if isinstance(event, AgentColTurnCompleted):
+                    break
+        finally:
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    async def _execute_turn(
+        self,
+        command: AgentColTurnCommand,
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> AgentColTurnResult:
         deadline = self._clock() + self._turn_timeout_seconds
         try:
             async with asyncio.timeout(self._turn_timeout_seconds):
@@ -333,8 +396,13 @@ class AgentColTurnService:
                     return await self._run_artifact_capable_with_deadline(
                         command,
                         deadline,
+                        on_delta=on_delta,
                     )
-                return await self._run_with_deadline(command, deadline)
+                return await self._run_with_deadline(
+                    command,
+                    deadline,
+                    on_delta=on_delta,
+                )
         except TimeoutError as exc:
             logger.error(
                 "Agent_Col turn failed (%s).",
@@ -557,6 +625,8 @@ class AgentColTurnService:
         self,
         command: AgentColTurnCommand,
         deadline: float,
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> AgentColTurnResult:
         claim = command.chat_turn_claim
         artifact_executor = self._artifact_executor
@@ -643,6 +713,7 @@ class AgentColTurnService:
                 claim,
                 directive,
                 deadline,
+                on_delta=on_delta,
             )
 
         v3_directive = AgentColRoutingDirective.model_validate(
@@ -665,6 +736,7 @@ class AgentColTurnService:
             deadline,
             routing_input=v3_input,
             directive=v3_directive,
+            on_delta=on_delta,
         )
 
     async def _complete_artifact_turn(
@@ -673,6 +745,8 @@ class AgentColTurnService:
         claim: ChatTurnClaim,
         directive: AgentColRoutingDirectiveV4,
         deadline: float,
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> AgentColTurnResult:
         artifact_executor = self._artifact_executor
         if artifact_executor is None:
@@ -715,7 +789,7 @@ class AgentColTurnService:
         )
         try:
             async with asyncio.timeout(self._remaining_seconds(deadline)):
-                result = await self._responder_runtime.run_turn(
+                result = await self._run_responder(
                     SupervisorTurnContext(
                         project_id=command.project_id,
                         session_id=command.session_id,
@@ -734,7 +808,8 @@ class AgentColTurnService:
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
                         ),
-                    )
+                    ),
+                    on_delta=on_delta,
                 )
         except SupervisorTimeoutError as exc:
             raise AgentColTurnTimeoutError(
@@ -847,6 +922,7 @@ class AgentColTurnService:
         deadline: float,
         routing_input: AgentColRoutingInput | None = None,
         directive: AgentColRoutingDirective | None = None,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> AgentColTurnResult:
         if routing_input is None or directive is None:
             numeric_projection = project_routing_numeric_candidates(
@@ -1008,7 +1084,7 @@ class AgentColTurnService:
         )
         try:
             async with asyncio.timeout(self._remaining_seconds(deadline)):
-                result = await self._responder_runtime.run_turn(
+                result = await self._run_responder(
                     SupervisorTurnContext(
                         project_id=command.project_id,
                         session_id=command.session_id,
@@ -1033,7 +1109,8 @@ class AgentColTurnService:
                         precompleted_collaborative_note_events=(
                             command.precompleted_collaborative_note_events
                         ),
-                    )
+                    ),
+                    on_delta=on_delta,
                 )
         except SupervisorTimeoutError as exc:
             logger.error(
@@ -1128,6 +1205,26 @@ class AgentColTurnService:
             continuity_receipts=command.continuity_receipts,
             continuity_choices=command.continuity_choices,
         )
+
+    async def _run_responder(
+        self,
+        context: SupervisorTurnContext,
+        *,
+        on_delta: Callable[[str], Awaitable[None]] | None,
+    ) -> SupervisorTurnResult:
+        if on_delta is None:
+            return await self._responder_runtime.run_turn(context)
+        result: SupervisorTurnResult | None = None
+        async for event in self._responder_runtime.stream_turn(context):
+            if isinstance(event, SupervisorTextDelta):
+                await on_delta(event.text)
+            elif isinstance(event, SupervisorTurnCompleted):
+                result = event.result
+        if result is None:
+            raise SupervisorRuntimeError(
+                "Agent_Col did not produce a completed turn."
+            )
+        return result
 
     def _remaining_seconds(self, deadline: float) -> float:
         remaining = deadline - self._clock()

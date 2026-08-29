@@ -14,6 +14,7 @@ import {
   generateSessionId,
   isValidIdentifier,
   readContextForm,
+  selectChatEndpoint,
 } from "../../frontend/requests.mjs";
 
 const cryptoStub = {
@@ -88,6 +89,36 @@ test("exact retry preserves the original key and body", () => {
 
   assert.equal(retry.key, original.key);
   assert.equal(retry.body, original.body);
+});
+
+test("chat endpoint selection streams only ordinary requests", () => {
+  const ordinary = buildOrdinaryChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    "Hello Agent Col",
+    cryptoStub,
+  );
+  assert.equal(selectChatEndpoint(ordinary), "/api/chat/stream");
+  assert.equal(
+    selectChatEndpoint(buildExactRetryRequest(ordinary)),
+    "/api/chat/stream",
+  );
+
+  for (const field of [
+    "memory_decision",
+    "memory_clarification_selection",
+    "artifact_feedback_decision",
+    "collaborative_note_decision",
+    "continuity_selection",
+  ]) {
+    assert.equal(
+      selectChatEndpoint({ body: { ...ordinary.body, [field]: {} } }),
+      "/api/chat",
+    );
+  }
 });
 
 test("structured memory and artifact decisions are mutually exclusive", () => {

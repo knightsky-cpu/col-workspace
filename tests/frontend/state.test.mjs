@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   acceptContext,
+  appendPendingResponseDelta,
   beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
@@ -341,6 +342,142 @@ test("pending turn lifecycle preserves exact retry envelope on failure", () => {
   assert.equal(failed.pendingTurn, null);
   assert.equal(failed.lastFailure.request, request);
   assert.equal(failed.lastFailure.message, "network failed");
+});
+
+test("streamed response text accumulates and converges to canonical final", () => {
+  const request = Object.freeze({
+    key: "chat--stream",
+    body: Object.freeze({ message: "hello" }),
+  });
+  const pending = appendPendingResponseDelta(
+    appendPendingResponseDelta(
+      beginPendingTurn(createInitialState(), request),
+      "Agent ",
+    ),
+    "Col draft",
+  );
+
+  assert.equal(pending.pendingResponseText, "Agent Col draft");
+
+  const completed = completePendingTurn(pending, {
+    response: "Agent Col final",
+    actions: [],
+  });
+  assert.equal(completed.pendingResponseText, "");
+  assert.equal(completed.transcript.length, 1);
+  assert.equal(completed.transcript[0].response.response, "Agent Col final");
+});
+
+test("failed streamed response remains explicitly provisional", () => {
+  const request = Object.freeze({
+    key: "chat--stream-failure",
+    body: Object.freeze({ message: "hello" }),
+  });
+  const pending = appendPendingResponseDelta(
+    beginPendingTurn(createInitialState(), request),
+    "Incomplete answer",
+  );
+  const failed = failPendingTurn(
+    pending,
+    { message: "Stream interrupted", status: 0, provisional: true },
+  );
+
+  assert.equal(failed.pendingResponseText, "");
+  assert.equal(failed.transcript.length, 0);
+  assert.equal(failed.lastFailure.provisionalResponseText, "Incomplete answer");
+});
+
+
+test("failed streamed response retains authoritative partial effects", () => {
+  const request = Object.freeze({
+    key: "chat--stream-partial-failure",
+    body: Object.freeze({ message: "create an artifact" }),
+  });
+  const partialFailure = Object.freeze({
+    detail: "Agent_Col response failed after a completed action.",
+    artifacts: [{
+      artifact_id: "artifact-1",
+      artifact_type: "single_file_artifact",
+      schema_version: "1.0",
+      display_label: "result.txt",
+    }],
+    memory_proposals: [],
+    collaborative_note_events: [],
+  });
+  const failed = failPendingTurn(
+    beginPendingTurn(createInitialState(), request),
+    {
+      message: "Agent Col could not complete this response.",
+      status: 502,
+      partialFailure,
+    },
+  );
+
+  assert.equal(failed.lastFailure.partialFailure, partialFailure);
+  assert.deepEqual(selectWorkRefreshPlan(failed.lastFailure.partialFailure), {
+    reloadList: true,
+    selectArtifactId: "artifact-1",
+    reloadSelectedFeedback: false,
+  });
+});
+
+test("failed streamed response activates an authoritative memory clarification", () => {
+  const partialFailure = Object.freeze({
+    detail: "Agent_Col response failed after a completed action.",
+    memory_clarifications: [clarificationReceipt()],
+  });
+  const failed = failPendingTurn(
+    beginPendingTurn(createInitialState(), {
+      key: "chat--stream-memory-clarification",
+      body: { message: "remember this" },
+    }),
+    {
+      message: "Agent Col could not complete this response.",
+      status: 502,
+      partialFailure,
+    },
+  );
+
+  assert.deepEqual(failed.activeMemoryClarification, clarificationReceipt());
+});
+
+test("failed streamed response stores authoritative note and continuity choices", () => {
+  const partialFailure = Object.freeze({
+    detail: "Agent_Col response failed after a completed action.",
+    collaborative_note_proposals: [{
+      proposal_id: "note-proposal-partial-1",
+      title: "API version",
+      body: "Use API version 2.",
+      status: "pending",
+    }],
+    continuity_choices: [{
+      choice_id: "choice-partial-1",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+      display_label: "API version",
+      match_reason: "bounded_relevance",
+    }],
+  });
+  const failed = failPendingTurn(
+    beginPendingTurn(createInitialState(), {
+      key: "chat--stream-note-choice",
+      body: { message: "use the API note" },
+    }),
+    {
+      message: "Agent Col could not complete this response.",
+      status: 502,
+      partialFailure,
+    },
+  );
+
+  assert.equal(
+    failed.notes.pendingProposals[0].proposal_id,
+    "note-proposal-partial-1",
+  );
+  assert.equal(
+    failed.activeContinuityChoices[0].choice_id,
+    "choice-partial-1",
+  );
 });
 
 test("initial state has no active memory clarification", () => {

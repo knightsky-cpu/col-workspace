@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -44,7 +45,9 @@ from generic_artifact_generation import (
     generate_generic_artifact,
 )
 from agent_col_turn_service import (
+    AgentColTextDelta,
     AgentColTurnCommand,
+    AgentColTurnCompleted,
     AgentColTurnResponderError,
     AgentColTurnResult,
     AgentColTurnRoutingError,
@@ -844,6 +847,9 @@ class FakeAgentColTurnService:
     error: Exception | None = None
     calls: list[AgentColTurnCommand] = field(default_factory=list)
     turn_result: AgentColTurnResult | None = None
+    stream_deltas: tuple[str, ...] = ("Generated ", "answer")
+    stream_block_after_deltas: bool = False
+    stream_cancelled: bool = False
 
     async def run_turn(
         self,
@@ -856,6 +862,25 @@ class FakeAgentColTurnService:
         if self.turn_result is not None:
             return self.turn_result
         return AgentColTurnResult(response=self.response_text)
+
+    async def stream_turn(self, command: AgentColTurnCommand):
+        self.calls.append(command)
+        self.events.append(("turn_service",))
+        for text in self.stream_deltas:
+            self.events.append(("turn_delta", text))
+            yield AgentColTextDelta(text=text)
+        if self.stream_block_after_deltas:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.stream_cancelled = True
+                raise
+        if self.error is not None:
+            raise self.error
+        result = self.turn_result or AgentColTurnResult(
+            response=self.response_text
+        )
+        yield AgentColTurnCompleted(result=result)
 
 
 @dataclass
@@ -2083,12 +2108,680 @@ async def client(service_state: ServiceState):
             yield test_client
 
 
+def parse_sse_events(body: str) -> list[tuple[str, object]]:
+    events: list[tuple[str, object]] = []
+    for frame in body.split("\n\n"):
+        if not frame.strip():
+            continue
+        fields = {
+            key: value.lstrip()
+            for key, value in (
+                line.split(":", 1)
+                for line in frame.splitlines()
+                if ":" in line
+            )
+        }
+        events.append((fields["event"], json.loads(fields["data"])))
+    return events
+
+
 @pytest.mark.asyncio
 async def test_health_check(client: httpx.AsyncClient) -> None:
     response = await client.get("/")
 
     assert response.status_code == 200
     assert response.json() == {"status": "online"}
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_emits_deltas_then_canonical_final(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = parse_sse_events(response.text)
+    assert events[:2] == [
+        ("delta", {"text": "Generated "}),
+        ("delta", {"text": "answer"}),
+    ]
+    assert events[2][0] == "final"
+    assert events[2][1] == ChatResponse(
+        response="Generated answer",
+        actions=[],
+        artifacts=[],
+        citations=[],
+        adaptations=[],
+    ).model_dump(mode="json")
+    assert service_state.database.complete_calls
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_waits_for_persistence_before_final(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    persistence_started = asyncio.Event()
+    allow_persistence = asyncio.Event()
+    complete_chat_turn = service_state.database.complete_chat_turn
+
+    async def blocked_complete_chat_turn(*args: object, **kwargs: object):
+        persistence_started.set()
+        await allow_persistence.wait()
+        return await complete_chat_turn(*args, **kwargs)
+
+    monkeypatch.setattr(
+        service_state.database,
+        "complete_chat_turn",
+        blocked_complete_chat_turn,
+    )
+    request = main.Request(
+        {
+            "type": "http",
+            "app": main.app,
+            "method": "POST",
+            "path": "/api/chat/stream",
+            "headers": [],
+            "query_string": b"",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+        }
+    )
+    response = await main.chat_stream(
+        main.ChatRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="New question",
+        ),
+        request,
+        "owned-key-1",
+        None,
+    )
+    iterator = response.body_iterator
+
+    first_delta = await anext(iterator)
+    second_delta = await anext(iterator)
+    await persistence_started.wait()
+    pending_final = asyncio.create_task(anext(iterator))
+    await asyncio.sleep(0)
+
+    assert parse_sse_events(str(first_delta)) == [
+        ("delta", {"text": "Generated "})
+    ]
+    assert parse_sse_events(str(second_delta)) == [
+        ("delta", {"text": "answer"})
+    ]
+    assert not pending_final.done()
+
+    allow_persistence.set()
+    final_frame = await pending_final
+    assert parse_sse_events(str(final_frame))[0][0] == "final"
+    assert service_state.database.complete_calls
+    await iterator.aclose()
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_emits_error_without_final_when_persistence_fails(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.database.complete_error = main.MemoryEngineError(
+        "private persistence failure"
+    )
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    events = parse_sse_events(response.text)
+    assert [event for event, _ in events] == ["delta", "delta", "error"]
+    assert events[-1][1] == {
+        "detail": "Database operation failed.",
+        "status": 500,
+        "provisional": True,
+    }
+    assert service_state.working_state_service.calls == []
+    assert "private persistence failure" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_emits_final_after_working_state_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    message = (
+        "I want a deployment plan, probably Cloud Run, but security "
+        "matters more than speed."
+    )
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = replace(
+        claim,
+        request=replace(claim.request, message=message),
+    )
+    service_state.working_state_service.error = main.WorkingStateGenerationError(
+        "private working state failure"
+    )
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": message,
+        },
+    )
+
+    events = parse_sse_events(response.text)
+    assert [event for event, _ in events] == ["delta", "delta", "final"]
+    assert service_state.database.complete_calls
+    assert len(service_state.working_state_service.calls) == 1
+    assert "private working state failure" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_replay_emits_canonical_final_only(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    stored_response = ChatResponse(
+        response="Stored answer",
+        actions=[],
+        artifacts=[],
+        citations=[],
+        adaptations=[],
+    )
+    service_state.database.chat_turn_result = ChatTurnReplay(
+        response=stored_response
+    )
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "replay-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert parse_sse_events(response.text) == [
+        ("final", stored_response.model_dump(mode="json"))
+    ]
+    assert service_state.turn_service.calls == []
+    assert service_state.database.complete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_preserves_live_idempotency_conflict(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_error = ChatTurnInProgressError(17)
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "live-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Chat turn is already in progress."}
+    assert response.headers["retry-after"] == "17"
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_requires_structured_decisions_to_use_json_endpoint(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "decision-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Yes, remember that preference.",
+            "memory_decision": {
+                "proposal_id": "response_length--proposal-1",
+                "decision": "approve",
+            },
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Structured chat decisions must use /api/chat."
+    }
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("authorization", "user_id", "project_id", "expected_status"),
+    (
+        (None, public_user_locator("109876543210"), "project-1", 401),
+        (
+            "Bearer token-abc",
+            public_user_locator("999999999999"),
+            google_subject_to_workspace_project_id("999999999999"),
+            403,
+        ),
+    ),
+)
+async def test_structured_chat_stream_checks_google_ownership_before_eligibility(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    authorization: str | None,
+    user_id: str,
+    project_id: str,
+    expected_status: int,
+) -> None:
+    subject = "109876543210"
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+    headers = {"Idempotency-Key": "decision-key-1"}
+    if authorization is not None:
+        headers["Authorization"] = authorization
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers=headers,
+        json={
+            "project_id": project_id,
+            "session_id": "session-1",
+            "user_id": user_id,
+            "message": "Yes, remember that preference.",
+            "memory_decision": {
+                "proposal_id": "response_length--proposal-1",
+                "decision": "approve",
+            },
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert service_state.events == []
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_google_chat_stream_uses_verified_owner_through_completion(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    project_id = google_subject_to_workspace_project_id(subject)
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={
+            "Authorization": "Bearer token-abc",
+            "Idempotency-Key": "google-stream-key-1",
+        },
+        json={
+            "project_id": project_id,
+            "session_id": "google-session-1",
+            "user_id": public_user_id,
+            "message": "New question",
+        },
+    )
+
+    events = parse_sse_events(response.text)
+    assert response.status_code == 200
+    assert events[-1][0] == "final"
+    assert service_state.database.claim_calls[0][0].user_id == user_id
+    assert service_state.database.claim_calls[0][0].project_id == project_id
+    assert service_state.turn_service.calls[0].user_id == user_id
+    assert service_state.turn_service.calls[0].project_id == project_id
+    assert service_state.database.complete_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("deltas", "provisional"),
+    (((), False), (("Provisional text",), True)),
+)
+async def test_chat_stream_sanitizes_responder_failure_before_or_after_deltas(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    deltas: tuple[str, ...],
+    provisional: bool,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.turn_service.stream_deltas = deltas
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private provider failure"
+    )
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    events = parse_sse_events(response.text)
+    assert events[-1] == (
+        "error",
+        {
+            "detail": "Agent_Col response failed.",
+            "status": 502,
+            "provisional": provisional,
+        },
+    )
+    assert "final" not in [event for event, _ in events]
+    assert "private provider failure" not in response.text
+    assert len(service_state.database.release_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("deltas", "provisional"),
+    (((), False), (("Provisional text",), True)),
+)
+async def test_chat_stream_reports_timeout_before_or_after_deltas(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    deltas: tuple[str, ...],
+    provisional: bool,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.turn_service.stream_deltas = deltas
+    service_state.turn_service.error = AgentColTurnTimeoutError(
+        "private timeout failure"
+    )
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "timeout-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "New question",
+        },
+    )
+
+    events = parse_sse_events(response.text)
+    assert events[-1] == (
+        "error",
+        {
+            "detail": "Agent_Col response timed out.",
+            "status": 504,
+            "provisional": provisional,
+        },
+    )
+    assert "final" not in [event for event, _ in events]
+    assert "private timeout failure" not in response.text
+    assert len(service_state.database.release_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_preserves_structured_partial_failure_effects(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    action = AgentActionReceipt(
+        action_name="propose_memory_signal",
+        status="completed",
+    )
+    proposal = make_memory_proposal_receipt()
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.turn_service.stream_deltas = ("Provisional text",)
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private responder failure",
+        actions=(action,),
+        memory_proposals=(proposal,),
+    )
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "partial-failure-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Remember this preference.",
+        },
+    )
+
+    events = parse_sse_events(response.text)
+    error = events[-1][1]
+    assert events[-1][0] == "error"
+    assert error["status"] == 502
+    assert error["provisional"] is True
+    assert error["partial_failure"] == {
+        "detail": "Agent_Col response failed after a completed action.",
+        "actions": [action.model_dump(mode="json")],
+        "memory_proposals": [proposal.model_dump(mode="json")],
+    }
+    assert "final" not in [event for event, _ in events]
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_disconnect_cancels_responder_without_completing_claim(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.turn_service.stream_deltas = ("Provisional text",)
+    service_state.turn_service.stream_block_after_deltas = True
+    request = main.Request(
+        {
+            "type": "http",
+            "app": main.app,
+            "method": "POST",
+            "path": "/api/chat/stream",
+            "headers": [],
+            "query_string": b"",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+        }
+    )
+    response = await main.chat_stream(
+        main.ChatRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="New question",
+        ),
+        request,
+        "owned-key-1",
+        None,
+    )
+    first_body_sent = asyncio.Event()
+    sent_messages: list[dict[str, object]] = []
+
+    async def send(message: dict[str, object]) -> None:
+        sent_messages.append(message)
+        if message["type"] == "http.response.body" and message.get("body"):
+            first_body_sent.set()
+
+    async def receive() -> dict[str, object]:
+        await first_body_sent.wait()
+        return {"type": "http.disconnect"}
+
+    await asyncio.wait_for(
+        response(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0", "spec_version": "2.3"},
+            },
+            receive,
+            send,
+        ),
+        timeout=1.0,
+    )
+
+    assert service_state.turn_service.stream_cancelled is True
+    assert service_state.database.complete_calls == []
+    assert service_state.database.release_calls == []
+    bodies = [
+        bytes(message.get("body", b"")).decode()
+        for message in sent_messages
+        if message["type"] == "http.response.body" and message.get("body")
+    ]
+    assert [event for body in bodies for event, _ in parse_sse_events(body)] == [
+        "delta"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_disconnect_after_persistence_replays_canonical_final(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = (
+        "I want a deployment plan, probably Cloud Run, but security "
+        "matters more than speed."
+    )
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = replace(
+        claim,
+        request=replace(claim.request, message=message),
+    )
+    maintenance_started = asyncio.Event()
+    maintenance_cancelled = asyncio.Event()
+
+    async def blocked_update(command: WorkingStateUpdateInput):
+        service_state.working_state_service.calls.append(command)
+        maintenance_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            maintenance_cancelled.set()
+            raise
+
+    monkeypatch.setattr(
+        service_state.working_state_service,
+        "update",
+        blocked_update,
+    )
+    request = main.Request(
+        {
+            "type": "http",
+            "app": main.app,
+            "method": "POST",
+            "path": "/api/chat/stream",
+            "headers": [],
+            "query_string": b"",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "client": ("testclient", 123),
+        }
+    )
+    response = await main.chat_stream(
+        main.ChatRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        request,
+        "persisted-disconnect-key-1",
+        None,
+    )
+    sent_messages: list[dict[str, object]] = []
+
+    async def send(event: dict[str, object]) -> None:
+        sent_messages.append(event)
+
+    async def receive() -> dict[str, object]:
+        await maintenance_started.wait()
+        return {"type": "http.disconnect"}
+
+    await asyncio.wait_for(
+        response(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0", "spec_version": "2.3"},
+            },
+            receive,
+            send,
+        ),
+        timeout=1.0,
+    )
+
+    assert maintenance_cancelled.is_set()
+    assert len(service_state.database.complete_calls) == 1
+    assert service_state.database.release_calls == []
+    bodies = [
+        bytes(event.get("body", b"")).decode()
+        for event in sent_messages
+        if event["type"] == "http.response.body" and event.get("body")
+    ]
+    assert "final" not in [
+        event for body in bodies for event, _ in parse_sse_events(body)
+    ]
+
+    stored_response = service_state.database.complete_calls[0][1]
+    service_state.database.chat_turn_result = ChatTurnReplay(
+        response=stored_response
+    )
+    replay = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "persisted-disconnect-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": message,
+        },
+    )
+
+    assert parse_sse_events(replay.text) == [
+        ("final", stored_response.model_dump(mode="json"))
+    ]
 
 
 @pytest.mark.asyncio
@@ -2190,6 +2883,42 @@ async def test_scoped_rate_limiter_returns_retry_after_for_expensive_routes(
     assert second_response.json() == {"detail": "Rate limit exceeded."}
     assert health_response.status_code == 200
     assert workspace_response.status_code == 200
+    assert service_state.events.count(("claim_chat_turn",)) == 1
+
+
+@pytest.mark.asyncio
+async def test_scoped_rate_limiter_covers_streaming_chat(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    main.app.state.rate_limiter = main.InMemoryRateLimiter(
+        max_requests=1,
+        window_seconds=30,
+        clock=lambda: 100.0,
+    )
+    payload = {
+        "project_id": "project-1",
+        "session_id": "session-1",
+        "user_id": "user-1",
+        "message": "What should I work on next?",
+    }
+
+    first_response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "rate-limit-stream-key-1"},
+        json=payload,
+    )
+    second_response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "rate-limit-stream-key-2"},
+        json=payload,
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+    assert second_response.headers["Retry-After"] == "30"
+    assert second_response.json() == {"detail": "Rate limit exceeded."}
     assert service_state.events.count(("claim_chat_turn",)) == 1
 
 

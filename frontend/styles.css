@@ -482,6 +482,15 @@ p {
   padding-block: 0.7rem;
 }
 
+.chat-turn--pending .turn-model {
+  border-style: dashed;
+}
+
+.chat-turn--incomplete .turn-model {
+  border-color: rgba(255, 155, 155, 0.58);
+  border-inline-start-color: var(--danger);
+}
+
 .turn-author-icon {
   block-size: 1rem;
   border: 1px solid currentColor;

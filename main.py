@@ -7,10 +7,10 @@ import re
 import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Callable, Literal, NoReturn, TypeVar
+from typing import Annotated, Awaitable, Callable, Literal, NoReturn, TypeVar
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -22,7 +22,12 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
@@ -35,7 +40,9 @@ from agent_col_artifact_feedback_executor import (
 from agent_col_expert_executor_v3 import AgentColExpertExecutorV3
 from agent_col_responder import create_responder_app
 from agent_col_turn_service import (
+    AgentColTextDelta,
     AgentColTurnCommand,
+    AgentColTurnCompleted,
     AgentColTurnRoutingTimeoutError,
     AgentColTurnService,
     AgentColTurnServiceError,
@@ -286,7 +293,11 @@ def _apply_security_headers(response: Response) -> Response:
 def _request_is_rate_limited(request: Request) -> bool:
     path = request.url.path
     method = request.method.upper()
-    if method == "POST" and path in {"/api/chat", "/api/synthesize"}:
+    if method == "POST" and path in {
+        "/api/chat",
+        "/api/chat/stream",
+        "/api/synthesize",
+    }:
         return True
     return (
         method in RATE_LIMITED_METHODS
@@ -2756,8 +2767,7 @@ async def list_blueprint_feedback(
         _raise_database_http_error(exc)
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat(
+async def _execute_chat(
     payload: ChatRequest,
     request: Request,
     idempotency_key: Annotated[
@@ -2768,7 +2778,11 @@ async def chat(
         str | None,
         Header(alias="Authorization"),
     ] = None,
-) -> ChatResponse:
+    *,
+    stream_started: Callable[[], Awaitable[None]] | None = None,
+    stream_delta: Callable[[str], Awaitable[None]] | None = None,
+    ordinary_only: bool = False,
+) -> ChatResponse | JSONResponse:
     database = request.app.state.db
     memory_service = request.app.state.memory_service
     continuity_service = request.app.state.continuity_service
@@ -2798,6 +2812,11 @@ async def chat(
         supplied_project_id=payload.project_id,
         authorization_header=authorization,
     )
+    if ordinary_only and _chat_request_requires_json(payload):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Structured chat decisions must use /api/chat.",
+        )
 
     if (
         _get_authenticator(request).settings.mode == "google_oidc"
@@ -3480,86 +3499,92 @@ async def chat(
         if message["role"] == "user"
     )
 
-    try:
-        result = await turn_service.run_turn(
-            AgentColTurnCommand(
-                project_id=effective_project_id,
-                session_id=payload.session_id,
-                user_id=effective_user_id,
-                message=payload.message,
-                recent_user_messages=recent_user_messages,
-                model_input_context=model_input_context,
-                working_state_context=working_state_context,
-                source_message_id=user_message_id,
-                memory_decision_present=(
-                    payload.memory_decision is not None
-                    or payload.memory_clarification_selection is not None
-                    or bool(precompleted_memory_clarifications)
-                ),
-                artifact_feedback_decision_present=(
-                    payload.artifact_feedback_decision is not None
-                ),
-                collaborative_note_decision_present=(
-                    payload.collaborative_note_decision is not None
-                ),
-                turn_lease=(
-                    ProposalTurnLease(
-                        turn_id=chat_turn_claim.ids.turn_id,
-                        owner_token=chat_turn_claim.owner_token,
-                    )
-                    if chat_turn_claim is not None
-                    else None
-                ),
-                precompleted_actions=(
-                    _merge_receipts(
-                        chat_turn_claim.precompleted_actions,
-                        decision_actions,
-                    )
-                    if chat_turn_claim is not None
-                    else decision_actions
-                ),
-                precompleted_memory_proposals=(
-                    _merge_receipts(
-                        chat_turn_claim.precompleted_memory_proposals,
-                        decision_memory_proposals,
-                    )
-                    if chat_turn_claim is not None
-                    else decision_memory_proposals
-                ),
-                precompleted_memory_clarifications=(
-                    precompleted_memory_clarifications
-                ),
-                precompleted_artifact_feedback=(
-                    chat_turn_claim.precompleted_artifact_feedback
-                    if chat_turn_claim is not None
-                    else ()
-                ),
-                precompleted_collaborative_note_proposals=(
-                    _merge_receipts(
-                        chat_turn_claim
-                        .precompleted_collaborative_note_proposals,
-                        decision_note_proposals,
-                    )
-                    if chat_turn_claim is not None
-                    else decision_note_proposals
-                ),
-                precompleted_collaborative_note_events=(
-                    _merge_receipts(
-                        chat_turn_claim.precompleted_collaborative_note_events,
-                        decision_note_events,
-                    )
-                    if chat_turn_claim is not None
-                    else decision_note_events
-                ),
-                continuity_receipts=tuple(
-                    continuity_resolution.receipts
-                ),
-                continuity_choices=tuple(
-                    continuity_resolution.choices
-                ),
-                chat_turn_claim=chat_turn_claim,
+    turn_command = AgentColTurnCommand(
+        project_id=effective_project_id,
+        session_id=payload.session_id,
+        user_id=effective_user_id,
+        message=payload.message,
+        recent_user_messages=recent_user_messages,
+        model_input_context=model_input_context,
+        working_state_context=working_state_context,
+        source_message_id=user_message_id,
+        memory_decision_present=(
+            payload.memory_decision is not None
+            or payload.memory_clarification_selection is not None
+            or bool(precompleted_memory_clarifications)
+        ),
+        artifact_feedback_decision_present=(
+            payload.artifact_feedback_decision is not None
+        ),
+        collaborative_note_decision_present=(
+            payload.collaborative_note_decision is not None
+        ),
+        turn_lease=(
+            ProposalTurnLease(
+                turn_id=chat_turn_claim.ids.turn_id,
+                owner_token=chat_turn_claim.owner_token,
             )
-        )
+            if chat_turn_claim is not None
+            else None
+        ),
+        precompleted_actions=(
+            _merge_receipts(
+                chat_turn_claim.precompleted_actions,
+                decision_actions,
+            )
+            if chat_turn_claim is not None
+            else decision_actions
+        ),
+        precompleted_memory_proposals=(
+            _merge_receipts(
+                chat_turn_claim.precompleted_memory_proposals,
+                decision_memory_proposals,
+            )
+            if chat_turn_claim is not None
+            else decision_memory_proposals
+        ),
+        precompleted_memory_clarifications=precompleted_memory_clarifications,
+        precompleted_artifact_feedback=(
+            chat_turn_claim.precompleted_artifact_feedback
+            if chat_turn_claim is not None
+            else ()
+        ),
+        precompleted_collaborative_note_proposals=(
+            _merge_receipts(
+                chat_turn_claim.precompleted_collaborative_note_proposals,
+                decision_note_proposals,
+            )
+            if chat_turn_claim is not None
+            else decision_note_proposals
+        ),
+        precompleted_collaborative_note_events=(
+            _merge_receipts(
+                chat_turn_claim.precompleted_collaborative_note_events,
+                decision_note_events,
+            )
+            if chat_turn_claim is not None
+            else decision_note_events
+        ),
+        continuity_receipts=tuple(continuity_resolution.receipts),
+        continuity_choices=tuple(continuity_resolution.choices),
+        chat_turn_claim=chat_turn_claim,
+    )
+    try:
+        if stream_started is not None:
+            await stream_started()
+        if stream_delta is None:
+            result = await turn_service.run_turn(turn_command)
+        else:
+            result = None
+            async for event in turn_service.stream_turn(turn_command):
+                if isinstance(event, AgentColTextDelta):
+                    await stream_delta(event.text)
+                elif isinstance(event, AgentColTurnCompleted):
+                    result = event.result
+            if result is None:
+                raise AgentColTurnServiceError(
+                    "Agent_Col did not produce a completed turn."
+                )
     except (
         AgentColTurnRoutingTimeoutError,
         AgentColTurnTimeoutError,
@@ -3849,4 +3874,198 @@ async def chat(
         response=chat_response,
         effective_user_id=effective_user_id,
         public_user_id=payload.user_id,
+    )
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(
+    payload: ChatRequest,
+    request: Request,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> ChatResponse | JSONResponse:
+    return await _execute_chat(
+        payload,
+        request,
+        idempotency_key,
+        authorization,
+    )
+
+
+def _chat_request_requires_json(payload: ChatRequest) -> bool:
+    return any(
+        decision is not None
+        for decision in (
+            payload.memory_decision,
+            payload.memory_clarification_selection,
+            payload.collaborative_note_decision,
+            payload.continuity_selection,
+            payload.artifact_feedback_decision,
+        )
+    )
+
+
+def _sse_frame(event: str, data: object) -> str:
+    return (
+        f"event: {event}\n"
+        f"data: {json.dumps(data, ensure_ascii=False, separators=(',', ':'))}\n\n"
+    )
+
+
+def _stream_error_payload(
+    error: Exception,
+    *,
+    provisional: bool,
+) -> dict[str, object]:
+    if isinstance(error, HTTPException):
+        status_code = error.status_code
+        detail = (
+            error.detail
+            if isinstance(error.detail, str)
+            else "Agent Col could not complete this response."
+        )
+    else:
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        detail = "Agent Col could not complete this response."
+    return {
+        "detail": detail,
+        "status": status_code,
+        "provisional": provisional,
+    }
+
+
+def _stream_json_error_payload(
+    response: JSONResponse,
+    *,
+    provisional: bool,
+) -> dict[str, object]:
+    try:
+        body = json.loads(response.body)
+    except (TypeError, ValueError):
+        body = {}
+    detail = body.get("detail")
+    if not isinstance(detail, str):
+        detail = "Agent Col could not complete this response."
+    payload: dict[str, object] = {
+        "detail": detail,
+        "status": response.status_code,
+        "provisional": provisional,
+    }
+    if body:
+        payload["partial_failure"] = body
+    return payload
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(
+    payload: ChatRequest,
+    request: Request,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> Response:
+    queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+
+    async def mark_started() -> None:
+        await queue.put(("started", None))
+
+    async def emit_delta(text: str) -> None:
+        await queue.put(("delta", text))
+
+    async def execute() -> None:
+        try:
+            response = await _execute_chat(
+                payload,
+                request,
+                idempotency_key,
+                authorization,
+                stream_started=mark_started,
+                stream_delta=emit_delta,
+                ordinary_only=True,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await queue.put(("failure", exc))
+        else:
+            await queue.put(("complete", response))
+
+    task = asyncio.create_task(execute())
+    first_kind, first_value = await queue.get()
+    if first_kind == "failure":
+        with suppress(asyncio.CancelledError):
+            await task
+        if isinstance(first_value, HTTPException):
+            raise first_value
+        if isinstance(first_value, asyncio.CancelledError):
+            raise first_value
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Agent Col could not complete this response.",
+        )
+    if first_kind == "complete" and isinstance(first_value, JSONResponse):
+        return first_value
+
+    async def event_stream() -> AsyncIterator[str]:
+        provisional = False
+        current_kind = first_kind
+        current_value = first_value
+        try:
+            while True:
+                if current_kind == "started":
+                    current_kind, current_value = await queue.get()
+                    continue
+                if current_kind == "delta":
+                    provisional = True
+                    yield _sse_frame("delta", {"text": current_value})
+                elif current_kind == "complete":
+                    if isinstance(current_value, ChatResponse):
+                        yield _sse_frame(
+                            "final",
+                            current_value.model_dump(mode="json"),
+                        )
+                    elif isinstance(current_value, JSONResponse):
+                        yield _sse_frame(
+                            "error",
+                            _stream_json_error_payload(
+                                current_value,
+                                provisional=provisional,
+                            ),
+                        )
+                    return
+                elif current_kind == "failure":
+                    if isinstance(current_value, Exception):
+                        yield _sse_frame(
+                            "error",
+                            _stream_error_payload(
+                                current_value,
+                                provisional=provisional,
+                            ),
+                        )
+                    return
+                current_kind, current_value = await queue.get()
+        finally:
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )

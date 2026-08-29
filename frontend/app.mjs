@@ -1,5 +1,6 @@
 import {
   apiFetchJson,
+  apiFetchSse,
   archiveNote,
   archiveArtifact,
   createArtifact,
@@ -52,6 +53,7 @@ import {
   buildMemoryClarificationSelectionChatRequest,
   buildOrdinaryChatRequest,
   readContextForm,
+  selectChatEndpoint,
 } from "./requests.mjs";
 import {
   createInitialLayoutState,
@@ -63,6 +65,7 @@ import {
 } from "./workspace-layout.mjs";
 import {
   acceptContext,
+  appendPendingResponseDelta,
   beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
@@ -631,41 +634,64 @@ async function loadChatSession(sessionId) {
   renderWorkspace();
 }
 
+async function refreshAuthoritativeEffects(response) {
+  const refreshPlan = selectWorkRefreshPlan(response);
+  if (refreshPlan.reloadList) {
+    await loadWorkList();
+  }
+  if (refreshPlan.selectArtifactId !== null) {
+    await loadWorkDetail(refreshPlan.selectArtifactId);
+  }
+  const receiptRefresh = selectNeedsReceiptRefresh(response);
+  if (receiptRefresh.memory) {
+    await loadMemory();
+  }
+  if (receiptRefresh.notes) {
+    await loadNotes();
+  }
+}
+
 async function submitRequest(request) {
   state = beginPendingTurn(state, request);
   renderWorkspace();
   document.querySelector("[data-chat-error]").hidden = true;
   setChatStatus("Waiting for Agent Col", "pending");
   try {
-    const response = await apiFetchJson("/api/chat", {
+    const endpoint = selectChatEndpoint(request);
+    const options = {
       method: "POST",
       idempotencyKey: request.key,
       authToken: state.context?.auth_token ?? null,
       body: request.body,
-    });
+    };
+    const response = endpoint === "/api/chat/stream"
+      ? await apiFetchSse(endpoint, {
+        ...options,
+        onDelta(text) {
+          const firstDelta = state.pendingResponseText.length === 0;
+          state = appendPendingResponseDelta(state, text);
+          if (firstDelta) {
+            setChatStatus("");
+          }
+          renderWorkspace();
+        },
+      })
+      : await apiFetchJson(endpoint, options);
     state = completePendingTurn(state, response);
     setChatStatus("");
     document.querySelector("[data-chat-input]").value = "";
-    const refreshPlan = selectWorkRefreshPlan(response);
-    if (refreshPlan.reloadList) {
-      await loadWorkList();
-    }
-    if (refreshPlan.selectArtifactId !== null) {
-      await loadWorkDetail(refreshPlan.selectArtifactId);
-    }
-    const receiptRefresh = selectNeedsReceiptRefresh(response);
-    if (receiptRefresh.memory) {
-      await loadMemory();
-    }
-    if (receiptRefresh.notes) {
-      await loadNotes();
-    }
+    renderWorkspace();
+    await refreshAuthoritativeEffects(response);
     await loadChatSessions();
   } catch (error) {
     state = failPendingTurn(state, error);
     setChatStatus("");
     setText(document.querySelector("[data-chat-error]"), error.message);
     document.querySelector("[data-chat-error]").hidden = false;
+    renderWorkspace();
+    if (error.partialFailure) {
+      await refreshAuthoritativeEffects(error.partialFailure);
+    }
   }
   renderWorkspace();
 }

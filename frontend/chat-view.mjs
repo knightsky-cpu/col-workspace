@@ -101,19 +101,57 @@ export function renderReceipts(container, response) {
   appendAdaptationReceipts(container, response.adaptations);
 }
 
-export function renderTranscript(container, transcript) {
-  container.replaceChildren();
-  for (const turn of transcript) {
-    const article = element("article", "turn");
-    const user = element("div", "turn-user");
-    const model = element("div", "turn-model");
-    appendTurnMessage(user, "user", turn.request?.body?.message ?? "");
-    appendTurnMessage(model, "model", turn.response?.response ?? "");
-    article.append(user, model);
+function appendTranscriptTurn(
+  container,
+  turn,
+  { className = "", includeReceipts = true } = {},
+) {
+  const article = element("article", `turn ${className}`.trim());
+  if (className === "chat-turn--incomplete") {
+    article.setAttribute("aria-label", "Incomplete assistant response");
+  }
+  const user = element("div", "turn-user");
+  const model = element("div", "turn-model");
+  appendTurnMessage(user, "user", turn.request?.body?.message ?? "");
+  appendTurnMessage(model, "model", turn.response?.response ?? "");
+  article.append(user, model);
+  if (includeReceipts) {
     const receipts = element("div", "turn-receipts");
     renderReceipts(receipts, turn.response ?? {});
     article.append(receipts);
-    container.append(article);
+  }
+  container.append(article);
+}
+
+export function renderTranscript(
+  container,
+  transcript,
+  pendingTurn = null,
+  pendingResponseText = "",
+  lastFailure = null,
+) {
+  container.replaceChildren();
+  for (const turn of transcript) {
+    appendTranscriptTurn(container, turn);
+  }
+  if (pendingTurn !== null) {
+    appendTranscriptTurn(
+      container,
+      {
+        request: pendingTurn,
+        response: { response: pendingResponseText },
+      },
+      { className: "chat-turn--pending", includeReceipts: false },
+    );
+  } else if (lastFailure?.provisionalResponseText) {
+    appendTranscriptTurn(
+      container,
+      {
+        request: lastFailure.request,
+        response: { response: lastFailure.provisionalResponseText },
+      },
+      { className: "chat-turn--incomplete", includeReceipts: false },
+    );
   }
 }
 
@@ -205,7 +243,13 @@ export function createChatView(elements, handlers) {
   updateCharacterCount();
   return {
     render(state) {
-      renderTranscript(elements.transcript, state.transcript);
+      renderTranscript(
+        elements.transcript,
+        state.transcript,
+        state.pendingTurn,
+        state.pendingResponseText,
+        state.lastFailure,
+      );
       elements.transcript.scrollTop = elements.transcript.scrollHeight;
       elements.retryButton.hidden = state.lastFailure === null;
       elements.submitButton.disabled = state.pendingTurn !== null;

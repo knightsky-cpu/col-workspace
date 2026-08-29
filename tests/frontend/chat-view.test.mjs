@@ -95,6 +95,51 @@ test("renderTranscript keeps user text literal and renders model Markdown struct
   assert.equal(model.textContent, "");
 });
 
+test("renderTranscript renders pending assistant text as safe Markdown", () => {
+  const container = node();
+  renderTranscript(
+    container,
+    [],
+    { body: { message: "<img src=x onerror=alert(1)>" } },
+    "### Draft\n\nUse **bounded context**.",
+    null,
+  );
+
+  assert.equal(container.children.length, 1);
+  const turn = container.children[0];
+  const user = turn.children[0];
+  const model = turn.children[1];
+  assert.equal(turn.classList.values.includes("chat-turn--pending"), true);
+  assert.equal(user.children[1].textContent, "<img src=x onerror=alert(1)>");
+  assert.equal(model.children[1].children[0].tagName, "h3");
+  assert.equal(textTree(model).includes("bounded context"), true);
+  assert.doesNotMatch(textTree(model), /<img|###|\*\*/);
+  assert.equal(turn.children.length, 2);
+});
+
+test("renderTranscript marks failed provisional text as incomplete", () => {
+  const container = node();
+  renderTranscript(
+    container,
+    [],
+    null,
+    "",
+    {
+      request: { body: { message: "hello" } },
+      provisionalResponseText: "Incomplete **answer**",
+    },
+  );
+
+  assert.equal(container.children.length, 1);
+  const turn = container.children[0];
+  assert.equal(turn.classList.values.includes("chat-turn--incomplete"), true);
+  assert.equal(turn.attributes["aria-label"], "Incomplete assistant response");
+  assert.match(textTree(turn), /Incomplete/);
+  assert.match(textTree(turn), /answer/);
+  assert.doesNotMatch(textTree(turn), /\*\*/);
+  assert.equal(turn.children.length, 2);
+});
+
 test("renderReceipts renders structured fields and ignores prose claims", () => {
   const container = node();
   renderReceipts(container, {
