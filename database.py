@@ -2,7 +2,7 @@ import logging
 import math
 import re
 import secrets
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import NoReturn
@@ -424,7 +424,11 @@ class MemoryEngine:
         self._validate_limit(limit, "limit", maximum=50)
 
         try:
-            sessions_ref = self._client.collection("sessions")
+            sessions_ref = (
+                self._client.collection("sessions")
+                .where("user_id", "==", user_id)
+                .where("project_id", "==", project_id)
+            )
             sessions: list[ChatSessionSummary] = []
             async for snapshot in sessions_ref.limit(200).stream():
                 data = snapshot.to_dict()
@@ -679,6 +683,10 @@ class MemoryEngine:
                         merge=False,
                     )
                     return
+                await self._delete_non_default_workspace_owned_data(
+                    user_id,
+                    workspace_id,
+                )
                 transaction.delete(workspace_ref)
 
             run_transaction = firestore.async_transactional(
@@ -689,6 +697,100 @@ class MemoryEngine:
             raise
         except GoogleAPIError as exc:
             self._raise_firestore_error("delete_workspace", exc)
+
+    async def _delete_non_default_workspace_owned_data(
+        self,
+        user_id: str,
+        workspace_id: str,
+    ) -> None:
+        user_ref = self._client.collection("users").document(user_id)
+        workspace_ref = user_ref.collection("workspaces").document(
+            workspace_id
+        )
+        project_ref = self._client.collection("projects").document(
+            workspace_id
+        )
+        await self._delete_collection_documents(
+            workspace_ref.collection("note_proposals")
+        )
+        await self._delete_notes_collection(
+            workspace_ref.collection("collaborative_notes")
+        )
+        await self._delete_collection_documents(
+            workspace_ref.collection("preference_observations")
+        )
+        await self._delete_collection_documents(
+            workspace_ref.collection("preference_hypotheses")
+        )
+        await self._delete_project_blueprints(
+            project_ref.collection("blueprints")
+        )
+        await self._delete_collection_documents(
+            project_ref.collection("artifacts")
+        )
+        await self._delete_workspace_chat_sessions(user_id, workspace_id)
+        await project_ref.delete()
+
+    async def _delete_notes_collection(self, notes_ref: object) -> None:
+        async for snapshot in self._stream_collection_pages(notes_ref):
+            note_ref = snapshot.reference
+            await self._delete_collection_documents(
+                note_ref.collection("events")
+            )
+            await note_ref.delete()
+
+    async def _delete_project_blueprints(self, blueprints_ref: object) -> None:
+        async for snapshot in self._stream_collection_pages(blueprints_ref):
+            blueprint_ref = snapshot.reference
+            await self._delete_collection_documents(
+                blueprint_ref.collection("feedback")
+            )
+            await self._delete_collection_documents(
+                blueprint_ref.collection("feedback_supersessions")
+            )
+            await blueprint_ref.delete()
+
+    async def _delete_workspace_chat_sessions(
+        self,
+        user_id: str,
+        workspace_id: str,
+    ) -> None:
+        query = (
+            self._client.collection("sessions")
+            .where("user_id", "==", user_id)
+            .where("project_id", "==", workspace_id)
+        )
+        async for snapshot in self._stream_collection_pages(query):
+            session_ref = snapshot.reference
+            for collection_name in (
+                "messages",
+                "turns",
+                "memory_clarifications",
+                "working_state",
+            ):
+                await self._delete_collection_documents(
+                    session_ref.collection(collection_name)
+                )
+            await session_ref.delete()
+
+    async def _delete_collection_documents(self, collection_ref: object) -> None:
+        async for snapshot in self._stream_collection_pages(collection_ref):
+            await snapshot.reference.delete()
+
+    async def _stream_collection_pages(
+        self,
+        collection_ref: object,
+    ) -> AsyncIterator[object]:
+        while True:
+            snapshots = [
+                snapshot async for snapshot in collection_ref.limit(200).stream()
+            ]
+            if not snapshots:
+                return
+            for snapshot in snapshots:
+                yield snapshot
+            if len(snapshots) < 200:
+                return
 
     async def create_collaborative_note_proposal(
         self,

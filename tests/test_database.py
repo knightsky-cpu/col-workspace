@@ -46,6 +46,20 @@ def document_snapshot(*, exists: bool, data: object = None) -> SimpleNamespace:
     return SimpleNamespace(exists=exists, to_dict=lambda: data)
 
 
+class PagedCollection:
+    def __init__(self, pages: list[list[object]]) -> None:
+        self.pages = pages
+        self.limit_calls: list[int] = []
+
+    def limit(self, value: int) -> "PagedCollection":
+        self.limit_calls.append(value)
+        return self
+
+    def stream(self) -> AsyncSnapshotStream:
+        page = self.pages.pop(0) if self.pages else []
+        return AsyncSnapshotStream(page)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "stored_session",
@@ -372,6 +386,12 @@ async def test_delete_non_default_workspace_removes_metadata_when_other_workspac
         target_snapshot
     ])
     client.transaction.return_value = transaction
+    cleanup = AsyncMock()
+    monkeypatch.setattr(
+        MemoryEngine,
+        "_delete_non_default_workspace_owned_data",
+        cleanup,
+    )
 
     await MemoryEngine(client).delete_workspace(
         user_id="user-1",
@@ -380,7 +400,236 @@ async def test_delete_non_default_workspace_removes_metadata_when_other_workspac
         default_display_name="Agent Col",
     )
 
+    cleanup.assert_awaited_once_with(
+        "user-1",
+        "project--abc--study-plans",
+    )
     transaction.delete.assert_called_once_with(target_ref)
+
+
+@pytest.mark.asyncio
+async def test_delete_non_default_workspace_removes_owned_data_before_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    workspaces = MagicMock()
+    target_ref = MagicMock()
+    transaction = MagicMock()
+    operations: list[str] = []
+    target_snapshot = SimpleNamespace(
+        id="project--abc--study-plans",
+        to_dict=lambda: {
+            "workspace_id": "project--abc--study-plans",
+            "display_name": "Study Plans",
+            "is_default": False,
+        },
+    )
+
+    client.collection.return_value = users
+    users.document.return_value = user
+    user.collection.return_value = workspaces
+    workspaces.document.return_value = target_ref
+    workspaces.limit.return_value.stream.return_value = AsyncSnapshotStream([
+        target_snapshot
+    ])
+    client.transaction.return_value = transaction
+    transaction.set.side_effect = lambda *args, **kwargs: operations.append(
+        "touch-user"
+    )
+    transaction.delete.side_effect = lambda *args: operations.append(
+        "delete-workspace-metadata"
+    )
+    cleanup = AsyncMock(side_effect=lambda *args, **kwargs: operations.append(
+        "delete-owned-data"
+    ))
+    monkeypatch.setattr(
+        MemoryEngine,
+        "_delete_non_default_workspace_owned_data",
+        cleanup,
+    )
+
+    await MemoryEngine(client).delete_workspace(
+        user_id="user-1",
+        workspace_id="project--abc--study-plans",
+        default_workspace_id="agent-col",
+        default_display_name="Agent Col",
+    )
+
+    cleanup.assert_awaited_once_with(
+        "user-1",
+        "project--abc--study-plans",
+    )
+    assert operations.index("delete-owned-data") < operations.index(
+        "delete-workspace-metadata"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_default_workspace_does_not_remove_owned_data(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client = MagicMock()
+    users = MagicMock()
+    user = MagicMock()
+    workspaces = MagicMock()
+    default_ref = MagicMock()
+    other_ref = MagicMock()
+    transaction = MagicMock()
+    other_snapshot = SimpleNamespace(
+        id="project--abc--study-plans",
+        to_dict=lambda: {
+            "workspace_id": "project--abc--study-plans",
+            "display_name": "Study Plans",
+            "is_default": False,
+        },
+    )
+
+    client.collection.return_value = users
+    users.document.return_value = user
+    user.collection.return_value = workspaces
+    workspaces.document.side_effect = lambda workspace_id: {
+        "agent-col": default_ref,
+        "project--abc--study-plans": other_ref,
+    }[workspace_id]
+    workspaces.limit.return_value.stream.return_value = AsyncSnapshotStream([
+        other_snapshot
+    ])
+    client.transaction.return_value = transaction
+    cleanup = AsyncMock()
+    monkeypatch.setattr(
+        MemoryEngine,
+        "_delete_non_default_workspace_owned_data",
+        cleanup,
+    )
+
+    await MemoryEngine(client).delete_workspace(
+        user_id="user-1",
+        workspace_id="agent-col",
+        default_workspace_id="agent-col",
+        default_display_name="Agent Col",
+    )
+
+    cleanup.assert_not_awaited()
+    transaction.set.assert_any_call(
+        default_ref,
+        {
+            "workspace_contract_version": "1.0",
+            "workspace_id": "agent-col",
+            "display_name": "Agent Col",
+            "deleted": True,
+            "is_default": True,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_collection_documents_paginates_until_empty() -> None:
+    first_page_refs = [MagicMock() for _ in range(200)]
+    second_page_ref = MagicMock()
+    collection = PagedCollection(
+        [
+            [
+                SimpleNamespace(reference=reference)
+                for reference in first_page_refs
+            ],
+            [SimpleNamespace(reference=second_page_ref)],
+            [],
+        ]
+    )
+    for reference in (*first_page_refs, second_page_ref):
+        reference.delete = AsyncMock()
+
+    await MemoryEngine(MagicMock())._delete_collection_documents(collection)
+
+    for reference in (*first_page_refs, second_page_ref):
+        reference.delete.assert_awaited_once_with()
+    assert collection.limit_calls == [200, 200]
+
+
+@pytest.mark.asyncio
+async def test_delete_notes_collection_paginates_and_removes_events() -> None:
+    first_note_refs = [MagicMock() for _ in range(200)]
+    second_note_ref = MagicMock()
+    event_collections: list[MagicMock] = []
+    for note_ref in (*first_note_refs, second_note_ref):
+        events = MagicMock()
+        event_collections.append(events)
+        note_ref.collection.return_value = events
+        note_ref.delete = AsyncMock()
+
+    notes = PagedCollection(
+        [
+            [
+                SimpleNamespace(reference=reference)
+                for reference in first_note_refs
+            ],
+            [SimpleNamespace(reference=second_note_ref)],
+            [],
+        ]
+    )
+    engine = MemoryEngine(MagicMock())
+    engine._delete_collection_documents = AsyncMock()
+
+    await engine._delete_notes_collection(notes)
+
+    for note_ref in (*first_note_refs, second_note_ref):
+        note_ref.collection.assert_called_once_with("events")
+        note_ref.delete.assert_awaited_once_with()
+    assert engine._delete_collection_documents.await_args_list == [
+        call(events) for events in event_collections
+    ]
+    assert notes.limit_calls == [200, 200]
+
+
+@pytest.mark.asyncio
+async def test_delete_project_blueprints_paginates_and_removes_feedback(
+) -> None:
+    first_blueprint_refs = [MagicMock() for _ in range(200)]
+    second_blueprint_ref = MagicMock()
+    nested_collections: list[MagicMock] = []
+    for blueprint_ref in (*first_blueprint_refs, second_blueprint_ref):
+        feedback = MagicMock()
+        supersessions = MagicMock()
+        nested_collections.extend([feedback, supersessions])
+        blueprint_ref.collection.side_effect = (
+            lambda name, *, feedback=feedback, supersessions=supersessions: {
+                "feedback": feedback,
+                "feedback_supersessions": supersessions,
+            }[name]
+        )
+        blueprint_ref.delete = AsyncMock()
+
+    blueprints = PagedCollection(
+        [
+            [
+                SimpleNamespace(reference=reference)
+                for reference in first_blueprint_refs
+            ],
+            [SimpleNamespace(reference=second_blueprint_ref)],
+            [],
+        ]
+    )
+    engine = MemoryEngine(MagicMock())
+    engine._delete_collection_documents = AsyncMock()
+
+    await engine._delete_project_blueprints(blueprints)
+
+    for blueprint_ref in (*first_blueprint_refs, second_blueprint_ref):
+        assert blueprint_ref.collection.call_args_list == [
+            call("feedback"),
+            call("feedback_supersessions"),
+        ]
+        blueprint_ref.delete.assert_awaited_once_with()
+    assert engine._delete_collection_documents.await_args_list == [
+        call(collection) for collection in nested_collections
+    ]
+    assert blueprints.limit_calls == [200, 200]
 
 
 @pytest.mark.asyncio
@@ -1128,9 +1377,13 @@ async def test_get_chat_history_rejects_malformed_session_ownership_before_query
 async def test_list_chat_sessions_filters_user_project_metadata() -> None:
     client = MagicMock()
     sessions = MagicMock()
+    user_query = MagicMock()
+    project_query = MagicMock()
     limited = MagicMock()
     client.collection.return_value = sessions
-    sessions.limit.return_value = limited
+    sessions.where.return_value = user_query
+    user_query.where.return_value = project_query
+    project_query.limit.return_value = limited
     limited.stream.return_value = snapshot_stream_with_ids(
         [
             (
@@ -1168,7 +1421,14 @@ async def test_list_chat_sessions_filters_user_project_metadata() -> None:
     ]
     assert result.sessions[0].last_message_preview == "new question"
     assert result.sessions[0].display_title == "API TUI app"
-    sessions.limit.assert_called_once_with(200)
+    sessions.where.assert_called_once_with("user_id", "==", "user-1")
+    user_query.where.assert_called_once_with(
+        "project_id",
+        "==",
+        "project-1",
+    )
+    project_query.limit.assert_called_once_with(200)
+    sessions.limit.assert_not_called()
 
 
 @pytest.mark.asyncio
