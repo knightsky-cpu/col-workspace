@@ -1,5 +1,48 @@
 # Unsafe Frontend Work Notes
 
+## 2026-08-28 - Accepted U7 Chat Receipt And Adaptation Disclosure Pass
+
+Status: accepted after user manual visual verification.
+
+Scope:
+- Implemented Pass U7 for chat receipt rendering only.
+- Moved adaptation receipts out of the flat receipt list into one collapsed native disclosure.
+- Used the visible summary label `Verified adaptations (N)` so adaptation proof remains inspectable without dominating the conversation.
+- Kept action, citation, artifact, feedback, memory proposal, note proposal, note event, and continuity receipts visible in the normal flat receipt list.
+- Preserved adaptation data in the response object and state/activity projection behavior.
+- Preserved text-safe rendering through `humanLabel(...)`, `humanValue(...)`, and text nodes.
+- Preserved raw-ID hiding for `signal_id`, `source_event_id`, proposal IDs, continuity IDs, and prose-only tool claims.
+- Added compact disclosure styling for the adaptation parent and nested receipt list.
+
+Source changed:
+- `frontend/chat-view.mjs`: added adaptation receipt value extraction and a collapsed adaptation receipt disclosure while preserving the existing flat receipt path for non-adaptation receipts.
+- `frontend/styles.css`: added `.receipt-disclosure`, `.receipt-disclosure__summary`, `.receipt-list--disclosure`, and small spacing for receipt groups.
+- `tests/frontend/chat-view.test.mjs`: covered collapsed adaptation disclosure, summary count, raw-ID hiding, nested adaptation values, and unchanged non-adaptation receipt rendering.
+- `tests/frontend/workspace-static.test.mjs`: covered compact disclosure styling hooks.
+
+TDD evidence:
+- RED 1: `node --test tests/frontend/chat-view.test.mjs` failed because adaptations were still inline in the flat `ul`, not inside collapsed `details`.
+- GREEN 1: added focused adaptation helper functions and rendered adaptations inside native `details`/`summary`.
+- RED 2: `node --test tests/frontend/workspace-static.test.mjs` failed because receipt disclosure CSS hooks did not exist.
+- GREEN 2: added compact disclosure CSS for the parent summary and nested receipt list.
+- REFACTOR: no broad refactor; extraction stayed limited to adaptation receipt rendering.
+
+Verification:
+- `node --test tests/frontend/chat-view.test.mjs` passed: 11 tests.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 14 tests.
+- `node --test tests/frontend/chat-view.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-static.test.mjs` passed: 70 tests.
+- `node --check frontend/chat-view.mjs` passed.
+- `git diff --check` passed.
+
+Manual verification result:
+- User confirmed the U7 pass successful.
+
+Deferred:
+- Tune chat icons/text colors/counter severity.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+
 ## 2026-08-28 - Accepted U6A/U6B Per-Letter Chat Pending Animation Correction
 
 Status: accepted after user manual visual verification.

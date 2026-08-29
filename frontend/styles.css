@@ -474,6 +474,8 @@ p {
 }
 
 .turn-receipts {
+  display: grid;
+  gap: 0.45rem;
   min-width: 0;
 }
 
@@ -493,6 +495,26 @@ p {
   background: rgba(54, 214, 194, 0.08);
   color: #bceee6;
   font-size: 0.875rem;
+}
+
+.receipt-disclosure {
+  justify-self: start;
+  max-width: 100%;
+}
+
+.receipt-disclosure__summary {
+  border: 1px solid rgba(243, 182, 75, 0.26);
+  border-radius: var(--radius);
+  background: rgba(243, 182, 75, 0.08);
+  color: #f5c56d;
+  cursor: pointer;
+  font-size: 0.875rem;
+  list-style-position: inside;
+  padding: 0.25rem 0.45rem;
+}
+
+.receipt-list--disclosure {
+  margin-block-start: 0.45rem;
 }
 
 .composer {

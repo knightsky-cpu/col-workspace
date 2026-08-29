@@ -93,18 +93,27 @@ test("renderReceipts renders structured fields and ignores prose claims", () => 
   });
 
   const text = textTree(container);
+  const receiptList = container.children[0];
+  const adaptationDisclosure = container.children[1];
+  assert.equal(container.children.length, 2);
   assert.match(text, /Url context/);
   assert.match(text, /Example Domain/);
   assert.match(text, /Blueprint/);
   assert.match(text, /Response length/);
-  assert.match(text, /Adaptation: Planning granularity/);
+  assert.equal(receiptList.tagName, "ul");
+  assert.equal(adaptationDisclosure.tagName, "details");
+  assert.equal(adaptationDisclosure.attributes.open, undefined);
+  assert.equal(adaptationDisclosure.children[0].tagName, "summary");
+  assert.equal(adaptationDisclosure.children[0].textContent, "Verified adaptations (1)");
+  assert.doesNotMatch(textTree(receiptList), /Adaptation: Planning granularity/);
+  assert.match(textTree(adaptationDisclosure), /Planning granularity/);
   assert.match(text, /Short plan first/);
   assert.doesNotMatch(text, /response_length--1/);
   assert.doesNotMatch(text, /planning_granularity--1/);
   assert.doesNotMatch(text, /planning_granularity--1--approved/);
   assert.doesNotMatch(text, /google_search/);
   assert.equal(
-    container.children[0].children.every((receipt) => (
+    receiptList.children.every((receipt) => (
       receipt.classList.values.includes("contain-text")
     )),
     true,
@@ -133,7 +142,11 @@ test("renderReceipts renders list-valued adaptation proof without raw ids", () =
   });
 
   const text = textTree(container);
-  assert.match(text, /Adaptation: Development environments/);
+  assert.equal(container.children.length, 1);
+  assert.equal(container.children[0].tagName, "details");
+  assert.equal(container.children[0].attributes.open, undefined);
+  assert.equal(container.children[0].children[0].textContent, "Verified adaptations (1)");
+  assert.match(text, /Development environments/);
   assert.match(text, /Macos, Linux/);
   assert.doesNotMatch(text, /development_environments--active-v2/);
   assert.doesNotMatch(text, /development_environments--active-v2--approved/);

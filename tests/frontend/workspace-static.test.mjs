@@ -156,3 +156,12 @@ test("chat pending status keeps live text while exposing per-letter reduced-moti
     /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-status\[data-chat-status-state="pending"\] \.chat-status__letter[\s\S]*?animation:\s*none/,
   );
 });
+
+test("chat adaptation receipts have compact disclosure styling hooks", () => {
+  assert.match(styles, /\.receipt-disclosure\s*\{/);
+  assert.match(styles, /\.receipt-disclosure__summary\s*\{/);
+  assert.match(styles, /\.receipt-list--disclosure\s*\{/);
+  assert.match(styles, /\.receipt-disclosure__summary\s*\{[\s\S]*?cursor:\s*pointer/);
+  assert.match(styles, /\.receipt-disclosure__summary\s*\{[\s\S]*?font-size:\s*0\.875rem/);
+  assert.match(styles, /\.receipt-list--disclosure\s*\{[\s\S]*?margin-block-start:\s*0\.45rem/);
+});

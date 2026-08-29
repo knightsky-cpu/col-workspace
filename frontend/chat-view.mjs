@@ -6,6 +6,38 @@ function appendReceipt(container, label, value) {
   container.append(item);
 }
 
+function adaptationReceiptValue(adaptation) {
+  if (
+    !adaptation
+    || typeof adaptation !== "object"
+    || typeof adaptation.category !== "string"
+  ) {
+    return "";
+  }
+  return [humanLabel(adaptation.category), humanValue(adaptation.value)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function appendAdaptationReceipts(container, adaptations) {
+  const values = (adaptations ?? [])
+    .map(adaptationReceiptValue)
+    .filter(Boolean);
+  if (values.length === 0) {
+    return;
+  }
+
+  const disclosure = element("details", "receipt-disclosure");
+  const summary = element("summary", "receipt-disclosure__summary contain-text");
+  summary.textContent = `Verified adaptations (${values.length})`;
+  const list = element("ul", "receipt-list receipt-list--disclosure");
+  for (const value of values) {
+    appendReceipt(list, "Adaptation", value);
+  }
+  disclosure.append(summary, list);
+  container.append(disclosure);
+}
+
 export function renderReceipts(container, response) {
   container.replaceChildren();
   const list = element("ul", "receipt-list");
@@ -45,25 +77,10 @@ export function renderReceipts(container, response) {
       String(receipt.display_label ?? "").replace(/^Used note:\s*/i, ""),
     );
   }
-  for (const adaptation of response.adaptations ?? []) {
-    if (
-      !adaptation
-      || typeof adaptation !== "object"
-      || typeof adaptation.category !== "string"
-    ) {
-      continue;
-    }
-    appendReceipt(
-      list,
-      "Adaptation",
-      [humanLabel(adaptation.category), humanValue(adaptation.value)]
-        .filter(Boolean)
-        .join(" · "),
-    );
-  }
   if (list.children.length > 0) {
     container.append(list);
   }
+  appendAdaptationReceipts(container, response.adaptations);
 }
 
 export function renderTranscript(container, transcript) {
