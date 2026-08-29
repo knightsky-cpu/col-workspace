@@ -221,7 +221,7 @@ class MemoryRevocationResult:
     """Return the governed state created by a memory revocation."""
 
     profile: VersionedCollaborationProfile
-    event: VersionedMemoryEvent
+    event: VersionedMemoryEvent | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -6839,27 +6839,7 @@ class MemoryEngine:
             source_snapshot = await source_event_ref.get(
                 transaction=transaction
             )
-            if not source_snapshot.exists:
-                raise ValueError("Active memory source event does not exist.")
-            source_event = self._versioned_memory_event_from_document(
-                active_signal.source_event_id,
-                source_snapshot.to_dict(),
-            )
-            self._validate_active_signal_source(active_signal, source_event)
-
             revision = profile.memory_revision + 1
-            revoked_event = self._signal_memory_event(
-                active_signal,
-                source_event=source_event,
-                event_id=revoked_event_id,
-                event_type="revoked",
-                confirmation_channel=confirmation_channel,
-                confirmation_session_id=confirmation_session_id,
-                confirmation_message_id=confirmation_message_id,
-                related_signal_id=None,
-                memory_revision=revision,
-                created_at=observed_at,
-            )
             identity_context = dict(profile.identity_context)
             active_preferences = dict(profile.active_preferences)
             identity_context.pop(category, None)
@@ -6874,14 +6854,47 @@ class MemoryEngine:
                 identity_context=identity_context,
                 active_preferences=active_preferences,
             )
+            if not source_snapshot.exists:
+                transaction.set(
+                    user_ref,
+                    self._collaboration_profile_removal_document(
+                        updated_profile,
+                        removed_category=category,
+                        refresh_approved_at=False,
+                    ),
+                    merge=True,
+                )
+                return MemoryRevocationResult(
+                    profile=updated_profile,
+                    event=None,
+                )
+            source_event = self._versioned_memory_event_from_document(
+                active_signal.source_event_id,
+                source_snapshot.to_dict(),
+            )
+            self._validate_active_signal_source(active_signal, source_event)
+
+            revoked_event = self._signal_memory_event(
+                active_signal,
+                source_event=source_event,
+                event_id=revoked_event_id,
+                event_type="revoked",
+                confirmation_channel=confirmation_channel,
+                confirmation_session_id=confirmation_session_id,
+                confirmation_message_id=confirmation_message_id,
+                related_signal_id=None,
+                memory_revision=revision,
+                created_at=observed_at,
+            )
             transaction.set(
                 revoked_event_ref,
                 self._memory_event_document(revoked_event),
             )
             transaction.set(
                 user_ref,
-                self._collaboration_profile_document(
+                self._collaboration_profile_removal_document(
                     updated_profile,
+                    removed_category=category,
                     refresh_approved_at=False,
                 ),
                 merge=True,
@@ -7033,8 +7046,9 @@ class MemoryEngine:
             )
             transaction.set(
                 user_ref,
-                self._collaboration_profile_document(
+                self._collaboration_profile_removal_document(
                     updated_profile,
+                    removed_category=category,
                     refresh_approved_at=False,
                 ),
                 merge=True,
@@ -7569,6 +7583,35 @@ class MemoryEngine:
                 for signal in signals.values():
                     signal["approved_at"] = firestore.SERVER_TIMESTAMP
         document["memory_updated_at"] = firestore.SERVER_TIMESTAMP
+        return document
+
+    @staticmethod
+    def _collaboration_profile_removal_document(
+        profile: VersionedCollaborationProfile,
+        *,
+        removed_category: MemoryCategoryV2,
+        refresh_approved_at: bool = True,
+    ) -> dict[str, object]:
+        document = MemoryEngine._collaboration_profile_document(
+            profile,
+            refresh_approved_at=refresh_approved_at,
+        )
+        projection_field = (
+            "identity_context"
+            if removed_category in (
+                "preferred_name",
+                "broad_roles",
+                "domain_experience",
+            )
+            else "active_preferences"
+        )
+        projections = document.get(projection_field)
+        if (
+            isinstance(projections, dict)
+            and projections
+            and removed_category not in projections
+        ):
+            projections[removed_category] = firestore.DELETE_FIELD
         return document
 
     @staticmethod

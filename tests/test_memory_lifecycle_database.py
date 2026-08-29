@@ -533,6 +533,123 @@ async def test_revoke_memory_signal_reads_all_documents_before_writing(
 
 
 @pytest.mark.asyncio
+async def test_revoke_memory_signal_removes_orphaned_active_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client, user, _, _, event_refs = lifecycle_store()
+    transaction = MagicMock()
+    client.transaction.return_value = transaction
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=active_profile_document,
+        )
+    )
+    revoked_ref = event_refs.setdefault(REVOKED_EVENT_ID, MagicMock())
+    revoked_ref.get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+    source_ref = event_refs.setdefault(APPROVED_EVENT_ID, MagicMock())
+    source_ref.get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+
+    result = await MemoryEngine(client).revoke_memory_signal(
+        "user-1",
+        "response_length",
+        SIGNAL_ID,
+        confirmation_channel="memory_api",
+        confirmation_session_id=None,
+        confirmation_message_id=None,
+        observed_at=NOW,
+    )
+
+    assert result.profile.memory_revision == 2
+    assert result.profile.active_preferences == {}
+    assert result.event is None
+    transaction.set.assert_called_once_with(
+        user,
+        {
+            "memory_schema_version": "1.0",
+            "memory_revision": 2,
+            "identity_context": {},
+            "active_preferences": {},
+            "memory_updated_at": firestore.SERVER_TIMESTAMP,
+        },
+        merge=True,
+    )
+    transaction.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_revoke_memory_signal_deletes_removed_projection_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    client, user, _, _, event_refs = lifecycle_store()
+    transaction = MagicMock()
+    client.transaction.return_value = transaction
+    retained_signal = {
+        "signal_id": "planning_granularity--signal-1",
+        "category": "planning_granularity",
+        "value": "tasks",
+        "policy_version": "1.0",
+        "source_event_id": "planning_granularity--signal-1--approved",
+        "approved_at": NOW,
+    }
+    user.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=lambda: {
+                **active_profile_document(),
+                "active_preferences": {
+                    **active_profile_document()["active_preferences"],
+                    "planning_granularity": retained_signal,
+                },
+            },
+        )
+    )
+    revoked_ref = event_refs.setdefault(REVOKED_EVENT_ID, MagicMock())
+    revoked_ref.get = AsyncMock(
+        return_value=SimpleNamespace(exists=False, to_dict=lambda: None)
+    )
+    source_ref = event_refs.setdefault(APPROVED_EVENT_ID, MagicMock())
+    source_ref.get = AsyncMock(
+        return_value=SimpleNamespace(
+            exists=True,
+            to_dict=approved_event_document,
+        )
+    )
+
+    result = await MemoryEngine(client).revoke_memory_signal(
+        "user-1",
+        "response_length",
+        SIGNAL_ID,
+        confirmation_channel="memory_api",
+        confirmation_session_id=None,
+        confirmation_message_id=None,
+        observed_at=NOW,
+    )
+
+    assert "response_length" not in result.profile.active_preferences
+    assert result.profile.active_preferences["planning_granularity"].value == (
+        "tasks"
+    )
+    persisted_profile = transaction.set.call_args_list[1].args[1]
+    assert (
+        persisted_profile["active_preferences"]["response_length"]
+        is firestore.DELETE_FIELD
+    )
+    assert (
+        persisted_profile["active_preferences"]["planning_granularity"][
+            "signal_id"
+        ]
+        == "planning_granularity--signal-1"
+    )
+
+
+@pytest.mark.asyncio
 async def test_revoke_memory_signal_fails_closed_for_active_revoked_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1029,6 +1146,55 @@ async def test_delete_memory_signal_creates_revision_root_for_orphan_history(
     )
     transaction.delete.assert_called_once_with(
         event_refs[APPROVED_EVENT_ID]
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_memory_signal_deletes_removed_projection_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    retained_signal = {
+        "signal_id": "planning_granularity--signal-1",
+        "category": "planning_granularity",
+        "value": "tasks",
+        "policy_version": "1.0",
+        "source_event_id": "planning_granularity--signal-1--approved",
+        "approved_at": NOW,
+    }
+    client, _, _, _, transaction = configure_delete_state(
+        profile_exists=True,
+        profile_document={
+            **active_profile_document(),
+            "active_preferences": {
+                **active_profile_document()["active_preferences"],
+                "planning_granularity": retained_signal,
+            },
+        },
+        proposal_document=None,
+        event_documents={"approved": approved_event_document()},
+    )
+
+    result = await MemoryEngine(client).delete_memory_signal(
+        "user-1",
+        "response_length",
+        SIGNAL_ID,
+    )
+
+    assert "response_length" not in result.profile.active_preferences
+    assert result.profile.active_preferences["planning_granularity"].value == (
+        "tasks"
+    )
+    persisted_profile = transaction.set.call_args.args[1]
+    assert (
+        persisted_profile["active_preferences"]["response_length"]
+        is firestore.DELETE_FIELD
+    )
+    assert (
+        persisted_profile["active_preferences"]["planning_granularity"][
+            "signal_id"
+        ]
+        == "planning_granularity--signal-1"
     )
 
 
