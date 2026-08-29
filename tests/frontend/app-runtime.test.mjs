@@ -464,11 +464,21 @@ test("memory sub-card revoke and delete do not depend on chat submit readiness",
     ) {
       return jsonResponse(200, {
         action: { action_name: "revoke_memory_signal", status: "completed" },
-        profile: { active_preferences: {} },
+        profile: {
+          active_preferences: {
+            planning_granularity: {
+              category: "planning_granularity",
+              signal_id: "planning_granularity--signal-1",
+              value: "implementation pass",
+              source_event_id: "planning_granularity--signal-1--approved",
+            },
+          },
+          identity_context: {},
+        },
       });
     }
     if (
-      path === "/api/users/wifiknight/memory/signals/response_length--signal-1"
+      path === "/api/users/wifiknight/memory/signals/planning_granularity--signal-1"
       && method === "DELETE"
     ) {
       return new Response(null, { status: 204 });
@@ -496,6 +506,12 @@ test("memory sub-card revoke and delete do not depend on chat submit readiness",
               signal_id: "response_length--signal-1",
               value: "concise",
               source_event_id: "response_length--signal-1--approved",
+            },
+            planning_granularity: {
+              category: "planning_granularity",
+              signal_id: "planning_granularity--signal-1",
+              value: "implementation pass",
+              source_event_id: "planning_granularity--signal-1--approved",
             },
           },
           identity_context: {},
@@ -552,7 +568,19 @@ test("memory sub-card revoke and delete do not depend on chat submit readiness",
     )),
     () => JSON.stringify(calls),
   );
+  await waitFor(
+    () => !findTree(
+      elements.get("[data-memory-panel]"),
+      (item) => item.attributes["data-memory-signal"] === "response_length--signal-1",
+    ),
+    () => elements.get("[data-memory-panel]").textContent,
+  );
 
+  const remainingSignalToggle = findTree(
+    elements.get("[data-memory-panel]"),
+    (item) => item.attributes["data-memory-signal"] === "planning_granularity--signal-1",
+  ).children[0];
+  remainingSignalToggle.onclick();
   const deleteButton = findTree(
     elements.get("[data-memory-panel]"),
     (item) => item.attributes["data-memory-signal-action"] === "delete",
@@ -560,9 +588,16 @@ test("memory sub-card revoke and delete do not depend on chat submit readiness",
   deleteButton.onclick();
   await waitFor(
     () => calls.some(([path, method]) => (
-      path === "/api/users/wifiknight/memory/signals/response_length--signal-1"
+      path === "/api/users/wifiknight/memory/signals/planning_granularity--signal-1"
       && method === "DELETE"
     )),
     () => JSON.stringify(calls),
+  );
+  await waitFor(
+    () => !findTree(
+      elements.get("[data-memory-panel]"),
+      (item) => item.attributes["data-memory-signal"] === "planning_granularity--signal-1",
+    ),
+    () => elements.get("[data-memory-panel]").textContent,
   );
 });

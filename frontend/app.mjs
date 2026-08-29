@@ -77,6 +77,7 @@ import {
   beginWorkDetailLoad,
   beginWorkListLoad,
   completeMemoryLoad,
+  completeMemorySignalMutation,
   completeNoteDetailLoad,
   completeNoteRequest,
   completeNotesLoad,
@@ -1236,12 +1237,16 @@ async function revokeActiveMemorySignal(signal) {
   }
   clearMemoryError();
   try {
-    await revokeMemorySignal(
+    const response = await revokeMemorySignal(
       state.context.user_id,
       signal.signal_id,
       authOptions(),
     );
-    await loadMemory();
+    state = completeMemorySignalMutation(
+      state,
+      signal.signal_id,
+      response.profile,
+    );
   } catch (error) {
     showMemoryError(error.message);
   }
@@ -1259,7 +1264,7 @@ async function deleteActiveMemorySignal(signal) {
       signal.signal_id,
       authOptions(),
     );
-    await loadMemory();
+    state = completeMemorySignalMutation(state, signal.signal_id);
   } catch (error) {
     showMemoryError(error.message);
   }

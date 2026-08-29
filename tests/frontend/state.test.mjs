@@ -24,6 +24,7 @@ import {
   completeWorkspaceListLoad,
   completeWorkListLoad,
   completeMemoryLoad,
+  completeMemorySignalMutation,
   completeNoteDetailLoad,
   completeNotesLoad,
   completePendingTurn,
@@ -1480,6 +1481,53 @@ test("memory lifecycle stores profile, unresolved proposals, events, and cursor"
     completed.memory.next_event_id,
     "response_length--signal-1--approved",
   );
+});
+
+test("memory signal mutation removes a saved memory and disclosure state", () => {
+  const loaded = completeMemoryLoad(createInitialState(), {
+    profile: {
+      memory_schema_version: "1.0",
+      memory_revision: 1,
+      identity_context: {
+        preferred_name: {
+          signal_id: "preferred_name--signal-1",
+          value: "wifiknight",
+        },
+      },
+      active_preferences: {
+        response_length: {
+          signal_id: "response_length--signal-1",
+          value: "concise",
+        },
+      },
+    },
+    unresolved_proposals: [{ proposal_id: "response_length--proposal-2" }],
+    events: [{ event_id: "event-1" }],
+  });
+  const expanded = toggleMemoryDisclosure(
+    loaded,
+    "response_length--signal-1",
+    "signal",
+  );
+
+  const updated = completeMemorySignalMutation(
+    expanded,
+    "response_length--signal-1",
+  );
+
+  assert.equal(
+    updated.memory.profile.active_preferences.response_length,
+    undefined,
+  );
+  assert.equal(
+    updated.memory.profile.identity_context.preferred_name.signal_id,
+    "preferred_name--signal-1",
+  );
+  assert.deepEqual(updated.memory.unresolvedProposals, [{
+    proposal_id: "response_length--proposal-2",
+  }]);
+  assert.deepEqual(updated.memory.events, [{ event_id: "event-1" }]);
+  assert.deepEqual(updated.disclosure.memory.signalIds, []);
 });
 
 test("memory load failures store safe error messages", () => {

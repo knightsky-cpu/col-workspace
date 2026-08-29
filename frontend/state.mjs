@@ -1279,6 +1279,46 @@ export function completeMemoryLoad(state, response) {
   };
 }
 
+function profileWithoutMemorySignal(profile, signalId) {
+  if (!profile || typeof profile !== "object") {
+    return profile ?? null;
+  }
+  const nextProfile = { ...profile };
+  for (const key of ["identity_context", "active_preferences"]) {
+    const entries = profile[key];
+    if (!entries || typeof entries !== "object") {
+      continue;
+    }
+    nextProfile[key] = Object.fromEntries(
+      Object.entries(entries).filter(([, signal]) => (
+        signal?.signal_id !== signalId
+      )),
+    );
+  }
+  return nextProfile;
+}
+
+export function completeMemorySignalMutation(state, signalId, profile = null) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      memory: {
+        ...state.disclosure.memory,
+        signalIds: state.disclosure.memory.signalIds.filter((id) => (
+          id !== signalId
+        )),
+      },
+    },
+    memory: {
+      ...state.memory,
+      status: "ready",
+      profile: profile ?? profileWithoutMemorySignal(state.memory.profile, signalId),
+      error: null,
+    },
+  };
+}
+
 export function failMemoryLoad(state, error) {
   return {
     ...state,
