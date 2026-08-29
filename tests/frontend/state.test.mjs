@@ -50,6 +50,7 @@ import {
   startNewConversation,
   toggleArtifactDisclosure,
   toggleChatDisclosure,
+  toggleMemoryEventsDisclosure,
   toggleMemoryDisclosure,
   toggleNoteDetailDisclosure,
   toggleNoteProposalDisclosure,
@@ -99,7 +100,7 @@ test("initial subcard disclosure state is empty and toggles stable child ids", (
   const initial = createInitialState();
   assert.deepEqual(initial.disclosure, {
     notes: { proposalIds: [], detailNoteIds: [] },
-    memory: { proposalIds: [], signalIds: [] },
+    memory: { proposalIds: [], signalIds: [], eventsExpanded: false },
     chats: { sessionIds: [] },
     work: { artifactIds: [] },
   });
@@ -125,6 +126,15 @@ test("initial subcard disclosure state is empty and toggles stable child ids", (
   assert.deepEqual(withMemoryProposal.disclosure.memory.proposalIds, ["proposal-1"]);
   const withSignal = toggleMemoryDisclosure(initial, "signal-1", "signal");
   assert.deepEqual(withSignal.disclosure.memory.signalIds, ["signal-1"]);
+  const withMemoryEvents = toggleMemoryEventsDisclosure(withSignal);
+  assert.equal(withMemoryEvents.disclosure.memory.eventsExpanded, true);
+  assert.deepEqual(withMemoryEvents.disclosure.memory.proposalIds, []);
+  assert.deepEqual(withMemoryEvents.disclosure.memory.signalIds, ["signal-1"]);
+  assert.equal(
+    toggleMemoryEventsDisclosure(withMemoryEvents)
+      .disclosure.memory.eventsExpanded,
+    false,
+  );
   const withChat = toggleChatDisclosure(initial, "session-1");
   assert.deepEqual(withChat.disclosure.chats.sessionIds, ["session-1"]);
   const withArtifact = toggleArtifactDisclosure(initial, "artifact--1");

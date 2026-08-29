@@ -347,6 +347,73 @@ test("renderMemoryPanel orders pending proposals before active preferences and e
   assert.equal(activeIndex < recentIndex, true);
 });
 
+test("renderMemoryPanel keeps recent memory events collapsed in one sub-card", () => {
+  const toggled = [];
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+    onToggleEventsDisclosure: () => toggled.push("events"),
+  }, {
+    proposalIds: [],
+    signalIds: [],
+    eventsExpanded: false,
+  });
+
+  const eventCard = findTree(container, (child) => (
+    child.attributes["data-memory-events"] === "recent"
+  ));
+  assert.notEqual(eventCard, null);
+  const toggle = findTree(eventCard, (child) => (
+    child.attributes["data-disclosure-toggle"] === "memory-events"
+  ));
+  assert.notEqual(toggle, null);
+  assert.equal(toggle.textContent, "Recent memory events");
+  assert.equal(toggle.attributes["aria-expanded"], "false");
+  assert.equal(findTree(eventCard, (child) => (
+    child.classList.values.includes("subcard-disclosure-panel")
+  )), null);
+  assert.equal(findAllTree(container, (child) => (
+    child.classList.values.includes("memory-event")
+  )).length, 0);
+
+  toggle.onclick();
+  assert.deepEqual(toggled, ["events"]);
+});
+
+test("renderMemoryPanel lists expanded recent memory events as plain text lines", () => {
+  const container = node();
+
+  renderMemoryPanel(container, memory, {
+    onSubmitDecision: () => {},
+  }, {
+    proposalIds: [],
+    signalIds: [],
+    eventsExpanded: true,
+  });
+
+  const eventCard = findTree(container, (child) => (
+    child.attributes["data-memory-events"] === "recent"
+  ));
+  assert.notEqual(eventCard, null);
+  assert.equal(eventCard.attributes["data-disclosure-expanded"], "true");
+  const toggle = findTree(eventCard, (child) => (
+    child.attributes["data-disclosure-toggle"] === "memory-events"
+  ));
+  assert.equal(toggle.attributes["aria-expanded"], "true");
+  const panel = findTree(eventCard, (child) => (
+    child.classList.values.includes("subcard-disclosure-panel")
+  ));
+  assert.notEqual(panel, null);
+  assert.equal(
+    textTree(panel).includes("- Response length · Approved · concise"),
+    true,
+  );
+  assert.equal(findAllTree(container, (child) => (
+    child.classList.values.includes("memory-event")
+  )).length, 0);
+});
+
 test("renderMemoryPanel requires confirmation before revoking active preferences", () => {
   const revoked = [];
   const confirmMessages = [];

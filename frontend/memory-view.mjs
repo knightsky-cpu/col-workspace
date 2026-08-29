@@ -187,19 +187,41 @@ function renderProposals(container, proposals, handlers, disclosure) {
   }
 }
 
-function renderEvents(container, events) {
-  appendTextElement(container, "h3", "work-heading contain-text", "Recent memory events");
-  if (events.length === 0) {
-    appendTextElement(container, "p", "muted contain-text", "No memory events loaded.");
+function renderEvents(container, events, handlers, disclosure) {
+  const expanded = disclosure?.eventsExpanded === true;
+  const card = element("div", "memory-card contain-text");
+  card.setAttribute("data-memory-events", "recent");
+  if (expanded) {
+    card.setAttribute("data-disclosure-expanded", "true");
+  }
+  const panelId = "memory-events-details";
+  const toggle = element("button", "subcard-disclosure-toggle contain-text", "Recent memory events");
+  toggle.setAttribute("type", "button");
+  toggle.setAttribute("data-disclosure-toggle", "memory-events");
+  toggle.setAttribute("aria-expanded", String(expanded));
+  toggle.setAttribute("aria-controls", panelId);
+  toggle.addEventListener("click", () => {
+    handlers.onToggleEventsDisclosure?.();
+  });
+  card.append(toggle);
+  appendTextElement(card, "p", "muted contain-text", events.length === 0
+    ? "No memory events loaded."
+    : `${events.length} memory event${events.length === 1 ? "" : "s"}`);
+  if (!expanded) {
+    container.append(card);
     return;
   }
+  const details = element("div", "subcard-disclosure-panel contain-text");
+  details.setAttribute("id", panelId);
   for (const event of events) {
-    appendTextElement(container, "p", "memory-event contain-text", compactText([
+    appendTextElement(details, "p", "contain-text", `- ${compactText([
       humanLabel(event.category),
       humanLabel(event.event_type),
       stringValue(event.value),
-    ]));
+    ])}`);
   }
+  card.append(details);
+  container.append(card);
 }
 
 export function renderMemoryPanel(container, memory, handlers, disclosure = {}) {
@@ -240,7 +262,7 @@ export function renderMemoryPanel(container, memory, handlers, disclosure = {}) 
     handlers,
     disclosure,
   );
-  renderEvents(container, memory.events ?? []);
+  renderEvents(container, memory.events ?? [], handlers, disclosure);
 }
 
 export function createMemoryView(elements, handlers) {

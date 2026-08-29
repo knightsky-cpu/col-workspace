@@ -70,6 +70,7 @@ function emptyDisclosureState() {
     memory: {
       proposalIds: [],
       signalIds: [],
+      eventsExpanded: false,
     },
     chats: {
       sessionIds: [],
@@ -534,6 +535,19 @@ export function toggleMemoryDisclosure(state, id, kind) {
       memory: {
         ...state.disclosure.memory,
         [key]: toggleStableId(state.disclosure.memory[key], id),
+      },
+    },
+  };
+}
+
+export function toggleMemoryEventsDisclosure(state) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      memory: {
+        ...state.disclosure.memory,
+        eventsExpanded: !state.disclosure.memory.eventsExpanded,
       },
     },
   };

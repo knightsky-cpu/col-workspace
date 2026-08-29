@@ -117,6 +117,7 @@ import {
   startNewConversation,
   toggleArtifactDisclosure,
   toggleChatDisclosure,
+  toggleMemoryEventsDisclosure,
   toggleMemoryDisclosure,
   toggleNoteDetailDisclosure,
   toggleNoteProposalDisclosure,
@@ -1019,6 +1020,10 @@ function ensureMemoryView() {
       },
       onToggleSignalDisclosure(signalId) {
         state = toggleMemoryDisclosure(state, signalId, "signal");
+        ensureMemoryView().render(state);
+      },
+      onToggleEventsDisclosure() {
+        state = toggleMemoryEventsDisclosure(state);
         ensureMemoryView().render(state);
       },
     },
