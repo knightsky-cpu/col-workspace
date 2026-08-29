@@ -126,22 +126,33 @@ test("workspace create form keeps input and create button compact", () => {
   assert.match(styles, /\.workspace-create-form button\s*\{[\s\S]*?justify-self:\s*start/);
 });
 
-test("chat pending status keeps live text while exposing reduced-motion-safe animation hooks", () => {
+test("chat pending status keeps live text while exposing per-letter reduced-motion-safe animation hooks", () => {
   assert.match(
     html,
     /<p class="chat-status" data-chat-status role="status" aria-atomic="true"><\/p>/,
   );
   assert.match(app, /function setChatStatus\(message, statusState = ""\)/);
+  assert.match(app, /function renderChatStatusLetters\(status, message\)/);
+  assert.match(app, /status\.setAttribute\("aria-label", message\)/);
+  assert.match(app, /letter\.setAttribute\("aria-hidden", "true"\)/);
+  assert.match(app, /letter\.classList\.add\("chat-status__letter"\)/);
+  assert.match(app, /letter\.style\.setProperty\("--chat-status-letter-index", String\(index\)\)/);
+  assert.match(app, /status\.removeAttribute\("aria-label"\)/);
   assert.match(app, /status\.dataset\.chatStatusState = statusState/);
   assert.match(app, /delete status\.dataset\.chatStatusState/);
   assert.match(app, /setChatStatus\("Waiting for Agent Col", "pending"\)/);
   assert.match(app, /setChatStatus\(""\)/);
   assert.match(styles, /\.chat-status\[data-chat-status-state="pending"\]/);
-  assert.match(styles, /\.chat-status\[data-chat-status-state="pending"\]::after/);
-  assert.match(styles, /@keyframes chat-status-wave/);
+  assert.doesNotMatch(styles, /\.chat-status\[data-chat-status-state="pending"\]\s*\{[\s\S]*?animation:\s*chat-status-wave/);
+  assert.match(styles, /\.chat-status__letter/);
+  assert.match(styles, /\.chat-status\[data-chat-status-state="pending"\] \.chat-status__letter/);
+  assert.doesNotMatch(styles, /\.chat-status\[data-chat-status-state="pending"\]::after/);
+  assert.match(styles, /animation:\s*chat-status-letter-wave 1\.65s ease-in-out infinite/);
+  assert.match(styles, /animation-delay:\s*calc\(var\(--chat-status-letter-index\) \* 85ms\)/);
+  assert.match(styles, /@keyframes chat-status-letter-wave/);
   assert.match(styles, /transform:\s*translateY\(/);
   assert.match(
     styles,
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-status\[data-chat-status-state="pending"\][\s\S]*?animation:\s*none/,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-status\[data-chat-status-state="pending"\] \.chat-status__letter[\s\S]*?animation:\s*none/,
   );
 });

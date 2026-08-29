@@ -1,5 +1,48 @@
 # Unsafe Frontend Work Notes
 
+## 2026-08-28 - Accepted U6A/U6B Per-Letter Chat Pending Animation Correction
+
+Status: accepted after user manual visual verification.
+
+Scope:
+- Corrected the accepted U6 pending chat animation before starting U7.
+- Replaced the single-element `Waiting for Agent Col` wave with independent per-letter spans from `W` through `l`.
+- Preserved the visible pending text and exposed the full phrase through the existing `role="status"` live region with `aria-label`.
+- Marked individual animated letter spans `aria-hidden="true"` so screen readers receive one coherent status phrase instead of character-by-character output.
+- Added per-letter animation index variables so CSS can stagger the sinewave-style motion.
+- Removed the generated three-dot pending-status pseudo-element after manual verification showed the per-letter wave was good but the dots should go.
+- Slowed the final accepted wave timing from the first correction to `1.65s` with an `85ms` per-letter stagger.
+- Preserved `/api/chat`, request body shape, idempotency keys, retry behavior, pending-turn state, transcript rendering, memory, notes, artifacts, receipts, auth, and model behavior.
+
+Source changed:
+- `frontend/app.mjs`: added `renderChatStatusLetters(...)` and routed pending statuses through per-letter rendering while preserving normal text rendering for cleared/non-pending statuses.
+- `frontend/styles.css`: added `.chat-status__letter`, per-letter `chat-status-letter-wave` animation, final `1.65s` duration, final `85ms` stagger, and removed the pending `::after` dot line.
+- `tests/frontend/workspace-static.test.mjs`: added static regression coverage for per-letter rendering hooks, accessible live-region labeling, absence of whole-status animation, absence of pending dot pseudo-element, final timing, and reduced-motion behavior.
+
+TDD evidence:
+- RED 1: `node --test tests/frontend/workspace-static.test.mjs` failed because `renderChatStatusLetters(...)`, `.chat-status__letter`, and per-letter animation hooks did not exist.
+- GREEN 1: added per-letter pending status rendering and CSS sinewave-style letter animation; focused checks passed.
+- Manual correction: user confirmed the independent letter animation was good, then requested removal of the dot line and a slightly slower wave.
+- RED 2: `node --test tests/frontend/workspace-static.test.mjs` failed because the old `.chat-status[data-chat-status-state="pending"]::after` dot rule still existed.
+- GREEN 2: removed the pending dot pseudo-element and changed the timing to `1.65s` / `85ms`; focused checks passed.
+- REFACTOR: no broad refactor; changes remained scoped to pending chat status rendering and styling.
+
+Verification:
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 13 tests.
+- `node --test tests/frontend/chat-view.test.mjs tests/frontend/workspace-static.test.mjs tests/frontend/state.test.mjs` passed: 69 tests.
+- `node --check frontend/app.mjs` passed.
+- `git diff --check` passed.
+
+Manual verification result:
+- User confirmed the corrected animation is good after the dot removal and slower wave adjustment.
+
+Deferred:
+- Add collapsed adaptation receipt disclosure.
+- Tune chat icons/text colors/counter severity.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+
 ## 2026-08-28 - Accepted U6 Chat Pending Status Wave Animation Pass
 
 Status: accepted after user manual visual verification.

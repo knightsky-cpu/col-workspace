@@ -231,13 +231,28 @@ function clearNotesError() {
   error.hidden = true;
 }
 
+function renderChatStatusLetters(status, message) {
+  status.replaceChildren();
+  status.setAttribute("aria-label", message);
+  [...message].forEach((character, index) => {
+    const letter = document.createElement("span");
+    letter.classList.add("chat-status__letter");
+    letter.setAttribute("aria-hidden", "true");
+    letter.style.setProperty("--chat-status-letter-index", String(index));
+    setText(letter, character);
+    status.append(letter);
+  });
+}
+
 function setChatStatus(message, statusState = "") {
   const status = document.querySelector("[data-chat-status]");
-  setText(status, message);
+  status.removeAttribute("aria-label");
   if (statusState) {
+    renderChatStatusLetters(status, message);
     status.dataset.chatStatusState = statusState;
     return;
   }
+  setText(status, message);
   delete status.dataset.chatStatusState;
 }
 

@@ -567,20 +567,21 @@ p {
 }
 
 .chat-status[data-chat-status-state="pending"] {
-  animation: chat-status-wave 1.4s ease-in-out infinite;
   color: var(--accent);
   display: inline-block;
+  white-space: pre;
 }
 
-.chat-status[data-chat-status-state="pending"]::after {
-  animation: chat-status-dots 1.4s steps(4, end) infinite;
-  content: "";
+.chat-status__letter {
   display: inline-block;
-  inline-size: 1.4em;
-  text-align: left;
 }
 
-@keyframes chat-status-wave {
+.chat-status[data-chat-status-state="pending"] .chat-status__letter {
+  animation: chat-status-letter-wave 1.65s ease-in-out infinite;
+  animation-delay: calc(var(--chat-status-letter-index) * 85ms);
+}
+
+@keyframes chat-status-letter-wave {
   0%,
   100% {
     transform: translateY(0);
@@ -1186,14 +1187,9 @@ p {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-status[data-chat-status-state="pending"],
-  .chat-status[data-chat-status-state="pending"]::after {
+  .chat-status[data-chat-status-state="pending"] .chat-status__letter {
     animation: none !important;
     transform: none !important;
-  }
-
-  .chat-status[data-chat-status-state="pending"]::after {
-    content: "...";
   }
 
   *,
