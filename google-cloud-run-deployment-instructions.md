@@ -479,7 +479,82 @@ gcloud run services describe agent-col \
 curl -fsS https://agent-col-994154906699.us-east4.run.app/
 ```
 
-## 12. Common Failure Cases
+## 12. MacBook Deployment Notes With Colima
+
+On the MacBook, Docker is provided by Colima, not Docker Desktop. A plain
+Docker command may fail if the default Docker context still points at
+`unix:///var/run/docker.sock`.
+
+Check Colima first:
+
+```bash
+colima status
+colima list
+docker context ls
+```
+
+If Colima is stopped, start it:
+
+```bash
+colima start
+```
+
+Expected result after startup:
+
+```text
+Current context is now "colima"
+```
+
+Verify Docker is using the Colima socket:
+
+```bash
+docker context ls
+docker version --format '{{.Server.Version}}'
+```
+
+Expected Docker endpoint:
+
+```text
+unix:///Users/wifiknight/.colima/default/docker.sock
+```
+
+Important: in the managed Codex sandbox, Colima and Docker commands that touch
+`~/.colima`, `~/.docker`, or the Colima Docker socket require elevated
+permission. Sandboxed commands can fail even when the local machine is
+configured correctly. Observed sandbox failures include:
+
+```text
+colima is not running
+error writing yaml file: open /Users/wifiknight/.colima/default/colima.yaml: operation not permitted
+permission denied while trying to connect to the docker API at unix:///Users/wifiknight/.colima/default/docker.sock
+```
+
+Use elevated execution for the Colima startup and Docker build/push steps when
+running through Codex. Do not reinterpret those sandbox permission failures as
+Cloud Run, Dockerfile, Artifact Registry, or application defects without
+checking Colima state directly.
+
+Because this MacBook's Colima profile is `aarch64`, build the Cloud Run image
+explicitly for `linux/amd64`:
+
+```bash
+COMMIT_SHA="$(git rev-parse HEAD)"
+IMAGE="us-east4-docker.pkg.dev/project-e1e2a890-4566-48a8-a32/agent-col/agent-col:${COMMIT_SHA}"
+
+docker build --platform linux/amd64 -t "${IMAGE}" .
+docker image inspect "${IMAGE}" --format '{{.Os}}/{{.Architecture}}'
+```
+
+Expected platform:
+
+```text
+linux/amd64
+```
+
+After the platform check passes, continue with the Artifact Registry push,
+Cloud Run deployment, and hosted verification sections above.
+
+## 13. Common Failure Cases
 
 - Wrong active project: run `gcloud config get-value project`; set
   `project-e1e2a890-4566-48a8-a32` before any build, push, deploy, or log
@@ -518,7 +593,7 @@ curl -fsS https://agent-col-994154906699.us-east4.run.app/
   with `git rev-parse HEAD`, then rebuild/push/deploy from the intended
   approved commit.
 
-## 13. Safety Rules
+## 14. Safety Rules
 
 - Never deploy with unresolved local source changes unless they are explicitly
   intended and reviewed.
