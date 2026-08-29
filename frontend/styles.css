@@ -13,6 +13,9 @@
   --accent-soft: rgba(54, 214, 194, 0.13);
   --amber: #f3b64b;
   --amber-soft: rgba(243, 182, 75, 0.14);
+  --chat-text: var(--text);
+  --chat-user-accent: var(--amber);
+  --chat-model-accent: #c7b8ff;
   --danger: #ff9b9b;
   --radius: 8px;
   font-family:
@@ -36,6 +39,9 @@
     --accent-soft: rgba(54, 214, 194, 0.13);
     --amber: #f3b64b;
     --amber-soft: rgba(243, 182, 75, 0.14);
+    --chat-text: var(--text);
+    --chat-user-accent: var(--amber);
+    --chat-model-accent: #c7b8ff;
     --danger: #ff9b9b;
   }
 }
@@ -433,6 +439,10 @@ p {
 
 .turn-user,
 .turn-model {
+  align-items: flex-start;
+  color: var(--chat-text);
+  display: inline-flex;
+  gap: 0.5rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -447,9 +457,9 @@ p {
   padding: 0.65rem 0.8rem;
   padding-block: 0.55rem;
   border: 1px solid rgba(148, 168, 165, 0.2);
+  border-inline-start: 3px solid var(--chat-user-accent);
   border-radius: var(--radius);
-  background: rgba(20, 35, 43, 0.78);
-  color: var(--text);
+  background: rgba(243, 182, 75, 0.08);
   text-align: left;
   line-height: 1.45;
   margin-block-end: 0.25rem;
@@ -462,15 +472,35 @@ p {
   block-size: fit-content;
   min-block-size: 0;
   max-inline-size: min(44rem, 100%);
-  border: 1px solid var(--border-soft);
-  border-inline-start: 3px solid var(--accent);
+  border: 1px solid rgba(199, 184, 255, 0.24);
+  border-inline-start: 3px solid var(--chat-model-accent);
   border-radius: var(--radius);
   background: rgba(12, 24, 31, 0.72);
-  color: var(--text);
   text-align: left;
   line-height: 1.55;
   padding: 1rem 1rem 1rem 1.1rem;
   padding-block: 0.7rem;
+}
+
+.turn-author-icon {
+  block-size: 1rem;
+  border: 1px solid currentColor;
+  border-radius: 0.25rem;
+  flex: 0 0 auto;
+  inline-size: 1rem;
+  margin-block-start: 0.2rem;
+}
+
+.turn-author-icon--user {
+  color: var(--chat-user-accent);
+}
+
+.turn-author-icon--model {
+  color: var(--chat-model-accent);
+}
+
+.turn-message-text {
+  min-width: 0;
 }
 
 .turn-receipts {
@@ -575,6 +605,18 @@ p {
 [data-character-count] {
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+[data-character-count-level="safe"] {
+  color: var(--accent);
+}
+
+[data-character-count-level="warn"] {
+  color: var(--amber);
+}
+
+[data-character-count-level="danger"] {
+  color: var(--danger);
 }
 
 [data-chat-submit] {

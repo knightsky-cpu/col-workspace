@@ -48,7 +48,7 @@ function textTree(item) {
   ].join(" ");
 }
 
-test("renderTranscript uses textContent for user and model text", () => {
+test("renderTranscript uses textContent for user and model text while adding decorative turn icons", () => {
   const container = node();
   renderTranscript(container, [{
     request: { body: { message: "<img src=x onerror=alert(1)>" } },
@@ -56,14 +56,30 @@ test("renderTranscript uses textContent for user and model text", () => {
   }]);
 
   assert.equal(container.children.length, 1);
+  const user = container.children[0].children[0];
+  const model = container.children[0].children[1];
+  assert.equal(user.tagName, "p");
+  assert.equal(model.tagName, "p");
+  assert.equal(user.children.length, 2);
+  assert.equal(model.children.length, 2);
+  assert.equal(user.children[0].tagName, "span");
+  assert.equal(model.children[0].tagName, "span");
+  assert.equal(user.children[0].attributes["aria-hidden"], "true");
+  assert.equal(model.children[0].attributes["aria-hidden"], "true");
+  assert.equal(user.children[0].classList.values.includes("turn-author-icon"), true);
+  assert.equal(user.children[0].classList.values.includes("turn-author-icon--user"), true);
+  assert.equal(model.children[0].classList.values.includes("turn-author-icon"), true);
+  assert.equal(model.children[0].classList.values.includes("turn-author-icon--model"), true);
   assert.equal(
-    container.children[0].children[0].textContent,
+    user.children[1].textContent,
     "<img src=x onerror=alert(1)>",
   );
   assert.equal(
-    container.children[0].children[1].textContent,
+    model.children[1].textContent,
     "<strong>not html</strong>",
   );
+  assert.equal(user.textContent, "");
+  assert.equal(model.textContent, "");
 });
 
 test("renderReceipts renders structured fields and ignores prose claims", () => {
@@ -272,6 +288,46 @@ test("createChatView updates the character counter from prompt input", () => {
   input.oninput();
 
   assert.equal(counter.textContent, "5 / 10000");
+  assert.equal(counter.attributes["data-character-count-level"], "safe");
+});
+
+test("createChatView sets character counter severity levels", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+
+  createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  assert.equal(counter.textContent, "0 / 10000");
+  assert.equal(counter.attributes["data-character-count-level"], "safe");
+
+  input.value = "x".repeat(4999);
+  input.oninput();
+  assert.equal(counter.textContent, "4999 / 10000");
+  assert.equal(counter.attributes["data-character-count-level"], "safe");
+
+  input.value = "x".repeat(5000);
+  input.oninput();
+  assert.equal(counter.textContent, "5000 / 10000");
+  assert.equal(counter.attributes["data-character-count-level"], "warn");
+
+  input.value = "x".repeat(9000);
+  input.oninput();
+  assert.equal(counter.textContent, "9000 / 10000");
+  assert.equal(counter.attributes["data-character-count-level"], "danger");
 });
 
 test("createChatView submits the existing form path once on Enter", () => {

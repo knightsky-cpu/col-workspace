@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 const html = readFileSync(new URL("../../frontend/index.html", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../../frontend/styles.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("../../frontend/app.mjs", import.meta.url), "utf8");
+const chatView = readFileSync(new URL("../../frontend/chat-view.mjs", import.meta.url), "utf8");
 
 test("workspace labels artifact surfaces with human-facing names", () => {
   assert.match(html, /<span class="section-heading__label" id="work-list-title"[\s\S]*Artifacts[\s\S]*<\/span>/);
@@ -164,4 +165,20 @@ test("chat adaptation receipts have compact disclosure styling hooks", () => {
   assert.match(styles, /\.receipt-disclosure__summary\s*\{[\s\S]*?cursor:\s*pointer/);
   assert.match(styles, /\.receipt-disclosure__summary\s*\{[\s\S]*?font-size:\s*0\.875rem/);
   assert.match(styles, /\.receipt-list--disclosure\s*\{[\s\S]*?margin-block-start:\s*0\.45rem/);
+});
+
+test("chat turn polish uses decorative icons, amber message text, and distinct accents", () => {
+  assert.doesNotMatch(html, /data-emoji|emoji-menu|@/i);
+  assert.doesNotMatch(app, /data-emoji|emoji-menu|@/i);
+  assert.match(chatView, /turn-author-icon--user/);
+  assert.match(chatView, /turn-author-icon--model/);
+  assert.match(styles, /--chat-text:\s*var\(--text\)/);
+  assert.match(styles, /--chat-user-accent:\s*var\(--amber\)/);
+  assert.match(styles, /--chat-model-accent:\s*#c7b8ff/);
+  assert.match(styles, /\.turn-user\s*\{[\s\S]*?border-inline-start:\s*3px solid var\(--chat-user-accent\)/);
+  assert.match(styles, /\.turn-model\s*\{[\s\S]*?border-inline-start:\s*3px solid var\(--chat-model-accent\)/);
+  assert.match(styles, /\.turn-user,\s*\.turn-model\s*\{[\s\S]*?color:\s*var\(--chat-text\)/);
+  assert.match(styles, /\[data-character-count-level="safe"\]/);
+  assert.match(styles, /\[data-character-count-level="warn"\]/);
+  assert.match(styles, /\[data-character-count-level="danger"\]/);
 });

@@ -38,6 +38,19 @@ function appendAdaptationReceipts(container, adaptations) {
   container.append(disclosure);
 }
 
+function turnAuthorIcon(kind) {
+  const iconClass = kind === "model" ? "turn-author-icon--model" : "turn-author-icon--user";
+  const icon = element("span", `turn-author-icon ${iconClass}`);
+  icon.setAttribute("aria-hidden", "true");
+  return icon;
+}
+
+function appendTurnMessage(container, kind, message) {
+  const messageText = element("span", "turn-message-text");
+  setText(messageText, message);
+  container.append(turnAuthorIcon(kind), messageText);
+}
+
 export function renderReceipts(container, response) {
   container.replaceChildren();
   const list = element("ul", "receipt-list");
@@ -89,8 +102,8 @@ export function renderTranscript(container, transcript) {
     const article = element("article", "turn");
     const user = element("p", "turn-user");
     const model = element("p", "turn-model");
-    setText(user, turn.request?.body?.message ?? "");
-    setText(model, turn.response?.response ?? "");
+    appendTurnMessage(user, "user", turn.request?.body?.message ?? "");
+    appendTurnMessage(model, "model", turn.response?.response ?? "");
     article.append(user, model);
     const receipts = element("div", "turn-receipts");
     renderReceipts(receipts, turn.response ?? {});
@@ -164,7 +177,9 @@ export function createChatView(elements, handlers) {
       return;
     }
     const count = String(elements.input.value ?? "").length;
+    const level = count >= 9000 ? "danger" : count >= 5000 ? "warn" : "safe";
     elements.characterCount.textContent = `${count} / 10000`;
+    elements.characterCount.setAttribute("data-character-count-level", level);
   }
 
   elements.form.addEventListener("submit", (event) => {

@@ -1,5 +1,51 @@
 # Unsafe Frontend Work Notes
 
+## 2026-08-28 - Accepted U8 Chat Icons, Accents, And Counter Severity Pass
+
+Status: accepted after user manual visual verification.
+
+Scope:
+- Implemented Pass U8 for chat transcript visual polish and composer counter severity.
+- Added decorative user/model turn icons while keeping them `aria-hidden="true"`.
+- Preserved text-safe chat message rendering through `setText(...)`; malicious-looking message strings remain literal text.
+- Added amber accents for user message cards.
+- Added purple accents for model response cards.
+- Added character counter severity state via `data-character-count-level="safe" | "warn" | "danger"`.
+- Set counter thresholds to safe below 5,000 characters, warn from 5,000 through 8,999 characters, and danger at 9,000 characters and above.
+- Preserved the accepted U7 adaptation receipt disclosure, U6 pending animation, drawer/menu behavior, backend routes, request shape, idempotency keys, retry behavior, memory, notes, artifacts, receipts, auth, and model behavior.
+- Corrected the initial U8 text-color choice after manual verification: amber body text was not comfortable to read, so chat body text was restored to white while preserving the accepted amber/purple accents.
+
+Source changed:
+- `frontend/chat-view.mjs`: added turn icon/message wrappers and character-count severity attributes.
+- `frontend/styles.css`: added chat accent variables, decorative turn icon styling, amber user-card accent, purple model-card accent, white chat body text, and safe/warn/danger counter colors.
+- `tests/frontend/chat-view.test.mjs`: covered decorative icons, text-safe user/model message rendering, and counter severity thresholds.
+- `tests/frontend/workspace-static.test.mjs`: covered no emoji or `@` controls, icon hooks, accent variables, white chat text, and counter severity CSS hooks.
+
+TDD evidence:
+- RED 1: `node --test tests/frontend/chat-view.test.mjs` failed because turn icons and counter severity attributes did not exist.
+- RED 2: `node --test tests/frontend/workspace-static.test.mjs` failed because U8 icon, color, and counter CSS hooks did not exist.
+- GREEN 1: added minimal chat-view icon/message wrappers, counter severity state, and CSS for icons, accents, text, and counter colors.
+- Manual correction: user confirmed accents and counter severity were good but amber chat body text was not comfortably readable.
+- RED 3: `node --test tests/frontend/workspace-static.test.mjs` failed because the test expected `--chat-text: var(--text)` while CSS still had amber `#f5c56d`.
+- GREEN 2: restored chat body text to white through `--chat-text: var(--text)` while preserving amber user accents, purple model accents, icons, and counter severity.
+- REFACTOR: made turn icon classes explicit so static tests can catch icon hook regressions.
+
+Verification:
+- `node --test tests/frontend/chat-view.test.mjs` passed: 12 tests.
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 15 tests.
+- `node --test tests/frontend/chat-view.test.mjs tests/frontend/state.test.mjs tests/frontend/workspace-static.test.mjs` passed: 72 tests.
+- `node --check frontend/chat-view.mjs` passed.
+- `git diff --check` passed.
+
+Manual verification result:
+- User confirmed the U8 pass successful after the chat body text was restored to white.
+
+Deferred:
+- Compare current app visuals against the target goal and assess remaining polishing work.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+
 ## 2026-08-28 - Accepted U7 Chat Receipt And Adaptation Disclosure Pass
 
 Status: accepted after user manual visual verification.
