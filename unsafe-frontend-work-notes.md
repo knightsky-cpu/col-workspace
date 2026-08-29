@@ -1,5 +1,95 @@
 # Unsafe Frontend Work Notes
 
+## 2026-08-28 - Accepted U9A Safe Chat Markdown Rendering Pass
+
+Status: accepted after user manual visual verification.
+
+Scope:
+- Implemented the approved U9A safe chat Markdown rendering pass.
+- Added model-response rendering for headings, paragraphs, unordered and ordered lists, inline code, fenced code blocks, safe links, and simple Markdown tables.
+- Kept user-authored chat messages on literal text rendering through `setText(...)`.
+- Changed chat turn message containers from `p` to `div` so model cards can legally contain block-level rendered Markdown.
+- Preserved `/api/chat`, request body shape, idempotency keys, retry behavior, pending-turn state, receipts, artifacts, notes, memory, auth, exports, prompts, model behavior, and stored response strings.
+- Implemented the renderer with DOM node/text-node construction and no `innerHTML`, `outerHTML`, or `insertAdjacentHTML`.
+- Fixed the manual-verification failure where Firefox showed an empty model card by normalizing browser uppercase `tagName` values through `localName`/lowercase fallback.
+- Added a stable child snapshot before appending rendered blocks so moving nodes during append cannot skip blocks.
+
+Source changed:
+- `frontend/markdown-renderer.mjs`: added a dependency-free safe Markdown renderer with bounded block/inline support and safe-link filtering.
+- `frontend/chat-view.mjs`: routed model responses through `renderSafeMarkdown(...)`, kept user messages text-only, and switched turn wrappers to block-safe `div` elements.
+- `frontend/styles.css`: added scoped model Markdown styles for headings, paragraphs, lists, inline code, code blocks, links, and tables.
+- `tests/frontend/markdown-renderer.test.mjs`: covered structured Markdown rendering, inert raw HTML, bounded links, browser uppercase `tagName` behavior, and stable child appending.
+- `tests/frontend/chat-view.test.mjs`: covered user literal text plus model Markdown structure in transcript rendering.
+- `tests/frontend/workspace-static.test.mjs`: covered renderer wiring, no unsafe HTML insertion APIs, safe-link hooks, and Markdown styling hooks.
+
+TDD evidence:
+- RED 1: `node --test tests/frontend/markdown-renderer.test.mjs` failed with `ERR_MODULE_NOT_FOUND` because `frontend/markdown-renderer.mjs` did not exist.
+- RED 2: `node --test tests/frontend/chat-view.test.mjs` failed because model Markdown did not render as structured child nodes.
+- RED 3: after diff review, `node --test tests/frontend/chat-view.test.mjs` failed because turn wrappers were still `p`, not block-safe `div` containers.
+- GREEN 1: added renderer, model-only chat-view wiring, block-safe turn containers, and Markdown CSS.
+- Manual failure: user reported model output disappeared in Firefox.
+- Root cause: real browser `Element.tagName` returns uppercase names for HTML documents; renderer filtered uppercase browser tags against lowercase allowed tags.
+- RED 4: `node --test tests/frontend/markdown-renderer.test.mjs` failed with browser-like uppercase `tagName`: expected rendered blocks, got an empty container.
+- GREEN 2: normalized block names with `localName`/lowercase fallback and iterated `Array.from(root.children)` before appending.
+- REFACTOR: isolated renderer test DOM setup per test to prevent browser-like fake DOM state from leaking between tests.
+
+Verification:
+- `node --test tests/frontend/markdown-renderer.test.mjs tests/frontend/chat-view.test.mjs tests/frontend/workspace-static.test.mjs` passed: 32 tests.
+- `node --check frontend/markdown-renderer.mjs` passed.
+- `node --check frontend/chat-view.mjs` passed.
+- `git diff --check` passed.
+
+Manual verification result:
+- User confirmed the model output reappeared and the U9A pass was successful.
+
+Deferred:
+- Add live streaming/typewriter model response rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+- Add secure attachment intake after chat response rendering is stable.
+
+## 2026-08-28 - Approved U9A Safe Chat Markdown Rendering Plan
+
+Status: approved for implementation.
+
+Context:
+- Current chat rendering is text-safe but visually raw: `frontend/chat-view.mjs` renders model responses through `setText(...)`, which delegates to `textContent`.
+- Current submit flow waits for full `/api/chat` JSON before completing the pending turn; there is no streaming transport in `frontend/app.mjs` or the `/api/chat` FastAPI route.
+- The existing visual polishing plan documents safe Markdown as a later pass and explicitly preserved `setText` during U8 until this pass was approved.
+- Live token/typewriter streaming is not currently documented in the visual polishing plan and must be handled as a separate backend/frontend contract pass.
+
+Approved U9A scope:
+- Render model responses as safe structured Markdown in the chat transcript.
+- Support headings, paragraphs, lists, inline code, fenced code blocks, links, and simple tables when possible.
+- Keep user-authored messages plain text.
+- Preserve stored response strings, `/api/chat`, idempotency keys, retry behavior, receipts, artifacts, notes, memory, auth, exports, prompts, and model behavior.
+- Avoid unsafe HTML insertion. Prefer DOM text-node construction or a sanitized Markdown pipeline; do not use unsanitized `innerHTML`.
+
+Expected source/test boundary:
+- Create: `frontend/markdown-renderer.mjs`
+- Modify: `frontend/chat-view.mjs`
+- Modify: `frontend/styles.css`
+- Test: `tests/frontend/markdown-renderer.test.mjs`
+- Test: `tests/frontend/chat-view.test.mjs`
+- Test: `tests/frontend/workspace-static.test.mjs`
+
+Focused verification target:
+- `node --test tests/frontend/markdown-renderer.test.mjs`
+- `node --test tests/frontend/chat-view.test.mjs tests/frontend/workspace-static.test.mjs`
+- `node --check frontend/markdown-renderer.mjs frontend/chat-view.mjs`
+- `git diff --check`
+
+Manual visual verification targets:
+1. Load or send a model response containing headings, paragraphs, bullets, inline code, a fenced code block, a link, and a table.
+2. Confirm the model response renders as structured content rather than exposing raw Markdown clutter.
+3. Confirm user messages still render literally and safely.
+4. Confirm malicious-looking HTML remains harmless and cannot execute.
+5. Confirm receipts, artifacts, notes, memory, retry, exports, and final stored response behavior remain unchanged.
+
+Follow-up plan:
+- Add a separate streaming response pass after safe rendering.
+- Research and verify the active Google/ADK provider stream surface before claiming true token streaming.
+- Preserve existing `/api/chat` JSON as the fallback and add a bounded streaming endpoint or mode only after a dedicated TDD plan is approved.
+
 ## 2026-08-28 - Accepted U8 Chat Icons, Accents, And Counter Severity Pass
 
 Status: accepted after user manual visual verification.

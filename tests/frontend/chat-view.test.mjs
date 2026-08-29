@@ -39,6 +39,11 @@ globalThis.document = {
   createElement(tagName) {
     return node(tagName);
   },
+  createTextNode(text) {
+    const textNode = node("#text");
+    textNode.textContent = String(text);
+    return textNode;
+  },
 };
 
 function textTree(item) {
@@ -48,18 +53,18 @@ function textTree(item) {
   ].join(" ");
 }
 
-test("renderTranscript uses textContent for user and model text while adding decorative turn icons", () => {
+test("renderTranscript keeps user text literal and renders model Markdown structure", () => {
   const container = node();
   renderTranscript(container, [{
     request: { body: { message: "<img src=x onerror=alert(1)>" } },
-    response: { response: "<strong>not html</strong>" },
+    response: { response: "### Root cause\n\nUse **bounded context** and `git diff --check`." },
   }]);
 
   assert.equal(container.children.length, 1);
   const user = container.children[0].children[0];
   const model = container.children[0].children[1];
-  assert.equal(user.tagName, "p");
-  assert.equal(model.tagName, "p");
+  assert.equal(user.tagName, "div");
+  assert.equal(model.tagName, "div");
   assert.equal(user.children.length, 2);
   assert.equal(model.children.length, 2);
   assert.equal(user.children[0].tagName, "span");
@@ -74,10 +79,18 @@ test("renderTranscript uses textContent for user and model text while adding dec
     user.children[1].textContent,
     "<img src=x onerror=alert(1)>",
   );
+  assert.equal(model.children[1].children[0].tagName, "h3");
+  assert.equal(textTree(model.children[1].children[0]).trim(), "Root cause");
+  assert.equal(model.children[1].children[1].tagName, "p");
   assert.equal(
-    model.children[1].textContent,
-    "<strong>not html</strong>",
+    model.children[1].children[1].children.some((child) => child.tagName === "strong"),
+    true,
   );
+  assert.equal(
+    model.children[1].children[1].children.some((child) => child.tagName === "code"),
+    true,
+  );
+  assert.doesNotMatch(textTree(model), /###|\*\*/);
   assert.equal(user.textContent, "");
   assert.equal(model.textContent, "");
 });

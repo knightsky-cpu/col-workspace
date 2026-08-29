@@ -6,6 +6,10 @@ const html = readFileSync(new URL("../../frontend/index.html", import.meta.url),
 const styles = readFileSync(new URL("../../frontend/styles.css", import.meta.url), "utf8");
 const app = readFileSync(new URL("../../frontend/app.mjs", import.meta.url), "utf8");
 const chatView = readFileSync(new URL("../../frontend/chat-view.mjs", import.meta.url), "utf8");
+const markdownRenderer = readFileSync(
+  new URL("../../frontend/markdown-renderer.mjs", import.meta.url),
+  "utf8",
+);
 
 test("workspace labels artifact surfaces with human-facing names", () => {
   assert.match(html, /<span class="section-heading__label" id="work-list-title"[\s\S]*Artifacts[\s\S]*<\/span>/);
@@ -181,4 +185,20 @@ test("chat turn polish uses decorative icons, amber message text, and distinct a
   assert.match(styles, /\[data-character-count-level="safe"\]/);
   assert.match(styles, /\[data-character-count-level="warn"\]/);
   assert.match(styles, /\[data-character-count-level="danger"\]/);
+});
+
+test("chat model Markdown rendering uses local DOM construction and scoped styles", () => {
+  assert.match(chatView, /renderSafeMarkdown\(messageText, message\)/);
+  assert.match(markdownRenderer, /export function renderSafeMarkdown/);
+  assert.match(markdownRenderer, /element\(`h/);
+  assert.match(markdownRenderer, /document\.createTextNode/);
+  assert.doesNotMatch(markdownRenderer, /innerHTML|insertAdjacentHTML|outerHTML/);
+  assert.match(markdownRenderer, /isSafeLinkHref/);
+  assert.match(markdownRenderer, /noopener noreferrer/);
+  assert.match(styles, /\.turn-model \.turn-message-text\s*\{/);
+  assert.match(styles, /\.markdown-heading\s*\{/);
+  assert.match(styles, /\.markdown-code-block\s*\{/);
+  assert.match(styles, /\.markdown-inline-code\s*\{/);
+  assert.match(styles, /\.markdown-table\s*\{/);
+  assert.match(styles, /\.markdown-link\s*\{/);
 });

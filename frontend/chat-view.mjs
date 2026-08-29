@@ -1,3 +1,4 @@
+import { renderSafeMarkdown } from "./markdown-renderer.mjs";
 import { element, humanLabel, humanValue, setText } from "./render.mjs";
 
 function appendReceipt(container, label, value) {
@@ -47,7 +48,11 @@ function turnAuthorIcon(kind) {
 
 function appendTurnMessage(container, kind, message) {
   const messageText = element("span", "turn-message-text");
-  setText(messageText, message);
+  if (kind === "model") {
+    renderSafeMarkdown(messageText, message);
+  } else {
+    setText(messageText, message);
+  }
   container.append(turnAuthorIcon(kind), messageText);
 }
 
@@ -100,8 +105,8 @@ export function renderTranscript(container, transcript) {
   container.replaceChildren();
   for (const turn of transcript) {
     const article = element("article", "turn");
-    const user = element("p", "turn-user");
-    const model = element("p", "turn-model");
+    const user = element("div", "turn-user");
+    const model = element("div", "turn-model");
     appendTurnMessage(user, "user", turn.request?.body?.message ?? "");
     appendTurnMessage(model, "model", turn.response?.response ?? "");
     article.append(user, model);
