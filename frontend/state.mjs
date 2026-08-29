@@ -74,6 +74,9 @@ function emptyDisclosureState() {
     chats: {
       sessionIds: [],
     },
+    work: {
+      artifactIds: [],
+    },
   };
 }
 
@@ -158,8 +161,32 @@ export function beginWorkspaceListLoad(state) {
   };
 }
 
-export function completeWorkspaceListLoad(state, response) {
+export function completeWorkspaceListLoad(
+  state,
+  response,
+  cryptoLike = globalThis.crypto,
+) {
   const items = Array.isArray(response.workspaces) ? response.workspaces : [];
+  const currentWorkspaceId = (
+    state.workspaces.selectedWorkspaceId
+    ?? state.context?.project_id
+    ?? null
+  );
+  const currentWorkspace = items.find((item) => (
+    item.workspace_id === currentWorkspaceId
+  ));
+  if (!currentWorkspace && items.length && state.context) {
+    return {
+      ...selectWorkspace(state, items[0], cryptoLike),
+      workspaces: {
+        ...state.workspaces,
+        status: "ready",
+        items,
+        selectedWorkspaceId: items[0].workspace_id,
+        error: null,
+      },
+    };
+  }
   return {
     ...state,
     workspaces: {
@@ -167,8 +194,7 @@ export function completeWorkspaceListLoad(state, response) {
       status: "ready",
       items,
       selectedWorkspaceId: (
-        state.workspaces.selectedWorkspaceId
-        ?? state.context?.project_id
+        currentWorkspace?.workspace_id
         ?? items[0]?.workspace_id
         ?? null
       ),
@@ -513,6 +539,22 @@ export function toggleMemoryDisclosure(state, id, kind) {
   };
 }
 
+export function toggleArtifactDisclosure(state, artifactId) {
+  return {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      work: {
+        ...state.disclosure.work,
+        artifactIds: toggleStableId(
+          state.disclosure.work.artifactIds,
+          artifactId,
+        ),
+      },
+    },
+  };
+}
+
 export function toggleChatDisclosure(state, sessionId) {
   return {
     ...state,
@@ -627,11 +669,19 @@ export function failChatSessionDetailLoad(state, error) {
 }
 
 export function selectCanSubmit(state) {
-  return (
-    state.mode === "workspace"
-    && state.context !== null
-    && state.pendingTurn === null
-  );
+  if (
+    state.mode !== "workspace"
+    || state.context === null
+    || state.pendingTurn !== null
+  ) {
+    return false;
+  }
+  if (state.workspaces.status !== "ready" || !state.workspaces.items.length) {
+    return false;
+  }
+  return state.workspaces.items.some((workspace) => (
+    workspace.workspace_id === state.context.project_id
+  ));
 }
 
 export function selectNeedsReceiptRefresh(response) {
@@ -847,7 +897,7 @@ function activityEntriesFromResponse(response) {
     entries.push({
       kind: "work",
       label: artifact.display_label ?? "Artifact",
-      detail: artifact.artifact_id ?? "",
+      detail: "created",
     });
   }
   for (
@@ -859,7 +909,7 @@ function activityEntriesFromResponse(response) {
     entries.push({
       kind: "feedback",
       label: compactText(["Feedback", feedback.decision]),
-      detail: feedback.feedback_id ?? "",
+      detail: feedback.status ?? "recorded",
     });
   }
   for (
@@ -871,7 +921,7 @@ function activityEntriesFromResponse(response) {
     entries.push({
       kind: "memory",
       label: proposal.category ?? "Memory proposal",
-      detail: proposal.proposal_id ?? "",
+      detail: proposal.status ?? "pending",
     });
   }
   for (
@@ -883,7 +933,7 @@ function activityEntriesFromResponse(response) {
     entries.push({
       kind: "note",
       label: proposal.title ?? "Note proposal",
-      detail: proposal.proposal_id ?? "",
+      detail: proposal.status ?? "pending",
     });
   }
   for (
@@ -895,7 +945,7 @@ function activityEntriesFromResponse(response) {
     entries.push({
       kind: "note",
       label: compactText(["Note", event.event_type]),
-      detail: event.note_id ?? "",
+      detail: event.title ?? "",
     });
   }
   for (
@@ -1033,6 +1083,10 @@ export function completeWorkRestore(state, artifactId) {
   return removeWorkArtifactFromCurrentView(state, artifactId);
 }
 
+export function completeWorkDelete(state, artifactId) {
+  return removeWorkArtifactFromCurrentView(state, artifactId);
+}
+
 export function completeWorkMetadataUpdate(state, metadata) {
   const artifactId = metadata?.reference?.artifact_id ?? null;
   if (!artifactId) {
@@ -1153,6 +1207,15 @@ function removeWorkArtifactFromCurrentView(state, artifactId) {
   );
   return {
     ...state,
+    disclosure: {
+      ...state.disclosure,
+      work: {
+        ...state.disclosure.work,
+        artifactIds: state.disclosure.work.artifactIds.filter((id) => (
+          id !== artifactId
+        )),
+      },
+    },
     work: {
       ...state.work,
       selectedArtifactId: selected ? null : state.work.selectedArtifactId,

@@ -66,6 +66,7 @@ from generic_artifact_service import (
     ArchiveGenericArtifactCommand,
     ArtifactReadStateError as GenericArtifactReadStateError,
     CreateGenericArtifactVersionCommand,
+    DeleteGenericArtifactCommand,
     GenericArtifactReadService,
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
@@ -751,6 +752,39 @@ def _workspace_defaults_for_request(
             detail="Authenticated user does not own this request.",
         )
     return (principal.workspace_project_id, "Private Google workspace")
+
+
+async def _ensure_visible_workspace_for_chat(
+    *,
+    request: Request,
+    authorization_header: str | None,
+    effective_user_id: str,
+    effective_project_id: str,
+) -> None:
+    authenticator = _get_authenticator(request)
+    if authenticator.settings.mode == "local_dev":
+        return
+    default_workspace_id, default_display_name = (
+        _workspace_defaults_for_request(
+            request=request,
+            authorization_header=authorization_header,
+        )
+    )
+    try:
+        response = await request.app.state.db.list_workspaces(
+            user_id=effective_user_id,
+            default_workspace_id=default_workspace_id,
+            default_display_name=default_display_name,
+            limit=50,
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    visible_ids = {workspace.workspace_id for workspace in response.workspaces}
+    if effective_project_id not in visible_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workspace is unavailable.",
+        )
 
 
 def _derive_workspace_id(
@@ -2607,6 +2641,50 @@ async def restore_generic_artifact(
         _raise_database_http_error(exc)
 
 
+@app.delete(
+    "/api/projects/{project_id}/artifacts/{artifact_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_generic_artifact(
+    project_id: IdentifierStr,
+    artifact_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> Response:
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        await request.app.state.generic_artifact_service.delete_artifact(
+            DeleteGenericArtifactCommand(
+                project_id=effective_project_id,
+                artifact_id=artifact_id,
+            )
+        )
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Artifact was not found.",
+        ) from exc
+    except GenericArtifactReadStateError as exc:
+        logger.error(
+            "Stored generic artifact delete state is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @app.patch(
     "/api/projects/{project_id}/artifacts/{artifact_id}/metadata",
     response_model=SingleFileArtifactLifecycleResponse,
@@ -2879,6 +2957,12 @@ async def _execute_chat(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Idempotency key is invalid.",
             ) from exc
+        await _ensure_visible_workspace_for_chat(
+            request=request,
+            authorization_header=authorization,
+            effective_user_id=effective_user_id,
+            effective_project_id=effective_project_id,
+        )
         try:
             turn_result = await database.claim_chat_turn(
                 ChatTurnRequest(

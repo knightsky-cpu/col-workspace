@@ -3,12 +3,12 @@ import {
   apiFetchSse,
   archiveNote,
   archiveArtifact,
-  createArtifact,
   createArtifactVersion,
   createNoteCorrection,
   createNoteProposal,
   createWorkspace,
   deleteNote,
+  deleteArtifact,
   deleteMemorySignal,
   deleteWorkspace,
   getArtifact,
@@ -86,6 +86,7 @@ import {
   completeWorkspaceDelete,
   completeWorkspaceListLoad,
   completeWorkArchive,
+  completeWorkDelete,
   completeWorkDetailLoad,
   completeWorkListLoad,
   completeWorkMetadataUpdate,
@@ -113,6 +114,7 @@ import {
   setWorkLifecycleStatus,
   storePendingNoteProposal,
   startNewConversation,
+  toggleArtifactDisclosure,
   toggleChatDisclosure,
   toggleMemoryDisclosure,
   toggleNoteDetailDisclosure,
@@ -832,14 +834,10 @@ function ensureWorkView() {
     {
       list: document.querySelector("[data-work-list]"),
       detail: document.querySelector("[data-work-detail]"),
-      createForm: document.querySelector("[data-artifact-create-form]"),
     },
     {
       onSelectArtifact(artifactId) {
         loadWorkDetail(artifactId);
-      },
-      onCreateArtifact(request) {
-        createGenericArtifact(request);
       },
       onSubmitFeedback(decision) {
         submitArtifactFeedback(decision);
@@ -853,6 +851,13 @@ function ensureWorkView() {
       onRestoreArtifact(artifactId) {
         restoreGenericArtifact(artifactId);
       },
+      onDeleteArtifact(artifactId) {
+        deleteGenericArtifact(artifactId);
+      },
+      onToggleArtifactDisclosure(artifactId) {
+        state = toggleArtifactDisclosure(state, artifactId);
+        ensureWorkView().render(state);
+      },
       onUpdateArtifactMetadata(artifactId, metadata) {
         updateGenericArtifactMetadata(artifactId, metadata);
       },
@@ -865,28 +870,6 @@ function ensureWorkView() {
     },
   );
   return workView;
-}
-
-async function createGenericArtifact(request) {
-  if (!state.context || state.pendingTurn !== null) {
-    return;
-  }
-  clearWorkError();
-  try {
-    const response = await createArtifact(
-      state.context.project_id,
-      {
-        ...request,
-        session_id: state.context.session_id,
-        user_id: state.context.user_id,
-      },
-      authOptions(),
-    );
-    await loadWorkList();
-    await loadWorkDetail(response.reference.artifact_id);
-  } catch (error) {
-    showWorkError(error.message);
-  }
 }
 
 async function archiveGenericArtifact(artifactId) {
@@ -920,6 +903,31 @@ async function restoreGenericArtifact(artifactId) {
       authOptions(),
     );
     state = completeWorkRestore(state, artifactId);
+    ensureWorkView().render(state);
+    await loadWorkList();
+  } catch (error) {
+    showWorkError(error.message);
+  }
+}
+
+async function deleteGenericArtifact(artifactId) {
+  if (!state.context || state.pendingTurn !== null) {
+    return;
+  }
+  const confirmed = globalThis.confirm?.(
+    "Delete this artifact?\n\nThe artifact is removed from active views, while existing chat history remains unchanged.",
+  ) ?? true;
+  if (!confirmed) {
+    return;
+  }
+  clearWorkError();
+  try {
+    await deleteArtifact(
+      state.context.project_id,
+      artifactId,
+      authOptions(),
+    );
+    state = completeWorkDelete(state, artifactId);
     ensureWorkView().render(state);
     await loadWorkList();
   } catch (error) {
@@ -1093,7 +1101,7 @@ async function submitArtifactFeedback(decision) {
   }
   const request = buildArtifactFeedbackChatRequest(
     state.context,
-    `Record ${decision.decision} feedback for Artifact ${decision.artifact_id}.`,
+    "Record artifact feedback.",
     decision,
   );
   await submitRequest(request);
@@ -1105,7 +1113,7 @@ async function submitMemoryDecision(decision) {
   }
   const request = buildMemoryDecisionChatRequest(
     state.context,
-    `Record ${decision.decision} decision for memory proposal ${decision.proposal_id}.`,
+    `${decision.decision === "reject" ? "Reject" : "Approve"} this memory proposal.`,
     decision,
   );
   await submitRequest(request);
@@ -1117,7 +1125,7 @@ async function submitCollaborativeNoteDecision(decision) {
   }
   const request = buildCollaborativeNoteDecisionChatRequest(
     state.context,
-    `Record ${decision.decision} decision for note proposal ${decision.proposal_id}.`,
+    `${decision.decision === "reject" ? "Reject" : "Approve"} this workspace note.`,
     decision,
   );
   await submitRequest(request);
@@ -1223,7 +1231,7 @@ async function changeCollaborativeNoteLifecycle(action, note) {
 }
 
 async function revokeActiveMemorySignal(signal) {
-  if (!state.context || !selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
   clearMemoryError();
@@ -1241,7 +1249,7 @@ async function revokeActiveMemorySignal(signal) {
 }
 
 async function deleteActiveMemorySignal(signal) {
-  if (!state.context || !selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
   clearMemoryError();
@@ -1258,7 +1266,7 @@ async function deleteActiveMemorySignal(signal) {
   renderWorkspace();
 }
 
-document.querySelector("[data-context-form]").addEventListener("submit", (event) => {
+document.querySelector("[data-context-form]").addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
     state = acceptContext(
@@ -1272,7 +1280,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", (event)
     ensureChatsView();
     ensureWorkspaceView();
     showWorkspace();
-    loadWorkspaces();
+    await loadWorkspaces();
     loadWorkList();
     loadNotes();
     loadMemory();

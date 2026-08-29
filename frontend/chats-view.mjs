@@ -8,10 +8,10 @@ function compactText(parts) {
 }
 
 function sessionLabel(session) {
-  if (session.last_message_preview) {
-    return String(session.last_message_preview);
+  if (session.display_title) {
+    return String(session.display_title);
   }
-  return "Untitled chat";
+  return session.last_message_preview ? String(session.last_message_preview) : "Untitled chat";
 }
 
 function sessionMeta(session) {
@@ -20,6 +20,7 @@ function sessionMeta(session) {
     : "";
   return compactText([
     updated,
+    session.last_message_preview ? `preview: ${session.last_message_preview}` : "",
     session.last_message_role ? `last: ${session.last_message_role}` : "",
   ]);
 }

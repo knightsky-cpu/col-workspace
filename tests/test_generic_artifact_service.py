@@ -10,6 +10,7 @@ class FakeArtifactDatabase:
     def __init__(self, records: tuple[object, ...]) -> None:
         self.records = records
         self.archive_calls: list[tuple[str, str]] = []
+        self.delete_calls: list[tuple[str, str]] = []
         self.update_calls: list[tuple[str, str, str | None, str | None]] = []
         self.save_calls: list[dict[str, object]] = []
 
@@ -46,6 +47,13 @@ class FakeArtifactDatabase:
     ) -> object:
         self.archive_calls.append((project_id, artifact_id))
         return self.records[0]
+
+    async def delete_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> None:
+        self.delete_calls.append((project_id, artifact_id))
 
     async def update_artifact_metadata_document(
         self,
@@ -221,6 +229,43 @@ async def test_generic_artifact_service_lists_archived_single_file_metadata(
 
 
 @pytest.mark.asyncio
+async def test_generic_artifact_service_omits_deleted_single_file_metadata(
+) -> None:
+    from database import ArtifactDocumentRecord
+    from generic_artifact_service import (
+        GenericArtifactReadService,
+        ListGenericArtifactsCommand,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--deleted",
+                document={
+                    **stored_single_file_document(),
+                    "lifecycle_status": "deleted",
+                    "deleted": True,
+                },
+            ),
+            ArtifactDocumentRecord(
+                artifact_id="artifact--active",
+                document=stored_single_file_document(),
+            ),
+        )
+    )
+
+    listing = await GenericArtifactReadService(
+        database=database
+    ).list_artifacts(
+        ListGenericArtifactsCommand(project_id="project-1", limit=10)
+    )
+
+    assert [
+        item.reference.artifact_id for item in listing.artifacts
+    ] == ["artifact--active"]
+
+
+@pytest.mark.asyncio
 async def test_generic_artifact_service_gets_single_file_detail() -> None:
     from database import ArtifactDocumentRecord
     from generic_artifact_service import (
@@ -246,6 +291,57 @@ async def test_generic_artifact_service_gets_single_file_detail() -> None:
 
     assert detail.metadata.filename == "password_generator.py"
     assert detail.artifact.content.startswith("import secrets")
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_rejects_deleted_single_file_detail(
+) -> None:
+    from database import ArtifactDocumentRecord, ArtifactNotFoundError
+    from generic_artifact_service import (
+        GenericArtifactReadService,
+        GetGenericArtifactCommand,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--deleted",
+                document={
+                    **stored_single_file_document(),
+                    "lifecycle_status": "deleted",
+                    "deleted": True,
+                },
+            ),
+        )
+    )
+
+    with pytest.raises(ArtifactNotFoundError):
+        await GenericArtifactReadService(database=database).get_artifact(
+            GetGenericArtifactCommand(
+                project_id="project-1",
+                artifact_id="artifact--deleted",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_soft_deletes_single_file_artifact(
+) -> None:
+    from generic_artifact_service import (
+        DeleteGenericArtifactCommand,
+        GenericArtifactReadService,
+    )
+
+    database = FakeArtifactDatabase(())
+
+    await GenericArtifactReadService(database=database).delete_artifact(
+        DeleteGenericArtifactCommand(
+            project_id="project-1",
+            artifact_id="artifact--abc",
+        )
+    )
+
+    assert database.delete_calls == [("project-1", "artifact--abc")]
 
 
 @pytest.mark.asyncio
@@ -429,6 +525,45 @@ async def test_generic_artifact_service_creates_linked_content_replacement(
             "parent_artifact_id": "artifact--abc",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_generic_artifact_service_rejects_deleted_version_parent(
+) -> None:
+    from database import ArtifactDocumentRecord, ArtifactNotFoundError
+    from generic_artifact_service import (
+        CreateGenericArtifactVersionCommand,
+        GenericArtifactReadService,
+    )
+
+    database = FakeArtifactDatabase(
+        (
+            ArtifactDocumentRecord(
+                artifact_id="artifact--abc",
+                document={
+                    **stored_single_file_document(),
+                    "lifecycle_status": "deleted",
+                    "deleted": True,
+                },
+            ),
+        )
+    )
+
+    with pytest.raises(ArtifactNotFoundError):
+        await GenericArtifactReadService(
+            database=database
+        ).create_artifact_version(
+            CreateGenericArtifactVersionCommand(
+                project_id="project-1",
+                artifact_id="artifact--abc",
+                session_id="session-2",
+                user_id="user-1",
+                content="import secrets\nprint('replacement')\n",
+                originating_turn_id="turn-2",
+            )
+        )
+
+    assert database.save_calls == []
 
 
 @pytest.mark.asyncio

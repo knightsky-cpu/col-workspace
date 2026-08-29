@@ -17,6 +17,7 @@ import {
   completeWorkMetadataUpdate,
   completeWorkVersionCreate,
   completeWorkArchive,
+  completeWorkDelete,
   completeWorkRestore,
   completeWorkspaceCreate,
   completeWorkspaceDelete,
@@ -46,6 +47,7 @@ import {
   setWorkLifecycleStatus,
   storePendingNoteProposal,
   startNewConversation,
+  toggleArtifactDisclosure,
   toggleChatDisclosure,
   toggleMemoryDisclosure,
   toggleNoteDetailDisclosure,
@@ -98,6 +100,7 @@ test("initial subcard disclosure state is empty and toggles stable child ids", (
     notes: { proposalIds: [], detailNoteIds: [] },
     memory: { proposalIds: [], signalIds: [] },
     chats: { sessionIds: [] },
+    work: { artifactIds: [] },
   });
 
   const withNoteProposal = toggleNoteProposalDisclosure(initial, "proposal-1");
@@ -123,6 +126,13 @@ test("initial subcard disclosure state is empty and toggles stable child ids", (
   assert.deepEqual(withSignal.disclosure.memory.signalIds, ["signal-1"]);
   const withChat = toggleChatDisclosure(initial, "session-1");
   assert.deepEqual(withChat.disclosure.chats.sessionIds, ["session-1"]);
+  const withArtifact = toggleArtifactDisclosure(initial, "artifact--1");
+  assert.deepEqual(withArtifact.disclosure.work.artifactIds, ["artifact--1"]);
+  assert.deepEqual(
+    toggleArtifactDisclosure(withArtifact, "artifact--1")
+      .disclosure.work.artifactIds,
+    [],
+  );
   const expandedChat = expandChatDisclosure(initial, "session-1");
   assert.deepEqual(expandedChat.disclosure.chats.sessionIds, ["session-1"]);
   assert.deepEqual(
@@ -169,6 +179,88 @@ test("workspace list lifecycle stores selectable user containers", () => {
       .workspaces.error,
     "workspace unavailable",
   );
+});
+
+test("workspace list load selects first visible workspace when seeded context is hidden", () => {
+  const state = acceptContext(
+    createInitialState(),
+    {
+      user_id: "google--user",
+      project_id: "project--deleted-default",
+      crypto: cryptoStub,
+    },
+  );
+  const populated = {
+    ...state,
+    transcript: [{ request: {}, response: {} }],
+    activeMemoryClarification: clarificationReceipt(),
+    work: {
+      ...state.work,
+      list: {
+        status: "ready",
+        items: [{ reference: { artifact_id: "artifact--stale" } }],
+        next_before: null,
+        error: null,
+      },
+    },
+    chats: {
+      ...state.chats,
+      sessions: [{ session_id: "session--stale" }],
+    },
+  };
+
+  const loaded = completeWorkspaceListLoad(populated, {
+    workspace_contract_version: "1.0",
+    workspaces: [
+      {
+        workspace_id: "project--visible-one",
+        display_name: "Visible One",
+        is_default: false,
+      },
+      {
+        workspace_id: "project--visible-two",
+        display_name: "Visible Two",
+        is_default: false,
+      },
+    ],
+  }, cryptoStub);
+
+  assert.equal(loaded.context.project_id, "project--visible-one");
+  assert.equal(loaded.context.session_id, "session--123e4567-e89b-12d3-a456-426614174000");
+  assert.equal(loaded.workspaces.selectedWorkspaceId, "project--visible-one");
+  assert.equal(loaded.transcript.length, 0);
+  assert.equal(loaded.work.list.items.length, 0);
+  assert.equal(loaded.chats.sessions.length, 0);
+});
+
+test("workspace list load preserves a visible selected workspace", () => {
+  const state = acceptContext(
+    createInitialState(),
+    {
+      user_id: "google--user",
+      project_id: "project--visible-two",
+      crypto: cryptoStub,
+    },
+  );
+
+  const loaded = completeWorkspaceListLoad(state, {
+    workspace_contract_version: "1.0",
+    workspaces: [
+      {
+        workspace_id: "project--visible-one",
+        display_name: "Visible One",
+        is_default: false,
+      },
+      {
+        workspace_id: "project--visible-two",
+        display_name: "Visible Two",
+        is_default: false,
+      },
+    ],
+  }, cryptoStub);
+
+  assert.equal(loaded.context.project_id, "project--visible-two");
+  assert.equal(loaded.workspaces.selectedWorkspaceId, "project--visible-two");
 });
 
 test("workspace selection updates context and clears workspace-scoped panels", () => {
@@ -342,6 +434,98 @@ test("pending turn lifecycle preserves exact retry envelope on failure", () => {
   assert.equal(failed.pendingTurn, null);
   assert.equal(failed.lastFailure.request, request);
   assert.equal(failed.lastFailure.message, "network failed");
+});
+
+test("submit is disabled when selected workspace is not visible after list load", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    {
+      user_id: "google--user",
+      project_id: "project--hidden",
+      crypto: cryptoStub,
+    },
+  );
+  const loaded = {
+    ...accepted,
+    workspaces: {
+      ...accepted.workspaces,
+      status: "ready",
+      selectedWorkspaceId: "project--hidden",
+      items: [{
+        workspace_id: "project--visible",
+        display_name: "Visible",
+      }],
+    },
+  };
+
+  assert.equal(selectCanSubmit(loaded), false);
+});
+
+test("submit is disabled until an authoritative visible workspace is selected", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    {
+      user_id: "google--user",
+      project_id: "project--visible",
+      crypto: cryptoStub,
+    },
+  );
+  const loading = beginWorkspaceListLoad(accepted);
+  const failed = failWorkspaceListLoad(loading, new Error("workspace load failed"));
+  const empty = completeWorkspaceListLoad(accepted, {
+    workspace_contract_version: "1.0",
+    workspaces: [],
+  }, cryptoStub);
+
+  assert.equal(selectCanSubmit(loading), false);
+  assert.equal(selectCanSubmit(failed), false);
+  assert.equal(selectCanSubmit(empty), false);
+});
+
+test("deleted artifact clears selected detail and current list item", () => {
+  const state = acceptContext(
+    createInitialState(),
+    { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
+  );
+  const loaded = {
+    ...state,
+    disclosure: {
+      ...state.disclosure,
+      work: { artifactIds: ["artifact--selected"] },
+    },
+    work: {
+      ...state.work,
+      selectedArtifactId: "artifact--selected",
+      list: {
+        status: "ready",
+        items: [
+          { reference: { artifact_id: "artifact--selected" } },
+          { reference: { artifact_id: "artifact--other" } },
+        ],
+        next_before: null,
+        error: null,
+      },
+      detail: {
+        status: "ready",
+        item: {
+          metadata: {
+            reference: { artifact_id: "artifact--selected" },
+          },
+        },
+        error: null,
+      },
+    },
+  };
+
+  const deleted = completeWorkDelete(loaded, "artifact--selected");
+
+  assert.equal(deleted.work.selectedArtifactId, null);
+  assert.equal(deleted.work.detail.status, "idle");
+  assert.deepEqual(
+    deleted.work.list.items.map((item) => item.reference.artifact_id),
+    ["artifact--other"],
+  );
+  assert.deepEqual(deleted.disclosure.work.artifactIds, []);
 });
 
 test("streamed response text accumulates and converges to canonical final", () => {
@@ -638,6 +822,11 @@ test("completed turn projects authoritative receipts into activity", () => {
         proposal_id: "preferred_name--proposal-1",
         category: "preferred_name",
       }],
+      collaborative_note_events: [{
+        event_type: "approved",
+        note_id: "note--1",
+        title: "API decision",
+      }],
       adaptations: [{
         signal_id: "preferred_name--signal-1",
         category: "preferred_name",
@@ -650,12 +839,16 @@ test("completed turn projects authoritative receipts into activity", () => {
 
   assert.deepEqual(
     completed.activity.entries.map((entry) => entry.kind),
-    ["action", "citation", "work", "feedback", "memory", "adaptation"],
+    ["action", "citation", "work", "feedback", "memory", "note", "adaptation"],
   );
   assert.equal(completed.activity.entries[0].label, "synthesize_project");
-  assert.equal(completed.activity.entries[2].detail, "blueprint--1");
-  assert.equal(completed.activity.entries[5].label, "Preferred name");
-  assert.equal(completed.activity.entries[5].detail, "Wifiknight");
+  assert.equal(completed.activity.entries[2].detail, "created");
+  assert.equal(completed.activity.entries[3].detail, "recorded");
+  assert.equal(completed.activity.entries[4].detail, "pending");
+  assert.equal(completed.activity.entries[5].detail, "API decision");
+  assert.equal(completed.activity.entries[6].label, "Preferred name");
+  assert.equal(completed.activity.entries[6].detail, "Wifiknight");
+  assert.equal(JSON.stringify(completed.activity.entries).includes("--"), false);
 });
 
 test("completed turn projects adaptation activity with readable provenance", () => {
@@ -945,9 +1138,17 @@ test("selectCanSubmit requires workspace context and no pending turn", () => {
     createInitialState(),
     { user_id: "wifiknight", project_id: "agent-col", crypto: cryptoStub },
   );
-  assert.equal(selectCanSubmit(accepted), true);
+  const loaded = completeWorkspaceListLoad(accepted, {
+    workspace_contract_version: "1.0",
+    workspaces: [{
+      workspace_id: "agent-col",
+      display_name: "Agent Col",
+      is_default: true,
+    }],
+  }, cryptoStub);
+  assert.equal(selectCanSubmit(loaded), true);
   assert.equal(
-    selectCanSubmit(beginPendingTurn(accepted, {
+    selectCanSubmit(beginPendingTurn(loaded, {
       key: "chat--1",
       body: { message: "hello" },
     })),
@@ -1482,7 +1683,8 @@ test("archiving selected work removes it from the visible list and clears detail
     { events: [], next_before: null },
   );
 
-  const archived = completeWorkArchive(loaded, "artifact--abc");
+  const expanded = toggleArtifactDisclosure(loaded, "artifact--abc");
+  const archived = completeWorkArchive(expanded, "artifact--abc");
 
   assert.deepEqual(
     archived.work.list.items.map((item) => item.reference.artifact_id),
@@ -1490,6 +1692,7 @@ test("archiving selected work removes it from the visible list and clears detail
   );
   assert.equal(archived.work.selectedArtifactId, null);
   assert.equal(archived.work.detail.status, "idle");
+  assert.deepEqual(archived.disclosure.work.artifactIds, []);
 });
 
 test("work lifecycle mode can switch to archived and restores selected work out of view", () => {

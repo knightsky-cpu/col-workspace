@@ -230,6 +230,45 @@ async def test_update_artifact_metadata_document_rejects_missing_artifact(
 
 
 @pytest.mark.asyncio
+async def test_delete_artifact_document_marks_generic_artifact_deleted(
+) -> None:
+    client, projects, project, artifacts = artifact_store()
+    artifact_ref = MagicMock()
+    artifact_ref.update = AsyncMock()
+    snapshot = SimpleNamespace(
+        exists=True,
+        to_dict=lambda: {
+            "artifact_contract_version": "1.0",
+            "artifact_type": "single_file_artifact",
+            "schema_version": "1.0",
+            "display_label": "Password Generator",
+            "filename": "password_generator.py",
+            "content": "print('preserved')\n",
+        },
+    )
+    artifact_ref.get = AsyncMock(return_value=snapshot)
+    artifacts.document.return_value = artifact_ref
+
+    await MemoryEngine(client).delete_artifact_document(
+        "project-1",
+        "artifact--abc",
+    )
+
+    projects.document.assert_called_once_with("project-1")
+    project.collection.assert_called_once_with("artifacts")
+    artifacts.document.assert_called_once_with("artifact--abc")
+    artifact_ref.get.assert_awaited_once_with()
+    artifact_ref.update.assert_awaited_once_with(
+        {
+            "lifecycle_status": "deleted",
+            "deleted": True,
+            "deleted_at": firestore.SERVER_TIMESTAMP,
+            "updated_at": firestore.SERVER_TIMESTAMP,
+        }
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("limit", (0, 51, True, "20"))
 async def test_list_blueprint_documents_validates_limit_before_access(
     limit: object,

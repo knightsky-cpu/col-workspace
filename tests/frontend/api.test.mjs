@@ -7,6 +7,7 @@ import {
   archiveArtifact,
   createArtifact,
   createArtifactVersion,
+  deleteArtifact,
   createNoteProposal,
   getAuthConfig,
   getAuthSession,
@@ -286,6 +287,32 @@ test("apiFetchJson maps Agent Col turn timeouts to user-facing copy", async () =
   );
 });
 
+test("apiFetchJson preserves JSON chat partial-failure response effects", async () => {
+  await assert.rejects(
+    () => apiFetchJson("/api/chat", {}, async () => jsonResponse(
+      504,
+      {
+        detail: "Agent_Col response timed out after a completed action.",
+        response: "",
+        actions: [{ action_name: "approve_memory_signal", status: "completed" }],
+        memory_proposals: [],
+      },
+    )),
+    (error) => {
+      assert.equal(error.status, 504);
+      assert.equal(
+        error.message,
+        "Agent Col timed out after recording a completed action. Retry will reuse completed receipts.",
+      );
+      assert.deepEqual(error.partialFailure.actions, [
+        { action_name: "approve_memory_signal", status: "completed" },
+      ]);
+      assert.equal("partial_failure" in error.partialFailure, false);
+      return true;
+    },
+  );
+});
+
 test("listBlueprints calls the canonical project blueprint list path", async () => {
   const calls = [];
   const result = await listBlueprints(
@@ -387,6 +414,15 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
       return jsonResponse(200, { artifact_contract_version: "1.0" });
     },
   );
+  await deleteArtifact(
+    "agent-col",
+    "artifact--abc",
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { artifact_id: "artifact--abc", deleted: true });
+    },
+  );
   await updateArtifactMetadata(
     "agent-col",
     "artifact--abc",
@@ -446,25 +482,31 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
   assert.equal(calls[4][1].headers.Authorization, "Bearer token-1");
   assert.equal(
     calls[5][0],
-    "/api/projects/agent-col/artifacts/artifact--abc/metadata",
+    "/api/projects/agent-col/artifacts/artifact--abc",
   );
-  assert.equal(calls[5][1].method, "PATCH");
+  assert.equal(calls[5][1].method, "DELETE");
   assert.equal(calls[5][1].headers.Authorization, "Bearer token-1");
   assert.equal(
-    calls[5][1].body,
+    calls[6][0],
+    "/api/projects/agent-col/artifacts/artifact--abc/metadata",
+  );
+  assert.equal(calls[6][1].method, "PATCH");
+  assert.equal(calls[6][1].headers.Authorization, "Bearer token-1");
+  assert.equal(
+    calls[6][1].body,
     JSON.stringify({
       display_label: "Renamed Script",
       filename: "renamed_script.py",
     }),
   );
   assert.equal(
-    calls[6][0],
+    calls[7][0],
     "/api/projects/agent-col/artifacts/artifact--abc/versions",
   );
-  assert.equal(calls[6][1].method, "POST");
-  assert.equal(calls[6][1].headers.Authorization, "Bearer token-1");
+  assert.equal(calls[7][1].method, "POST");
+  assert.equal(calls[7][1].headers.Authorization, "Bearer token-1");
   assert.equal(
-    calls[6][1].body,
+    calls[7][1].body,
     JSON.stringify({
       session_id: "session--2",
       user_id: "wifiknight",
@@ -474,10 +516,10 @@ test("generic artifact API wrappers use the canonical artifact paths", async () 
     }),
   );
   assert.equal(
-    calls[7][0],
+    calls[8][0],
     "/api/projects/agent-col/artifacts?lifecycle_status=archived",
   );
-  assert.equal(calls[7][1].method, "GET");
+  assert.equal(calls[8][1].method, "GET");
   assert.equal(
     calls[2][1].body,
     JSON.stringify({

@@ -150,6 +150,7 @@ async def test_save_message_commits_parent_and_message_atomically(
                 "updated_at": firestore.SERVER_TIMESTAMP,
                 "last_message_preview": "hello",
                 "last_message_role": "user",
+                "display_title": "Hello",
             },
             merge=True,
         ),
@@ -717,7 +718,7 @@ async def test_archive_artifact_document_marks_project_artifact_archived(
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
     )
-    artifact_ref.get.assert_awaited_once_with()
+    assert artifact_ref.get.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -768,7 +769,7 @@ async def test_restore_artifact_document_marks_project_artifact_active(
             "updated_at": firestore.SERVER_TIMESTAMP,
         }
     )
-    artifact_ref.get.assert_awaited_once_with()
+    assert artifact_ref.get.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -1140,6 +1141,7 @@ async def test_list_chat_sessions_filters_user_project_metadata() -> None:
                     "updated_at": datetime(2026, 8, 24, 12, 0),
                     "last_message_preview": "new question",
                     "last_message_role": "user",
+                    "display_title": "API TUI app",
                 },
             ),
             (
@@ -1165,6 +1167,7 @@ async def test_list_chat_sessions_filters_user_project_metadata() -> None:
         "session-new"
     ]
     assert result.sessions[0].last_message_preview == "new question"
+    assert result.sessions[0].display_title == "API TUI app"
     sessions.limit.assert_called_once_with(200)
 
 

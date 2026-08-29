@@ -956,42 +956,6 @@ p {
   padding: 0.75rem;
 }
 
-.artifact-create-form {
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius);
-  background: rgba(20, 35, 43, 0.7);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-  display: grid;
-  gap: 0.5rem;
-  margin-block: 0.75rem 1rem;
-  padding: 0.75rem;
-}
-
-.artifact-create-form h3 {
-  margin: 0;
-}
-
-.artifact-create-form label {
-  display: grid;
-  gap: 0.25rem;
-}
-
-.artifact-create-form input,
-.artifact-create-form select,
-.artifact-create-form textarea {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--text);
-  padding: 0.5rem;
-}
-
-.artifact-create-form textarea {
-  min-height: 6rem;
-  resize: vertical;
-}
-
 .feedback-form textarea,
 .feedback-form input,
 .feedback-form select {
@@ -1051,7 +1015,8 @@ p {
 
 .memory-actions,
 .workspace-actions,
-.notes-actions {
+.notes-actions,
+.artifact-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
@@ -1062,8 +1027,8 @@ p {
 .memory-actions button,
 .workspace-actions button,
 .notes-actions button,
+.artifact-actions button,
 .export-controls button,
-.artifact-create-form button,
 .feedback-form button,
 .notes-correction-form button,
 .work-panel .control-compact {
@@ -1096,6 +1061,7 @@ p {
 
 .memory-card[data-disclosure-expanded="true"],
 .notes-card[data-disclosure-expanded="true"],
+.work-list-item[data-disclosure-expanded="true"],
 .chat-session-card[data-disclosure-expanded="true"] {
   border-color: rgba(243, 182, 75, 0.34);
   background: rgba(20, 35, 43, 0.88);

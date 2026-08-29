@@ -56,18 +56,13 @@ function feedbackCounts(item) {
   ]);
 }
 
-export function buildArtifactCreateRequest(formData) {
-  const request = {
-    artifact_family: String(formData.get("artifact_family") ?? "").trim(),
-    format: String(formData.get("format") ?? "").trim(),
-    filename: String(formData.get("filename") ?? "").trim(),
-    source_text: String(formData.get("source_text") ?? "").trim(),
-  };
-  const displayLabel = String(formData.get("display_label") ?? "").trim();
-  if (displayLabel) {
-    request.display_label = displayLabel;
-  }
-  return request;
+function artifactExpanded(disclosure, artifactId) {
+  return Array.isArray(disclosure?.artifactIds)
+    && disclosure.artifactIds.includes(String(artifactId ?? ""));
+}
+
+function disclosureId(prefix, id) {
+  return `${prefix}-${String(id ?? "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 }
 
 export function buildBlueprintDownload(detail) {
@@ -84,7 +79,6 @@ function blueprintMarkdown(detail) {
     "",
     model.core_value_proposition,
     "",
-    `Artifact ID: ${reference.artifact_id}`,
     `Schema version: ${reference.schema_version}`,
     "",
     "## In scope",
@@ -342,7 +336,7 @@ function renderExportControls(parent, detail, handlers) {
   parent.append(box);
 }
 
-export function renderWorkList(container, work, handlers) {
+export function renderWorkList(container, work, handlers, disclosure = {}) {
   container.replaceChildren();
   if (work.list.status === "loading") {
     appendTextElement(container, "p", "muted", "Loading Artifacts...");
@@ -353,21 +347,25 @@ export function renderWorkList(container, work, handlers) {
     return;
   }
   const lifecycleStatus = work.list.lifecycleStatus ?? "active";
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.classList.add("control-compact");
-  toggle.setAttribute("data-artifact-lifecycle-toggle", "");
-  setText(
-    toggle,
-    lifecycleStatus === "archived" ? "Show Active" : "Show Archived",
-  );
-  toggle.addEventListener("click", () => {
-    handlers.onSetArtifactLifecycleStatus?.(
-      lifecycleStatus === "archived" ? "active" : "archived",
-    );
-  });
+  const lifecycleControls = document.createElement("div");
+  lifecycleControls.classList.add("artifact-actions", "contain-text");
+  lifecycleControls.setAttribute("data-artifact-lifecycle-controls", "");
+  for (const status of ["active", "archived"]) {
+    const filter = document.createElement("button");
+    filter.type = "button";
+    filter.classList.add("control-compact");
+    filter.setAttribute("data-artifact-lifecycle-filter", status);
+    filter.disabled = lifecycleStatus === status;
+    setText(filter, status === "active" ? "Active" : "Archived");
+    filter.addEventListener("click", () => {
+      if (!filter.disabled) {
+        handlers.onSetArtifactLifecycleStatus?.(status);
+      }
+    });
+    lifecycleControls.append(filter);
+  }
+  container.append(lifecycleControls);
   if (!work.list.items.length) {
-    container.append(toggle);
     appendTextElement(
       container,
       "p",
@@ -380,12 +378,15 @@ export function renderWorkList(container, work, handlers) {
   }
   for (const item of work.list.items) {
     const reference = item.reference;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.classList.add("work-list-item", "contain-text");
-    button.setAttribute("data-artifact-id", reference.artifact_id);
+    const expanded = artifactExpanded(disclosure, reference.artifact_id);
+    const card = document.createElement("div");
+    card.classList.add("work-list-item", "contain-text");
+    card.setAttribute("data-artifact-id", reference.artifact_id);
+    if (expanded) {
+      card.setAttribute("data-disclosure-expanded", "true");
+    }
     if (work.selectedArtifactId === reference.artifact_id) {
-      button.setAttribute("aria-current", "true");
+      card.setAttribute("aria-current", "true");
     }
     const secondary = reference.artifact_type === "single_file_artifact"
       ? compactText([
@@ -393,16 +394,90 @@ export function renderWorkList(container, work, handlers) {
           item.parent_artifact_id ? "Revised version" : "",
         ])
       : feedbackCounts(item);
-    setText(button, compactText([
+    const isGenericArtifact = reference.artifact_type === "single_file_artifact";
+    const panelId = disclosureId("artifact-lifecycle", reference.artifact_id);
+    const selectButton = document.createElement("button");
+    selectButton.type = "button";
+    selectButton.classList.add("subcard-disclosure-toggle", "contain-text");
+    if (isGenericArtifact) {
+      selectButton.setAttribute("data-disclosure-toggle", "artifact-lifecycle");
+      selectButton.setAttribute("aria-expanded", String(expanded));
+      selectButton.setAttribute("aria-controls", panelId);
+    }
+    setText(selectButton, compactText([
       reference.display_label,
       secondary,
     ]));
-    button.addEventListener("click", () => {
+    selectButton.addEventListener("click", () => {
+      if (isGenericArtifact) {
+        handlers.onToggleArtifactDisclosure?.(reference.artifact_id);
+        return;
+      }
       handlers.onSelectArtifact(reference.artifact_id);
     });
-    container.append(button);
+    card.addEventListener("click", (event) => {
+      if (event?.target === card) {
+        if (isGenericArtifact) {
+          handlers.onToggleArtifactDisclosure?.(reference.artifact_id);
+          return;
+        }
+        handlers.onSelectArtifact(reference.artifact_id);
+      }
+    });
+    card.append(selectButton);
+    if (isGenericArtifact) {
+      if (!expanded) {
+        container.append(card);
+        continue;
+      }
+      const panel = document.createElement("div");
+      panel.classList.add("subcard-disclosure-panel", "contain-text");
+      panel.setAttribute("data-artifact-lifecycle-panel", "");
+      panel.setAttribute("id", panelId);
+      const actions = document.createElement("div");
+      actions.classList.add("artifact-actions", "contain-text");
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.classList.add("control-compact");
+      openButton.setAttribute("data-open-artifact", "");
+      setText(openButton, "Open");
+      openButton.addEventListener("click", (event) => {
+        event?.stopPropagation?.();
+        handlers.onSelectArtifact?.(reference.artifact_id);
+      });
+      const lifecycleAction = document.createElement("button");
+      lifecycleAction.type = "button";
+      lifecycleAction.classList.add("control-compact");
+      if (lifecycleStatus === "archived") {
+        lifecycleAction.setAttribute("data-restore-artifact", "");
+        setText(lifecycleAction, "Restore");
+        lifecycleAction.addEventListener("click", (event) => {
+          event?.stopPropagation?.();
+          handlers.onRestoreArtifact?.(reference.artifact_id);
+        });
+      } else {
+        lifecycleAction.setAttribute("data-archive-artifact", "");
+        setText(lifecycleAction, "Archive");
+        lifecycleAction.addEventListener("click", (event) => {
+          event?.stopPropagation?.();
+          handlers.onArchiveArtifact?.(reference.artifact_id);
+        });
+      }
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.classList.add("control-compact");
+      deleteButton.setAttribute("data-delete-artifact", "");
+      setText(deleteButton, "Delete");
+      deleteButton.addEventListener("click", (event) => {
+        event?.stopPropagation?.();
+        handlers.onDeleteArtifact?.(reference.artifact_id);
+      });
+      actions.append(openButton, lifecycleAction, deleteButton);
+      panel.append(actions);
+      card.append(panel);
+    }
+    container.append(card);
   }
-  container.append(toggle);
 }
 
 function renderBlueprint(parent, blueprint) {
@@ -661,15 +736,11 @@ function renderFeedbackTargets(parent, detail, handlers) {
       correction.required = select.value === "edited";
     });
 
-    const supersedes = document.createElement("input");
-    supersedes.name = "supersedes_feedback_id";
-    supersedes.placeholder = "Optional feedback ID to supersede";
-
     const submit = document.createElement("button");
     submit.type = "submit";
     setText(submit, "Record feedback");
 
-    form.append(select, feedback, correction, supersedes, submit);
+    form.append(select, feedback, correction, submit);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       handlers.onSubmitFeedback({
@@ -678,7 +749,6 @@ function renderFeedbackTargets(parent, detail, handlers) {
         decision: select.value,
         feedback_text: feedback.value,
         correction_text: correction.value,
-        supersedes_feedback_id: supersedes.value,
         expected_schema_version: detail.metadata.reference.schema_version,
       });
     });
@@ -763,16 +833,14 @@ export function renderWorkDetail(container, work, handlers) {
 }
 
 export function createWorkView(elements, handlers) {
-  elements.createForm?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    handlers.onCreateArtifact?.(
-      buildArtifactCreateRequest(new FormData(event.currentTarget)),
-    );
-  });
-
   return {
     render(state) {
-      renderWorkList(elements.list, state.work, handlers);
+      renderWorkList(
+        elements.list,
+        state.work,
+        handlers,
+        state.disclosure?.work,
+      );
       renderWorkDetail(elements.detail, state.work, handlers);
     },
   };

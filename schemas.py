@@ -903,6 +903,7 @@ class ChatSessionSummary(StrictModel):
     project_id: IdentifierStr
     user_id: IdentifierStr
     updated_at: datetime | None = None
+    display_title: str | None = Field(default=None, max_length=80)
     last_message_preview: str | None = Field(default=None, max_length=180)
     last_message_role: ChatRole | None = None
 

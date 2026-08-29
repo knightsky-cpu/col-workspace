@@ -376,6 +376,15 @@ class MemoryEngine:
                         {
                             "project_id": project_id,
                             "user_id": user_id,
+                            **(
+                                {
+                                    "display_title": (
+                                        self._chat_display_title(text)
+                                    )
+                                }
+                                if role == "user"
+                                else {}
+                            ),
                         }
                     )
                 transaction.set(
@@ -441,6 +450,11 @@ class MemoryEngine:
                             if isinstance(
                                 data.get("last_message_preview"), str
                             )
+                            else None
+                        ),
+                        display_title=(
+                            data.get("display_title")
+                            if isinstance(data.get("display_title"), str)
                             else None
                         ),
                         last_message_role=(
@@ -1818,6 +1832,9 @@ class MemoryEngine:
                     {
                         "project_id": request.project_id,
                         "user_id": request.user_id,
+                        "display_title": self._chat_display_title(
+                            request.message
+                        ),
                     }
                 )
             transaction.set(session_ref, session_update, merge=True)
@@ -4194,6 +4211,14 @@ class MemoryEngine:
                 .collection("artifacts")
                 .document(artifact_id)
             )
+            snapshot = await artifact_ref.get()
+            if not snapshot.exists:
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored artifact document is invalid.")
+            if self._artifact_document_deleted(document):
+                raise ArtifactNotFoundError("Artifact does not exist.")
             await artifact_ref.update(
                 {
                     "lifecycle_status": "archived",
@@ -4202,11 +4227,11 @@ class MemoryEngine:
                 }
             )
             snapshot = await artifact_ref.get()
-            if not snapshot.exists:
-                raise ArtifactNotFoundError("Artifact does not exist.")
             document = snapshot.to_dict()
             if not isinstance(document, dict):
                 raise ValueError("Stored artifact document is invalid.")
+            if self._artifact_document_deleted(document):
+                raise ArtifactNotFoundError("Artifact does not exist.")
             return ArtifactDocumentRecord(
                 artifact_id=artifact_id,
                 document=document,
@@ -4234,6 +4259,14 @@ class MemoryEngine:
                 .collection("artifacts")
                 .document(artifact_id)
             )
+            snapshot = await artifact_ref.get()
+            if not snapshot.exists:
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored artifact document is invalid.")
+            if self._artifact_document_deleted(document):
+                raise ArtifactNotFoundError("Artifact does not exist.")
             await artifact_ref.update(
                 {
                     "lifecycle_status": "active",
@@ -4242,8 +4275,6 @@ class MemoryEngine:
                 }
             )
             snapshot = await artifact_ref.get()
-            if not snapshot.exists:
-                raise ArtifactNotFoundError("Artifact does not exist.")
             document = snapshot.to_dict()
             if not isinstance(document, dict):
                 raise ValueError("Stored artifact document is invalid.")
@@ -4294,10 +4325,16 @@ class MemoryEngine:
                 .collection("artifacts")
                 .document(artifact_id)
             )
-            await artifact_ref.update(updates)
             snapshot = await artifact_ref.get()
             if not snapshot.exists:
                 raise ArtifactNotFoundError("Artifact does not exist.")
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored artifact document is invalid.")
+            if self._artifact_document_deleted(document):
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            await artifact_ref.update(updates)
+            snapshot = await artifact_ref.get()
             document = snapshot.to_dict()
             if not isinstance(document, dict):
                 raise ValueError("Stored artifact document is invalid.")
@@ -4317,6 +4354,45 @@ class MemoryEngine:
                 "update_artifact_metadata_document",
                 exc,
             )
+
+    async def delete_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> None:
+        """Soft-delete one project-owned generic artifact document."""
+        self._validate_memory_identifier(project_id, "project_id")
+        self._validate_memory_identifier(artifact_id, "artifact_id")
+
+        try:
+            artifact_ref = (
+                self._client.collection("projects")
+                .document(project_id)
+                .collection("artifacts")
+                .document(artifact_id)
+            )
+            snapshot = await artifact_ref.get()
+            if not snapshot.exists:
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            document = snapshot.to_dict()
+            if not isinstance(document, dict):
+                raise ValueError("Stored artifact document is invalid.")
+            if self._artifact_document_deleted(document):
+                raise ArtifactNotFoundError("Artifact does not exist.")
+            await artifact_ref.update(
+                {
+                    "lifecycle_status": "deleted",
+                    "deleted": True,
+                    "deleted_at": firestore.SERVER_TIMESTAMP,
+                    "updated_at": firestore.SERVER_TIMESTAMP,
+                }
+            )
+        except ArtifactNotFoundError:
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("delete_artifact_document", exc)
+        except ValueError as exc:
+            self._raise_firestore_error("delete_artifact_document", exc)
 
     async def record_blueprint_feedback(
         self,
@@ -4726,6 +4802,13 @@ class MemoryEngine:
             self._raise_firestore_error("get_artifact_document", exc)
         except ValueError as exc:
             self._raise_firestore_error("get_artifact_document", exc)
+
+    @staticmethod
+    def _artifact_document_deleted(document: Mapping[str, object]) -> bool:
+        return (
+            document.get("deleted") is True
+            or document.get("lifecycle_status") == "deleted"
+        )
 
     async def list_artifact_documents(
         self,
@@ -6983,6 +7066,61 @@ class MemoryEngine:
     def _chat_preview(text: str) -> str:
         compact = " ".join(text.split())
         return compact[:180]
+
+    @staticmethod
+    def _chat_display_title(text: str) -> str:
+        words = re.findall(r"[A-Za-z0-9]+", text)
+        stop_words = {
+            "a",
+            "about",
+            "agent",
+            "an",
+            "and",
+            "are",
+            "can",
+            "col",
+            "could",
+            "for",
+            "hey",
+            "hi",
+            "hello",
+            "in",
+            "is",
+            "me",
+            "of",
+            "on",
+            "or",
+            "our",
+            "please",
+            "that",
+            "the",
+            "this",
+            "to",
+            "use",
+            "used",
+            "was",
+            "we",
+            "were",
+            "what",
+            "would",
+            "you",
+        }
+        selected = [
+            word for word in words if word.lower() not in stop_words
+        ][:5]
+        if not selected:
+            selected = words[:5]
+        if not selected:
+            return "Untitled chat"
+        acronyms = {"api", "cli", "css", "gba", "html", "mcu", "sdk", "sql", "tui", "ui"}
+        normalized = [
+            word.upper() if word.lower() in acronyms else word.lower()
+            for word in selected
+        ]
+        title = " ".join(normalized)
+        if title:
+            return f"{title[0].upper()}{title[1:]}"[:80]
+        return "Untitled chat"
 
     @staticmethod
     def _validate_limit(

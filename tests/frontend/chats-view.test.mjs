@@ -57,6 +57,7 @@ test("renderChatsPanel renders human-facing session cards", () => {
       sessions: [
         {
           session_id: "session--1",
+          display_title: "API TUI app",
           last_message_preview: "Plan the artifact viewer",
           last_message_role: "model",
           updated_at: "2026-08-24T10:00:00Z",
@@ -70,7 +71,8 @@ test("renderChatsPanel renders human-facing session cards", () => {
     },
   );
 
-  assert.equal(textTree(container).includes("Plan the artifact viewer"), true);
+  assert.equal(textTree(container).includes("API TUI app"), true);
+  assert.equal(textTree(container).includes("Plan the artifact viewer"), false);
   assert.equal(textTree(container).includes("session--1"), false);
   const sessionCard = container.children[0];
   assert.equal(sessionCard.attributes["data-session-id"], "session--1");
@@ -105,6 +107,7 @@ test("renderChatsPanel collapses selected session metadata without reopening the
       sessions: [
         {
           session_id: "session--1",
+          display_title: "API TUI app",
           last_message_preview: "Plan the artifact viewer",
           last_message_role: "model",
           updated_at: "2026-08-24T10:00:00Z",
@@ -128,6 +131,8 @@ test("renderChatsPanel collapses selected session metadata without reopening the
   assert.equal(sessionCard.tagName, "button");
   assert.equal(sessionCard.attributes["data-disclosure-toggle"], "chat-session");
   assert.equal(sessionCard.attributes["aria-expanded"], "true");
+  assert.equal(textTree(sessionCard).includes("API TUI app"), true);
+  assert.equal(textTree(sessionCard).includes("Plan the artifact viewer"), true);
   assert.equal(textTree(sessionCard).includes("last: model"), true);
   sessionCard.onclick();
   assert.deepEqual(toggled, ["session--1"]);

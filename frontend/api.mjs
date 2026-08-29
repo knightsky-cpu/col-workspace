@@ -73,6 +73,23 @@ export function normalizeApiError(response, body) {
   const detail = body && typeof body === "object" && "detail" in body
     ? body.detail
     : body;
+  const partialFailure = (
+    body
+    && typeof body === "object"
+    && typeof body.response === "string"
+    && (
+      Array.isArray(body.actions)
+      || Array.isArray(body.artifacts)
+      || Array.isArray(body.artifact_feedback)
+      || Array.isArray(body.memory_proposals)
+      || Array.isArray(body.memory_clarifications)
+      || Array.isArray(body.collaborative_note_proposals)
+      || Array.isArray(body.collaborative_note_events)
+      || Array.isArray(body.continuity_receipts)
+      || Array.isArray(body.continuity_choices)
+      || Array.isArray(body.adaptations)
+    )
+  ) ? body : null;
   const timeoutMessage = detailToTimeoutMessage(response.status, detail);
   return new ApiError({
     status: response.status,
@@ -81,6 +98,7 @@ export function normalizeApiError(response, body) {
     retryAfterSeconds: retryAfter === null
       ? null
       : Number.parseInt(retryAfter, 10),
+    partialFailure,
   });
 }
 
@@ -457,6 +475,22 @@ export function restoreArtifact(
   return apiFetchJson(
     `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/restore`,
     { method: "POST", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function deleteArtifact(
+  projectId,
+  artifactId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
+    { method: "DELETE", authToken: options.authToken },
     fetchLike,
   );
 }

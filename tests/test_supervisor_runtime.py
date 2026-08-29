@@ -572,17 +572,17 @@ async def test_run_turn_includes_precompleted_note_decision_context() -> None:
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
 
     event = CollaborativeNoteEvent(
-        event_id="note-1--approved--note-proposal-1",
-        note_id="note-1",
-        proposal_id="note-proposal-1",
+        event_id="event--private-note-approved",
+        note_id="note--private",
+        proposal_id="note-proposal--private",
         owner_user_id="user-1",
-        workspace_id="project-1",
+        workspace_id="workspace--private",
         event_type="approved",
         note_kind="constraint",
         title="API version",
         body="Use API version 2.",
-        source_session_id="session-1",
-        source_message_ids=["message-1"],
+        source_session_id="session--private",
+        source_message_ids=["message--private"],
         revision=1,
         previous_revision=None,
         created_at=datetime(2026, 8, 26, 16, 0, tzinfo=UTC),
@@ -615,7 +615,15 @@ async def test_run_turn_includes_precompleted_note_decision_context() -> None:
     ].text
     assert "SERVER_VALIDATED_PRECOMPLETED_ACTIONS" in context_text
     assert "collaborative_note_events" in context_text
-    assert "note-proposal-1" in context_text
+    assert "API version" in context_text
+    assert "Use API version 2." in context_text
+    assert "approved" in context_text
+    assert "event--private-note-approved" not in context_text
+    assert "note--private" not in context_text
+    assert "note-proposal--private" not in context_text
+    assert "workspace--private" not in context_text
+    assert "session--private" not in context_text
+    assert "message--private" not in context_text
 
 
 @pytest.mark.asyncio
@@ -787,7 +795,7 @@ async def test_run_turn_recovers_precompleted_proposal_without_new_tool_call(
         status="completed",
     )
     proposal = MemoryProposalReceipt(
-        proposal_id="response_length--proposal-1",
+        proposal_id="response_length--private-proposal",
         category="response_length",
         proposed_value="concise",
         expires_at=datetime(2026, 8, 22, 16, 0, tzinfo=UTC),
@@ -817,7 +825,9 @@ async def test_run_turn_recovers_precompleted_proposal_without_new_tool_call(
     ].model_input_context[-1].parts[0].text
     assert "already completed" in operational_context
     assert "do not call propose_memory_signal" in operational_context
-    assert "response_length--proposal-1" in operational_context
+    assert "response_length" in operational_context
+    assert "concise" in operational_context
+    assert "response_length--private-proposal" not in operational_context
 
 
 @pytest.mark.asyncio

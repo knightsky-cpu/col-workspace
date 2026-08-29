@@ -29,21 +29,19 @@ test("workspace hides internal Google subject field from authenticated users", (
   assert.match(html, /data-google-account-status/);
 });
 
-test("workspace exposes a bounded generic artifact creation form", () => {
-  assert.match(html, /data-artifact-create-form/);
-  assert.match(html, /name="artifact_family"/);
-  assert.match(html, /name="format"/);
-  assert.match(html, /name="filename"/);
-  assert.match(html, /name="source_text"/);
+test("workspace omits manual artifact creation from the left drawer", () => {
+  assert.match(html, /data-work-list/);
+  assert.doesNotMatch(html, /data-artifact-create-form/);
+  assert.doesNotMatch(html, /Create Artifact/);
+  assert.doesNotMatch(html, /name="source_text"/);
 });
 
-test("artifacts drawer lists artifacts before the create form", () => {
-  const listIndex = html.indexOf("data-work-list");
-  const createIndex = html.indexOf("data-artifact-create-form");
-
-  assert.notEqual(listIndex, -1);
-  assert.notEqual(createIndex, -1);
-  assert.equal(listIndex < createIndex, true);
+test("structured action chat prose does not interpolate internal ids", () => {
+  assert.doesNotMatch(app, /Record \$\{decision\.decision\} decision for memory proposal/);
+  assert.doesNotMatch(app, /Record \$\{decision\.decision\} decision for note proposal/);
+  assert.doesNotMatch(app, /Artifact \$\{decision\.artifact_id\}/);
+  assert.match(app, /Approve\"} this memory proposal/);
+  assert.match(app, /Approve\"} this workspace note/);
 });
 
 test("workspace print stylesheet prints only the artifact detail surface", () => {
@@ -111,7 +109,7 @@ test("drawer selected child subcards use amber current styling and standard comp
   assert.doesNotMatch(styles, /\.work-list-item\[aria-current="true"\]\s*\{[\s\S]*?border-inline-start-color:\s*var\(--accent\)/);
 
   assert.match(styles, /\.drawer-action-control/);
-  assert.match(styles, /\.memory-actions button,\s*\.workspace-actions button,\s*\.notes-actions button,\s*\.export-controls button,\s*\.artifact-create-form button,\s*\.feedback-form button,\s*\.notes-correction-form button/);
+  assert.match(styles, /\.memory-actions button,\s*\.workspace-actions button,\s*\.notes-actions button,\s*\.artifact-actions button,\s*\.export-controls button,\s*\.feedback-form button,\s*\.notes-correction-form button/);
   assert.match(styles, /min-height:\s*1\.21rem/);
   assert.match(styles, /font-size:\s*0\.73rem/);
   assert.match(styles, /\.notes-correction-form button\s*\{[\s\S]*?justify-self:\s*start/);

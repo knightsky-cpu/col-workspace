@@ -1144,6 +1144,7 @@ async def test_claim_chat_turn_atomically_creates_turn_and_user_message(
                 "updated_at": firestore.SERVER_TIMESTAMP,
                 "last_message_preview": "Remember one logical turn.",
                 "last_message_role": "user",
+                "display_title": "Remember one logical turn",
             },
             merge=True,
         ),
@@ -1332,6 +1333,7 @@ async def test_claim_chat_turn_establishes_new_session_owner_once(
             "updated_at": firestore.SERVER_TIMESTAMP,
             "last_message_preview": "Remember one logical turn.",
             "last_message_role": "user",
+            "display_title": "Remember one logical turn",
         },
         merge=True,
     )

@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  buildArtifactCreateRequest,
   buildBlueprintExports,
   buildBlueprintDownload,
   renderFeedbackHistory,
@@ -54,6 +53,9 @@ function textTree(item) {
 }
 
 function findTree(item, predicate) {
+  if (!item) {
+    return null;
+  }
   if (predicate(item)) {
     return item;
   }
@@ -192,23 +194,6 @@ const textArtifactDetail = {
   },
 };
 
-test("buildArtifactCreateRequest maps form data to API payload", () => {
-  const formData = new FormData();
-  formData.set("artifact_family", "code");
-  formData.set("format", "python");
-  formData.set("filename", "password_generator.py");
-  formData.set("display_label", "Password Generator");
-  formData.set("source_text", "Create a password generator.");
-
-  assert.deepEqual(buildArtifactCreateRequest(formData), {
-    artifact_family: "code",
-    format: "python",
-    filename: "password_generator.py",
-    display_label: "Password Generator",
-    source_text: "Create a password generator.",
-  });
-});
-
 test("renderWorkList renders blueprint metadata and selection controls", () => {
   const selected = [];
   const container = node();
@@ -230,21 +215,23 @@ test("renderWorkList renders blueprint metadata and selection controls", () => {
     { onSelectArtifact: (artifactId) => selected.push(artifactId) },
   );
 
-  assert.equal(container.children.length, 2);
-  assert.equal(container.children[0].textContent.includes("Safe <Blueprint>"), true);
-  assert.equal(container.children[0].textContent.includes("blueprint--abc"), false);
-  assert.equal(container.children[0].textContent.includes("Accepted 1"), true);
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "blueprint--abc"
+  ));
+  const selectButton = card.children[0];
+  assert.equal(textTree(card).includes("Safe <Blueprint>"), true);
+  assert.equal(textTree(card).includes("blueprint--abc"), false);
+  assert.equal(textTree(card).includes("Accepted 1"), true);
   assert.equal(
-    container.children[0].classList.values.includes("contain-text"),
+    card.classList.values.includes("contain-text"),
     true,
   );
-  assert.equal(container.children[1].textContent, "Show Archived");
-  container.children[0].onclick();
+  selectButton.onclick();
   assert.deepEqual(selected, ["blueprint--abc"]);
 });
 
-test("renderWorkList renders single-file artifact metadata and selection controls", () => {
-  const selected = [];
+test("renderWorkList renders single-file artifact metadata collapsed by default", () => {
+  const toggled = [];
   const container = node();
 
   renderWorkList(
@@ -263,14 +250,26 @@ test("renderWorkList renders single-file artifact metadata and selection control
       },
       selectedArtifactId: null,
     },
-    { onSelectArtifact: (artifactId) => selected.push(artifactId) },
+    { onToggleArtifactDisclosure: (artifactId) => toggled.push(artifactId) },
   );
 
-  assert.equal(container.children[0].textContent.includes("Password Generator"), true);
-  assert.equal(container.children[0].textContent.includes("Python code"), true);
-  assert.equal(container.children[0].textContent.includes("artifact--script"), false);
-  container.children[0].onclick();
-  assert.deepEqual(selected, ["artifact--script"]);
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "artifact--script"
+  ));
+  const archiveButton = findTree(card, (child) => (
+    child.attributes["data-archive-artifact"] === ""
+  ));
+  const deleteButton = findTree(card, (child) => (
+    child.attributes["data-delete-artifact"] === ""
+  ));
+  assert.equal(textTree(card).includes("Password Generator"), true);
+  assert.equal(textTree(card).includes("Python code"), true);
+  assert.equal(textTree(card).includes("artifact--script"), false);
+  assert.equal(card.attributes["data-disclosure-expanded"], undefined);
+  assert.equal(archiveButton, null);
+  assert.equal(deleteButton, null);
+  card.children[0].onclick();
+  assert.deepEqual(toggled, ["artifact--script"]);
 });
 
 test("renderWorkList labels generic artifact versions without exposing parent ids", () => {
@@ -298,8 +297,11 @@ test("renderWorkList labels generic artifact versions without exposing parent id
     { onSelectArtifact: () => {} },
   );
 
-  assert.equal(container.children[0].textContent.includes("Revised version"), true);
-  assert.equal(container.children[0].textContent.includes("artifact--script"), false);
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "artifact--script-v2"
+  ));
+  assert.equal(textTree(card).includes("Revised version"), true);
+  assert.equal(textTree(card).includes("artifact--script"), false);
 });
 
 test("renderWorkList marks the selected artifact and avoids Work terminology", () => {
@@ -322,8 +324,11 @@ test("renderWorkList marks the selected artifact and avoids Work terminology", (
     { onSelectArtifact: () => {} },
   );
 
-  assert.equal(container.children[0].attributes["aria-current"], "true");
-  assert.equal(container.children[0].textContent.includes("Work"), false);
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "blueprint--abc"
+  ));
+  assert.equal(card.attributes["aria-current"], "true");
+  assert.equal(textTree(card).includes("Work"), false);
 });
 
 test("renderWorkList uses artifact terminology for list states", () => {
@@ -376,13 +381,248 @@ test("renderWorkList can switch between active and archived artifact views", () 
     },
   );
 
-  const toggle = container.children.find((child) => (
-    child.attributes["data-artifact-lifecycle-toggle"] === ""
+  const toggle = findTree(container, (child) => (
+    child.attributes["data-artifact-lifecycle-filter"] === "archived"
   ));
   assert.ok(toggle);
-  assert.equal(toggle.textContent, "Show Archived");
+  assert.equal(toggle.textContent, "Archived");
   toggle.onclick();
   assert.deepEqual(switches, ["archived"]);
+});
+
+test("renderWorkList places lifecycle controls before artifact cards", () => {
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        lifecycleStatus: "active",
+        items: [{
+          reference: genericDetail.metadata.reference,
+          filename: "password_generator.py",
+          artifact_family: "code",
+          format: "python",
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    { onSelectArtifact: () => {} },
+  );
+
+  assert.equal(container.children[0].attributes["data-artifact-lifecycle-controls"], "");
+  assert.equal(container.children[1].attributes["data-artifact-id"], "artifact--script");
+});
+
+test("renderWorkList keeps generic artifact lifecycle actions collapsed until card expansion", () => {
+  const toggled = [];
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        lifecycleStatus: "active",
+        items: [{
+          reference: genericDetail.metadata.reference,
+          filename: "password_generator.py",
+          artifact_family: "code",
+          format: "python",
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    {
+      onToggleArtifactDisclosure: (artifactId) => toggled.push(artifactId),
+    },
+  );
+
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "artifact--script"
+  ));
+  const archiveButton = findTree(card, (child) => (
+    child.attributes["data-archive-artifact"] === ""
+  ));
+  const deleteButton = findTree(card, (child) => (
+    child.attributes["data-delete-artifact"] === ""
+  ));
+  const manageButton = findTree(card, (child) => (
+    child.textContent === "Manage"
+  ));
+  const toggleButton = findTree(card, (child) => (
+    child.attributes["data-disclosure-toggle"] === "artifact-lifecycle"
+  ));
+
+  assert.equal(archiveButton, null);
+  assert.equal(deleteButton, null);
+  assert.equal(manageButton, null);
+  assert.ok(toggleButton);
+  assert.equal(toggleButton.textContent.includes("Password Generator"), true);
+  toggleButton.onclick();
+
+  assert.deepEqual(toggled, ["artifact--script"]);
+});
+
+test("renderWorkList exposes compact lifecycle actions when artifact card is expanded", () => {
+  const selected = [];
+  const archived = [];
+  const deleted = [];
+  let stopped = 0;
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        lifecycleStatus: "active",
+        items: [{
+          reference: genericDetail.metadata.reference,
+          filename: "password_generator.py",
+          artifact_family: "code",
+          format: "python",
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    {
+      onSelectArtifact: (artifactId) => selected.push(artifactId),
+      onArchiveArtifact: (artifactId) => archived.push(artifactId),
+      onDeleteArtifact: (artifactId) => deleted.push(artifactId),
+    },
+    { artifactIds: ["artifact--script"] },
+  );
+
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "artifact--script"
+  ));
+  const panel = findTree(card, (child) => (
+    child.attributes["data-artifact-lifecycle-panel"] === ""
+  ));
+  const archiveButton = findTree(panel, (child) => (
+    child.attributes["data-archive-artifact"] === ""
+  ));
+  const deleteButton = findTree(panel, (child) => (
+    child.attributes["data-delete-artifact"] === ""
+  ));
+  const openButton = findTree(panel, (child) => (
+    child.attributes["data-open-artifact"] === ""
+  ));
+
+  assert.equal(card.attributes["data-disclosure-expanded"], "true");
+  assert.ok(openButton);
+  assert.ok(archiveButton);
+  assert.ok(deleteButton);
+  assert.equal(openButton.textContent, "Open");
+  assert.equal(archiveButton.textContent, "Archive");
+  assert.equal(deleteButton.textContent, "Delete");
+  openButton.onclick({ stopPropagation() { stopped += 1; } });
+  archiveButton.onclick({ stopPropagation() { stopped += 1; } });
+  deleteButton.onclick({ stopPropagation() { stopped += 1; } });
+
+  assert.equal(stopped, 3);
+  assert.deepEqual(selected, ["artifact--script"]);
+  assert.deepEqual(archived, ["artifact--script"]);
+  assert.deepEqual(deleted, ["artifact--script"]);
+});
+
+test("renderWorkList exposes restore and delete when archived generic artifact is expanded", () => {
+  const selected = [];
+  const restored = [];
+  const deleted = [];
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        lifecycleStatus: "archived",
+        items: [{
+          reference: genericDetail.metadata.reference,
+          filename: "password_generator.py",
+          artifact_family: "code",
+          format: "python",
+          lifecycle_status: "archived",
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    {
+      onSelectArtifact: (artifactId) => selected.push(artifactId),
+      onRestoreArtifact: (artifactId) => restored.push(artifactId),
+      onDeleteArtifact: (artifactId) => deleted.push(artifactId),
+    },
+    { artifactIds: ["artifact--script"] },
+  );
+
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "artifact--script"
+  ));
+  const panel = findTree(card, (child) => (
+    child.attributes["data-artifact-lifecycle-panel"] === ""
+  ));
+  const restoreButton = findTree(panel, (child) => (
+    child.attributes["data-restore-artifact"] === ""
+  ));
+  const archiveButton = findTree(panel, (child) => (
+    child.attributes["data-archive-artifact"] === ""
+  ));
+  const deleteButton = findTree(panel, (child) => (
+    child.attributes["data-delete-artifact"] === ""
+  ));
+  const openButton = findTree(panel, (child) => (
+    child.attributes["data-open-artifact"] === ""
+  ));
+
+  assert.equal(archiveButton, null);
+  assert.ok(openButton);
+  assert.ok(restoreButton);
+  assert.ok(deleteButton);
+  assert.equal(openButton.textContent, "Open");
+  assert.equal(restoreButton.textContent, "Restore");
+  assert.equal(deleteButton.textContent, "Delete");
+  openButton.onclick({ stopPropagation() {} });
+  restoreButton.onclick({ stopPropagation() {} });
+  deleteButton.onclick({ stopPropagation() {} });
+
+  assert.deepEqual(selected, ["artifact--script"]);
+  assert.deepEqual(restored, ["artifact--script"]);
+  assert.deepEqual(deleted, ["artifact--script"]);
+});
+
+test("renderWorkList does not show generic lifecycle controls for blueprints", () => {
+  const container = node();
+
+  renderWorkList(
+    container,
+    {
+      list: {
+        status: "ready",
+        lifecycleStatus: "active",
+        items: [{
+          reference: detail.metadata.reference,
+          created_at: "2026-08-23T00:00:00Z",
+          feedback_counts: { accepted: 1, rejected: 0, edited: 0 },
+        }],
+        error: null,
+      },
+      selectedArtifactId: null,
+    },
+    { onSelectArtifact: () => {} },
+  );
+
+  const card = container.children.find((child) => (
+    child.attributes["data-artifact-id"] === "blueprint--abc"
+  ));
+  assert.equal(findTree(card, (child) => child.attributes["data-archive-artifact"] === ""), null);
+  assert.equal(findTree(card, (child) => child.attributes["data-delete-artifact"] === ""), null);
 });
 
 test("renderWorkList shows archived empty state and can return to active view", () => {
@@ -406,11 +646,11 @@ test("renderWorkList shows archived empty state and can return to active view", 
     },
   );
 
-  const toggle = container.children.find((child) => (
-    child.attributes["data-artifact-lifecycle-toggle"] === ""
+  const toggle = findTree(container, (child) => (
+    child.attributes["data-artifact-lifecycle-filter"] === "active"
   ));
   assert.ok(toggle);
-  assert.equal(toggle.textContent, "Show Active");
+  assert.equal(toggle.textContent, "Active");
   assert.equal(textTree(container).includes("No Archived Artifacts."), true);
   toggle.onclick();
   assert.deepEqual(switches, ["active"]);
@@ -714,13 +954,9 @@ test("feedback form submits canonical artifact decision fields", () => {
   const correction = form.children.find((child) => (
     child.tagName === "textarea" && child.name === "correction_text"
   ));
-  const supersedes = form.children.find((child) => (
-    child.tagName === "input" && child.name === "supersedes_feedback_id"
-  ));
   select.value = "edited";
   feedback.value = "Needs a clearer milestone.";
   correction.value = "Rename Phase 1 to Discovery.";
-  supersedes.value = "feedback--old";
 
   form.onsubmit({ preventDefault() {} });
 
@@ -730,7 +966,6 @@ test("feedback form submits canonical artifact decision fields", () => {
     decision: "edited",
     feedback_text: "Needs a clearer milestone.",
     correction_text: "Rename Phase 1 to Discovery.",
-    supersedes_feedback_id: "feedback--old",
     expected_schema_version: "2.0",
   }]);
 });
@@ -752,6 +987,35 @@ test("renderWorkDetail uses human target kind and adaptation labels", () => {
   assert.equal(text.includes("whole_blueprint"), false);
   assert.equal(text.includes("Planning granularity"), true);
   assert.equal(text.includes("planning_granularity--1"), false);
+});
+
+test("blueprint markdown export does not expose raw artifact identifiers", () => {
+  const markdown = decodeURIComponent(
+    buildBlueprintExports(detail)
+      .find((item) => item.format === "md")
+      .href.split(",", 2)[1],
+  );
+
+  assert.equal(markdown.includes("Artifact ID:"), false);
+  assert.equal(markdown.includes("blueprint--abc"), false);
+  assert.equal(markdown.includes("Safe <Blueprint>"), true);
+});
+
+test("feedback form does not ask users to enter internal feedback ids", () => {
+  const container = node();
+
+  renderWorkDetail(
+    container,
+    {
+      detail: { status: "ready", item: detail, error: null },
+      feedback: { status: "ready", events: [], error: null },
+    },
+    { onSubmitFeedback: () => {} },
+  );
+
+  const text = textTree(container);
+  assert.equal(text.includes("feedback ID"), false);
+  assert.equal(findTree(container, (child) => child.name === "supersedes_feedback_id"), null);
 });
 
 test("renderFeedbackHistory shows supersession state without mutating artifacts", () => {

@@ -7,6 +7,7 @@ from typing import Literal, Protocol
 from pydantic import ValidationError
 
 from database import ArtifactDocumentPage, ArtifactDocumentRecord
+from database import ArtifactNotFoundError
 from schemas import (
     ARTIFACT_CONTRACT_VERSION,
     ArtifactReference,
@@ -50,6 +51,12 @@ class ArchiveGenericArtifactCommand:
 
 @dataclass(frozen=True, slots=True)
 class RestoreGenericArtifactCommand:
+    project_id: str
+    artifact_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteGenericArtifactCommand:
     project_id: str
     artifact_id: str
 
@@ -102,6 +109,12 @@ class GenericArtifactDatabase(Protocol):
         artifact_id: str,
     ) -> ArtifactDocumentRecord: ...
 
+    async def delete_artifact_document(
+        self,
+        project_id: str,
+        artifact_id: str,
+    ) -> None: ...
+
     async def update_artifact_metadata_document(
         self,
         project_id: str,
@@ -144,6 +157,7 @@ class GenericArtifactReadService:
             self._project_metadata(command.project_id, record)
             for record in page.records
             if self._uses_single_file_contract(record)
+            and not self._is_deleted(record)
             and self._lifecycle_status(record) == command.lifecycle_status
         ]
         return SingleFileArtifactListResponse(
@@ -159,6 +173,8 @@ class GenericArtifactReadService:
             command.project_id,
             command.artifact_id,
         )
+        if self._is_deleted(record):
+            raise ArtifactNotFoundError("Artifact does not exist.")
         artifact = self._project_artifact(record)
         return SingleFileArtifactDetailResponse(
             metadata=self._project_metadata(command.project_id, record),
@@ -179,6 +195,15 @@ class GenericArtifactReadService:
             )
         return SingleFileArtifactLifecycleResponse(
             metadata=self._project_metadata(command.project_id, record)
+        )
+
+    async def delete_artifact(
+        self,
+        command: DeleteGenericArtifactCommand,
+    ) -> None:
+        await self._database.delete_artifact_document(
+            command.project_id,
+            command.artifact_id,
         )
 
     async def restore_artifact(
@@ -219,6 +244,8 @@ class GenericArtifactReadService:
             command.project_id,
             command.artifact_id,
         )
+        if self._is_deleted(parent_record):
+            raise ArtifactNotFoundError("Artifact does not exist.")
         parent_artifact = self._project_artifact(parent_record)
         artifact = SingleFileArtifact.model_validate(
             {
@@ -275,6 +302,13 @@ class GenericArtifactReadService:
     @staticmethod
     def _is_archived(record: ArtifactDocumentRecord) -> bool:
         return GenericArtifactReadService._lifecycle_status(record) == "archived"
+
+    @staticmethod
+    def _is_deleted(record: ArtifactDocumentRecord) -> bool:
+        return (
+            record.document.get("deleted") is True
+            or record.document.get("lifecycle_status") == "deleted"
+        )
 
     @staticmethod
     def _lifecycle_status(

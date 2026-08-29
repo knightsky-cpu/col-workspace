@@ -675,22 +675,57 @@ class SupervisorRuntime:
             return None
         payload = {
             "actions": [
-                action.model_dump(mode="json") for action in actions
+                {
+                    "action_name": action.action_name,
+                    "status": action.status,
+                }
+                for action in actions
             ],
             "memory_proposals": [
-                proposal.model_dump(mode="json")
+                {
+                    "category": proposal.category,
+                    "proposed_value": proposal.proposed_value,
+                }
                 for proposal in memory_proposals
             ],
             "memory_clarifications": [
-                clarification.model_dump(mode="json")
+                {
+                    "choices": [
+                        choice.model_dump(mode="json")
+                        for choice in clarification.choices
+                    ],
+                }
                 for clarification in memory_clarifications
             ],
             "collaborative_note_proposals": [
-                proposal.model_dump(mode="json")
+                {
+                    "note_kind": proposal.note_kind,
+                    "title": proposal.title,
+                    "body": proposal.body,
+                    "status": proposal.status,
+                }
                 for proposal in collaborative_note_proposals
             ],
             "collaborative_note_events": [
-                event.model_dump(mode="json")
+                {
+                    "event_type": event.event_type,
+                    **(
+                        {"note_kind": event.note_kind}
+                        if event.note_kind is not None
+                        else {}
+                    ),
+                    **(
+                        {"title": event.title}
+                        if event.title is not None
+                        else {}
+                    ),
+                    **(
+                        {"body": event.body}
+                        if event.body is not None
+                        else {}
+                    ),
+                    "revision": event.revision,
+                }
                 for event in collaborative_note_events
             ],
         }

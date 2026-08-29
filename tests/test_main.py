@@ -28,6 +28,7 @@ from generic_artifact_service import (
     ArchiveGenericArtifactCommand,
     ArtifactReadStateError as GenericArtifactReadStateError,
     CreateGenericArtifactVersionCommand,
+    DeleteGenericArtifactCommand,
     GetGenericArtifactCommand,
     ListGenericArtifactsCommand,
     RestoreGenericArtifactCommand,
@@ -1128,6 +1129,9 @@ class FakeGenericArtifactReadService:
     create_version_calls: list[
         CreateGenericArtifactVersionCommand
     ] = field(default_factory=list)
+    delete_calls: list[DeleteGenericArtifactCommand] = field(
+        default_factory=list
+    )
 
     async def list_artifacts(
         self,
@@ -1232,6 +1236,13 @@ class FakeGenericArtifactReadService:
             reference=reference,
             artifact=artifact,
         )
+
+    async def delete_artifact(
+        self,
+        command: DeleteGenericArtifactCommand,
+    ) -> None:
+        self.delete_calls.append(command)
+        self.events.append(("generic_artifact_delete",))
 
 
 @dataclass
@@ -2450,6 +2461,15 @@ async def test_google_chat_stream_uses_verified_owner_through_completion(
     user_id = f"google--{subject}"
     public_user_id = public_user_locator(subject)
     project_id = google_subject_to_workspace_project_id(subject)
+    service_state.database.workspace_list_result = WorkspaceListResponse(
+        workspaces=[
+            WorkspaceSummary(
+                workspace_id=project_id,
+                display_name="Private Google workspace",
+                is_default=True,
+            )
+        ]
+    )
     main.app.state.authenticator = Authenticator(
         AuthSettings(mode="google_oidc", google_client_id="client-123"),
         token_verifier=lambda token, client_id: {"sub": subject},
@@ -2478,6 +2498,105 @@ async def test_google_chat_stream_uses_verified_owner_through_completion(
     assert service_state.turn_service.calls[0].user_id == user_id
     assert service_state.turn_service.calls[0].project_id == project_id
     assert service_state.database.complete_calls
+
+
+@pytest.mark.asyncio
+async def test_google_chat_rejects_owned_but_hidden_workspace_before_claim(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    deleted_default_project_id = google_subject_to_workspace_project_id(
+        subject
+    )
+    visible_project_id = f"{deleted_default_project_id}--study-plans"
+    service_state.database.workspace_list_result = WorkspaceListResponse(
+        workspaces=[
+            WorkspaceSummary(
+                workspace_id=visible_project_id,
+                display_name="Study Plans",
+                is_default=False,
+            )
+        ]
+    )
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={
+            "Authorization": "Bearer token-abc",
+            "Idempotency-Key": "hidden-workspace-key-1",
+        },
+        json={
+            "project_id": deleted_default_project_id,
+            "session_id": "google-session-1",
+            "user_id": public_user_id,
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Workspace is unavailable."}
+    assert service_state.database.workspace_list_calls == [
+        (
+            user_id,
+            deleted_default_project_id,
+            "Private Google workspace",
+            50,
+        )
+    ]
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_google_chat_rejects_when_no_visible_workspaces_before_claim(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    default_project_id = google_subject_to_workspace_project_id(subject)
+    service_state.database.workspace_list_result = WorkspaceListResponse(
+        workspaces=[]
+    )
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={
+            "Authorization": "Bearer token-abc",
+            "Idempotency-Key": "no-visible-workspace-key-1",
+        },
+        json={
+            "project_id": default_project_id,
+            "session_id": "google-session-1",
+            "user_id": public_user_id,
+            "message": "New question",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Workspace is unavailable."}
+    assert service_state.database.workspace_list_calls == [
+        (
+            user_id,
+            default_project_id,
+            "Private Google workspace",
+            50,
+        )
+    ]
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
 
 
 @pytest.mark.asyncio
@@ -3286,6 +3405,15 @@ async def test_google_collaborative_note_responses_hide_internal_owner(
     internal_user_id = f"google--{subject}"
     public_user_id = public_user_locator(subject)
     project_id = google_subject_to_workspace_project_id(subject)
+    service_state.database.workspace_list_result = WorkspaceListResponse(
+        workspaces=[
+            WorkspaceSummary(
+                workspace_id=project_id,
+                display_name="Private Google workspace",
+                is_default=True,
+            )
+        ]
+    )
     main.app.state.authenticator = Authenticator(
         AuthSettings(mode="google_oidc", google_client_id="client-123"),
         token_verifier=lambda token, client_id: {"sub": subject},
@@ -4375,6 +4503,24 @@ async def test_restore_generic_artifact_marks_artifact_active(
     assert response.json()["metadata"]["lifecycle_status"] == "active"
     assert service_state.generic_artifact_service.restore_calls == [
         RestoreGenericArtifactCommand(
+            project_id="project-1",
+            artifact_id="artifact-1",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_generic_artifact_marks_artifact_deleted(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.delete(
+        "/api/projects/project-1/artifacts/artifact-1"
+    )
+
+    assert response.status_code == 204
+    assert service_state.generic_artifact_service.delete_calls == [
+        DeleteGenericArtifactCommand(
             project_id="project-1",
             artifact_id="artifact-1",
         )
@@ -6883,6 +7029,15 @@ async def test_google_chat_propagates_verified_owner_to_claim_and_history(
     user_id = f"google--{subject}"
     public_user_id = public_user_locator(subject)
     project_id = google_subject_to_workspace_project_id(subject)
+    service_state.database.workspace_list_result = WorkspaceListResponse(
+        workspaces=[
+            WorkspaceSummary(
+                workspace_id=project_id,
+                display_name="Private Google workspace",
+                is_default=True,
+            )
+        ]
+    )
     main.app.state.authenticator = Authenticator(
         AuthSettings(mode="google_oidc", google_client_id="client-123"),
         token_verifier=lambda token, client_id: {"sub": subject},
@@ -7426,6 +7581,15 @@ async def test_google_chat_note_event_receipts_hide_internal_owner(
     internal_user_id = f"google--{subject}"
     public_user_id = public_user_locator(subject)
     project_id = google_subject_to_workspace_project_id(subject)
+    service_state.database.workspace_list_result = WorkspaceListResponse(
+        workspaces=[
+            WorkspaceSummary(
+                workspace_id=project_id,
+                display_name="Private Google workspace",
+                is_default=True,
+            )
+        ]
+    )
     decision = CollaborativeNoteDecisionRequest(
         proposal_id="note-proposal-1",
         decision="approve",
