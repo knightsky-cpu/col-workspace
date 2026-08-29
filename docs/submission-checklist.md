@@ -1,124 +1,96 @@
-# All Things Agentic Submission Checklist
+# Agent Col Submission Checklist
 
-Last reconciled: August 27, 2026.
+Last reconciled: August 29, 2026.
 
-Current roadmap authority:
-[`final-checklist-planning.md`](final-checklist-planning.md).
+This checklist contains remaining work only. Current source, tests,
+`repo-map.md`, `docs/architecture.md`, and `docs/current-state.md` are the
+authority for implementation status. Legacy documentation is historical
+provenance, not a source of active requirements.
 
-Current source status:
-[`current-state.md`](current-state.md).
+## Required Submission And Finalization Work
 
-This checklist tracks the actual judged submission path for the Collaborative
-Partner category. Durable asynchronous artifact jobs, Google Cloud Tasks, and
-private worker execution are deferred until after submission and are not
-current submission requirements.
+- [ ] Submit before August 31, 2026 at 5:00 PM PT / 8:00 PM ET.
+- [ ] Freeze the exact judged commit, hosted build, demo video, and written
+  submission materials.
+- [ ] Confirm the public repository URL or private judge access is ready.
+- [ ] Confirm Apache License, Version 2.0 remains present.
+- [ ] Audit third-party code, fonts, icons, libraries, media, and generated
+  assets for license and disclosure requirements.
+- [ ] Confirm every submitted feature claim is implemented in current source
+  and visible in the demo or written evidence.
+- [ ] Preserve the submitted repository, hosted app, video, and testing state
+  through the judging window.
 
-## Official Deadline
+## Hosted And Demo Verification
 
-- [ ] Submit before August 31, 2026, at 5:00 PM Pacific.
-- [ ] Freeze the judged build and submitted materials before final submission.
-- [ ] Preserve the submitted repo, video, and hosted/testing state through the
-  judging window.
+- [ ] Re-verify the final Cloud Run hosted URL after the submission freeze.
+- [ ] Verify Google OIDC login on the hosted build.
+- [ ] Verify workspace ownership and cross-workspace access behavior on hosted
+  state.
+- [ ] Verify `/workspace`, `/api/auth/session`, and a representative
+  idempotent `/api/chat` turn on the hosted build.
+- [ ] Verify memory proposal/clarification/approval behavior on hosted state.
+- [ ] Verify collaborative note proposal/decision/lifecycle behavior.
+- [ ] Verify continuity retrieval or ambiguity-choice behavior.
+- [ ] Verify specialist receipts/citations for at least one grounded or routed
+  expert flow.
+- [ ] Verify artifact creation, detail display, lifecycle, versioning, or
+  feedback behavior used in the demo.
+- [ ] Verify retry uses the same request/idempotency key for a recoverable chat
+  failure path.
+- [ ] Inspect hosted logs for submission-safe diagnostics and no secret or
+  content-heavy leakage.
+- [ ] Confirm Cloud Run environment/runtime settings match the frozen build.
 
-## Stage One Eligibility
+## Documentation And Evidence Work
 
-- [x] Category selected: Collaborative Partner.
-- [x] Gemini 3.6 Flash satisfies the Gemini 3.5-or-newer requirement.
-- [x] Google ADK satisfies the Google agent-framework requirement.
-- [x] Google GenAI SDK is also in the allowed framework list.
-- [x] Firestore satisfies the Google Cloud infrastructure requirement.
-- [ ] Deploy and prove the functioning application on Google Cloud.
-- [ ] Confirm every depicted feature works consistently in the judged build.
-- [ ] Confirm all submitted work was created during the contest period or
-  disclose any permitted pre-existing material.
-- [x] Apache License, Version 2.0 is present.
-- [ ] Audit third-party code, fonts, icons, libraries, and media for license
-  compliance.
+- [ ] Final-review `docs/architecture.md` for current architecture accuracy.
+- [ ] Final-review `docs/current-state.md` for implemented capability accuracy.
+- [ ] Final-review this checklist so it contains remaining work only.
+- [ ] Confirm `README.md` setup, environment, and deployment notes match the
+  frozen source.
+- [ ] Capture source-backed evidence for Gemini, Google ADK, Google GenAI SDK,
+  Firestore, Cloud Run, Google OIDC, and architecture claims.
+- [ ] Capture screenshots or notes for hosted auth, chat, memory, notes,
+  continuity, specialist receipts, and artifact behavior.
+- [ ] Confirm stale documents remain under `docs/legacy/` and are not linked as
+  current implementation truth.
 
-## Collaborative Partner Proof
+## Demo Recording And Presentation Work
 
-- [ ] Show messy or complex user input.
-- [ ] Show Agent Col asking or resolving a meaningful clarification.
-- [ ] Show Agent Col synthesizing or mutating data into a useful artifact,
-  plan, structured answer, or workspace output.
-- [ ] Show governed workspace notes or receipt-backed continuity.
-- [ ] Show Target A if implemented: correction/evidence creates a
-  non-authoritative preference hypothesis, the user confirms it, and existing
-  governed memory handles approval and later adaptation.
-- [ ] Show Target B if implemented: Agent Col recommends or continues the next
-  useful step using existing working-state understanding.
-- [ ] Show memory or receipt provenance so the adaptation is inspectable.
-- [ ] Show a controlled failure, limitation, or rejection path that proves
-  bounded behavior without relying on background jobs.
+- [ ] Prepare a four-minute-or-shorter demo script for the Collaborative
+  Partner category.
+- [ ] Show messy or underspecified user input.
+- [ ] Show Agent Col resolving a clarification, continuity choice, or governed
+  context decision.
+- [ ] Show governed memory or collaborative notes with inspectable receipts or
+  provenance.
+- [ ] Show a routed specialist flow with receipt/citation evidence.
+- [ ] Show useful artifact creation, mutation, versioning, or feedback.
+- [ ] Show an intentional bounded limitation, failure, retry, or rejection path.
+- [ ] Show the final Cloud Run hosted application in the recording.
+- [ ] Upload the demo to a public YouTube or Vimeo URL.
+- [ ] Verify the video has no unlicensed music, logos, footage, or third-party
+  material that requires additional disclosure.
+- [ ] Prepare Devpost project summary, feature list, technology stack, Google
+  Cloud services description, data-source disclosure, and learning summary.
 
-## Production Controls
+## Optional Polish
 
-- [x] Derive user identity from a verified Google ID token in `google_oidc`
-  mode.
-- [ ] Require fail-closed production configuration.
-- [ ] Require `google_oidc` in production.
-- [ ] Replace raw-subject user identifiers with opaque production-safe user
-  identity.
-- [ ] Complete canonical workspace ownership and cross-owner denial checks.
-- [ ] Enforce request/body size limits.
-- [ ] Add bounded per-user or per-principal rate limiting.
-- [ ] Add production CSP and security headers.
-- [ ] Remove content-bearing validation details from logs.
-- [ ] Document retention and deletion behavior.
-- [ ] Configure Cloud Run maximum instances, timeouts, and budget controls.
+- [ ] Tighten demo copy or UI presentation only if the judged build is already
+  stable.
+- [ ] Add extra evidence screenshots for judges.
+- [ ] Run additional smoke scenarios that support the exact demo path.
+- [ ] Publish an optional build article or social post after core materials are
+  frozen.
 
-## Repository And Reproduction
+## Post-Submission Technical Debt
 
-- [x] Repository contains local setup instructions.
-- [x] Repository contains an architecture document and diagram source.
-- [x] Repository contains a current source-state inventory.
-- [x] Repository contains current finalization planning.
-- [ ] Pin and verify the production Python runtime.
-- [ ] Add Dockerfile and container startup instructions.
-- [ ] Add `.dockerignore`.
-- [ ] Add Cloud Run deployment setup.
-- [x] Add local environment-variable reference without secrets.
-- [ ] Add production Cloud Run environment-variable reference without secrets.
-- [ ] Run the complete relevant offline suite from a clean clone.
-- [ ] Run hosted smoke and security checks against the final deployment.
-- [ ] Confirm `.env`, credentials, virtual environments, and generated data are
-  ignored and absent from Git history.
-
-## Devpost Materials
-
-- [ ] Hosted project URL if available for judging/testing.
-- [ ] Public repository URL, or private-repository access granted to
-  `testing@devpost.com` and `cloudhackathons@google.com`.
-- [ ] English project summary and value proposition.
-- [ ] Features and functionality description.
-- [ ] Technology and Google Cloud services description.
-- [ ] Data-source and third-party integration disclosure.
-- [ ] Findings and learning summary.
-- [ ] Step-by-step spin-up instructions in `README.md`.
-- [ ] Architecture diagram uploaded in a judge-readable format.
-- [ ] Public YouTube or Vimeo demo URL.
-- [ ] Confirm the video is four minutes or shorter.
-- [ ] Confirm the video contains no unlicensed logos, music, footage, or other
-  third-party material.
-
-## Four-Minute Demo Runbook
-
-- [ ] `0:00-0:20` - State the friction and Collaborative Partner value.
-- [ ] `0:20-0:55` - Give Agent Col messy work and show clarification/guidance.
-- [ ] `0:55-1:30` - Show synthesis or artifact work with receipts.
-- [ ] `1:30-2:10` - Show notes, continuity, or retrieval-backed context.
-- [ ] `2:10-2:55` - Show Target A preference-learning proof if implemented.
-- [ ] `2:55-3:20` - Show Target B next-step leadership if implemented.
-- [ ] `3:20-3:45` - Show memory/receipt proof and Firestore evidence.
-- [ ] `3:45-4:00` - Show Cloud Run or Google Cloud proof and close.
-
-## Optional Bonus Work
-
-- [ ] Publish a public build article or video with the required hackathon
-  disclosure.
-- [ ] Publish a social post using `#AllThingsAgenticHackathon`.
-- [ ] Add another eligible Google AI model only if the core judged workflow is
-  already stable, deployed, polished, and documented.
-
-Optional bonus work must not displace Collaborative Partner proof, deployment
-evidence, documentation clarity, or demo quality.
+- [ ] Add distributed rate limiting.
+- [ ] Expand indexed pagination/query support.
+- [ ] Broaden preference extraction beyond explicit concise/shorter feedback.
+- [ ] Add durable asynchronous/background execution.
+- [ ] Improve blueprint/generic artifact lifecycle parity.
+- [ ] Clean up compatibility, tests-only, live-check-only, and apparently unused
+  legacy source after the freeze.
+- [ ] Deepen retention, deletion, privacy, and operational hardening.

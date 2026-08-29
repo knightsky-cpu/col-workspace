@@ -1,198 +1,201 @@
 # Agent Col Architecture
 
-Last reconciled: August 27, 2026.
+Last reconciled: August 29, 2026.
 
-For the complete status summary, see [Current state](current-state.md).
+This document describes how the current application is built and how its parts
+interact. Source code, tests, and the root-level `repo-map.md` are the authority
+for these claims; historical files under `docs/legacy/` are provenance only.
 
-## Current Implemented System
+## System Shape
 
-Agent Col is a FastAPI application with a same-origin browser workspace,
-server-routed specialist capabilities, deterministic application services, and
-Firestore persistence.
+Agent Col is a FastAPI backend with a same-origin static browser workspace. The
+backend owns authentication, workspace ownership, Firestore persistence,
+chat-turn idempotency, routing, expert execution, responder generation, memory,
+collaborative notes, continuity, hidden working state, preference learning, and
+artifacts (`main.py:1280-1417`, `repo-map.md`).
 
-Requests currently remain open while routing, expert execution, synthesis,
-artifact effects, note effects, continuity resolution, response generation, and
-persistence complete. Durable asynchronous jobs and private Cloud Run worker
-execution are deferred until after submission under the current finalization
-strategy.
+The browser workspace is served at `GET /workspace`; static frontend modules are
+mounted under `/static/agent-col` (`main.py:1403-1417`). The browser does not
+call Firestore or Vertex AI directly. It uses same-origin JSON APIs through the
+central frontend API helper (`frontend/api.mjs:13-119`).
 
-```mermaid
-flowchart TD
-    browser[Browser workspace at /workspace]
-    api[FastAPI main:app]
-    auth[Auth/session boundary]
-    turn[Agent Col turn service]
-    router[Structured routing provider]
-    executor[Expert executor]
-    experts[Research / Source / Computation / Requirements Verification]
-    responder[Responder-only Agent Col]
-    memory[Trusted memory service]
-    notes[Collaborative note service]
-    continuity[Continuity service]
-    working[Working state service]
-    artifacts[Artifact services]
-    synthesis[Synthesis service]
-    genai[Vertex AI / Gemini]
-    firestore[(Cloud Firestore)]
+## Backend Composition
 
-    browser -->|same-origin JSON| api
-    api --> auth
-    api --> turn
-    turn --> router
-    router --> genai
-    turn --> executor
-    executor --> experts
-    experts --> genai
-    turn --> continuity
-    turn --> working
-    turn --> responder
-    responder --> genai
-    responder -->|pending governed proposal only| memory
-    api --> memory
-    api --> notes
-    api --> artifacts
-    api --> synthesis
-    synthesis --> genai
-    memory --> firestore
-    notes --> firestore
-    working --> firestore
-    artifacts --> firestore
-    synthesis --> firestore
-    turn --> firestore
+`main.py` is the HTTP and dependency-injection composition root. Its lifespan
+function creates the Vertex/Gemini client, Firestore `MemoryEngine`, synthesis
+and artifact services, memory/note/continuity/working-state/preference
+services, specialist services, the v3 expert executor, responder runtime, and
+`AgentColTurnService` (`main.py:1280-1400`).
+
+The primary runtime path is `POST /api/chat`. Other routes expose auth/session
+state, workspace management, memory inspection/mutation, collaborative notes,
+chat sessions, synthesis blueprints, generic artifacts, and blueprint feedback
+(`main.py:1420-2759`, `repo-map.md`).
+
+## Frontend Architecture
+
+The frontend is a vanilla ES module application rooted at `frontend/index.html`
+and `frontend/app.mjs`. The HTML shell exposes a context gate, left supporting
+drawer sections for Workspace, Artifacts, Notes, Memory, and Chats, the central
+conversation area, and the right Artifacts Viewer (`frontend/index.html:29-290`).
+
+`frontend/state.mjs` owns client state for auth/context, transcript, pending
+turns, retries, memory clarification choices, continuity choices, workspace,
+work/artifacts, notes, memory, chats, activity entries, and drawer disclosure.
+`frontend/app.mjs` wires bootstrap, rendering, API calls, chat submission,
+structured decisions, workspace operations, artifact operations, memory
+operations, and note operations (`frontend/app.mjs:315-725`,
+`repo-map.md`).
+
+Rendering is intentionally DOM-safe: helpers write text nodes, markdown is
+bounded to a safe subset, and artifact content is rendered as text inside code
+blocks rather than injected HTML (`frontend/render.mjs:1-25`,
+`frontend/markdown-renderer.mjs:3-252`, `repo-map.md`).
+
+## Chat-Turn Lifecycle
+
+`POST /api/chat` resolves effective user and project identity, enforces
+idempotency where required, claims or replays a durable turn record, loads
+history/profile context, persists the user message, applies structured memory,
+note, clarification, continuity, or artifact-feedback decisions, and then calls
+the turn service for ordinary model work (`main.py:2759-3562`).
+
+Ordinary turns load governed model context, optional continuity context, and
+optional hidden working-state context before routing. The turn service routes
+through v4 when artifact routing is available and v3 for non-artifact expert
+flows, executes at most one specialist, runs responder-only Agent Col, and
+returns validated text plus public receipts (`agent_col_turn_service.py:271-372`,
+`agent_col_turn_service.py:556-668`, `agent_col_turn_service.py:929-1130`,
+`repo-map.md`).
+
+The request-latency ordering is:
+
+```text
+canonical responder completion
+-> authoritative chat persistence
+-> awaited hidden working-state maintenance
+-> HTTP response returned
 ```
 
-## Browser Workspace
+Working-state data is hidden, non-authoritative, failure-tolerant, and logged on
+failure. The maintenance call is still awaited after chat persistence and before
+the HTTP response returns when working-state updates are enabled
+(`main.py:3483-3562`, `main.py:3785-3852`).
 
-The browser workspace is implemented under `frontend/` and served at
-`GET /workspace`. Static assets are mounted under `/static/agent-col`.
+## Routing And Specialist Boundaries
 
-The workspace includes:
+The routing layer treats user text and projected context as untrusted task data.
+Routing providers call Gemini with structured JSON schemas and local validation;
+they do not execute tools or persist state (`agent_col_routing_provider_v3.py`,
+`agent_col_routing_provider_v4.py`, `repo-map.md`).
 
-- auth entry and local/Google session state;
-- workspace list/create;
-- conversation and receipts;
-- Work/artifact list and detail;
-- Notes lifecycle controls;
-- Memory inspection and lifecycle controls;
-- Chats list/detail;
-- Activity view;
-- left/right drawer layout controls.
+Current expert routes are Direct, Clarify, Source, Research, Computation, and
+Requirements Verification, with v4 adding Artifact routing for supported
+artifact creation (`agent_col_routing_v3.py:49-55`,
+`agent_col_routing_v4.py:34-59`).
 
-The browser must not call Vertex AI or Firestore directly. It communicates only
-with same-origin FastAPI JSON routes.
+Experts are bounded evidence producers. The responder has no model-visible
+Research, Source, Computation, or Requirements Verification tools; it receives
+validated results and receipts from application code.
 
-## Authentication Boundary
+## Memory, Notes, Continuity, Working State, And Preferences
 
-Supported local auth modes:
+Profile memory is governed and proposal-based. Pending memory is not active
+until approved by the user. Approval, rejection, correction, revocation, and
+deletion flow through typed services and durable events
+(`trusted_memory_service.py:286-633`, `database.py:6388-6968`).
 
-- `local_dev`
-- `google_oidc`
+Collaborative notes are workspace-scoped. Notes support proposals,
+approval/rejection, corrections, archive, restore, deletion, active projection,
+and provenance events (`collaborative_note_service.py:188-331`,
+`database.py:679-1331`).
 
-Google OIDC verifies browser-provided Google ID tokens and derives the
-effective application principal. Firestore and Vertex AI server clients use
-Application Default Credentials separately.
+Continuity has no independent persisted collection. It resolves active notes
+and prior chat sessions/messages into bounded context receipts or ambiguity
+choices (`continuity_service.py:118-239`, `database.py:4964-5040`).
 
-Production authentication and ownership hardening is not complete. Phase 4
-must replace remaining local-development assumptions with fail-closed
-production startup, canonical workspace ownership, and cross-owner denial
-proof.
+Working state is same-session hidden collaboration context. It can summarize
+current goals, constraints, unresolved questions, next-step hypotheses, and
+confidence, but it cannot authorize tools, identity changes, durable memory,
+notes, artifacts, or other actions (`working_state.py:11-101`).
 
-## Chat Turn Flow
+Preference learning records non-authoritative observations and hypotheses. The
+current extractor is deliberately narrow and recognizes explicit shorter or
+more concise response feedback; surfaced hypotheses go through memory
+clarification rather than directly mutating active memory
+(`preference_learning.py:10-164`,
+`preference_learning_service.py:43-152`, `main.py:3733-3779`).
 
-1. FastAPI validates the `ChatRequest`.
-2. The application resolves effective user/workspace identity.
-3. Idempotent turns claim, replay, or reject conflicts through Firestore.
-4. Memory decisions, note decisions, feedback decisions, clarification
-   selections, and continuity selections are applied only through typed
-   application services.
-5. The turn service projects bounded URL, numeric, and text-block routing
-   inputs.
-6. The structured router returns one locally validated route.
-7. The expert executor runs zero or one selected expert under a deadline.
-8. Artifact execution may persist an approved chat artifact effect when
-   selected by the artifact-capable route.
-9. The continuity and working-state services provide bounded context.
-10. Responder-only Agent Col writes the final response from server-validated
-    context.
-11. Firestore stores the deterministic model message and public receipts.
+## Artifacts
 
-The responder has no model-visible Research, Source, Computation, or
-Requirements Verification tools. It receives validated results and receipts
-from application code.
+The artifact system has two families: synthesis blueprints and generic
+single-file artifacts. Blueprints are produced by the synthesis path and
+persisted under projects. Generic artifacts support create, list, detail,
+archive, restore, metadata update, and child version creation
+(`synthesis_service.py:117-152`, `generic_artifact_service.py:128-360`,
+`main.py:2211-2757`).
 
-## Specialist Capability Boundary
+Artifact feedback is persisted for blueprint targets and can be routed through
+chat as governed, receipt-backed feedback context. Current artifact execution is
+request-bound; durable asynchronous/background execution is not part of the
+current runtime path (`artifact_feedback_service.py:133-338`,
+`agent_col_artifact_feedback_executor.py:86-200`, `repo-map.md`).
 
-The current capability catalog contains four expert routes:
+## Persistence And Data Relationships
 
-| Capability | Provider surface | Public receipt on completion |
-| --- | --- | --- |
-| Research | Direct GenAI `generate_content` with Google Search grounding | `google_search` action and citations |
-| Source | Direct GenAI chat with URL Context, then tool-free classification | `url_context` action and citations |
-| Computation | ADK isolated workflow with built-in Python execution | `run_computation` action |
-| Requirements Verification | Direct tool-free structured generation | `verify_requirements` action |
+Firestore stores chat sessions, child messages, child turn records, session
+working state, user profile memory, memory proposals/origins/events,
+user-owned workspaces, workspace note proposals, collaborative notes and note
+events, projects, blueprint artifacts, generic artifacts, artifact versions,
+blueprint feedback, feedback supersession records, preference observations, and
+preference hypotheses (`database.py`, `repo-map.md`).
 
-Experts are bounded evidence producers, not authorities over persistence,
-memory, identity, or final user-visible response policy.
+Important ownership relationships:
 
-## Memory, Notes, Continuity, And Working State
+- Chat data lives under `sessions/{session_id}` with child `messages`,
+  `turns`, `memory_clarifications`, and `working_state`.
+- User-owned data lives under `users/{user_id}`, including workspaces, memory
+  records, memory events, note proposals, notes, note events, and preference
+  records.
+- Project-owned artifact data lives under `projects/{project_id}` with child
+  `blueprints`, `artifacts`, and blueprint feedback records.
 
-Profile memory and workspace notes are separate domains.
+## Authentication, Ownership, And Security
 
-Profile memory stores approved reusable collaboration preferences and allowed
-low-sensitivity identity context. Pending memory proposals are not active until
-approved.
+Auth supports `local_dev` and `google_oidc`. In Google mode, bearer-token
+authentication verifies the Google ID token, derives an internal user ID, and
+projects a public opaque user ID for client-facing responses. On Cloud Run,
+startup fails unless `AGENT_COL_AUTH_MODE=google_oidc` and an OAuth client ID is
+configured (`auth.py:66-93`, `auth.py:177-251`).
 
-Workspace notes store user-approved project/workspace context. Notes support
-proposal, approval/rejection, correction, archive, restore, deletion, active
-projection, and provenance.
+Workspace/project ownership is enforced by resolving supplied user/project IDs
+against the authenticated principal. Middleware adds request body limits,
+per-client/path in-memory rate limiting, and security/cache headers
+(`auth.py:215-251`, `main.py:280-405`).
 
-Continuity retrieves bounded active notes and prior chat sessions, returning
-receipts or ambiguity choices.
+## Deployment And Runtime
 
-Working state is hidden same-session collaboration context. It is
-non-authoritative, possibly stale, and cannot authorize tools, durable memory,
-notes, artifacts, identity changes, or actions.
+The container builds from `python:3.14-slim`, installs `requirements.txt`, runs
+as a non-root `appuser`, exposes port 8080, and starts
+`uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}` (`Dockerfile:3-22`).
+Vertex configuration requires a Google Cloud project, global location, and
+enterprise GenAI mode (`vertex_config.py:25-53`).
 
-## Synthesis And Artifacts
+The README identifies Cloud Run in `us-east4` as the hosted platform and notes a
+verified deployment; submission work should therefore focus on final hosted
+re-verification and freeze rather than initial deployment (`README.md:17-29`).
 
-`POST /api/synthesize` remains a synchronous structured synthesis endpoint.
-The current source also supports:
+## System Invariants
 
-- blueprint artifact listing/detail;
-- generic single-file artifact listing/detail/create;
-- archive and restore;
-- metadata update;
-- version creation;
-- artifact feedback targets and lifecycle records;
-- chat-carried artifact feedback decisions.
-
-Durable background artifact jobs, Cloud Tasks, private worker execution, and
-queued/running/completed/failed/cancelled job states remain post-submission
-future work.
-
-## Firestore Responsibility
-
-Firestore is the durable source of truth for:
-
-- user profile memory and lifecycle events;
-- workspace notes and note events;
-- chat sessions, messages, turns, and receipts;
-- working state snapshots;
-- projects and blueprints;
-- generic artifacts and versions;
-- artifact feedback records.
-
-ADK sessions and provider interactions are temporary execution state and are
-not the durable memory system.
-
-## Current Gaps
-
-- No Dockerfile, `.dockerignore`, production start scripts, or Cloud Run
-  service descriptors are present.
-- No Google Cloud Tasks runtime dependency or private worker implementation is
-  present; that work is deferred until after submission.
-- Durable asynchronous jobs are not part of the current judged-build path.
-- Full production ownership, rate limiting, security headers, retention,
-  deletion, and hosted verification remain production-hardening work.
-- Clean-clone evidence, final submission docs, visual polish, and demo freeze
-  remain pending.
+- Source and tests are implementation authority; legacy documentation is not.
+- Browser code talks only to same-origin backend APIs.
+- Structured decisions mutate durable state only through typed backend
+  services.
+- Pending memory and note proposals are not active until approved.
+- Hidden working state and continuity context are non-authoritative and cannot
+  authorize persistence or tool use.
+- Idempotent chat turns protect deterministic replay, conflict detection, and
+  retry behavior.
+- Experts produce bounded evidence; Agent Col responder owns the final
+  user-facing response.
+- Current artifacts are request-bound; background execution is future work.
