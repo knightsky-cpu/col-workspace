@@ -1,5 +1,51 @@
 # Unsafe Frontend Work Notes
 
+## 2026-08-28 - Accepted U6 Chat Pending Status Wave Animation Pass
+
+Status: accepted after user manual visual verification.
+
+Scope:
+- Implemented Pass U6 for the active chat pending status only.
+- Preserved the visible pending text `Waiting for Agent Col`.
+- Added explicit `aria-atomic="true"` to the existing `role="status"` live region.
+- Added a centralized `setChatStatus(message, statusState = "")` helper for status text and `data-chat-status-state`.
+- Set `data-chat-status-state="pending"` only while a submitted chat request is waiting for Agent Col.
+- Cleared pending status state after successful response, failed response, chat-session load, and New conversation.
+- Added CSS-only pending text wave motion and generated dot animation using pseudo-elements.
+- Added targeted reduced-motion handling so pending status remains readable without animation.
+- Preserved `/api/chat`, request body shape, idempotency keys, retry behavior, pending-turn state, transcript rendering, memory, notes, artifacts, receipts, auth, and model behavior.
+- User accepted the pass as functional but requested a follow-up correction: the current animation moves the status as one element, while the desired animation is a per-letter sinewave from `W` through `l` in `Waiting for Agent Col`.
+
+Source changed:
+- `frontend/index.html`: added `aria-atomic="true"` to the chat status live region.
+- `frontend/app.mjs`: added `setChatStatus(...)` and replaced direct chat-status text mutations in pending, success, failure, chat-session load, and New conversation paths.
+- `frontend/styles.css`: added pending status animation, generated dots, and targeted reduced-motion override.
+- `tests/frontend/workspace-static.test.mjs`: added static coverage for the live-region attribute, pending status state wiring, CSS animation hooks, transform-based motion, and reduced-motion override.
+
+TDD evidence:
+- RED: `node --test tests/frontend/workspace-static.test.mjs` failed because `aria-atomic="true"` and the U6 pending animation/status hooks did not exist.
+- GREEN: added the status live-region attribute, app helper, pending-state wiring, CSS keyframes, pseudo-element dots, and reduced-motion override.
+- REFACTOR: no broad refactor; `app.mjs` remains the status owner because source inspection showed `chat-view.mjs` does not render `data-chat-status`.
+
+Verification:
+- `node --test tests/frontend/workspace-static.test.mjs` passed: 13 tests.
+- `node --test tests/frontend/chat-view.test.mjs tests/frontend/workspace-static.test.mjs tests/frontend/state.test.mjs` passed: 69 tests.
+- `node --check frontend/app.mjs` passed.
+- `git diff --check` passed.
+- `rg -n "setChatStatus|data-chat-status-state|chat-status-wave|chat-status-dots|aria-atomic" frontend tests/frontend/workspace-static.test.mjs` confirmed the intended hooks.
+
+Manual verification result:
+- User confirmed the pass works.
+- User requested the next correction pass before U7: replace the single-element wave with independent per-letter sinewave animation across `Waiting for Agent Col`.
+
+Deferred:
+- Improve the pending status animation to animate each letter independently in a sinewave-like sequence.
+- Add collapsed adaptation receipt disclosure.
+- Tune chat icons/text colors/counter severity.
+- Add secure attachment intake.
+- Add safe Markdown response/artifact rendering.
+- Restructure the Artifact Viewer toward the reference screenshot.
+
 ## 2026-08-28 - Accepted U5 Standard Subcard Disclosure And Compact Control Correction Pass
 
 Status: accepted after user manual visual verification.

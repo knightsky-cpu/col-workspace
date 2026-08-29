@@ -125,3 +125,23 @@ test("workspace create form keeps input and create button compact", () => {
   assert.match(styles, /\.workspace-create-form button\s*\{[\s\S]*?font-size:\s*0\.8125rem/);
   assert.match(styles, /\.workspace-create-form button\s*\{[\s\S]*?justify-self:\s*start/);
 });
+
+test("chat pending status keeps live text while exposing reduced-motion-safe animation hooks", () => {
+  assert.match(
+    html,
+    /<p class="chat-status" data-chat-status role="status" aria-atomic="true"><\/p>/,
+  );
+  assert.match(app, /function setChatStatus\(message, statusState = ""\)/);
+  assert.match(app, /status\.dataset\.chatStatusState = statusState/);
+  assert.match(app, /delete status\.dataset\.chatStatusState/);
+  assert.match(app, /setChatStatus\("Waiting for Agent Col", "pending"\)/);
+  assert.match(app, /setChatStatus\(""\)/);
+  assert.match(styles, /\.chat-status\[data-chat-status-state="pending"\]/);
+  assert.match(styles, /\.chat-status\[data-chat-status-state="pending"\]::after/);
+  assert.match(styles, /@keyframes chat-status-wave/);
+  assert.match(styles, /transform:\s*translateY\(/);
+  assert.match(
+    styles,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-status\[data-chat-status-state="pending"\][\s\S]*?animation:\s*none/,
+  );
+});

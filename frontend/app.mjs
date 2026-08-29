@@ -231,6 +231,16 @@ function clearNotesError() {
   error.hidden = true;
 }
 
+function setChatStatus(message, statusState = "") {
+  const status = document.querySelector("[data-chat-status]");
+  setText(status, message);
+  if (statusState) {
+    status.dataset.chatStatusState = statusState;
+    return;
+  }
+  delete status.dataset.chatStatusState;
+}
+
 function authOptions(options = {}) {
   return {
     ...options,
@@ -599,7 +609,7 @@ async function loadChatSession(sessionId) {
     );
     state = completeChatSessionDetailLoad(state, response);
     document.querySelector("[data-chat-error]").hidden = true;
-    setText(document.querySelector("[data-chat-status]"), "");
+    setChatStatus("");
   } catch (error) {
     state = failChatSessionDetailLoad(state, error);
   }
@@ -610,7 +620,7 @@ async function submitRequest(request) {
   state = beginPendingTurn(state, request);
   renderWorkspace();
   document.querySelector("[data-chat-error]").hidden = true;
-  setText(document.querySelector("[data-chat-status]"), "Waiting for Agent Col");
+  setChatStatus("Waiting for Agent Col", "pending");
   try {
     const response = await apiFetchJson("/api/chat", {
       method: "POST",
@@ -619,7 +629,7 @@ async function submitRequest(request) {
       body: request.body,
     });
     state = completePendingTurn(state, response);
-    setText(document.querySelector("[data-chat-status]"), "");
+    setChatStatus("");
     document.querySelector("[data-chat-input]").value = "";
     const refreshPlan = selectWorkRefreshPlan(response);
     if (refreshPlan.reloadList) {
@@ -638,6 +648,7 @@ async function submitRequest(request) {
     await loadChatSessions();
   } catch (error) {
     state = failPendingTurn(state, error);
+    setChatStatus("");
     setText(document.querySelector("[data-chat-error]"), error.message);
     document.querySelector("[data-chat-error]").hidden = false;
   }
@@ -1236,7 +1247,7 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
   }
   state = startNewConversation(state);
   document.querySelector("[data-chat-error]").hidden = true;
-  setText(document.querySelector("[data-chat-status]"), "");
+  setChatStatus("");
   renderWorkspace();
   loadNotes();
   loadChatSessions();
