@@ -81,10 +81,19 @@ test("workspace shell provides persistent non-emoji icon hooks for primary navig
   }
 
   assert.match(html, /data-new-conversation[\s\S]*class="button-icon"/);
-  assert.match(html, /id="empty-conversation-title"[\s\S]*class="title-icon[^"]*"/);
   assert.doesNotMatch(html, /section-heading__chevron/);
   assert.doesNotMatch(styles, /\.section-heading__chevron/);
   assert.match(app, /setButtonLabel/);
+});
+
+test("empty conversation intro is rendered inside the scrollable transcript without helper copy", () => {
+  assert.doesNotMatch(html, /Ask Agent Col for help, or ask it to create a structured/);
+  assert.doesNotMatch(
+    html,
+    /<main id="conversation-workspace"[\s\S]*?<section class="conversation-intro"[\s\S]*?<div class="chat-transcript"/,
+  );
+  assert.match(chatView, /empty-conversation-title/);
+  assert.match(chatView, /Start a conversation/);
 });
 
 test("drawer parent cards are full header disclosure controls without selected state", () => {

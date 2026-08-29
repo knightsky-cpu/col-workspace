@@ -408,7 +408,7 @@ p {
     radial-gradient(circle at 50% 0%, rgba(54, 214, 194, 0.05), transparent 30%),
     var(--background);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   max-height: 100%;
   overflow: hidden;
 }
@@ -804,10 +804,6 @@ p {
 
 .title-icon--workspace {
   color: var(--amber);
-}
-
-.title-icon--conversation {
-  color: var(--accent);
 }
 
 .title-icon--artifacts,

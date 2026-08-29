@@ -95,6 +95,18 @@ test("renderTranscript keeps user text literal and renders model Markdown struct
   assert.equal(model.textContent, "");
 });
 
+test("renderTranscript shows an empty conversation title inside the transcript", () => {
+  const container = node();
+
+  renderTranscript(container, []);
+
+  assert.equal(container.children.length, 1);
+  assert.equal(container.children[0].tagName, "section");
+  assert.equal(container.children[0].attributes["aria-labelledby"], "empty-conversation-title");
+  assert.match(textTree(container), /Start a conversation/);
+  assert.doesNotMatch(textTree(container), /Ask Agent Col for help/);
+});
+
 test("renderTranscript renders pending assistant text as safe Markdown", () => {
   const container = node();
   renderTranscript(

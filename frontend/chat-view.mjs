@@ -56,6 +56,15 @@ function appendTurnMessage(container, kind, message) {
   container.append(turnAuthorIcon(kind), messageText);
 }
 
+function appendEmptyConversationIntro(container) {
+  const section = element("section", "conversation-intro");
+  section.setAttribute("aria-labelledby", "empty-conversation-title");
+  const title = element("h2", "", "Start a conversation");
+  title.setAttribute("id", "empty-conversation-title");
+  section.append(title);
+  container.append(section);
+}
+
 export function renderReceipts(container, response) {
   container.replaceChildren();
   const list = element("ul", "receipt-list");
@@ -131,6 +140,10 @@ export function renderTranscript(
   lastFailure = null,
 ) {
   container.replaceChildren();
+  if (transcript.length === 0 && pendingTurn === null && !lastFailure?.provisionalResponseText) {
+    appendEmptyConversationIntro(container);
+    return;
+  }
   for (const turn of transcript) {
     appendTranscriptTurn(container, turn);
   }

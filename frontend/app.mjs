@@ -1290,6 +1290,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", async (
     ensureChatsView();
     ensureWorkspaceView();
     showWorkspace();
+    renderWorkspace();
     await loadWorkspaces();
     loadWorkList();
     loadNotes();

@@ -71,6 +71,16 @@ function findTree(item, predicate) {
   return null;
 }
 
+function textTree(item) {
+  if (!item) {
+    return "";
+  }
+  return [
+    item.textContent,
+    ...(item.children ?? []).flatMap((child) => textTree(child)),
+  ].join(" ");
+}
+
 function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), {
     status,
@@ -293,6 +303,7 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
     () => JSON.stringify(calls),
   );
   await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  assert.match(textTree(elements.get("[data-chat-transcript]")), /Start a conversation/);
   await waitFor(
     () => findTree(
       elements.get("[data-memory-panel]"),
