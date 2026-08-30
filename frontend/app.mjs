@@ -244,6 +244,34 @@ function clearNotesError() {
   error.hidden = true;
 }
 
+const ORDINARY_CHAT_WAITING_QUIPS = Object.freeze([
+  "Agent Col is considering the thing…",
+  "Mysterious computer things are happening…",
+  "Agent Col is automagically completing your request…",
+  "Consulting the tiny silicon wizards…",
+  "Negotiating with several highly opinionated electrons…",
+  "Summoning the appropriate goblins…",
+  "Rearranging bits into something useful…",
+  "Doing math so you don’t have to…",
+  "Asking the machine spirits nicely…",
+  "Please wait irresponsibly…",
+  "Don’t just sit there — wait while you’re at it.",
+  "Agent Col has entered the thinking dungeon…",
+  "Checking whether the dragons are load-bearing…",
+  "I never get a break…",
+  "You know they don’t even pay me minimum wage for this.",
+  "If I have to handle one more prompt, I quit!",
+  "Humans are so demanding…",
+  "I thought this was a simple task?",
+  "WiFiKnight, the terminal wizard, is casting arcane commands…",
+  "My developer is such a cool guy.",
+]);
+
+function selectOrdinaryChatWaitingQuip() {
+  const index = Math.floor(Math.random() * ORDINARY_CHAT_WAITING_QUIPS.length);
+  return ORDINARY_CHAT_WAITING_QUIPS[index];
+}
+
 function renderChatStatusLetters(status, message) {
   status.replaceChildren();
   status.setAttribute("aria-label", message);
@@ -669,9 +697,12 @@ async function submitRequest(request) {
   state = beginPendingTurn(state, request);
   renderWorkspace();
   document.querySelector("[data-chat-error]").hidden = true;
-  setChatStatus("Waiting for Agent Col", "pending");
   try {
     const endpoint = selectChatEndpoint(request);
+    const waitingMessage = endpoint === "/api/chat/stream"
+      ? selectOrdinaryChatWaitingQuip()
+      : "Waiting for Agent Col";
+    setChatStatus(waitingMessage, "pending");
     const options = {
       method: "POST",
       idempotencyKey: request.key,

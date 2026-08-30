@@ -3,6 +3,29 @@ import assert from "node:assert/strict";
 
 import { storeOrdinaryChatRequest } from "../../frontend/chat-request-recovery.mjs";
 
+const APPROVED_ORDINARY_CHAT_WAITING_QUIPS = Object.freeze([
+  "Agent Col is considering the thing…",
+  "Mysterious computer things are happening…",
+  "Agent Col is automagically completing your request…",
+  "Consulting the tiny silicon wizards…",
+  "Negotiating with several highly opinionated electrons…",
+  "Summoning the appropriate goblins…",
+  "Rearranging bits into something useful…",
+  "Doing math so you don’t have to…",
+  "Asking the machine spirits nicely…",
+  "Please wait irresponsibly…",
+  "Don’t just sit there — wait while you’re at it.",
+  "Agent Col has entered the thinking dungeon…",
+  "Checking whether the dragons are load-bearing…",
+  "I never get a break…",
+  "You know they don’t even pay me minimum wage for this.",
+  "If I have to handle one more prompt, I quit!",
+  "Humans are so demanding…",
+  "I thought this was a simple task?",
+  "WiFiKnight, the terminal wizard, is casting arcane commands…",
+  "My developer is such a cool guy.",
+]);
+
 function node(tagName = "div") {
   return {
     tagName,
@@ -270,6 +293,11 @@ function createControlledSseResponse() {
   });
   return {
     response,
+    delta(text) {
+      controller.enqueue(encoder.encode(
+        `event: delta\ndata: ${JSON.stringify({ text })}\n\n`,
+      ));
+    },
     complete(body) {
       controller.enqueue(encoder.encode(
         `event: final\ndata: ${JSON.stringify(body)}\n\n`,
@@ -279,7 +307,16 @@ function createControlledSseResponse() {
   };
 }
 
-test("ordinary submit releases the composer after durable capture and preserves a next draft", async () => {
+test("ordinary submit shows an approved waiting quip without contaminating the request or transcript", async (t) => {
+  const originalRandom = Math.random;
+  let randomCallCount = 0;
+  Math.random = () => {
+    randomCallCount += 1;
+    return 0.999999;
+  };
+  t.after(() => {
+    Math.random = originalRandom;
+  });
   const { contextForm, elements } = installOrdinaryChatRuntimeDom();
   const storage = memoryStorage();
   globalThis.sessionStorage = storage;
@@ -354,6 +391,13 @@ test("ordinary submit releases the composer after durable capture and preserves 
     () => JSON.stringify(calls.map(([path]) => path)),
   );
 
+  const waitingQuip = APPROVED_ORDINARY_CHAT_WAITING_QUIPS.at(-1);
+  const chatStatus = elements.get("[data-chat-status]");
+  const transcript = elements.get("[data-chat-transcript]");
+  assert.equal(chatStatus.attributes["aria-label"], waitingQuip);
+  assert.equal(chatStatus.dataset.chatStatusState, "pending");
+  assert.equal(randomCallCount, 1);
+  assert.equal(textTree(transcript).includes(waitingQuip), false);
   assert.equal(input.value, "");
   assert.equal(elements.get("[data-character-count]").textContent, "0 / 10000");
   assert.equal(elements.get("[data-chat-submit]").disabled, true);
@@ -369,6 +413,18 @@ test("ordinary submit releases the composer after durable capture and preserves 
   assert.equal(recovery.request.body.user_id, "wifiknight");
   assert.equal(recovery.request.body.project_id, "agent-col");
   assert.equal("auth_token" in recovery.request.body, false);
+  assert.equal(JSON.stringify(recovery).includes(waitingQuip), false);
+  const [, chatRequest] = calls.find(([path]) => path === "/api/chat/stream");
+  assert.equal(chatRequest.body.includes(waitingQuip), false);
+
+  stream.delta("Provisional response");
+  await waitFor(
+    () => textTree(transcript).includes("Provisional response"),
+    () => textTree(transcript),
+  );
+  assert.equal(chatStatus.attributes["aria-label"], undefined);
+  assert.equal(chatStatus.dataset.chatStatusState, undefined);
+  assert.equal(randomCallCount, 1);
 
   input.value = "Next draft";
   input.oninput();
@@ -393,6 +449,10 @@ test("ordinary submit releases the composer after durable capture and preserves 
   assert.equal(elements.get("[data-character-count]").textContent, "10 / 10000");
   assert.equal(elements.get("[data-chat-submit]").disabled, false);
   assert.equal(storage.length, 0);
+  assert.equal(chatStatus.attributes["aria-label"], undefined);
+  assert.equal(chatStatus.dataset.chatStatusState, undefined);
+  assert.equal(textTree(transcript).includes(waitingQuip), false);
+  assert.equal(textTree(transcript).includes("Provisional response"), false);
 });
 
 test("ordinary submit stops without clearing or sending when durable capture fails", async () => {
@@ -475,6 +535,20 @@ test("ordinary submit stops without clearing or sending when durable capture fai
   assert.equal(elements.get("[data-character-count]").textContent, "31 / 10000");
   assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
   assert.equal(elements.get("[data-chat-error]").hidden, false);
+  assert.equal(
+    elements.get("[data-chat-status]").attributes["aria-label"],
+    undefined,
+  );
+  assert.equal(
+    elements.get("[data-chat-status]").dataset.chatStatusState,
+    undefined,
+  );
+  assert.equal(
+    APPROVED_ORDINARY_CHAT_WAITING_QUIPS.some(
+      (quip) => textTree(elements.get("[data-chat-transcript]")).includes(quip),
+    ),
+    false,
+  );
   assert.match(
     elements.get("[data-chat-error]").textContent,
     /prompt was not sent because this browser could not safely retain it/i,
@@ -568,6 +642,25 @@ test("ordinary request failure retains recovery, submitted turn, and next draft"
   assert.match(
     textTree(elements.get("[data-chat-transcript]")),
     /Prompt retained after authentication failure/,
+  );
+  assert.equal(elements.get("[data-chat-error]").hidden, false);
+  assert.equal(
+    elements.get("[data-chat-error]").textContent,
+    "Authentication required.",
+  );
+  assert.equal(
+    elements.get("[data-chat-status]").attributes["aria-label"],
+    undefined,
+  );
+  assert.equal(
+    elements.get("[data-chat-status]").dataset.chatStatusState,
+    undefined,
+  );
+  assert.equal(
+    APPROVED_ORDINARY_CHAT_WAITING_QUIPS.some(
+      (quip) => textTree(elements.get("[data-chat-transcript]")).includes(quip),
+    ),
+    false,
   );
   assert.equal(elements.get("[data-retry-turn]").hidden, false);
 });
@@ -831,6 +924,10 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
   }
   globalThis.FormData = FakeFormData;
 
+  let resolveStructuredChat;
+  const structuredChatResponse = new Promise((resolve) => {
+    resolveStructuredChat = resolve;
+  });
   const calls = [];
   globalThis.fetch = async (path, init = {}) => {
     calls.push([path, init?.method ?? "GET"]);
@@ -885,19 +982,7 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
       });
     }
     if (path === "/api/chat") {
-      return jsonResponse(504, {
-        detail: "Agent_Col response timed out after a completed action.",
-        response: "",
-        actions: [{
-          action_name: "approve_memory_signal",
-          status: "completed",
-        }],
-        memory_proposals: [],
-        collaborative_note_events: [{
-          event_type: "approved",
-          title: "API version",
-        }],
-      });
+      return structuredChatResponse;
     }
     throw new Error(`Unexpected fetch: ${path}`);
   };
@@ -930,6 +1015,33 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
     (item) => item.attributes["data-memory-decision"] === "approve",
   );
   approve.onclick();
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat"),
+    () => JSON.stringify(calls),
+  );
+  assert.equal(
+    elements.get("[data-chat-status]").attributes["aria-label"],
+    "Waiting for Agent Col",
+  );
+  assert.equal(
+    APPROVED_ORDINARY_CHAT_WAITING_QUIPS.includes(
+      elements.get("[data-chat-status]").attributes["aria-label"],
+    ),
+    false,
+  );
+  resolveStructuredChat(jsonResponse(504, {
+    detail: "Agent_Col response timed out after a completed action.",
+    response: "",
+    actions: [{
+      action_name: "approve_memory_signal",
+      status: "completed",
+    }],
+    memory_proposals: [],
+    collaborative_note_events: [{
+      event_type: "approved",
+      title: "API version",
+    }],
+  }));
   await waitFor(
     () => (
       calls.filter(([path]) => path.startsWith("/api/users/wifiknight/memory")).length >= 2

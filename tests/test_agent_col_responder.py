@@ -102,6 +102,43 @@ def test_responder_instruction_preserves_final_response_authority() -> None:
         assert required_rule in normalized
 
 
+def test_responder_answers_who_are_you_as_agent_col_collaborative_partner(
+) -> None:
+    from agent_col_responder import create_responder_app
+
+    app = create_responder_app(vertex_settings=VERTEX_SETTINGS)
+    normalized = " ".join(app.root_agent.instruction.split()).lower()
+
+    assert "agent col is your product identity" in normalized
+    assert "collaborative partner is your role" in normalized
+
+
+def test_responder_answers_who_created_you_with_wifiknight_not_google(
+) -> None:
+    from agent_col_responder import create_responder_app
+
+    app = create_responder_app(vertex_settings=VERTEX_SETTINGS)
+    normalized = " ".join(app.root_agent.instruction.split()).lower()
+
+    assert "wifiknight is agent col's creator and developer" in normalized
+    assert (
+        "never attribute agent col's creation or development to google or "
+        "gemini"
+    ) in normalized
+
+
+def test_responder_answers_what_model_powers_you_without_replacing_identity(
+) -> None:
+    from agent_col_responder import create_responder_app
+
+    app = create_responder_app(vertex_settings=VERTEX_SETTINGS)
+    normalized = " ".join(app.root_agent.instruction.split()).lower()
+
+    assert "underlying model" in normalized
+    assert "agent col uses google/gemini technology" in normalized
+    assert "preserving agent col as the product identity" in normalized
+
+
 def test_responder_instruction_disclaims_google_research_as_not_guaranteed_official(
 ) -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION

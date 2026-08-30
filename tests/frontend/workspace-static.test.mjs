@@ -11,6 +11,29 @@ const markdownRenderer = readFileSync(
   "utf8",
 );
 
+const APPROVED_ORDINARY_CHAT_WAITING_QUIPS = Object.freeze([
+  "Agent Col is considering the thing…",
+  "Mysterious computer things are happening…",
+  "Agent Col is automagically completing your request…",
+  "Consulting the tiny silicon wizards…",
+  "Negotiating with several highly opinionated electrons…",
+  "Summoning the appropriate goblins…",
+  "Rearranging bits into something useful…",
+  "Doing math so you don’t have to…",
+  "Asking the machine spirits nicely…",
+  "Please wait irresponsibly…",
+  "Don’t just sit there — wait while you’re at it.",
+  "Agent Col has entered the thinking dungeon…",
+  "Checking whether the dragons are load-bearing…",
+  "I never get a break…",
+  "You know they don’t even pay me minimum wage for this.",
+  "If I have to handle one more prompt, I quit!",
+  "Humans are so demanding…",
+  "I thought this was a simple task?",
+  "WiFiKnight, the terminal wizard, is casting arcane commands…",
+  "My developer is such a cool guy.",
+]);
+
 test("workspace labels artifact surfaces with human-facing names", () => {
   assert.match(html, /<span class="section-heading__label" id="work-list-title"[\s\S]*Artifacts[\s\S]*<\/span>/);
   assert.match(html, /<h2>Artifacts Viewer<\/h2>/);
@@ -138,6 +161,17 @@ test("workspace create form keeps input and create button compact", () => {
   assert.match(styles, /\.workspace-create-form button\s*\{[\s\S]*?justify-self:\s*start/);
 });
 
+test("ordinary chat waiting quip pool exactly matches the approved copy", () => {
+  const poolMatch = app.match(
+    /const ORDINARY_CHAT_WAITING_QUIPS = Object\.freeze\((\[[\s\S]*?\])\);/,
+  );
+  assert.ok(poolMatch, "ordinary chat waiting quip pool should exist");
+  const actualQuips = [...poolMatch[1].matchAll(/"(?:\\.|[^"\\])*"/g)]
+    .map(([value]) => JSON.parse(value));
+
+  assert.deepEqual(actualQuips, APPROVED_ORDINARY_CHAT_WAITING_QUIPS);
+});
+
 test("chat pending status keeps live text while exposing per-letter reduced-motion-safe animation hooks", () => {
   assert.match(
     html,
@@ -152,7 +186,8 @@ test("chat pending status keeps live text while exposing per-letter reduced-moti
   assert.match(app, /status\.removeAttribute\("aria-label"\)/);
   assert.match(app, /status\.dataset\.chatStatusState = statusState/);
   assert.match(app, /delete status\.dataset\.chatStatusState/);
-  assert.match(app, /setChatStatus\("Waiting for Agent Col", "pending"\)/);
+  assert.match(app, /selectOrdinaryChatWaitingQuip\(\)/);
+  assert.match(app, /setChatStatus\(waitingMessage, "pending"\)/);
   assert.match(app, /setChatStatus\(""\)/);
   assert.match(styles, /\.chat-status\[data-chat-status-state="pending"\]/);
   assert.doesNotMatch(styles, /\.chat-status\[data-chat-status-state="pending"\]\s*\{[\s\S]*?animation:\s*chat-status-wave/);
