@@ -598,7 +598,7 @@ async def test_turn_service_bounds_recent_user_messages_for_v4_routing(
     )
 
     routing_input = artifact_routing.calls[0]["routing_input"]
-    assert routing_input.recent_user_messages == recent_messages[-20:]
+    assert routing_input.recent_user_messages == recent_messages[-10:]
 
 
 @pytest.mark.asyncio
@@ -1636,6 +1636,43 @@ async def test_stream_turn_stops_before_responder_on_specialist_failure() -> Non
     assert len(executor.calls) == 1
     assert responder.contexts == []
     assert "private-specialist-configuration" not in str(captured.value)
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_limits_recent_user_messages_for_url_projection(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    routing = RecordingRoutingRequest(AgentColRoutingDirective(route="direct"))
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=routing,
+    )
+    recent_messages = (
+        "Older URL https://old.example.com/reference",
+        "Another older URL https://older.example.com/reference",
+        *(f"recent message {index} without a URL" for index in range(10)),
+    )
+
+    events = [
+        event
+        async for event in service.stream_turn(
+            AgentColTurnCommand(
+                project_id="project-1",
+                session_id="session-1",
+                user_id="user-1",
+                message="Summarize the current request.",
+                recent_user_messages=recent_messages,
+            )
+        )
+    ]
+
+    assert len(routing.calls) == 1
+    routing_input = routing.calls[0]["routing_input"]
+    assert routing_input.candidate_urls == ()
+    assert events[-1].result.response == "Agent_Col response."
 
 
 @pytest.mark.asyncio

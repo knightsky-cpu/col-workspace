@@ -9,6 +9,7 @@ from typing import Protocol, TypeVar
 
 from google import genai
 from google.genai import types
+from pydantic import ValidationError
 
 from agent_col_expert_executor_v3 import (
     AgentColExpertExecutorV3ConfigurationError,
@@ -100,7 +101,8 @@ TURN_ROUTING_TIMEOUT_SECONDS = 15.0
 TURN_TIMEOUT_SECONDS = 90.0
 TURN_EXPERT_BUDGET_SECONDS = 45.0
 TURN_RESPONDER_RESERVE_SECONDS = 20.0
-MAX_ROUTING_RECENT_USER_MESSAGES = 20
+MAX_ROUTING_RECENT_USER_MESSAGES = 10
+MAX_ROUTING_RECENT_USER_MESSAGE_CHARS = 1_000
 logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
 
@@ -284,6 +286,17 @@ def _stable_merge(
             if item not in merged:
                 merged.append(item)
     return tuple(merged)
+
+
+def _project_recent_user_messages_for_routing(
+    recent_user_messages: tuple[str, ...],
+) -> tuple[str, ...]:
+    projected = tuple(
+        message.strip()[:MAX_ROUTING_RECENT_USER_MESSAGE_CHARS]
+        for message in recent_user_messages
+        if message.strip()
+    )
+    return projected[-MAX_ROUTING_RECENT_USER_MESSAGES:]
 
 
 class AgentColTurnService:
@@ -639,9 +652,11 @@ class AgentColTurnService:
             command.message
         )
         text_projection = project_routing_text_blocks(command.message)
-        routing_recent_user_messages = command.recent_user_messages[
-            -MAX_ROUTING_RECENT_USER_MESSAGES:
-        ]
+        routing_recent_user_messages = (
+            _project_recent_user_messages_for_routing(
+                command.recent_user_messages
+            )
+        )
         routing_input = AgentColRoutingInputV4(
             current_message=command.message,
             candidate_urls=project_routing_url_candidates(
@@ -765,7 +780,10 @@ class AgentColTurnService:
                     ),
                 )
             )
-        except AgentColArtifactExecutorConfigurationError as exc:
+        except (
+            AgentColArtifactExecutorConfigurationError,
+            ValidationError,
+        ) as exc:
             raise AgentColTurnServiceError(
                 "Agent_Col artifact execution failed.",
                 actions=claim.precompleted_actions,
@@ -929,9 +947,11 @@ class AgentColTurnService:
                 command.message
             )
             text_projection = project_routing_text_blocks(command.message)
-            routing_recent_user_messages = command.recent_user_messages[
-                -MAX_ROUTING_RECENT_USER_MESSAGES:
-            ]
+            routing_recent_user_messages = (
+                _project_recent_user_messages_for_routing(
+                    command.recent_user_messages
+                )
+            )
             routing_input = AgentColRoutingInput(
                 current_message=command.message,
                 candidate_urls=project_routing_url_candidates(

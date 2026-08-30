@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from agent_col_artifact_executor import (
     AgentColArtifactExecutionResult,
@@ -15,7 +16,12 @@ from schemas import (
     AgentActionReceipt,
     ArtifactReference,
 )
-from supervisor_runtime import SupervisorRuntimeError, SupervisorTurnResult
+from supervisor_runtime import (
+    SupervisorRuntimeError,
+    SupervisorTextDelta,
+    SupervisorTurnCompleted,
+    SupervisorTurnResult,
+)
 
 
 NOW = datetime(2026, 8, 23, 16, 0, tzinfo=UTC)
@@ -133,6 +139,20 @@ class RecordingArtifactExecutor:
         return self.result
 
 
+class ValidationFailingArtifactModel(BaseModel):
+    required_value: int
+
+
+class ValidationFailingArtifactExecutor:
+    def __init__(self, error: ValidationError) -> None:
+        self.error = error
+        self.commands: list[object] = []
+
+    async def execute(self, command):
+        self.commands.append(command)
+        raise self.error
+
+
 class RecordingResponder:
     def __init__(
         self,
@@ -149,6 +169,13 @@ class RecordingResponder:
         if self.error is not None:
             raise self.error
         return self.result
+
+    async def stream_turn(self, context):
+        self.contexts.append(context)
+        if self.error is not None:
+            raise self.error
+        yield SupervisorTextDelta(text=self.result.response)
+        yield SupervisorTurnCompleted(result=self.result)
 
 
 def artifact_execution_result(
@@ -225,6 +252,109 @@ async def test_turn_service_routes_artifact_through_application_executor(
     assert result.artifacts == execution.artifacts
     assert result.adaptations == execution.adaptations
     assert result.chat_turn_claim is execution.claim
+
+
+@pytest.mark.asyncio
+async def test_streamed_artifact_routing_projects_long_recent_user_messages(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    claim = initial_claim()
+    routing = RecordingV4RoutingRequest(artifact_directive())
+    artifact_executor = RecordingArtifactExecutor(
+        artifact_execution_result(claim)
+    )
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=responder,
+        artifact_executor=artifact_executor,
+        artifact_routing_request=routing,
+        wall_clock=lambda: NOW,
+    )
+    recent_messages = (
+        "old ignored 0",
+        "old ignored 1",
+        "old ignored 2",
+        "   ",
+        *(f"kept recent {index}" for index in range(9)),
+        f"  {'x' * 1_200}  ",
+    )
+
+    events = [
+        event
+        async for event in service.stream_turn(
+            AgentColTurnCommand(
+                project_id=claim.request.project_id,
+                session_id=claim.request.session_id,
+                user_id=claim.request.user_id,
+                message=claim.request.message,
+                recent_user_messages=recent_messages,
+                chat_turn_claim=claim,
+            )
+        )
+    ]
+
+    assert len(routing.calls) == 1
+    routing_input = routing.calls[0][1]
+    assert routing_input.recent_user_messages == (
+        *(f"kept recent {index}" for index in range(9)),
+        "x" * 1_000,
+    )
+    assert all(
+        0 < len(message) <= 1_000
+        for message in routing_input.recent_user_messages
+    )
+    assert events[-1].result.response == "Created."
+
+
+@pytest.mark.asyncio
+async def test_streamed_artifact_validation_failure_is_wrapped_safely(
+) -> None:
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnService,
+        AgentColTurnServiceError,
+    )
+
+    claim = initial_claim()
+    try:
+        ValidationFailingArtifactModel.model_validate({})
+    except ValidationError as exc:
+        validation_error = exc
+    artifact_executor = ValidationFailingArtifactExecutor(validation_error)
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=responder,
+        artifact_executor=artifact_executor,
+        artifact_routing_request=RecordingV4RoutingRequest(
+            artifact_directive()
+        ),
+        wall_clock=lambda: NOW,
+    )
+
+    with pytest.raises(AgentColTurnServiceError) as captured:
+        _ = [
+            event
+            async for event in service.stream_turn(
+                AgentColTurnCommand(
+                    project_id=claim.request.project_id,
+                    session_id=claim.request.session_id,
+                    user_id=claim.request.user_id,
+                    message=claim.request.message,
+                    chat_turn_claim=claim,
+                )
+            )
+        ]
+
+    assert captured.value.__cause__ is validation_error
+    assert captured.value.chat_turn_claim is claim
+    assert len(artifact_executor.commands) == 1
+    assert responder.contexts == []
+    assert "required_value" not in str(captured.value)
 
 
 @pytest.mark.asyncio
