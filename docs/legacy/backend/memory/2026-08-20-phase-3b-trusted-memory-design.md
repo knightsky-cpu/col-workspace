@@ -9,10 +9,10 @@ change; each implementation pass still requires separate approval.
 
 This design is subordinate to:
 
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md)
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md)
-- [`AGENTS.md`](../../../AGENTS.md)
-- [`2026-08-19-hybrid-adk-supervisor-contract-design.md`](2026-08-19-hybrid-adk-supervisor-contract-design.md)
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md)
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md)
+- [`AGENTS.md`](../../../../AGENTS.md)
+- [`2026-08-19-hybrid-adk-supervisor-contract-design.md`](../../architecture/2026-08-19-hybrid-adk-supervisor-contract-design.md)
 
 Agent_Col is a general collaborative partner. This contract governs only the
 trusted continuity mechanism through which a user explicitly teaches

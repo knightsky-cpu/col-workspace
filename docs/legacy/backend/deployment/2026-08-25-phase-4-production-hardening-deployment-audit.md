@@ -8,7 +8,7 @@ Status note, August 27, 2026: this audit remains useful production-hardening
 provenance, but worker and Cloud Tasks sections describe the older
 durable-async path. The current pre-submission path is single-service Cloud Run
 hardening without private worker or queue requirements. Use
-[`../final-checklist-planning.md`](../final-checklist-planning.md) for the
+[`../final-checklist-planning.md`](../../finalization/final-checklist-planning.md) for the
 current roadmap.
 
 ## TL;DR

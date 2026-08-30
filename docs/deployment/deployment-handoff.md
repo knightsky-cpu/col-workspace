@@ -41,9 +41,9 @@ Before reporting readiness for the next pass or proposing implementation, review
 
 1. `AGENTS.md`
    - Required workflow, TDD, manual acceptance, and GitHub checkpoint rules.
-2. `deployment-handoff.md`
+2. `docs/deployment/deployment-handoff.md`
    - This current handoff and selected deployment path.
-3. `deployment-notes.md`
+3. `docs/deployment/deployment-notes.md`
    - Accepted pass history, verification evidence, checkpoint history, and limitations.
 4. `docs/superpowers/plans/2026-08-28-updated-finalization-handoff.md`
    - Current project/submission alignment and superseding handoff context.

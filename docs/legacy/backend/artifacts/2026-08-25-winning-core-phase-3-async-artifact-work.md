@@ -14,7 +14,7 @@ artifact plan is deferred until after submission. It remains future engineering
 provenance, but Google Cloud Tasks, private worker execution, job
 retry/cancellation, and durable job-state proof are not prerequisites for the
 judged build. Use
-[`../../final-checklist-planning.md`](../../final-checklist-planning.md) as the
+[`../../final-checklist-planning.md`](../../finalization/final-checklist-planning.md) as the
 current pre-submission roadmap.
 
 **Goal:** Convert structured blueprint synthesis into one inspectable durable
@@ -43,8 +43,8 @@ Node test runner, pytest.
 **Governing repository references:**
 
 - `AGENTS.md`
-- `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
-- `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
+- `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
+- `docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
 - `docs/aug-25-2026-final-checklist.md`
 
 No other `docs/research/*.md` file exists at the planning baseline. Phase 3
@@ -1091,8 +1091,8 @@ duplicate restraint, cancellation truth, and one canonical artifact.
 
 - Modify `docs/aug-25-2026-final-checklist.md`.
 - Modify current status/evidence documentation directly affected by Phase 3,
-  likely `AGENT_COL_IDENTITY_AND_ALIGNMENT.md` and
-  `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`.
+  likely `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md` and
+  `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`.
 - Add privacy-reviewed evidence under the established repository evidence
   location.
 - Disable controlled-failure environment configuration after evidence.

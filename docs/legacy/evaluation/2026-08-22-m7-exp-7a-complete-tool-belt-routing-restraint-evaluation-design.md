@@ -11,13 +11,13 @@ API, persistence, or infrastructure change.
 This design is subordinate to:
 
 - [`AGENTS.md`](../../../AGENTS.md);
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
-- [`2026-08-21-phase-3b-m7-2-core-expert-routing-design.md`](2026-08-21-phase-3b-m7-2-core-expert-routing-design.md);
-- [`2026-08-21-phase-3b-m7-exp-4d-r3-production-model-routing-design.md`](2026-08-21-phase-3b-m7-exp-4d-r3-production-model-routing-design.md);
-- [`2026-08-21-phase-3b-m7-exp-4d-r3-3-production-routing-integration-design.md`](2026-08-21-phase-3b-m7-exp-4d-r3-3-production-routing-integration-design.md);
-- [`2026-08-22-phase-3b-m7-exp-5c-computational-routing-provenance-design.md`](2026-08-22-phase-3b-m7-exp-5c-computational-routing-provenance-design.md);
-- [`2026-08-22-m7-exp-6a-requirements-verification-boundary-design.md`](2026-08-22-m7-exp-6a-requirements-verification-boundary-design.md).
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
+- [`2026-08-21-phase-3b-m7-2-core-expert-routing-design.md`](../backend/routing/2026-08-21-phase-3b-m7-2-core-expert-routing-design.md);
+- [`2026-08-21-phase-3b-m7-exp-4d-r3-production-model-routing-design.md`](../backend/routing/2026-08-21-phase-3b-m7-exp-4d-r3-production-model-routing-design.md);
+- [`2026-08-21-phase-3b-m7-exp-4d-r3-3-production-routing-integration-design.md`](../backend/routing/2026-08-21-phase-3b-m7-exp-4d-r3-3-production-routing-integration-design.md);
+- [`2026-08-22-phase-3b-m7-exp-5c-computational-routing-provenance-design.md`](../backend/routing/2026-08-22-phase-3b-m7-exp-5c-computational-routing-provenance-design.md);
+- [`2026-08-22-m7-exp-6a-requirements-verification-boundary-design.md`](../backend/artifacts/2026-08-22-m7-exp-6a-requirements-verification-boundary-design.md).
 
 Agent_Col remains a general collaborative partner and the only user-facing
 conversational owner. This evaluation measures whether Agent_Col chooses and

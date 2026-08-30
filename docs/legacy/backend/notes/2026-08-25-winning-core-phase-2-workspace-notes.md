@@ -30,10 +30,10 @@ pytest, Google OIDC.
 **Governing references:**
 
 - `AGENTS.md`
-- `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
-- `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
+- `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
+- `docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
 - `docs/aug-25-2026-final-checklist.md`
-- `docs/phase-1-memory-lifecycle-evidence-aug-26-2026.md`
+- `docs/notes/phase-1-memory-lifecycle-evidence-aug-26-2026.md`
 - `docs/superpowers/specs/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`
 - `docs/superpowers/plans/2026-08-24-m9-note-1a-collaborative-note-proposal-active-projection-models.md`
 - `docs/superpowers/plans/2026-08-25-winning-core-phase-1-remaining-work.md`
@@ -935,8 +935,8 @@ features.
 
 - Modify `docs/aug-25-2026-final-checklist.md`.
 - Modify current status/evidence documentation identified during the closure
-  audit, likely `AGENT_COL_IDENTITY_AND_ALIGNMENT.md` and
-  `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`.
+  audit, likely `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md` and
+  `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`.
 - Add bounded screenshot/log evidence under the repository's established
   evidence location only after checking that it contains no tokens, subjects,
   prompts, note bodies not intended for publication, or other private data.

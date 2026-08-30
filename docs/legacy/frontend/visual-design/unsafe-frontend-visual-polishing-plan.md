@@ -8,7 +8,7 @@
 
 **Tech Stack:** Static HTML, CSS, browser-native JavaScript ES modules, FastAPI, Firestore-backed services, Node `node --test` frontend tests, pytest backend tests, manual browser verification, and approved vendored frontend assets only when a pass explicitly authorizes them.
 
-**Spec:** `AGENTS.md`, `frontend-work-notes.md`, `post-deployment-handoff.md`, `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md`, `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md`, current frontend/backend source, current tests, user-provided screenshot `/home/sigmaknight/Pictures/Screenshots/Screenshot From 2026-08-28 10-58-04.png`, and root visual target `agent-col-visual-target.jpeg`.
+**Spec:** `AGENTS.md`, `docs/notes/frontend-work-notes.md`, `docs/deployment/post-deployment-handoff.md`, `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md`, `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md`, current frontend/backend source, current tests, user-provided local screenshot recorded in the original plan, and root visual target `agent-col-visual-target.jpeg`.
 
 ## Current Boundary
 

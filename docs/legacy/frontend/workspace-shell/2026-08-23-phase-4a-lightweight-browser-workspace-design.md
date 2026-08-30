@@ -9,11 +9,11 @@ contracts, authentication, deployment, or any other source-behavior change.
 
 This design is subordinate to:
 
-- [`AGENTS.md`](../../../AGENTS.md);
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
-- [`BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`](../../../BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md);
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
-- [`2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md`](2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md).
+- [`AGENTS.md`](../../../../AGENTS.md);
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
+- [`docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`](../../../design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md);
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
+- [`2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md`](../../backend/artifacts/2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md).
 
 The backend-to-frontend integration inventory is the primary integration
 reference for this design. Executable source controls if that inventory later

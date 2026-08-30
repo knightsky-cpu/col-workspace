@@ -145,7 +145,7 @@ Vertex quota and writes fixed synthetic chat state to the configured Firestore
 database.
 
 See the
-[M7 core tool-belt evaluation closure](../superpowers/specs/2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md)
+[M7 core tool-belt evaluation closure](../legacy/evaluation/2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md)
 for accepted evidence, limitations, and correction history.
 
 ## Static checks for Python scripts

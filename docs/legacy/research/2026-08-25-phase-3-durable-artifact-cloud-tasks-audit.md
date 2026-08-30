@@ -8,7 +8,7 @@ Status note, August 27, 2026: this audit remains useful future engineering
 provenance, but durable asynchronous artifacts, Cloud Tasks, and private worker
 execution are deferred until after submission under the current finalization
 strategy. Use
-[`../final-checklist-planning.md`](../final-checklist-planning.md) for the
+[`../final-checklist-planning.md`](../finalization/final-checklist-planning.md) for the
 current pre-submission roadmap.
 
 ## TL;DR

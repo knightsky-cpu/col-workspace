@@ -106,5 +106,5 @@ and cost controls are in place.
 ## Working Method
 
 Every source-changing pass follows the repository's approval-gated TDD
-workflow in [`AGENTS.md`](../../AGENTS.md). Accepted work is manually verified
+workflow in [`AGENTS.md`](../../../AGENTS.md). Accepted work is manually verified
 before any Git checkpoint or push.

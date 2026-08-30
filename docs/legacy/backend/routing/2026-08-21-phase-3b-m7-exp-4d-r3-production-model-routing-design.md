@@ -7,7 +7,7 @@
 This document is a design contract. It does not authorize production-code,
 test, dependency, schema, API, or infrastructure changes. A bounded
 implementation plan and separate explicit approval are required before source
-changes begin under [`AGENTS.md`](../../../AGENTS.md).
+changes begin under [`AGENTS.md`](../../../../AGENTS.md).
 
 The design is grounded in repository checkpoint `b7f7bb5`, the manually
 accepted M7-EXP.4D-R2.1 Vertex compatibility evidence, the approved M7.2 core
@@ -17,11 +17,11 @@ contract.
 
 This contract remains subordinate to:
 
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
 - [`2026-08-21-phase-3b-m7-2-core-expert-routing-design.md`](2026-08-21-phase-3b-m7-2-core-expert-routing-design.md);
-- [`2026-08-21-phase-3b-m7-exp-4a-source-provider-compatibility-report.md`](2026-08-21-phase-3b-m7-exp-4a-source-provider-compatibility-report.md);
-- [`turn-idempotency.md`](../../design/turn-idempotency.md).
+- [`2026-08-21-phase-3b-m7-exp-4a-source-provider-compatibility-report.md`](../../research/2026-08-21-phase-3b-m7-exp-4a-source-provider-compatibility-report.md);
+- [`turn-idempotency.md`](../chat/turn-idempotency.md).
 
 If this document conflicts with those contracts, the stricter privacy,
 provenance, idempotency, evidence, tool-restraint, or deterministic-authority

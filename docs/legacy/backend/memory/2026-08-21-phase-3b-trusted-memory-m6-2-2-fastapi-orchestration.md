@@ -24,7 +24,7 @@ replacing the original `502` or `504`.
 adapter, pytest, pytest-asyncio, HTTPX ASGI transport.
 
 **Spec:**
-[`docs/superpowers/specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md`](../specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md)
+[`docs/superpowers/specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md`](2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md)
 
 ## Global constraints
 

@@ -21,7 +21,7 @@ parsing without network, Firestore, ADK, or Gemini access.
 pytest-asyncio, Markdown.
 
 **Spec:**
-[`docs/superpowers/specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md`](../specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md)
+[`docs/superpowers/specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md`](2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md)
 
 ## Global constraints
 

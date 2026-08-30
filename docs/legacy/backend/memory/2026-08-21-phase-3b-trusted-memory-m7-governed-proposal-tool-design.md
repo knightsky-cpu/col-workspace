@@ -7,7 +7,7 @@ this design on August 21, 2026**. That approval authorizes this design contract,
 not a production-code, test, dependency, API, or Firestore change. A separate
 implementation plan and a separate explicit approval are required before
 source changes begin under
-[`AGENTS.md`](../../../AGENTS.md).
+[`AGENTS.md`](../../../../AGENTS.md).
 
 The design is grounded in repository commit
 `780bdefe940bb0e75a77dcfa8e24e12f12c62f81`, the manually accepted M6.2.3
@@ -18,9 +18,9 @@ official Google ADK public contracts linked below.
 
 M7 remains subordinate to:
 
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md)
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md)
-- [`2026-08-19-hybrid-adk-supervisor-contract-design.md`](2026-08-19-hybrid-adk-supervisor-contract-design.md)
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md)
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md)
+- [`2026-08-19-hybrid-adk-supervisor-contract-design.md`](../../architecture/2026-08-19-hybrid-adk-supervisor-contract-design.md)
 - [`2026-08-20-phase-3b-trusted-memory-design.md`](2026-08-20-phase-3b-trusted-memory-design.md)
 - [`2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md`](2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md)
 

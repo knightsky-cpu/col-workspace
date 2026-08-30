@@ -15,13 +15,13 @@ are deferred until after submission unless explicitly reopened. Use
 contest-finalization reference.
 
 For the current source-level feature inventory, see
-[`current-state.md`](current-state.md).
+[`current-state.md`](../../current-state.md).
 
 Implementation remains governed by:
 
-- [`AGENTS.md`](../AGENTS.md);
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md).
+- [`AGENTS.md`](../../../AGENTS.md);
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md).
 
 Every non-superseded source-changing pass still requires its own
 investigation, bounded implementation plan, explicit user approval,
@@ -81,25 +81,25 @@ source baseline produced by the preceding phase.
 
 1. **Phase 1 - Memory Continuity Closure**
    - Accepted Pass 1A plan and implementation record:
-     [Phase 1 Memory Continuity Closure](superpowers/plans/2026-08-25-winning-core-phase-1-memory-continuity.md)
+     [Phase 1 Memory Continuity Closure](../backend/memory/2026-08-25-winning-core-phase-1-memory-continuity.md)
    - Remaining implementation plan:
-     [Phase 1 Remaining Work](superpowers/plans/2026-08-25-winning-core-phase-1-remaining-work.md)
+     [Phase 1 Remaining Work](2026-08-25-winning-core-phase-1-remaining-work.md)
    - Phase 1E closure evidence:
-     [Phase 1E Memory Lifecycle Closure Evidence](phase-1-memory-lifecycle-evidence-aug-26-2026.md)
+     [Phase 1E Memory Lifecycle Closure Evidence](../../notes/phase-1-memory-lifecycle-evidence-aug-26-2026.md)
    - Status: Phase 1 accepted on August 26, 2026 after manual Google OIDC
      lifecycle verification and recorded by the Phase 1 closure checkpoint.
 2. **Phase 2 - Governed Workspace Notes**
    - Approved implementation plan:
-     [Phase 2 Governed Workspace Notes](superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md)
+     [Phase 2 Governed Workspace Notes](../backend/notes/2026-08-25-winning-core-phase-2-workspace-notes.md)
    - Phase 2H closure evidence:
-     [Phase 2 Workspace Notes Closure Evidence](phase-2-workspace-notes-evidence-aug-26-2026.md)
+     [Phase 2 Workspace Notes Closure Evidence](../../notes/phase-2-workspace-notes-evidence-aug-26-2026.md)
    - Status: Phase 2 accepted on August 26, 2026 after live Google OIDC
      workspace-note and receipt-backed continuity verification, including the
      accepted chat-continuity correction checkpoint
      `624c6bbf2e65112655e63624b843387bcbbfb81c`.
 3. **Phase 3 - Durable Asynchronous Artifact Work**
    - Checkpointed implementation plan:
-     [Phase 3 Durable Asynchronous Artifact Work](superpowers/plans/2026-08-25-winning-core-phase-3-async-artifact-work.md)
+     [Phase 3 Durable Asynchronous Artifact Work](../backend/artifacts/2026-08-25-winning-core-phase-3-async-artifact-work.md)
    - Status: plan checkpointed at `c889a99`; implementation remains pending.
      Do not confuse this Winning Core Phase 3 with the already accepted
      specialist tooling/expert-surface work. The four expert capabilities are
@@ -107,7 +107,7 @@ source baseline produced by the preceding phase.
      private worker are not implemented.
 4. **Phase 4 - Production Hardening and Deployment**
    - Pending implementation plan:
-     [Phase 4 Production Hardening and Deployment](superpowers/plans/2026-08-25-winning-core-phase-4-production-deployment.md)
+     [Phase 4 Production Hardening and Deployment](../backend/deployment/2026-08-25-winning-core-phase-4-production-deployment.md)
    - Status: plan created from the current source baseline and Phase 4 research
      audit and reconciled on August 27, 2026; pending user approval.
      Implementation remains blocked on accepted Phase 3 durable artifact jobs
@@ -144,7 +144,7 @@ it, observe a changed response in another session, inspect why Agent Col
 adapted, and remove or correct the preference.
 
 Source-backed Phase 1 implementation evidence is recorded in
-[`phase-1-memory-lifecycle-evidence-aug-26-2026.md`](phase-1-memory-lifecycle-evidence-aug-26-2026.md).
+[`phase-1-memory-lifecycle-evidence-aug-26-2026.md`](../../notes/phase-1-memory-lifecycle-evidence-aug-26-2026.md).
 Phase 1 was manually accepted from live Google OIDC screenshots and runtime
 checks supplied in the August 26, 2026 implementation conversation. Private
 screenshots are not committed to the repository.
@@ -168,7 +168,7 @@ notes without confusing workspace knowledge with global profile preferences or
 silently persisting conversation.
 
 Source-backed Phase 2 implementation and live evidence are recorded in
-[`phase-2-workspace-notes-evidence-aug-26-2026.md`](phase-2-workspace-notes-evidence-aug-26-2026.md).
+[`phase-2-workspace-notes-evidence-aug-26-2026.md`](../../notes/phase-2-workspace-notes-evidence-aug-26-2026.md).
 Phase 2 was manually accepted from live Google OIDC screenshots and runtime
 checks supplied in the August 26, 2026 implementation conversation.
 
@@ -248,14 +248,14 @@ submission text tell one truthful and reproducible Collaborative Partner story.
 
 ## Existing design and planning references
 
-- [Continuity and collaborative notes design](superpowers/specs/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md)
-- [Collaborative note model plan](superpowers/plans/2026-08-24-m9-note-1a-collaborative-note-proposal-active-projection-models.md)
-- [Judge-facing collaborative artifact loop](superpowers/specs/2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md)
-- [Browser workspace design](superpowers/specs/2026-08-23-phase-4a-lightweight-browser-workspace-design.md)
-- [Hybrid ADK supervisor contract](superpowers/specs/2026-08-19-hybrid-adk-supervisor-contract-design.md)
-- [Submission checklist](submission-checklist.md)
-- [Architecture](architecture.md)
-- [Local development setup](development/local-setup.md)
+- [Continuity and collaborative notes design](../backend/continuity/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md)
+- [Collaborative note model plan](../backend/notes/2026-08-24-m9-note-1a-collaborative-note-proposal-active-projection-models.md)
+- [Judge-facing collaborative artifact loop](../backend/artifacts/2026-08-23-m8-col-1-judge-facing-collaborative-artifact-loop-design.md)
+- [Browser workspace design](../frontend/workspace-shell/2026-08-23-phase-4a-lightweight-browser-workspace-design.md)
+- [Hybrid ADK supervisor contract](../architecture/2026-08-19-hybrid-adk-supervisor-contract-design.md)
+- [Submission checklist](../../submission-checklist.md)
+- [Architecture](../../architecture.md)
+- [Local development setup](../../development/local-setup.md)
 
 Current executable source remains authoritative when an older design or status
 document differs from implemented behavior. Every new phase plan must compare
@@ -336,8 +336,8 @@ and checkpointed.
 
 | Phase | Status | Accepted checkpoint | Evidence location |
 | --- | --- | --- | --- |
-| 1. Memory Continuity Closure | Accepted | `fca35e5` | [`phase-1-memory-lifecycle-evidence-aug-26-2026.md`](phase-1-memory-lifecycle-evidence-aug-26-2026.md) |
-| 2. Governed Workspace Notes | Accepted | `624c6bb` | [`phase-2-workspace-notes-evidence-aug-26-2026.md`](phase-2-workspace-notes-evidence-aug-26-2026.md) |
+| 1. Memory Continuity Closure | Accepted | `fca35e5` | [`phase-1-memory-lifecycle-evidence-aug-26-2026.md`](../../notes/phase-1-memory-lifecycle-evidence-aug-26-2026.md) |
+| 2. Governed Workspace Notes | Accepted | `624c6bb` | [`phase-2-workspace-notes-evidence-aug-26-2026.md`](../../notes/phase-2-workspace-notes-evidence-aug-26-2026.md) |
 | 3. Durable Asynchronous Artifact Work | Pending plan | - | - |
 | 4. Production Hardening and Deployment | Pending plan | - | - |
 | 5. Reproducibility and Submission Evidence | Pending plan | - | - |

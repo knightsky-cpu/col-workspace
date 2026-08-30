@@ -40,7 +40,7 @@ git remote -v
 Expected repository root:
 
 ```text
-/home/sigmaknight/col-workspace
+<repo-root>
 ```
 
 Expected remote:
@@ -515,7 +515,7 @@ docker version --format '{{.Server.Version}}'
 Expected Docker endpoint:
 
 ```text
-unix:///Users/wifiknight/.colima/default/docker.sock
+unix://<user-home>/.colima/default/docker.sock
 ```
 
 Important: in the managed Codex sandbox, Colima and Docker commands that touch
@@ -525,8 +525,8 @@ configured correctly. Observed sandbox failures include:
 
 ```text
 colima is not running
-error writing yaml file: open /Users/wifiknight/.colima/default/colima.yaml: operation not permitted
-permission denied while trying to connect to the docker API at unix:///Users/wifiknight/.colima/default/docker.sock
+error writing yaml file: open <user-home>/.colima/default/colima.yaml: operation not permitted
+permission denied while trying to connect to the docker API at unix://<user-home>/.colima/default/docker.sock
 ```
 
 Use elevated execution for the Colima startup and Docker build/push steps when

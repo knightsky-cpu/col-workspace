@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Restyle the Agent Col browser workspace so its finished visual quality explicitly aligns with the root-level reference image at [`agent-col-visual-target.jpeg`](/Users/wifiknight/col-workspace/agent-col-visual-target.jpeg), while preserving current application behavior exactly.
+**Goal:** Restyle the Agent Col browser workspace so its finished visual quality explicitly aligns with the root-level reference image at [`agent-col-visual-target.jpeg`](../../../../agent-col-visual-target.jpeg), while preserving current application behavior exactly.
 
 **Architecture:** This is a visual-only frontend pass. The primary implementation surface is `frontend/styles.css`; the current four-region workspace structure remains unchanged: top bar, left drawer, chat surface, and right artifact drawer. HTML, JavaScript, backend routes, prompts, schemas, persistence, auth, memory, notes, artifacts, and working-state behavior are locked unless a later separately approved behavior pass changes that boundary.
 
 **Tech Stack:** Static HTML, CSS, vanilla JavaScript modules, FastAPI static serving, Node frontend tests, Python static-route tests, browser/manual visual verification.
 
-**Spec:** `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md`, [`agent-col-visual-target.jpeg`](/Users/wifiknight/col-workspace/agent-col-visual-target.jpeg), current `frontend/index.html`, current `frontend/styles.css`, current frontend static tests, and the official documentation references below.
+**Spec:** `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md`, [`agent-col-visual-target.jpeg`](../../../../agent-col-visual-target.jpeg), current `frontend/index.html`, current `frontend/styles.css`, current frontend static tests, and the official documentation references below.
 
 ## Official Documentation Evidence
 
@@ -46,7 +46,7 @@
 
 ## Global Constraints
 
-- Use [`agent-col-visual-target.jpeg`](/Users/wifiknight/col-workspace/agent-col-visual-target.jpeg) as the explicit visual benchmark.
+- Use [`agent-col-visual-target.jpeg`](../../../../agent-col-visual-target.jpeg) as the explicit visual benchmark.
 - Default implementation surface is `frontend/styles.css`.
 - Do not change backend routes, request payloads, schemas, prompts, auth, persistence, memory, notes, artifacts, working state, or model behavior.
 - Do not change JavaScript state, event handlers, request builders, render logic, export behavior, retry behavior, or hidden/disabled/expanded semantics.
@@ -214,7 +214,7 @@ approved behavior/test pass changes Google auth presentation or initialization.
 
 Reference image file:
 
-- [`agent-col-visual-target.jpeg`](/Users/wifiknight/col-workspace/agent-col-visual-target.jpeg)
+- [`agent-col-visual-target.jpeg`](../../../../agent-col-visual-target.jpeg)
 
 ## Implementation Tasks
 
@@ -924,7 +924,7 @@ Do not run the full suite by default for this CSS-only pass unless focused verif
 
 ## Manual Visual And Runtime Verification Targets
 
-1. Open `/workspace` and compare the whole application against [`agent-col-visual-target.jpeg`](/Users/wifiknight/col-workspace/agent-col-visual-target.jpeg).
+1. Open `/workspace` and compare the whole application against [`agent-col-visual-target.jpeg`](../../../../agent-col-visual-target.jpeg).
 2. Verify the four-region structure remains intact: top bar, left drawer, chat surface, right artifact drawer.
 3. Verify the target-image qualities are visible: dark shell, teal primary accent, amber secondary accents, subtle borders, dense professional layout, polished drawer rows, model response rail, readable receipts, integrated composer, and clearer artifact panel.
 4. Verify drawer Hide/Show, section Expand/Collapse, and artifact viewer Expand/Hide still work.
@@ -951,4 +951,4 @@ Stop and revise the plan before implementation continues if:
 
 ## Completion Condition
 
-This plan is complete only when the application visually aligns with [`agent-col-visual-target.jpeg`](/Users/wifiknight/col-workspace/agent-col-visual-target.jpeg) while preserving all existing behavior verified by focused automated checks and user manual acceptance.
+This plan is complete only when the application visually aligns with [`agent-col-visual-target.jpeg`](../../../../agent-col-visual-target.jpeg) while preserving all existing behavior verified by focused automated checks and user manual acceptance.

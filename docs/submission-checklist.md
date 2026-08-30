@@ -3,7 +3,7 @@
 Last reconciled: August 29, 2026.
 
 This checklist contains remaining work only. Current source, tests,
-`repo-map.md`, `docs/architecture.md`, and `docs/current-state.md` are the
+`docs/repo-map.md`, `docs/architecture.md`, and `docs/current-state.md` are the
 authority for implementation status. Legacy documentation is historical
 provenance, not a source of active requirements.
 

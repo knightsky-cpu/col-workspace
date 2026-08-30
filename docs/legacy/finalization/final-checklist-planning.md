@@ -83,7 +83,7 @@ The accepted implementation already includes:
 - synchronous synthesis and request-bound artifacts;
 - artifact lifecycle, versioning, and feedback surfaces.
 
-See [Current state](current-state.md) for the source-level inventory.
+See [Current state](../../current-state.md) for the source-level inventory.
 
 ## Product Target A - Evidence-Governed Preference Learning
 
@@ -199,7 +199,7 @@ Remove from pre-submission production scope:
 Visual frontend work belongs after functional freeze and before demo capture.
 
 Use the safe visual guide:
-[Safe frontend visual appearance change boundaries](superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md).
+[Safe frontend visual appearance change boundaries](../frontend/visual-design/safe-frontend-visual-appearance-change-boundaries.md).
 
 Default scope:
 

@@ -7,7 +7,7 @@ verification and accepted correction checkpoint
 `624c6bbf2e65112655e63624b843387bcbbfb81c`.
 
 This document reconciles the accepted Phase 2 behavior against
-[`superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md`](superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md),
+[`superpowers/plans/2026-08-25-winning-core-phase-2-workspace-notes.md`](../legacy/backend/notes/2026-08-25-winning-core-phase-2-workspace-notes.md),
 especially Pass 2H.
 
 ## Source-backed implementation

@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Use `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` as the primary backend contract reference.
+- Use `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` as the primary backend contract reference.
 - Preserve `GET /` as the existing JSON health endpoint returning `{"status":"online"}`.
 - Add only `GET /workspace` and the bounded static namespace `GET /static/agent-col/*`.
 - Use same-origin relative API paths only.

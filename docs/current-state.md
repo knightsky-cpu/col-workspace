@@ -1,9 +1,9 @@
 # Agent Col Current State
 
-Last reconciled: August 29, 2026.
+Last reconciled: August 30, 2026.
 
 This document describes what Agent Col can do in the current checkout. Source
-code, tests, and the root-level `repo-map.md` are the authority for these
+code, tests, and [Repository map](repo-map.md) are the authority for these
 claims; historical files under `docs/legacy/` are not implementation truth.
 
 ## Current Product State
@@ -24,6 +24,9 @@ initial deployment (`README.md:17-29`).
 - Workspace selection, creation, deletion, and workspace-scoped chat state.
 - Conversation UI with idempotent retry, receipts, citations, memory
   clarification choices, continuity choices, and status/error display.
+- Progressive streaming for ordinary chat turns through `/api/chat/stream`;
+  `/api/chat` remains the canonical JSON and structured-decision path
+  (`main.py:3964-4194`).
 - Supporting drawer sections for Workspace, Artifacts, Notes, Memory, and
   Chats; there is activity/receipt state and rendering support in code, but the
   inspected HTML does not expose a separately labeled Activity drawer section
@@ -39,8 +42,8 @@ initial deployment (`README.md:17-29`).
 ## Implemented Backend Capabilities
 
 - FastAPI routes for auth/session, workspaces, memory, notes, chat sessions,
-  synthesis, artifacts, feedback, and chat (`main.py:1420-2759`,
-  `repo-map.md`).
+  synthesis, artifacts, feedback, chat, and ordinary chat streaming
+  (`main.py:1420-4194`, `repo-map.md`).
 - Firestore-backed chat sessions, messages, turn records, user workspaces,
   memory, note, artifact, feedback, continuity-source, working-state, and
   preference records (`database.py`, `repo-map.md`).
@@ -147,7 +150,7 @@ execution is not part of the current runtime path.
 
 ## Test And Evidence Status
 
-The root `repo-map.md` records the current source-backed test inventory.
+[Repository map](repo-map.md) records the current source-backed test inventory.
 Existing tests cover routing constraints, expert validation, memory
 normalization and proposal behavior, collaborative-note lifecycle behavior,
 artifact read/feedback behavior, frontend state/retry behavior, and safe

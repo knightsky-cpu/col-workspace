@@ -19,7 +19,7 @@ from the model message plus validated receipt fields.
 Firestore client, pytest, pytest-asyncio, unittest.mock.
 
 **Spec:**
-[`docs/superpowers/specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md`](../specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md)
+[`docs/superpowers/specs/2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md`](2026-08-20-phase-3b-trusted-memory-m6-idempotency-design.md)
 
 ## Global constraints
 

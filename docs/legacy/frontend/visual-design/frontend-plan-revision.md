@@ -16,8 +16,8 @@ during this review and are not treated as accepted baseline behavior:
 - `scrnshot-evidence/memory.png`.
 
 This revision remains subordinate to `AGENTS.md`,
-`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`, and
-`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`.
+`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`, and
+`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`.
 
 It is also revised against the hackathon requirements supplied by the
 repository owner on August 24, 2026. Those requirements make three outcomes

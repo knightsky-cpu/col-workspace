@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Use `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` as the source of truth for `/api/chat` request and response fields.
+- Use `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` as the source of truth for `/api/chat` request and response fields.
 - Use only `POST /api/chat` for conversation turns.
 - Generate exactly one idempotency key per new submitted turn.
 - Exact retry must reuse the original frozen request body and original idempotency key.

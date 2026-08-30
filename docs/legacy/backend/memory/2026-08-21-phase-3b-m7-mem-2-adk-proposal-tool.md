@@ -19,7 +19,7 @@ complete FastAPI context, replay, and partial-failure handling.
 pytest-asyncio.
 
 **Spec:**
-[`docs/superpowers/specs/2026-08-21-phase-3b-trusted-memory-m7-governed-proposal-tool-design.md`](../specs/2026-08-21-phase-3b-trusted-memory-m7-governed-proposal-tool-design.md)
+[`docs/superpowers/specs/2026-08-21-phase-3b-trusted-memory-m7-governed-proposal-tool-design.md`](2026-08-21-phase-3b-trusted-memory-m7-governed-proposal-tool-design.md)
 
 ## Global constraints
 

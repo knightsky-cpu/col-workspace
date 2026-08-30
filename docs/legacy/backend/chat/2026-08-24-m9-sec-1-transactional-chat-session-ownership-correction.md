@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, FastAPI, Pydantic, async Google Cloud Firestore, pytest, httpx.
 
-**Spec:** [`../specs/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`](../specs/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md)
+**Spec:** [`../specs/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`](../continuity/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md)
 
 ## Global constraints
 

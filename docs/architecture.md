@@ -1,201 +1,294 @@
 # Agent Col Architecture
 
-Last reconciled: August 29, 2026.
+Last reconciled: August 30, 2026.
 
-This document describes how the current application is built and how its parts
-interact. Source code, tests, and the root-level `repo-map.md` are the authority
-for these claims; historical files under `docs/legacy/` are provenance only.
+This document describes the current production architecture. Source code and
+tests are the authority; historical files under `docs/legacy/` are provenance
+and planning records only.
 
-## System Shape
+## System Overview
 
-Agent Col is a FastAPI backend with a same-origin static browser workspace. The
-backend owns authentication, workspace ownership, Firestore persistence,
-chat-turn idempotency, routing, expert execution, responder generation, memory,
-collaborative notes, continuity, hidden working state, preference learning, and
-artifacts (`main.py:1280-1417`, `repo-map.md`).
+Agent Col is a FastAPI backend with a same-origin static browser workspace.
+The backend owns authentication, workspace ownership, request validation,
+Firestore persistence, chat-turn idempotency, routing, expert execution,
+Google ADK responder execution, Gemini/Vertex AI calls, governed memory,
+collaborative notes, continuity, working state, preference learning, and
+artifacts.
 
-The browser workspace is served at `GET /workspace`; static frontend modules are
-mounted under `/static/agent-col` (`main.py:1403-1417`). The browser does not
-call Firestore or Vertex AI directly. It uses same-origin JSON APIs through the
-central frontend API helper (`frontend/api.mjs:13-119`).
+The browser workspace is served at `GET /workspace`. Static modules live in
+`frontend/` and are mounted at `/static/agent-col`. The browser does not call
+Firestore, Vertex AI, Gemini, or Google ADK directly; it uses same-origin
+FastAPI JSON or SSE endpoints.
 
-## Backend Composition
+## Judge-Facing Architecture Diagram
 
-`main.py` is the HTTP and dependency-injection composition root. Its lifespan
-function creates the Vertex/Gemini client, Firestore `MemoryEngine`, synthesis
-and artifact services, memory/note/continuity/working-state/preference
-services, specialist services, the v3 expert executor, responder runtime, and
-`AgentColTurnService` (`main.py:1280-1400`).
+```mermaid
+flowchart TB
+    Browser[Browser workspace<br/>frontend/*.mjs + index.html]
+    AuthUI[Google Identity Services<br/>browser ID token]
+    CloudRun[Cloud Run service<br/>FastAPI main:app]
+    Auth[Auth boundary<br/>local_dev or Google OIDC<br/>auth.py]
+    Routes[HTTP routes<br/>auth, workspaces, chat, notes, memory, artifacts]
+    Turn[AgentColTurnService<br/>idempotent turn lifecycle]
+    Router[Gemini routing providers<br/>v3/v4 JSON schema validation]
+    ADK[Google ADK Runner<br/>SupervisorRuntime]
+    Gemini[Gemini 3.6 Flash<br/>Vertex AI via Google GenAI SDK]
+    Experts[Bounded specialists<br/>Research, Source, Computation, Requirements]
+    Firestore[Cloud Firestore<br/>sessions, turns, users, workspaces,<br/>memory, notes, artifacts, feedback]
+    Logs[Cloud Logging<br/>bounded diagnostics]
 
-The primary runtime path is `POST /api/chat`. Other routes expose auth/session
-state, workspace management, memory inspection/mutation, collaborative notes,
-chat sessions, synthesis blueprints, generic artifacts, and blueprint feedback
-(`main.py:1420-2759`, `repo-map.md`).
+    Browser -->|/workspace static assets| CloudRun
+    Browser -->|same-origin JSON + SSE APIs| CloudRun
+    AuthUI -->|ID token| Browser
+    CloudRun --> Auth
+    Auth --> Routes
+    Routes --> Turn
+    Routes --> Firestore
+    Turn --> Router
+    Router --> Gemini
+    Turn --> Experts
+    Experts --> Gemini
+    Turn --> ADK
+    ADK --> Gemini
+    Turn --> Firestore
+    CloudRun --> Logs
+```
 
-## Frontend Architecture
+## Runtime Composition
 
-The frontend is a vanilla ES module application rooted at `frontend/index.html`
-and `frontend/app.mjs`. The HTML shell exposes a context gate, left supporting
-drawer sections for Workspace, Artifacts, Notes, Memory, and Chats, the central
-conversation area, and the right Artifacts Viewer (`frontend/index.html:29-290`).
+`main.py` is the composition root. During FastAPI lifespan startup it loads
+Vertex settings, creates a Google GenAI client, creates the Firestore-backed
+`MemoryEngine`, constructs memory, note, continuity, working-state,
+preference, synthesis, artifact, feedback, specialist, routing, responder, and
+turn services, then stores them on `app.state`.
 
-`frontend/state.mjs` owns client state for auth/context, transcript, pending
-turns, retries, memory clarification choices, continuity choices, workspace,
-work/artifacts, notes, memory, chats, activity entries, and drawer disclosure.
-`frontend/app.mjs` wires bootstrap, rendering, API calls, chat submission,
-structured decisions, workspace operations, artifact operations, memory
-operations, and note operations (`frontend/app.mjs:315-725`,
-`repo-map.md`).
+The container image is built from `python:3.14-slim`, installs
+`requirements.txt`, runs as non-root `appuser`, exposes port 8080, and starts
+`uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}`.
 
-Rendering is intentionally DOM-safe: helpers write text nodes, markdown is
-bounded to a safe subset, and artifact content is rendered as text inside code
-blocks rather than injected HTML (`frontend/render.mjs:1-25`,
-`frontend/markdown-renderer.mjs:3-252`, `repo-map.md`).
+## Browser Frontend
 
-## Chat-Turn Lifecycle
+The frontend is static HTML, CSS, and vanilla JavaScript ES modules:
 
-`POST /api/chat` resolves effective user and project identity, enforces
-idempotency where required, claims or replays a durable turn record, loads
-history/profile context, persists the user message, applies structured memory,
-note, clarification, continuity, or artifact-feedback decisions, and then calls
-the turn service for ordinary model work (`main.py:2759-3562`).
+- `frontend/index.html`: shell for auth/context entry, drawers, conversation,
+  composer, notes, memory, chats, work, and artifact viewer regions.
+- `frontend/app.mjs`: bootstrap and event wiring for auth, workspace, chat,
+  memory, notes, chats, and artifacts.
+- `frontend/state.mjs`: immutable client state transitions for context,
+  transcript, retries, memory clarification choices, continuity choices,
+  drawer disclosure, work, notes, memory, chats, and activity.
+- `frontend/api.mjs`: same-origin request helper with relative-path
+  enforcement, auth headers, idempotency headers, JSON parsing, and error
+  normalization.
+- `frontend/chat-view.mjs`, `work-view.mjs`, `notes-view.mjs`,
+  `memory-view.mjs`, `chats-view.mjs`, and related modules: panel rendering.
 
-Ordinary turns load governed model context, optional continuity context, and
-optional hidden working-state context before routing. The turn service routes
-through v4 when artifact routing is available and v3 for non-artifact expert
-flows, executes at most one specialist, runs responder-only Agent Col, and
-returns validated text plus public receipts (`agent_col_turn_service.py:271-372`,
-`agent_col_turn_service.py:556-668`, `agent_col_turn_service.py:929-1130`,
-`repo-map.md`).
+Rendering is deliberately bounded. General text goes through `textContent`,
+model Markdown goes through a small safe Markdown renderer, and artifact
+content is displayed as text inside code blocks rather than injected HTML.
 
-The request-latency ordering is:
+## FastAPI Boundary
+
+The public runtime entry points are:
+
+- `GET /`: health check.
+- `GET /workspace`: browser UI.
+- `GET /api/auth/config` and `GET /api/auth/session`: auth configuration and
+  principal/session projection.
+- Workspace, memory, notes, chat-session, synthesis, blueprint, artifact, and
+  feedback APIs.
+- `POST /api/chat`: canonical JSON chat and all structured decision turns.
+- `POST /api/chat/stream`: SSE transport for ordinary conversational chat
+  turns only.
+
+The streaming endpoint emits provisional `delta` events and an authoritative
+`final` event containing the canonical validated `ChatResponse`. It does not
+make streamed fragments durable chat truth. Structured decisions stay on the
+JSON endpoint.
+
+## Authentication And Identity
+
+Auth has two modes:
+
+- `local_dev`: local development accepts supplied user/project IDs.
+- `google_oidc`: browser requests carry a Google ID token; the backend verifies
+  the token, derives the internal owner, and returns an opaque public user
+  locator to the browser.
+
+Cloud Run startup fails closed unless `AGENT_COL_AUTH_MODE=google_oidc` and a
+public OAuth client ID is configured. Server-side Firestore and Vertex AI calls
+use Application Default Credentials or the Cloud Run service identity, not the
+browser token.
+
+## Google Model And Agent Runtime
+
+Gemini access uses `gemini-3.6-flash` through Vertex AI / Gemini Enterprise.
+`vertex_config.py` requires:
+
+- `GOOGLE_CLOUD_PROJECT`
+- `GOOGLE_CLOUD_LOCATION=global`
+- `GOOGLE_GENAI_USE_ENTERPRISE=True`
+
+Google ADK is used for the Agent Col responder runtime through
+`SupervisorRuntime`, which wraps an ADK `Runner` and calls `run_async`.
+Streaming uses ADK `StreamingMode.SSE`; non-streaming turns use
+`StreamingMode.NONE`.
+
+Google GenAI SDK is used for Vertex client construction, structured routing
+generation, direct specialist generation, synthesis, generic artifact
+generation, working-state summarization, URL Context, and Google Search
+grounding.
+
+## Chat And Session Lifecycle
+
+For `POST /api/chat`, the backend:
+
+1. Resolves authenticated user and project identity.
+2. Validates idempotency requirements.
+3. Claims, replays, rejects, or resumes a durable chat turn record.
+4. Loads chat history and collaboration profile context.
+5. Persists the user message when appropriate.
+6. Handles structured decisions for memory, notes, continuity, and artifact
+   feedback before ordinary model work.
+7. Loads governed memory, note continuity, preference, and hidden working-state
+   context.
+8. Routes the turn.
+9. Executes zero or one specialist when selected.
+10. Runs the responder-only Agent Col through Google ADK.
+11. Persists the canonical model message and turn effects.
+12. Attempts hidden working-state maintenance.
+13. Returns a public `ChatResponse`.
+
+The authoritative ordering is:
 
 ```text
 canonical responder completion
--> authoritative chat persistence
--> awaited hidden working-state maintenance
--> HTTP response returned
+-> durable chat/message/effect persistence
+-> awaited best-effort working-state maintenance
+-> HTTP JSON response or SSE final event
 ```
 
-Working-state data is hidden, non-authoritative, failure-tolerant, and logged on
-failure. The maintenance call is still awaited after chat persistence and before
-the HTTP response returns when working-state updates are enabled
-(`main.py:3483-3562`, `main.py:3785-3852`).
+## Routing And Expert Execution
 
-## Routing And Specialist Boundaries
+Routing providers use Gemini with JSON schemas and local validation. Routing is
+a decision boundary, not a tool-execution boundary.
 
-The routing layer treats user text and projected context as untrusted task data.
-Routing providers call Gemini with structured JSON schemas and local validation;
-they do not execute tools or persist state (`agent_col_routing_provider_v3.py`,
-`agent_col_routing_provider_v4.py`, `repo-map.md`).
+Current routed outcomes include direct response, clarification, Source,
+Research, Computation, Requirements Verification, and artifact creation.
+Experts are bounded evidence producers. The responder receives validated expert
+results and receipts from application code; it does not receive open-ended
+model-visible Research, Source, Computation, or Requirements Verification
+tools.
 
-Current expert routes are Direct, Clarify, Source, Research, Computation, and
-Requirements Verification, with v4 adding Artifact routing for supported
-artifact creation (`agent_col_routing_v3.py:49-55`,
-`agent_col_routing_v4.py:34-59`).
+Specialist boundaries:
 
-Experts are bounded evidence producers. The responder has no model-visible
-Research, Source, Computation, or Requirements Verification tools; it receives
-validated results and receipts from application code.
+- Research: direct GenAI Google Search grounding with grounding metadata
+  validation and public citation receipts.
+- Source: GenAI URL Context for supplied public URLs.
+- Computation: ADK computation flow with bounded execution.
+- Requirements Verification: structured Gemini generation plus local evidence
+  validation.
 
-## Memory, Notes, Continuity, Working State, And Preferences
+## Firestore Persistence
 
-Profile memory is governed and proposal-based. Pending memory is not active
-until approved by the user. Approval, rejection, correction, revocation, and
-deletion flow through typed services and durable events
-(`trusted_memory_service.py:286-633`, `database.py:6388-6968`).
+Firestore stores durable product state:
 
-Collaborative notes are workspace-scoped. Notes support proposals,
-approval/rejection, corrections, archive, restore, deletion, active projection,
-and provenance events (`collaborative_note_service.py:188-331`,
-`database.py:679-1331`).
+- `sessions/{session_id}` with child `messages`, `turns`,
+  `memory_clarifications`, and `working_state`.
+- `users/{user_id}` with workspaces, memory proposals/origins/events,
+  collaborative note proposals, collaborative notes and events, preference
+  observations, and preference hypotheses.
+- `projects/{project_id}` with blueprint artifacts, generic artifacts,
+  artifact versions, blueprint feedback, and feedback supersession records.
 
-Continuity has no independent persisted collection. It resolves active notes
-and prior chat sessions/messages into bounded context receipts or ambiguity
-choices (`continuity_service.py:118-239`, `database.py:4964-5040`).
+User-owned workspace data is under `users/{user_id}/workspaces/{workspace_id}`.
+Project artifact data is under `projects/{project_id}`. Authenticated requests
+resolve supplied user/project IDs against the authenticated principal before
+service access.
 
-Working state is same-session hidden collaboration context. It can summarize
-current goals, constraints, unresolved questions, next-step hypotheses, and
-confidence, but it cannot authorize tools, identity changes, durable memory,
-notes, artifacts, or other actions (`working_state.py:11-101`).
+## Governed Memory
 
-Preference learning records non-authoritative observations and hypotheses. The
-current extractor is deliberately narrow and recognizes explicit shorter or
-more concise response feedback; surfaced hypotheses go through memory
-clarification rather than directly mutating active memory
-(`preference_learning.py:10-164`,
-`preference_learning_service.py:43-152`, `main.py:3733-3779`).
+Profile memory is proposal-based. Pending memory is not active until user
+approval. The memory system supports clarification, approval, rejection,
+correction, revocation, deletion, inspection, provenance records, lifecycle
+events, and adaptation receipts.
+
+Memory is intentionally not an uncontrolled transcript scrape. It is a durable,
+user-governed projection of approved signals.
+
+## Collaborative Notes And Continuity
+
+Collaborative notes are workspace-scoped durable records. They support pending
+proposals, approval/rejection, correction proposals, archive, restore, delete,
+active projection, and event history.
+
+Continuity does not own a separate collection. It reads active notes and prior
+chat sessions/messages, then returns bounded context receipts or explicit
+ambiguity choices. The system treats continuity as context, not authority.
+
+## Preference And Adaptation System
+
+Preference learning is implemented narrowly. It records non-authoritative
+observations and hypotheses for explicit concise or shorter-response feedback.
+Those records can surface through governed memory clarification and adaptation
+receipts; they do not silently mutate active memory.
+
+## Working State
+
+Working state is hidden same-session context. It can preserve current goals,
+constraints, unresolved questions, next-step hypotheses, and confidence for
+the ongoing session. It is non-authoritative and cannot approve tools,
+identity changes, memory, notes, artifacts, or other durable effects.
 
 ## Artifacts
 
-The artifact system has two families: synthesis blueprints and generic
-single-file artifacts. Blueprints are produced by the synthesis path and
-persisted under projects. Generic artifacts support create, list, detail,
-archive, restore, metadata update, and child version creation
-(`synthesis_service.py:117-152`, `generic_artifact_service.py:128-360`,
-`main.py:2211-2757`).
+Agent Col has two artifact families:
 
-Artifact feedback is persisted for blueprint targets and can be routed through
-chat as governed, receipt-backed feedback context. Current artifact execution is
-request-bound; durable asynchronous/background execution is not part of the
-current runtime path (`artifact_feedback_service.py:133-338`,
-`agent_col_artifact_feedback_executor.py:86-200`, `repo-map.md`).
+- Synthesis blueprints from the structured synthesis path.
+- Generic single-file artifacts from chat or artifact APIs.
 
-## Persistence And Data Relationships
+Artifacts support list, detail, create, archive, restore, delete, metadata
+update, version creation, feedback, and export surfaces. Current artifact
+execution is request-bound. Durable asynchronous background execution is future
+work, not production behavior in this checkout.
 
-Firestore stores chat sessions, child messages, child turn records, session
-working state, user profile memory, memory proposals/origins/events,
-user-owned workspaces, workspace note proposals, collaborative notes and note
-events, projects, blueprint artifacts, generic artifacts, artifact versions,
-blueprint feedback, feedback supersession records, preference observations, and
-preference hypotheses (`database.py`, `repo-map.md`).
+## Cloud Run Deployment
 
-Important ownership relationships:
+The selected hosted path is:
 
-- Chat data lives under `sessions/{session_id}` with child `messages`,
-  `turns`, `memory_clarifications`, and `working_state`.
-- User-owned data lives under `users/{user_id}`, including workspaces, memory
-  records, memory events, note proposals, notes, note events, and preference
-  records.
-- Project-owned artifact data lives under `projects/{project_id}` with child
-  `blueprints`, `artifacts`, and blueprint feedback records.
+```text
+Dockerfile
+-> Artifact Registry image
+-> Cloud Run service
+-> application-level Google OIDC
+-> Firestore and Vertex AI through service identity/ADC
+```
 
-## Authentication, Ownership, And Security
+The current hosted service is in `us-east4` and is documented in
+[Deployment notes](deployment/deployment-notes.md). Hosted verification must
+be refreshed before submission freeze because Cloud Run configuration,
+OAuth origins, IAM, and live model availability can drift outside Git.
 
-Auth supports `local_dev` and `google_oidc`. In Google mode, bearer-token
-authentication verifies the Google ID token, derives an internal user ID, and
-projects a public opaque user ID for client-facing responses. On Cloud Run,
-startup fails unless `AGENT_COL_AUTH_MODE=google_oidc` and an OAuth client ID is
-configured (`auth.py:66-93`, `auth.py:177-251`).
+## Trust And Security Boundaries
 
-Workspace/project ownership is enforced by resolving supplied user/project IDs
-against the authenticated principal. Middleware adds request body limits,
-per-client/path in-memory rate limiting, and security/cache headers
-(`auth.py:215-251`, `main.py:280-405`).
+- Browser code only talks to same-origin FastAPI APIs.
+- Google ID tokens are verified at the backend auth boundary.
+- Raw Google subjects stay internal; public responses use opaque locators.
+- Workspace/project ownership is resolved before state access.
+- Structured decisions mutate state only through typed backend services.
+- Pending memory and notes are not active until approval.
+- Hidden working state and continuity context are not authorization sources.
+- Experts return bounded evidence and receipts; responder text is validated
+  before persistence.
+- Request body limits, per-client/path in-memory rate limiting, cache control,
+  and security headers are applied in middleware.
+- Public errors are bounded; provider and database details stay server-side.
+- The rate limiter is per-process and per Cloud Run instance, not a global
+  distributed control.
 
-## Deployment And Runtime
+## Source Authority
 
-The container builds from `python:3.14-slim`, installs `requirements.txt`, runs
-as a non-root `appuser`, exposes port 8080, and starts
-`uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}` (`Dockerfile:3-22`).
-Vertex configuration requires a Google Cloud project, global location, and
-enterprise GenAI mode (`vertex_config.py:25-53`).
-
-The README identifies Cloud Run in `us-east4` as the hosted platform and notes a
-verified deployment; submission work should therefore focus on final hosted
-re-verification and freeze rather than initial deployment (`README.md:17-29`).
-
-## System Invariants
-
-- Source and tests are implementation authority; legacy documentation is not.
-- Browser code talks only to same-origin backend APIs.
-- Structured decisions mutate durable state only through typed backend
-  services.
-- Pending memory and note proposals are not active until approved.
-- Hidden working state and continuity context are non-authoritative and cannot
-  authorize persistence or tool use.
-- Idempotent chat turns protect deterministic replay, conflict detection, and
-  retry behavior.
-- Experts produce bounded evidence; Agent Col responder owns the final
-  user-facing response.
-- Current artifacts are request-bound; background execution is future work.
+Use [Repository map](repo-map.md) for exact file ownership, route inventory,
+and test layout. Use [Current state](current-state.md) for user-visible
+implemented capability status. Legacy documents preserve history but are not
+current architecture truth unless the current source still matches them.

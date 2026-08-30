@@ -19,7 +19,7 @@ The next agent must read this handoff before proposing or performing work. This 
    - This document.
    - Use it as the current handoff entrypoint.
 
-3. `PRODUCTION_HARDENING_CHECKLIST.md`
+3. `docs/deployment/PRODUCTION_HARDENING_CHECKLIST.md`
    - Root-level deployment hardening checklist.
    - It records that Target A and Target B are demo-ready and that current priority is single-service production hardening, Cloud Run deployment proof, and targeted latency measurement.
    - It points to the Cloud Run implementation plan so future agents do not reinvent deployment planning.
@@ -149,7 +149,7 @@ Deferred from pre-submission scope:
 
 ### Production Hardening
 
-Use `PRODUCTION_HARDENING_CHECKLIST.md` as the root-level checklist and `docs/superpowers/plans/2026-08-28-cloud-run-production-hardening-deployment.md` as the implementation plan.
+Use `docs/deployment/PRODUCTION_HARDENING_CHECKLIST.md` as the root-level checklist and `docs/superpowers/plans/2026-08-28-cloud-run-production-hardening-deployment.md` as the implementation plan.
 
 The recommended first production pass is the production configuration gate:
 

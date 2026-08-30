@@ -28,10 +28,10 @@ Firestore async transactions, vanilla JavaScript ES modules, Node test runner,
 pytest.
 
 **Spec:**
-[`docs/aug-25-2026-final-checklist.md`](../../aug-25-2026-final-checklist.md),
-[`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md),
+[`docs/aug-25-2026-final-checklist.md`](../../finalization/aug-25-2026-final-checklist.md),
+[`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md),
 and
-[`docs/superpowers/specs/2026-08-23-phase-4a-lightweight-browser-workspace-design.md`](../specs/2026-08-23-phase-4a-lightweight-browser-workspace-design.md).
+[`docs/superpowers/specs/2026-08-23-phase-4a-lightweight-browser-workspace-design.md`](../../frontend/workspace-shell/2026-08-23-phase-4a-lightweight-browser-workspace-design.md).
 
 **Verified baseline:** `36ec6ab Document Winning Core execution checklist`
 

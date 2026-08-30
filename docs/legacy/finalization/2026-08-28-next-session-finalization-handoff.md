@@ -235,7 +235,7 @@ rg -n "Source|Research|Computation|Requirements Verification|capabilities|tool b
   agent_col_expert_executor_v3.py main.py agent_col_responder.py tests docs
 
 rg -n "infer preferences|autonomous background|Do not infer memory|MemoryContextRenderer|propose_memory_signal|memory_decision|MemoryClarification" \
-  AGENT_COL_IDENTITY_AND_ALIGNMENT.md docs memory_*.py trusted_memory_service.py memory_context.py main.py tests frontend
+  docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md docs memory_*.py trusted_memory_service.py memory_context.py main.py tests frontend
 
 rg -n "working_state|SERVER_VALIDATED_WORKING_STATE|next_step_hypothesis|current_goal|unresolved_questions" \
   working_state.py working_state_service.py agent_col_responder.py main.py tests docs

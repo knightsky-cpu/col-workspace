@@ -8,9 +8,9 @@ Proposed for user review. This document authorizes no production-code change.
 
 This design is subordinate to:
 
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md)
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md)
-- [`AGENTS.md`](../../../AGENTS.md)
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md)
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md)
+- [`AGENTS.md`](../../../../AGENTS.md)
 
 Agent_Col remains a general collaborative partner. Requirement-traced software
 blueprint synthesis is one specialist workflow and must not redefine the

@@ -9,11 +9,11 @@ or deployment change.
 
 This design is subordinate to:
 
-- [`AGENTS.md`](../../../AGENTS.md);
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
-- [`2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md`](2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md);
-- [`2026-08-20-phase-3b-trusted-memory-design.md`](2026-08-20-phase-3b-trusted-memory-design.md).
+- [`AGENTS.md`](../../../../AGENTS.md);
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
+- [`2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md`](../../evaluation/2026-08-23-m7-exp-7c-core-tool-belt-evaluation-closure.md);
+- [`2026-08-20-phase-3b-trusted-memory-design.md`](../memory/2026-08-20-phase-3b-trusted-memory-design.md).
 
 Agent_Col remains a general collaborative partner and the only user-facing
 conversational owner. Structured synthesis is one artifact workflow, not the

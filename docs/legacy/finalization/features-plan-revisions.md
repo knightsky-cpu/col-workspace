@@ -450,7 +450,7 @@ artifact retrieval, feedback, and personalization. In particular:
 - `README.md` is no longer a reliable feature-status summary;
 - `docs/architecture.md` does not describe the current route and persistence
   model;
-- `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` predates many current
+- `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` predates many current
   APIs;
 - `docs/submission-checklist.md` is not reconciled with implementation.
 

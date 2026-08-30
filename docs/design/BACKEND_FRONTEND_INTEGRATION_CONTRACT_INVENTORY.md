@@ -11,7 +11,7 @@ reference, not a proposal for new behavior.
 
 Executable source and accepted repository contracts are authoritative when
 they conflict with older status documentation. For the current source-level
-project inventory, see [`docs/current-state.md`](docs/current-state.md).
+project inventory, see [`docs/current-state.md`](../current-state.md).
 
 Primary sources for this inventory are:
 

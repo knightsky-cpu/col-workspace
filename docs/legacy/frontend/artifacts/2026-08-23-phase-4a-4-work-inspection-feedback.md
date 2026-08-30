@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Use `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` as the source of truth for implemented HTTP contracts.
+- Use `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` as the source of truth for implemented HTTP contracts.
 - User-facing copy must say `Agent Col`; keep `Agent_Col` only where it is a technical identifier, code symbol, file path, schema name, or backend contract value.
 - Use only the implemented artifact read APIs:
   - `GET /api/projects/{project_id}/blueprints?limit=20&before=CURSOR`

@@ -15,7 +15,7 @@ production-hardening provenance, but its dependency on a Phase 3 Cloud
 Tasks/private-worker architecture no longer controls the judged-build path.
 The current path is single-service Cloud Run hardening without worker or queue
 requirements. Use
-[`../../final-checklist-planning.md`](../../final-checklist-planning.md) as the
+[`../../final-checklist-planning.md`](../../finalization/final-checklist-planning.md) as the
 current pre-submission roadmap.
 
 **August 27, 2026 reconciliation note:** Phase 1 memory lifecycle, Phase 2
@@ -53,8 +53,8 @@ OIDC/IAM, Bash, vanilla JavaScript ES modules, Node test runner, and pytest.
 **Governing repository references:**
 
 - `AGENTS.md`
-- `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
-- `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
+- `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
+- `docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
 
 ## Planning baseline and prerequisites
 

@@ -6,8 +6,8 @@ Approved by the repository owner on August 24, 2026, after manual acceptance
 of M9-SEC.1. This plan is subordinate to:
 
 - `AGENTS.md`;
-- `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`;
-- `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`;
+- `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`;
+- `docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`;
 - `docs/superpowers/specs/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`.
 
 This is the first bounded subpass of M9-NOTE.1. It does not complete the

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, FastAPI, Uvicorn, Pydantic, Google GenAI SDK, Google ADK, Firestore, Vertex AI, Google Identity Services, Cloud Run, Artifact Registry, Google Cloud buildpacks or Docker, pytest, Node test runner.
 
-**Spec:** `PRODUCTION_HARDENING_CHECKLIST.md`, `docs/final-checklist-planning.md`, `docs/superpowers/plans/2026-08-28-updated-finalization-handoff.md`, current source files listed below, and current official Cloud Run / Google Identity documentation.
+**Spec:** `docs/deployment/PRODUCTION_HARDENING_CHECKLIST.md`, `docs/final-checklist-planning.md`, `docs/superpowers/plans/2026-08-28-updated-finalization-handoff.md`, current source files listed below, and current official Cloud Run / Google Identity documentation.
 
 ## Global Constraints
 

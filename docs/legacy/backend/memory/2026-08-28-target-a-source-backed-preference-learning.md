@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.14, FastAPI, Pydantic 2.13.4, Firestore, Google GenAI SDK, Vertex AI / Gemini, pytest, vanilla JavaScript ES modules, Node test runner.
 
-**Spec:** `docs/final-checklist-planning.md`, `docs/current-state.md`, `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`, `docs/superpowers/specs/2026-08-24-m9-mem-1-governed-profile-memory-scope-and-natural-request-design.md`
+**Spec:** `docs/final-checklist-planning.md`, `docs/current-state.md`, `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`, `docs/superpowers/specs/2026-08-24-m9-mem-1-governed-profile-memory-scope-and-natural-request-design.md`
 
 ## Global Constraints
 

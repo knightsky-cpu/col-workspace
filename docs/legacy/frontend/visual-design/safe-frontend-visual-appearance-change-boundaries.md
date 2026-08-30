@@ -19,7 +19,7 @@ For this guide, a safe visual change means:
 CSS-only changes are the default safe path. HTML and JavaScript changes are not visual-only unless they are explicitly limited as described below.
 
 For the broader project state, see
-[`docs/current-state.md`](../../current-state.md). This guide governs the
+[`docs/current-state.md`](../../../current-state.md). This guide governs the
 future UI surface check and visual polish phase; it does not authorize source
 changes by itself.
 

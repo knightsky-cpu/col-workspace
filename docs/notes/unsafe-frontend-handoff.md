@@ -13,10 +13,10 @@ The next proposed implementation pass is Pass U5, the standard collapsed-by-defa
 Read these before source changes:
 
 - `AGENTS.md`: repository workflow, TDD, approval gates, focused verification, GitHub checkpoint rules.
-- `frontend-work-notes.md`: prior frontend evidence and known visual-state regressions.
+- `docs/notes/frontend-work-notes.md`: prior frontend evidence and known visual-state regressions.
 - `docs/superpowers/plans/unsafe-frontend-visual-polishing-plan.md`: controlling pass plan and remaining roadmap.
-- `unsafe-frontend-work-notes.md`: accepted unsafe frontend pass history.
-- `post-deployment-handoff.md`: deployment and runtime context.
+- `docs/notes/unsafe-frontend-work-notes.md`: accepted unsafe frontend pass history.
+- `docs/deployment/post-deployment-handoff.md`: deployment and runtime context.
 
 ## Next pass boundary
 

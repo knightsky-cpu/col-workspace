@@ -29,7 +29,7 @@ Google OIDC.
 - `docs/aug-25-2026-final-checklist.md`
 - `docs/superpowers/plans/2026-08-25-winning-core-phase-1-memory-continuity.md`
 - `docs/superpowers/specs/2026-08-23-phase-4a-lightweight-browser-workspace-design.md`
-- `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
+- `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
 
 **Baseline:** The accepted Pass 1A implementation checkpoint committed with
 this plan. Pass 1A supplies strict public selection schemas, durable request

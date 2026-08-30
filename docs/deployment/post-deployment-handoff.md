@@ -93,8 +93,8 @@ The visual pass must preserve:
 Start with these exact files, in this order:
 
 1. `AGENTS.md`
-2. `post-deployment-handoff.md`
-3. `deployment-notes.md`
+2. `docs/deployment/post-deployment-handoff.md`
+3. `docs/deployment/deployment-notes.md`
 4. `README.md`
 5. `docs/superpowers/plans/safe-frontend-visual-appearance-change-boundaries.md`
 6. `docs/superpowers/plans/2026-08-28-frontend-visual-improvement-plan.md`
@@ -105,7 +105,7 @@ Start with these exact files, in this order:
 
 Important status note: `docs/superpowers/plans/2026-08-28-updated-finalization-handoff.md`
 contains useful frontend and streaming guidance, but its deployment-pending
-language is stale. `deployment-notes.md`, `README.md`, and this handoff are
+language is stale. `docs/deployment/deployment-notes.md`, `README.md`, and this handoff are
 newer for Cloud Run deployment status.
 
 ## Inspect These Frontend Source Files First

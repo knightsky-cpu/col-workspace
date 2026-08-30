@@ -138,7 +138,7 @@ Required corrections:
 - Update the Firestore model with current workspace, session, memory,
   artifact, feedback, and turn-effect entities.
 
-### `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`
+### `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`
 
 Stale claims:
 
@@ -294,7 +294,7 @@ Recommended correction:
 - Use it as rationale for Phase 5 reconciliation and future frontend passes,
   not as judge-facing current status.
 
-### `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
+### `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`
 
 The identity, memory-boundary, and evaluation-priority sections remain strong
 and should stay authoritative.
@@ -318,7 +318,7 @@ Required correction:
   - Phase 4 production hardening;
   - Phase 5/6 submission evidence.
 
-### `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
+### `docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`
 
 This remains the correct documentation standard.
 
@@ -376,14 +376,14 @@ planning pass.
 3. Rewrite `docs/development/local-setup.md` around `/workspace`, local-dev
    mode, Google OIDC mode, ADC, and exact environment variables.
 4. Rewrite `docs/architecture.md` against current source.
-5. Replace `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` with a current
+5. Replace `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md` with a current
    route and model inventory.
 6. Refresh `docs/development/testing.md`.
 7. Refresh `docs/development/troubleshooting.md`.
 8. Refresh `docs/submission-checklist.md`.
 9. Refresh the current-status section of
-   `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`.
-10. Refresh `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md` only where it
+   `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`.
+10. Refresh `docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md` only where it
     describes the current gap.
 
 ## Proposed Phase 5 Documentation Pass Boundary
@@ -399,11 +399,11 @@ Expected files:
 - `docs/development/local-setup.md`;
 - `docs/development/testing.md`;
 - `docs/development/troubleshooting.md`;
-- `BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`;
+- `docs/design/BACKEND_FRONTEND_INTEGRATION_CONTRACT_INVENTORY.md`;
 - `docs/submission-checklist.md`;
 - `docs/aug-25-2026-final-checklist.md`;
-- `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`;
-- `DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`.
+- `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`;
+- `docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`.
 
 Preserved behavior:
 

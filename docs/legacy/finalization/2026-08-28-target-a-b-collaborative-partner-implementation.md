@@ -10,7 +10,7 @@
 
 **Tech Stack:** Python 3.14, FastAPI, Pydantic, Firestore, Vertex AI / Gemini, Google ADK, vanilla JavaScript modules, Node test runner, pytest.
 
-**Spec:** `docs/final-checklist-planning.md`, `docs/current-state.md`, `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`, `docs/superpowers/specs/2026-08-24-m9-mem-1-governed-profile-memory-scope-and-natural-request-design.md`
+**Spec:** `docs/final-checklist-planning.md`, `docs/current-state.md`, `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`, `docs/superpowers/specs/2026-08-24-m9-mem-1-governed-profile-memory-scope-and-natural-request-design.md`
 
 ## Global Constraints
 
@@ -38,7 +38,7 @@ This gate must run before any source-changing Target A or Target B pass. Its out
 
 ### Files To Inspect
 
-- `AGENT_COL_IDENTITY_AND_ALIGNMENT.md`: root memory and adaptation authority.
+- `docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`: root memory and adaptation authority.
 - `docs/final-checklist-planning.md`: current roadmap authority.
 - `docs/current-state.md`: current implemented capability inventory.
 - `docs/superpowers/specs/2026-08-24-m9-mem-1-governed-profile-memory-scope-and-natural-request-design.md`: old M9 contract and intentional non-goals.
@@ -76,7 +76,7 @@ This gate must run before any source-changing Target A or Target B pass. Its out
 
 ```bash
 rg -n "infer preferences|autonomous background|Do not infer memory|MemoryContextRenderer|propose_memory_signal|MemoryClarification|memory_decision|next_step_hypothesis|SERVER_VALIDATED_WORKING_STATE" \
-  AGENT_COL_IDENTITY_AND_ALIGNMENT.md \
+  docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md \
   docs/final-checklist-planning.md \
   docs/current-state.md \
   docs/superpowers/specs/2026-08-24-m9-mem-1-governed-profile-memory-scope-and-natural-request-design.md \

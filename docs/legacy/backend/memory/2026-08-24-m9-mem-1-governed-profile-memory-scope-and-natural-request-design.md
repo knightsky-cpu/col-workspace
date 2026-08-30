@@ -8,13 +8,13 @@ schema, prompt, persistence, API, frontend, dependency, or deployment change.
 
 This design is subordinate to:
 
-- [`AGENTS.md`](../../../AGENTS.md);
-- [`AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
-- [`DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
+- [`AGENTS.md`](../../../../AGENTS.md);
+- [`docs/design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md`](../../../design/AGENT_COL_IDENTITY_AND_ALIGNMENT.md);
+- [`docs/design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md`](../../../design/DOCUMENTATION_AND_REPRODUCIBILITY_CONTRACT.md);
 - [`2026-08-20-phase-3b-trusted-memory-design.md`](2026-08-20-phase-3b-trusted-memory-design.md);
-- [`2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`](2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md);
-- [`features-plan-revisions.md`](../../legacy/features-plan-revisions.md);
-- [`frontend-plan-revision.md`](../../legacy/frontend-plan-revision.md).
+- [`2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md`](../continuity/2026-08-24-m9-cont-1-continuity-domain-and-collaborative-notes-design.md);
+- [`features-plan-revisions.md`](../../finalization/features-plan-revisions.md);
+- [`frontend-plan-revision.md`](../../frontend/visual-design/frontend-plan-revision.md).
 
 Agent Col remains a general collaborative partner. Profile memory is one
 governed adaptation domain. It is not a transcript archive, a generic personal

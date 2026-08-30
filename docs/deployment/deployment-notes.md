@@ -546,7 +546,7 @@ does not contain local secrets, repository metadata, agent workspace state,
 virtualenvs, pytest cache, or screenshot evidence.
 
 ```bash
-docker run --rm --name agent-col-pass6-smoke -p 8080:8080 -e PORT=8080 -e K_SERVICE=agent-col -e AGENT_COL_AUTH_MODE=google_oidc -e GOOGLE_OAUTH_CLIENT_ID=pass6-local-client -e GOOGLE_CLOUD_PROJECT=project-e1e2a890-4566-48a8-a32 -e GOOGLE_CLOUD_LOCATION=global -e GOOGLE_GENAI_USE_ENTERPRISE=True -e GOOGLE_APPLICATION_CREDENTIALS=/var/run/secrets/google/application_default_credentials.json -v /home/sigmaknight/.config/gcloud/application_default_credentials.json:/var/run/secrets/google/application_default_credentials.json:ro agent-col:pass6
+docker run --rm --name agent-col-pass6-smoke -p 8080:8080 -e PORT=8080 -e K_SERVICE=agent-col -e AGENT_COL_AUTH_MODE=google_oidc -e GOOGLE_OAUTH_CLIENT_ID=pass6-local-client -e GOOGLE_CLOUD_PROJECT=project-e1e2a890-4566-48a8-a32 -e GOOGLE_CLOUD_LOCATION=global -e GOOGLE_GENAI_USE_ENTERPRISE=True -e GOOGLE_APPLICATION_CREDENTIALS=/var/run/secrets/google/application_default_credentials.json -v /.config/gcloud/application_default_credentials.json:/var/run/secrets/google/application_default_credentials.json:ro agent-col:pass6
 ```
 
 Then, from the host:
@@ -728,7 +728,7 @@ gcloud auth configure-docker us-east4-docker.pkg.dev --quiet
 
 Observed result: Docker configuration was updated. The first push attempt then
 failed because `docker-credential-gcloud` was not on this shell's `PATH`; the
-helper existed at `/home/sigmaknight/.local/google-cloud-sdk/bin/docker-credential-gcloud`.
+helper existed at `<gcloud-sdk>/bin/docker-credential-gcloud`.
 The push was retried with that Cloud SDK bin directory scoped into `PATH`.
 
 ```bash

@@ -260,7 +260,7 @@ Tests:
 
 Documentation:
 
-- `chat-stream-work-notes.md`
+- `docs/notes/chat-stream-work-notes.md`
 
 ## Issues Found And Resolutions
 

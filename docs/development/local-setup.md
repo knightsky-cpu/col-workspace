@@ -5,9 +5,9 @@ workspace locally. The local app can use either local-development identity or
 browser Google OIDC. Firestore and Vertex AI calls use Application Default
 Credentials in both modes.
 
-The current runtime is still request-bound. Cloud Tasks and a private worker
-are deferred until after submission; Docker and Cloud Run deployment remain
-production-hardening work. None are current local runtime requirements.
+The current runtime is request-bound. Cloud Tasks, durable asynchronous
+artifact jobs, and a private worker are deferred. Docker and Cloud Run
+deployment support exists, but none of it is required for local development.
 
 ## Prerequisites
 

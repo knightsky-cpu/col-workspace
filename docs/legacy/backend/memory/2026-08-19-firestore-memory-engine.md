@@ -54,7 +54,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 
-DATABASE_PATH = Path("/Users/wifiknight/col-workspace/database.py")
+DATABASE_PATH = Path("<repo-root>/database.py")
 
 
 class InterfaceTests(unittest.IsolatedAsyncioTestCase):
