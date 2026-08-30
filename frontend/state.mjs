@@ -98,6 +98,34 @@ export function acceptContext(state, context) {
   };
 }
 
+export function restoreRecoveredTurn(state, request) {
+  if (
+    state.context === null
+    || request?.body?.user_id !== state.context.user_id
+    || request?.body?.project_id !== state.context.project_id
+  ) {
+    throw new Error("Recovered turn does not match the active context.");
+  }
+  return {
+    ...state,
+    context: {
+      ...state.context,
+      session_id: request.body.session_id,
+    },
+    pendingTurn: null,
+    pendingResponseText: "",
+    lastFailure: {
+      request,
+      message: "The assistant response was interrupted before completion. Retry will reuse the original submitted turn.",
+      status: null,
+      retryAfterSeconds: null,
+      provisionalResponseText: "",
+      partialFailure: null,
+      recovered: true,
+    },
+  };
+}
+
 function emptyWorkState() {
   return {
     list: {
@@ -687,6 +715,7 @@ export function selectCanSubmit(state) {
     state.mode !== "workspace"
     || state.context === null
     || state.pendingTurn !== null
+    || state.lastFailure?.recovered === true
   ) {
     return false;
   }

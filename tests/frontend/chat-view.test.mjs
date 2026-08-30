@@ -152,6 +152,27 @@ test("renderTranscript marks failed provisional text as incomplete", () => {
   assert.equal(turn.children.length, 2);
 });
 
+test("renderTranscript keeps a failed user turn visible without assistant text", () => {
+  const container = node();
+  renderTranscript(
+    container,
+    [],
+    null,
+    "",
+    {
+      request: { body: { message: "Prompt retained after network failure" } },
+      provisionalResponseText: "",
+    },
+  );
+
+  assert.equal(container.children.length, 1);
+  const turn = container.children[0];
+  assert.equal(turn.tagName, "article");
+  assert.equal(turn.classList.values.includes("chat-turn--incomplete"), true);
+  assert.match(textTree(turn), /Prompt retained after network failure/);
+  assert.doesNotMatch(textTree(container), /Start a conversation/);
+});
+
 test("renderReceipts renders structured fields and ignores prose claims", () => {
   const container = node();
   renderReceipts(container, {

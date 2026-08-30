@@ -140,7 +140,7 @@ export function renderTranscript(
   lastFailure = null,
 ) {
   container.replaceChildren();
-  if (transcript.length === 0 && pendingTurn === null && !lastFailure?.provisionalResponseText) {
+  if (transcript.length === 0 && pendingTurn === null && lastFailure === null) {
     appendEmptyConversationIntro(container);
     return;
   }
@@ -156,7 +156,7 @@ export function renderTranscript(
       },
       { className: "chat-turn--pending", includeReceipts: false },
     );
-  } else if (lastFailure?.provisionalResponseText) {
+  } else if (lastFailure !== null) {
     appendTranscriptTurn(
       container,
       {
@@ -255,6 +255,10 @@ export function createChatView(elements, handlers) {
   });
   updateCharacterCount();
   return {
+    clearComposer() {
+      elements.input.value = "";
+      updateCharacterCount();
+    },
     render(state) {
       renderTranscript(
         elements.transcript,
@@ -265,7 +269,10 @@ export function createChatView(elements, handlers) {
       );
       elements.transcript.scrollTop = elements.transcript.scrollHeight;
       elements.retryButton.hidden = state.lastFailure === null;
-      elements.submitButton.disabled = state.pendingTurn !== null;
+      elements.submitButton.disabled = (
+        state.pendingTurn !== null
+        || state.lastFailure?.recovered === true
+      );
       renderMemoryClarificationChoices(
         elements.clarificationChoices,
         state.activeMemoryClarification ?? null,

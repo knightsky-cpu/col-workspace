@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { storeOrdinaryChatRequest } from "../../frontend/chat-request-recovery.mjs";
+
 function node(tagName = "div") {
   return {
     tagName,
@@ -106,6 +108,609 @@ function waitFor(predicate, describe = () => "") {
     poll();
   });
 }
+
+function memoryStorage() {
+  const values = new Map();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear() {
+      values.clear();
+    },
+    getItem(key) {
+      return values.has(String(key)) ? values.get(String(key)) : null;
+    },
+    key(index) {
+      return [...values.keys()][index] ?? null;
+    },
+    removeItem(key) {
+      values.delete(String(key));
+    },
+    setItem(key, value) {
+      values.set(String(key), String(value));
+    },
+    entries() {
+      return [...values.entries()];
+    },
+  };
+}
+
+function installOrdinaryChatRuntimeDom() {
+  const elements = new Map();
+  const contextForm = node("form");
+  const projectInput = node("input");
+  projectInput.name = "project_id";
+  projectInput.value = "agent-col";
+  const userInput = node("input");
+  userInput.name = "user_id";
+  userInput.value = "wifiknight";
+  const contextSubmit = node("button");
+  contextSubmit.type = "submit";
+  contextForm.fields = { project_id: projectInput, user_id: userInput };
+  elements.set("[data-context-form]", contextForm);
+  elements.set('[name="project_id"]', projectInput);
+  elements.set('[name="user_id"]', userInput);
+  elements.set('[data-context-form] button[type="submit"]', contextSubmit);
+
+  for (const selector of [
+    "[data-auth-error]",
+    "[data-context-error]",
+    "[data-workspace]",
+    ".context-gate",
+    "[data-new-conversation]",
+    "[data-artifacts-expand]",
+    "[data-left-refresh]",
+    "#conversation-workspace",
+    "[data-work-error]",
+    "[data-memory-error]",
+    "[data-workspace-error]",
+    "[data-notes-error]",
+    "[data-chat-status]",
+    "[data-auth-mode-label]",
+    "[data-google-account-status]",
+    "[data-google-signin]",
+    "[data-google-button]",
+    "[data-workspace-indicator]",
+    "[data-chat-error]",
+    "[data-chat-form]",
+    "[data-chat-input]",
+    "[data-chat-submit]",
+    "[data-retry-turn]",
+    "[data-chat-transcript]",
+    "[data-character-count]",
+    "[data-memory-clarification-choices]",
+    "[data-continuity-choices]",
+    "[data-workspace-list]",
+    "[data-work-list]",
+    "[data-work-detail]",
+    "[data-memory-panel]",
+    "[data-notes-panel]",
+    "[data-chats-list]",
+  ]) {
+    if (!elements.has(selector)) {
+      elements.set(selector, node());
+    }
+  }
+  elements.get("[data-chat-form]").tagName = "form";
+
+  const drawerButtons = [node("button"), node("button")];
+  drawerButtons[0].setAttribute("data-drawer-toggle", "left");
+  drawerButtons[1].setAttribute("data-drawer-toggle", "right");
+  const sectionButtons = ["workspace", "work", "notes", "memory", "chats"]
+    .map((section) => {
+      const button = node("button");
+      const content = node("div");
+      button.setAttribute("data-section-toggle", section);
+      content.setAttribute("data-section-content", section);
+      elements.set(`[data-section-toggle="${section}"]`, button);
+      elements.set(`[data-section-content="${section}"]`, content);
+      return button;
+    });
+
+  globalThis.document = {
+    head: node("head"),
+    createElement(tagName) {
+      return node(tagName);
+    },
+    createTextNode(text) {
+      const textNode = node("#text");
+      textNode.textContent = String(text);
+      return textNode;
+    },
+    querySelector(selector) {
+      return elements.get(selector) ?? null;
+    },
+    querySelectorAll(selector) {
+      if (selector === "[data-context-form] input") {
+        return [projectInput, userInput];
+      }
+      if (selector === "[data-drawer-toggle]") {
+        return drawerButtons;
+      }
+      if (selector === '[data-drawer-toggle="left"]') {
+        return [drawerButtons[0]];
+      }
+      if (selector === '[data-drawer-toggle="right"]') {
+        return [drawerButtons[1]];
+      }
+      if (selector === "[data-section-toggle]") {
+        return sectionButtons;
+      }
+      return [];
+    },
+  };
+
+  class FakeFormData {
+    constructor(form) {
+      this.form = form;
+    }
+    get(name) {
+      return this.form.fields?.[name]?.value ?? "";
+    }
+    has(name) {
+      return this.form.fields?.[name] !== undefined;
+    }
+  }
+  globalThis.FormData = FakeFormData;
+
+  return { contextForm, elements };
+}
+
+function createControlledSseResponse() {
+  const encoder = new TextEncoder();
+  let controller = null;
+  const response = new Response(new ReadableStream({
+    start(streamController) {
+      controller = streamController;
+    },
+  }), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
+  return {
+    response,
+    complete(body) {
+      controller.enqueue(encoder.encode(
+        `event: final\ndata: ${JSON.stringify(body)}\n\n`,
+      ));
+      controller.close();
+    },
+  };
+}
+
+test("ordinary submit releases the composer after durable capture and preserves a next draft", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  const storage = memoryStorage();
+  globalThis.sessionStorage = storage;
+  const stream = createControlledSseResponse();
+  const calls = [];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return stream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-ordinary-lifecycle-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "Keep this submitted prompt";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  assert.equal(input.value, "");
+  assert.equal(elements.get("[data-character-count]").textContent, "0 / 10000");
+  assert.equal(elements.get("[data-chat-submit]").disabled, true);
+  assert.equal(input.disabled, false);
+  assert.match(
+    textTree(elements.get("[data-chat-transcript]")),
+    /Keep this submitted prompt/,
+  );
+  assert.equal(storage.length, 1);
+  const recovery = JSON.parse(storage.entries()[0][1]);
+  assert.equal(recovery.version, 1);
+  assert.equal(recovery.request.body.message, "Keep this submitted prompt");
+  assert.equal(recovery.request.body.user_id, "wifiknight");
+  assert.equal(recovery.request.body.project_id, "agent-col");
+  assert.equal("auth_token" in recovery.request.body, false);
+
+  input.value = "Next draft";
+  input.oninput();
+  stream.complete({
+    response: "Agent response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+  await waitFor(
+    () => textTree(elements.get("[data-chat-transcript]")).includes("Agent response"),
+    () => textTree(elements.get("[data-chat-transcript]")),
+  );
+
+  assert.equal(input.value, "Next draft");
+  assert.equal(elements.get("[data-character-count]").textContent, "10 / 10000");
+  assert.equal(elements.get("[data-chat-submit]").disabled, false);
+  assert.equal(storage.length, 0);
+});
+
+test("ordinary submit stops without clearing or sending when durable capture fails", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = {
+    getItem() {
+      return null;
+    },
+    removeItem() {},
+    setItem() {
+      throw new Error("storage quota unavailable");
+    },
+  };
+  const calls = [];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-capture-failure-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "Do not lose or send this prompt";
+  input.oninput();
+  assert.doesNotThrow(() => {
+    elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  });
+
+  assert.equal(input.value, "Do not lose or send this prompt");
+  assert.equal(elements.get("[data-character-count]").textContent, "31 / 10000");
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+  assert.equal(elements.get("[data-chat-error]").hidden, false);
+  assert.match(
+    elements.get("[data-chat-error]").textContent,
+    /prompt was not sent because this browser could not safely retain it/i,
+  );
+});
+
+test("ordinary request failure retains recovery, submitted turn, and next draft", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  const storage = memoryStorage();
+  globalThis.sessionStorage = storage;
+  const calls = [];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return jsonResponse(401, { detail: "Authentication required." });
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-request-failure-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "Prompt retained after authentication failure";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  input.value = "Next draft survives";
+  input.oninput();
+  await waitFor(
+    () => elements.get("[data-chat-error]").textContent === "Authentication required.",
+    () => elements.get("[data-chat-error]").textContent,
+  );
+
+  assert.equal(input.value, "Next draft survives");
+  assert.equal(elements.get("[data-character-count]").textContent, "19 / 10000");
+  assert.equal(storage.length, 1);
+  const recovery = JSON.parse(storage.entries()[0][1]);
+  assert.equal(
+    recovery.request.body.message,
+    "Prompt retained after authentication failure",
+  );
+  assert.match(
+    textTree(elements.get("[data-chat-transcript]")),
+    /Prompt retained after authentication failure/,
+  );
+  assert.equal(elements.get("[data-retry-turn]").hidden, false);
+});
+
+test("reload restores an exact ordinary request for explicit retry without auto-send", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  const storage = memoryStorage();
+  globalThis.sessionStorage = storage;
+  const recoveredRequest = {
+    key: "chat--recovered-request",
+    body: {
+      project_id: "agent-col",
+      session_id: "session--original",
+      user_id: "wifiknight",
+      message: "Prompt captured before refresh",
+    },
+  };
+  storeOrdinaryChatRequest(recoveredRequest, storage);
+  const stream = createControlledSseResponse();
+  let resolveWorkspaceList;
+  const workspaceListResponse = new Promise((resolve) => {
+    resolveWorkspaceList = resolve;
+  });
+  const calls = [];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return workspaceListResponse;
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return stream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-recovery-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const contextLoad = contextForm.onsubmit({
+    preventDefault() {},
+    currentTarget: contextForm,
+  });
+  await waitFor(
+    () => calls.some(([path]) => path.startsWith("/api/users/wifiknight/workspaces")),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  assert.equal(elements.get("[data-retry-turn]").hidden, true);
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+  resolveWorkspaceList(jsonResponse(200, {
+    workspace_contract_version: "1.0",
+    workspaces: [{
+      workspace_id: "agent-col",
+      display_name: "Agent Col",
+      is_default: true,
+    }],
+  }));
+  await contextLoad;
+  await waitFor(
+    () => elements.get("[data-retry-turn]").hidden === false,
+    () => textTree(elements.get("[data-chat-transcript]")),
+  );
+
+  assert.match(
+    textTree(elements.get("[data-chat-transcript]")),
+    /Prompt captured before refresh/,
+  );
+  assert.match(
+    elements.get("[data-chat-error]").textContent,
+    /Retry will reuse the original submitted turn/,
+  );
+  assert.equal(elements.get("[data-chat-error]").hidden, false);
+  assert.equal(elements.get("[data-chat-submit]").disabled, true);
+  assert.equal(elements.get("[data-chat-input]").disabled, false);
+  assert.equal(elements.get("[data-new-conversation]").disabled, true);
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+
+  elements.get("[data-retry-turn]").onclick();
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const [, retryInit] = calls.find(([path]) => path === "/api/chat/stream");
+  assert.equal(retryInit.headers["Idempotency-Key"], recoveredRequest.key);
+  assert.deepEqual(JSON.parse(retryInit.body), recoveredRequest.body);
+
+  stream.complete({
+    response: "Recovered response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+  await waitFor(
+    () => textTree(elements.get("[data-chat-transcript]")).includes("Recovered response"),
+    () => textTree(elements.get("[data-chat-transcript]")),
+  );
+
+  assert.equal(storage.length, 0);
+  assert.equal(elements.get("[data-chat-submit]").disabled, false);
+  assert.equal(elements.get("[data-new-conversation]").disabled, false);
+});
 
 test("JSON partial failure from submit refreshes authoritative memory and notes", async () => {
   const elements = new Map();

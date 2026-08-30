@@ -40,6 +40,7 @@ import {
   failPendingTurn,
   failChatSessionDetailLoad,
   failChatSessionListLoad,
+  restoreRecoveredTurn,
   selectCanSubmit,
   selectFirstSupportedArtifact,
   selectNeedsReceiptRefresh,
@@ -445,6 +446,41 @@ test("pending turn lifecycle preserves exact retry envelope on failure", () => {
   assert.equal(failed.pendingTurn, null);
   assert.equal(failed.lastFailure.request, request);
   assert.equal(failed.lastFailure.message, "network failed");
+});
+
+test("recovered turn restores the original session as an exact retryable failure", () => {
+  const accepted = acceptContext(
+    createInitialState(),
+    {
+      user_id: "wifiknight",
+      project_id: "agent-col",
+      crypto: cryptoStub,
+    },
+  );
+  const loaded = completeWorkspaceListLoad(accepted, {
+    workspaces: [{ workspace_id: "agent-col", display_name: "Agent Col" }],
+  }, cryptoStub);
+  assert.equal(selectCanSubmit(loaded), true);
+  const request = Object.freeze({
+    key: "chat--request-1",
+    body: Object.freeze({
+      user_id: "wifiknight",
+      project_id: "agent-col",
+      session_id: "session--original",
+      message: "Retain this exact prompt",
+    }),
+  });
+
+  const recovered = restoreRecoveredTurn(loaded, request);
+
+  assert.equal(recovered.context.session_id, "session--original");
+  assert.equal(recovered.context.auth_token, null);
+  assert.equal(recovered.pendingTurn, null);
+  assert.equal(recovered.pendingResponseText, "");
+  assert.equal(recovered.lastFailure.request, request);
+  assert.equal(recovered.lastFailure.recovered, true);
+  assert.match(recovered.lastFailure.message, /Retry will reuse the original submitted turn/);
+  assert.equal(selectCanSubmit(recovered), false);
 });
 
 test("submit is disabled when selected workspace is not visible after list load", () => {

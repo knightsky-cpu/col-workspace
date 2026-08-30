@@ -39,6 +39,11 @@ import {
 } from "./auth-view.mjs";
 import { createChatsView } from "./chats-view.mjs";
 import { createChatView } from "./chat-view.mjs";
+import {
+  clearOrdinaryChatRequest,
+  loadOrdinaryChatRequest,
+  storeOrdinaryChatRequest,
+} from "./chat-request-recovery.mjs";
 import { createMemoryView } from "./memory-view.mjs";
 import { createNotesView } from "./notes-view.mjs";
 import { createWorkView } from "./work-view.mjs";
@@ -107,6 +112,7 @@ import {
   failPendingTurn,
   failWorkDetailLoad,
   failWorkListLoad,
+  restoreRecoveredTurn,
   selectCanSubmit,
   selectNeedsReceiptRefresh,
   selectWorkspace,
@@ -365,6 +371,10 @@ async function bootstrapAuth() {
 
 function renderWorkspace() {
   renderTopBarWorkspaceIndicator();
+  document.querySelector("[data-new-conversation]").disabled = (
+    state.pendingTurn !== null
+    || state.lastFailure?.recovered === true
+  );
   ensureWorkspaceView().render(state);
   ensureChatView().render(state);
   ensureWorkView().render(state);
@@ -682,8 +692,8 @@ async function submitRequest(request) {
       })
       : await apiFetchJson(endpoint, options);
     state = completePendingTurn(state, response);
+    clearOrdinaryChatRequest(request);
     setChatStatus("");
-    document.querySelector("[data-chat-input]").value = "";
     renderWorkspace();
     await refreshAuthoritativeEffects(response);
     await loadChatSessions();
@@ -721,6 +731,17 @@ function ensureChatView() {
           return;
         }
         const request = buildOrdinaryChatRequest(state.context, message);
+        try {
+          storeOrdinaryChatRequest(request);
+        } catch {
+          setText(
+            document.querySelector("[data-chat-error]"),
+            "The prompt was not sent because this browser could not safely retain it.",
+          );
+          document.querySelector("[data-chat-error]").hidden = false;
+          return;
+        }
+        chatView.clearComposer();
         submitRequest(request);
       },
       onRetry() {
@@ -1283,6 +1304,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", async (
       state,
       contextForSubmit(event.currentTarget),
     );
+    const recoveredRequest = loadOrdinaryChatRequest(state.context);
     ensureChatView();
     ensureWorkView();
     ensureNotesView();
@@ -1292,6 +1314,21 @@ document.querySelector("[data-context-form]").addEventListener("submit", async (
     showWorkspace();
     renderWorkspace();
     await loadWorkspaces();
+    const canRestoreRequest = (
+      recoveredRequest !== null
+      && recoveredRequest.body.user_id === state.context?.user_id
+      && recoveredRequest.body.project_id === state.context?.project_id
+      && selectCanSubmit(state)
+    );
+    if (canRestoreRequest) {
+      state = restoreRecoveredTurn(state, recoveredRequest);
+      renderWorkspace();
+      setText(
+        document.querySelector("[data-chat-error]"),
+        state.lastFailure.message,
+      );
+      document.querySelector("[data-chat-error]").hidden = false;
+    }
     loadWorkList();
     loadNotes();
     loadMemory();
@@ -1302,7 +1339,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", async (
 });
 
 document.querySelector("[data-new-conversation]").addEventListener("click", () => {
-  if (state.pendingTurn !== null) {
+  if (state.pendingTurn !== null || state.lastFailure?.recovered === true) {
     return;
   }
   state = startNewConversation(state);
