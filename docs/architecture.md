@@ -24,18 +24,18 @@ FastAPI JSON or SSE endpoints.
 
 ```mermaid
 flowchart TB
-    Browser[Browser workspace<br/>frontend/*.mjs + index.html]
-    AuthUI[Google Identity Services<br/>browser ID token]
-    CloudRun[Cloud Run service<br/>FastAPI main:app]
-    Auth[Auth boundary<br/>local_dev or Google OIDC<br/>auth.py]
-    Routes[HTTP routes<br/>auth, workspaces, chat, notes, memory, artifacts]
-    Turn[AgentColTurnService<br/>idempotent turn lifecycle]
-    Router[Gemini routing providers<br/>v3/v4 JSON schema validation]
-    ADK[Google ADK Runner<br/>SupervisorRuntime]
-    Gemini[Gemini 3.6 Flash<br/>Vertex AI via Google GenAI SDK]
-    Experts[Bounded specialists<br/>Research, Source, Computation, Requirements]
-    Firestore[Cloud Firestore<br/>sessions, turns, users, workspaces,<br/>memory, notes, artifacts, feedback]
-    Logs[Cloud Logging<br/>bounded diagnostics]
+    Browser["Browser workspace<br/>frontend/*.mjs + index.html"]
+    AuthUI["Google Identity Services<br/>browser ID token"]
+    CloudRun["Cloud Run service<br/>FastAPI main:app"]
+    Auth["Auth boundary<br/>local_dev or Google OIDC<br/>auth.py"]
+    Routes["HTTP routes<br/>auth, workspaces, chat, notes, memory, artifacts"]
+    Turn["AgentColTurnService<br/>idempotent turn lifecycle"]
+    Router["Gemini routing providers<br/>v3/v4 JSON schema validation"]
+    ADK["Google ADK Runner<br/>SupervisorRuntime"]
+    Gemini["Gemini 3.6 Flash<br/>Vertex AI via Google GenAI SDK"]
+    Experts["Bounded specialists<br/>Research, Source, Computation, Requirements"]
+    Firestore["Cloud Firestore<br/>sessions, turns, users, workspaces,<br/>memory, notes, artifacts, feedback"]
+    Logs["Cloud Logging<br/>bounded diagnostics"]
 
     Browser -->|/workspace static assets| CloudRun
     Browser -->|same-origin JSON + SSE APIs| CloudRun
@@ -264,10 +264,11 @@ Dockerfile
 -> Firestore and Vertex AI through service identity/ADC
 ```
 
-The current hosted service is in `us-east4` and is documented in
-[Deployment notes](deployment/deployment-notes.md). Hosted verification must
-be refreshed before submission freeze because Cloud Run configuration,
-OAuth origins, IAM, and live model availability can drift outside Git.
+The documented hosted service is in `us-east4`; accepted deployment evidence
+lives in [Deployment notes](deployment/deployment-notes.md). Hosted
+verification must be refreshed before submission freeze because Cloud Run
+configuration, OAuth origins, IAM, and live model availability can drift
+outside Git.
 
 ## Trust And Security Boundaries
 

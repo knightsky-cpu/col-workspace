@@ -48,15 +48,15 @@ projection.
 
 ```mermaid
 flowchart LR
-    User[User browser] --> UI[Static workspace UI<br/>/workspace]
-    UI --> API[FastAPI on Cloud Run<br/>main.py]
-    API --> Auth[Google OIDC or local_dev auth<br/>auth.py]
-    API --> Turn[AgentColTurnService<br/>routing and lifecycle]
-    Turn --> ADK[Google ADK Runner<br/>SupervisorRuntime]
-    ADK --> Gemini[Gemini 3.6 Flash<br/>Vertex AI / GenAI SDK]
-    Turn --> Experts[Bounded specialists<br/>Research, Source, Computation, Requirements]
+    User["User browser"] --> UI["Static workspace UI<br/>/workspace"]
+    UI --> API["FastAPI on Cloud Run<br/>main.py"]
+    API --> Auth["Google OIDC or local_dev auth<br/>auth.py"]
+    API --> Turn["AgentColTurnService<br/>routing and lifecycle"]
+    Turn --> ADK["Google ADK Runner<br/>SupervisorRuntime"]
+    ADK --> Gemini["Gemini 3.6 Flash<br/>Vertex AI / GenAI SDK"]
+    Turn --> Experts["Bounded specialists<br/>Research, Source, Computation, Requirements"]
     Experts --> Gemini
-    API --> Store[Cloud Firestore<br/>sessions, workspaces, memory, notes, artifacts]
+    API --> Store["Cloud Firestore<br/>sessions, workspaces, memory, notes, artifacts"]
 ```
 
 See [Architecture](docs/architecture.md) for the full source-grounded diagram,
@@ -76,17 +76,19 @@ data boundaries, and trust model.
 
 ## Hosted Deployment
 
-Current hosted service:
+Documented hosted service:
 
 - URL: `https://agent-col-994154906699.us-east4.run.app`
 - Platform: Cloud Run in `us-east4`
 - Runtime auth mode: Google OIDC
-- Deployment phase status: accepted on August 28, 2026
+- Deployment phase status: accepted in repository deployment notes on August
+  28, 2026
 
 The service is publicly reachable, but user data is protected by application
 Google OIDC. Hosted evidence and pass history live in
 [Deployment notes](docs/deployment/deployment-notes.md). Re-verify the hosted
-URL before final submission freeze because hosted state can drift.
+URL before final submission freeze because live Cloud Run, OAuth, IAM, and
+model-access state can drift outside Git.
 
 ## Prerequisites
 
