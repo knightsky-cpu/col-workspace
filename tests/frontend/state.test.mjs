@@ -1085,6 +1085,7 @@ test("chat session detail load switches context and rebuilds transcript", () => 
   assert.equal(loaded.transcript.length, 1);
   assert.equal(loaded.transcript[0].request.body.message, "hello");
   assert.equal(loaded.transcript[0].response.response, "hi");
+  assert.equal(loaded.transcript[0].response.message_id, "message--2");
 });
 
 test("chat session detail restores an active memory clarification", () => {

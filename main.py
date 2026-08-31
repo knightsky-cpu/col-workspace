@@ -275,6 +275,7 @@ class SpeechSynthesizeRequest(BaseModel):
     session_id: IdentifierStr
     message_id: IdentifierStr
     chunk_index: int = Field(default=0, ge=0)
+    voice_id: Literal["female", "male"] = "female"
 
 
 class InMemoryRateLimiter:
@@ -1618,6 +1619,7 @@ async def speech_synthesize(
         audio = await request.app.state.speech_synthesis_service.synthesize(
             text=message.text,
             chunk_index=payload.chunk_index,
+            voice_id=payload.voice_id,
         )
     except SpeechSynthesisChunkError as exc:
         raise HTTPException(

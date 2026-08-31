@@ -887,8 +887,15 @@ class FakeSpeechSynthesisService:
         *,
         text: str,
         chunk_index: int,
+        voice_id: str = "female",
     ) -> object:
-        self.calls.append({"text": text, "chunk_index": chunk_index})
+        self.calls.append(
+            {
+                "text": text,
+                "chunk_index": chunk_index,
+                "voice_id": voice_id,
+            }
+        )
         self.events.append(("speech_synthesize", chunk_index))
         if self.error is not None:
             raise self.error
@@ -3230,7 +3237,11 @@ async def test_speech_synthesize_returns_canonical_audio_bytes(
         ("user-1", "project-1", "session-1", message_id)
     ]
     assert service_state.speech_synthesis_service.calls == [
-        {"text": "Canonical persisted answer.", "chunk_index": 0}
+        {
+            "text": "Canonical persisted answer.",
+            "chunk_index": 0,
+            "voice_id": "female",
+        }
     ]
     assert service_state.speech_transcription_service.calls == []
     assert service_state.database.claim_calls == []
@@ -3258,6 +3269,51 @@ async def test_speech_synthesize_rejects_browser_supplied_text(
     assert service_state.database.completed_model_message_calls == []
     assert service_state.speech_synthesis_service.calls == []
     assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_uses_approved_male_voice_id(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+            "voice_id": "male",
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.speech_synthesis_service.calls == [
+        {
+            "text": "Canonical persisted answer.",
+            "chunk_index": 0,
+            "voice_id": "male",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_rejects_raw_google_voice_name(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+            "voice_id": "en-GB-Chirp3-HD-Alnilam",
+        },
+    )
+
+    assert response.status_code == 422
+    assert service_state.database.completed_model_message_calls == []
+    assert service_state.speech_synthesis_service.calls == []
 
 
 @pytest.mark.asyncio

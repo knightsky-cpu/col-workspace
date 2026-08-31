@@ -31,6 +31,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  synthesizeSpeechAudio,
   transcribeSpeechAudio,
   updateArtifactMetadata,
 } from "../../frontend/api.mjs";
@@ -205,6 +206,49 @@ test("transcribeSpeechAudio posts raw audio with the recording MIME type", async
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
   assert.equal(calls[0][1].headers["Content-Type"], "audio/webm;codecs=opus");
   assert.equal(calls[0][1].body, audio);
+});
+
+test("synthesizeSpeechAudio posts canonical locator and returns audio metadata", async () => {
+  const calls = [];
+  const result = await synthesizeSpeechAudio(
+    "wifiknight",
+    {
+      project_id: "agent-col",
+      session_id: "session--1",
+      message_id: "turn--abc--model",
+      chunk_index: 1,
+      voice_id: "male",
+    },
+    { authToken: "google-id-token" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return new Response(new Blob(["audio chunk"], { type: "audio/mpeg" }), {
+        status: 200,
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "X-Speech-Chunk-Index": "1",
+          "X-Speech-Chunk-Count": "3",
+        },
+      });
+    },
+  );
+
+  assert.equal(calls[0][0], "/api/users/wifiknight/speech/synthesize");
+  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+  assert.equal(calls[0][1].headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    project_id: "agent-col",
+    session_id: "session--1",
+    message_id: "turn--abc--model",
+    chunk_index: 1,
+    voice_id: "male",
+  });
+  assert.equal(calls[0][1].body.includes("Agent response"), false);
+  assert.equal(result.audio instanceof Blob, true);
+  assert.equal(result.contentType, "audio/mpeg");
+  assert.equal(result.chunkIndex, 1);
+  assert.equal(result.chunkCount, 3);
 });
 
 test("getAuthSession calls the canonical auth session path", async () => {

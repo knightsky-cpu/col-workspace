@@ -12,10 +12,15 @@ DEFAULT_STT_MODEL = "latest_short"
 DEFAULT_STT_LOCATION = "global"
 DEFAULT_TTS_LANGUAGE_CODE = "en-GB"
 DEFAULT_TTS_VOICE = "en-GB-Chirp3-HD-Kore"
+ALTERNATE_TTS_MALE_VOICE = "en-GB-Chirp3-HD-Alnilam"
 DEFAULT_TTS_SPEAKING_RATE = 1.0
 DEFAULT_TTS_AUDIO_CONTENT_TYPE = "audio/mpeg"
 TTS_PROVIDER_INPUT_BYTE_LIMIT = 5000
 TTS_CHUNK_BYTE_LIMIT = 4800
+TTS_VOICE_NAMES_BY_ID = {
+    "female": DEFAULT_TTS_VOICE,
+    "male": ALTERNATE_TTS_MALE_VOICE,
+}
 SUPPORTED_AUDIO_CONTENT_TYPES = frozenset(
     {
         "audio/webm",
@@ -298,6 +303,7 @@ class CloudTextToSpeechSynthesisService:
         *,
         text: str,
         chunk_index: int,
+        voice_id: str = "female",
     ) -> SpeechSynthesisResult:
         chunks = chunk_text_for_speech(
             text,
@@ -310,6 +316,7 @@ class CloudTextToSpeechSynthesisService:
             chunks[chunk_index],
             chunk_index,
             len(chunks),
+            voice_id,
         )
 
     def _texttospeech(self) -> object:
@@ -330,8 +337,14 @@ class CloudTextToSpeechSynthesisService:
         text: str,
         chunk_index: int,
         chunk_count: int,
+        voice_id: str,
     ) -> SpeechSynthesisResult:
         config = self._config_loader()
+        voice_name = TTS_VOICE_NAMES_BY_ID.get(voice_id)
+        if voice_name is None:
+            raise SpeechSynthesisConfigurationError(
+                "Speech voice is not configured."
+            )
         texttospeech = self._texttospeech()
         client = self._client()
         try:
@@ -339,7 +352,7 @@ class CloudTextToSpeechSynthesisService:
                 input=texttospeech.SynthesisInput(text=text),
                 voice=texttospeech.VoiceSelectionParams(
                     language_code=config.language_code,
-                    name=config.voice_name,
+                    name=voice_name,
                 ),
                 audio_config=texttospeech.AudioConfig(
                     audio_encoding=texttospeech.AudioEncoding.MP3,

@@ -53,6 +53,19 @@ function textTree(item) {
   ].join(" ");
 }
 
+function findTree(item, predicate) {
+  if (predicate(item)) {
+    return item;
+  }
+  for (const child of item.children ?? []) {
+    const found = findTree(child, predicate);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
 test("renderTranscript keeps user text literal and renders model Markdown structure", () => {
   const container = node();
   renderTranscript(container, [{
@@ -93,6 +106,64 @@ test("renderTranscript keeps user text literal and renders model Markdown struct
   assert.doesNotMatch(textTree(model), /###|\*\*/);
   assert.equal(user.textContent, "");
   assert.equal(model.textContent, "");
+});
+
+test("renderTranscript exposes Speak only for completed assistant turns", () => {
+  const container = node();
+  const completedTurn = {
+    request: { key: "chat--1", body: { message: "hello" } },
+    response: { message_id: "turn--1--model", response: "completed answer" },
+  };
+  let spokenTurn = null;
+
+  renderTranscript(
+    container,
+    [completedTurn],
+    null,
+    "",
+    null,
+    {
+      onSpeakTurn(turn) {
+        spokenTurn = turn;
+      },
+    },
+  );
+
+  const speakButton = findTree(container, (item) => (
+    item.tagName === "button" && item.textContent === "Speak"
+  ));
+  assert.ok(speakButton);
+  assert.equal(speakButton.attributes.type, "button");
+  assert.equal(speakButton.attributes["aria-label"], "Speak assistant response");
+  speakButton.onclick();
+  assert.equal(spokenTurn, completedTurn);
+});
+
+test("renderTranscript does not expose Speak for pending or failed assistant text", () => {
+  const pendingContainer = node();
+  renderTranscript(
+    pendingContainer,
+    [],
+    { key: "chat--1", body: { message: "hello" } },
+    "partial answer",
+    null,
+    { onSpeakTurn() {} },
+  );
+  assert.equal(findTree(pendingContainer, (item) => item.textContent === "Speak"), null);
+
+  const failedContainer = node();
+  renderTranscript(
+    failedContainer,
+    [],
+    null,
+    "",
+    {
+      request: { key: "chat--2", body: { message: "hello" } },
+      provisionalResponseText: "failed answer",
+    },
+    { onSpeakTurn() {} },
+  );
+  assert.equal(findTree(failedContainer, (item) => item.textContent === "Speak"), null);
 });
 
 test("renderTranscript shows an empty conversation title inside the transcript", () => {

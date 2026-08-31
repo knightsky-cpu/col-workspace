@@ -685,8 +685,8 @@ p {
 }
 
 .composer-actions {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 1rem;
 }
@@ -694,12 +694,23 @@ p {
 .composer-speech {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.5rem;
+  justify-self: center;
   min-width: 0;
 }
 
 .speech-toggle {
+  min-height: 2.25rem;
+}
+
+.speech-voice-select {
+  min-height: 2.25rem;
+  max-inline-size: 9rem;
+}
+
+.speech-stop,
+.turn-speak {
   min-height: 2.25rem;
 }
 
@@ -722,6 +733,7 @@ p {
 [data-character-count] {
   color: var(--muted);
   font-size: 0.9rem;
+  justify-self: start;
 }
 
 [data-character-count-level="safe"] {
@@ -741,6 +753,13 @@ p {
   border-color: transparent;
   background: linear-gradient(180deg, var(--accent-strong), #2aa998);
   color: #03110f;
+  justify-self: end;
+}
+
+.turn-speech-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-block-start: 0.25rem;
 }
 
 .chat-error {

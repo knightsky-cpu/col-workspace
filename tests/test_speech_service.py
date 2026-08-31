@@ -186,6 +186,26 @@ def test_load_speech_synthesis_config_uses_chirp_3_hd_baseline() -> None:
     )
 
 
+def test_cloud_text_to_speech_service_maps_approved_male_voice() -> None:
+    client = FakeTextToSpeechClient()
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=lambda: client,
+        texttospeech_module=FakeTextToSpeechModule,
+    )
+
+    service._synthesize_sync(
+        "Canonical persisted answer.",
+        0,
+        1,
+        voice_id="male",
+    )
+
+    assert client.calls[0]["voice"] == FakeVoiceSelectionParams(
+        language_code="en-GB",
+        name="en-GB-Chirp3-HD-Alnilam",
+    )
+
+
 def test_chunk_text_for_speech_preserves_text_under_byte_limit() -> None:
     text = (
         "First paragraph has one sentence. It has another sentence.\n\n"

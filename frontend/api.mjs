@@ -329,6 +329,39 @@ export async function transcribeSpeechAudio(
   return body;
 }
 
+export async function synthesizeSpeechAudio(
+  userId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", request?.project_id);
+  assertIdentifier("session_id", request?.session_id);
+  assertIdentifier("message_id", request?.message_id);
+  const response = await fetchLike(
+    `/api/users/${encodeURIComponent(userId)}/speech/synthesize`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.authToken ? { Authorization: `Bearer ${options.authToken}` } : {}),
+      },
+      body: JSON.stringify(request),
+    },
+  );
+  if (!response.ok) {
+    throw normalizeApiError(response, await parseBody(response));
+  }
+  return {
+    audio: await response.blob(),
+    contentType: response.headers.get("content-type") ?? "application/octet-stream",
+    chunkIndex: Number.parseInt(response.headers.get("x-speech-chunk-index") ?? "0", 10),
+    chunkCount: Number.parseInt(response.headers.get("x-speech-chunk-count") ?? "1", 10),
+  };
+}
+
 function assertIdentifier(name, value) {
   if (!isValidIdentifier(value)) {
     throw new Error(`${name} is invalid.`);

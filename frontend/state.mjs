@@ -816,6 +816,7 @@ function transcriptFromMessages(messages) {
       transcript.push({
         request: pendingUser,
         response: {
+          message_id: message.message_id,
           response: message.text,
           actions: [],
           artifacts: [],
