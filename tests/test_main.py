@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -94,6 +95,7 @@ from database import (
     WorkspaceNotFoundError,
 )
 from speech_service import (
+    SpeechTranscriptionProviderError,
     SpeechSynthesisChunkError,
     SpeechSynthesisProviderError,
 )
@@ -3192,6 +3194,23 @@ async def test_speech_transcribe_returns_transcript_only(
 
 
 @pytest.mark.asyncio
+async def test_speech_transcribe_rejects_empty_audio_before_provider(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=b"",
+        headers={"Content-Type": "audio/webm;codecs=opus"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Speech audio is required."}
+    assert service_state.events == []
+    assert service_state.speech_transcription_service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_speech_transcribe_sanitizes_provider_failure(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -3209,6 +3228,36 @@ async def test_speech_transcribe_sanitizes_provider_failure(
     assert response.status_code == 502
     assert response.json() == {"detail": "Speech transcription failed."}
     assert "private credential" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_speech_transcribe_logs_provider_cause_without_leaking_it_to_client(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    provider_error = SpeechTranscriptionProviderError(
+        "private wrapped transcription error"
+    )
+    provider_error.__cause__ = RuntimeError(
+        "private credential path /secret/project"
+    )
+    service_state.speech_transcription_service.error = provider_error
+    caplog.set_level(logging.ERROR, logger=main.logger.name)
+
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=b"webm audio",
+        headers={"Content-Type": "audio/webm;codecs=opus"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Speech transcription failed."}
+    assert "provider_error=SpeechTranscriptionProviderError" in caplog.text
+    assert "provider_cause=RuntimeError" in caplog.text
+    assert "private credential" not in response.text
+    assert "private credential" not in caplog.text
+    assert "private wrapped" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -3473,6 +3522,39 @@ async def test_speech_synthesize_sanitizes_provider_failure(
     assert response.status_code == 502
     assert response.json() == {"detail": "Speech synthesis failed."}
     assert "private provider" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_logs_provider_cause_without_leaking_it_to_client(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    provider_error = SpeechSynthesisProviderError(
+        "private wrapped synthesis error"
+    )
+    provider_error.__cause__ = RuntimeError(
+        "private tts provider path /secret/project"
+    )
+    service_state.speech_synthesis_service.error = provider_error
+    caplog.set_level(logging.ERROR, logger=main.logger.name)
+
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Speech synthesis failed."}
+    assert "provider_error=SpeechSynthesisProviderError" in caplog.text
+    assert "provider_cause=RuntimeError" in caplog.text
+    assert "private tts" not in response.text
+    assert "private tts" not in caplog.text
+    assert "private wrapped" not in caplog.text
 
 
 @pytest.mark.asyncio

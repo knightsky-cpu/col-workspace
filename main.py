@@ -238,6 +238,34 @@ from vertex_config import load_vertex_ai_settings
 
 logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
+
+
+def _provider_code_label(error: BaseException) -> str:
+    code = getattr(error, "code", None)
+    if callable(code):
+        try:
+            code = code()
+        except Exception:
+            return "unavailable"
+    if code is None:
+        return "unavailable"
+    code_name = getattr(code, "name", None)
+    if isinstance(code_name, str):
+        return code_name
+    return type(code).__name__
+
+
+def _log_speech_provider_failure(operation: str, error: BaseException) -> None:
+    cause = error.__cause__ or error
+    logger.error(
+        "Speech %s failed provider_error=%s provider_cause=%s provider_code=%s",
+        operation,
+        type(error).__name__,
+        type(cause).__name__,
+        _provider_code_label(cause),
+    )
+
+
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 MAX_REQUEST_BODY_BYTES = 64 * 1024
 DEFAULT_SPEECH_REQUEST_BODY_BYTES = 2 * 1024 * 1024
@@ -1553,6 +1581,11 @@ async def speech_transcribe(
             detail="Unsupported audio content type.",
         ) from exc
     audio = await request.body()
+    if not audio:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Speech audio is required.",
+        )
     try:
         transcript = await request.app.state.speech_transcription_service.transcribe(
             audio=audio,
@@ -1565,10 +1598,7 @@ async def speech_transcribe(
             detail="Speech transcription is not configured.",
         ) from exc
     except Exception as exc:
-        logger.error(
-            "Speech transcription failed (%s).",
-            type(exc).__name__,
-        )
+        _log_speech_provider_failure("transcription", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Speech transcription failed.",
@@ -1633,7 +1663,7 @@ async def speech_synthesize(
             detail="Speech synthesis is not configured.",
         ) from exc
     except SpeechSynthesisProviderError as exc:
-        logger.error("Speech synthesis failed (%s).", type(exc).__name__)
+        _log_speech_provider_failure("synthesis", exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Speech synthesis failed.",
