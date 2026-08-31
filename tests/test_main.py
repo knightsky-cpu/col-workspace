@@ -821,6 +821,26 @@ class FakeSynthesisApplicationService:
 
 
 @dataclass
+class FakeSpeechTranscriptionService:
+    events: list[tuple[Any, ...]]
+    transcript: str = "recognized text"
+    error: Exception | None = None
+    calls: list[dict[str, object]] = field(default_factory=list)
+
+    async def transcribe(
+        self,
+        *,
+        audio: bytes,
+        content_type: str,
+    ) -> str:
+        self.calls.append({"audio": audio, "content_type": content_type})
+        self.events.append(("speech_transcribe",))
+        if self.error is not None:
+            raise self.error
+        return self.transcript
+
+
+@dataclass
 class FakeSupervisorRuntime:
     events: list[tuple[Any, ...]]
     response_text: str = "Generated answer"
@@ -1452,6 +1472,7 @@ class ServiceState:
     database: FakeMemoryEngine
     genai_client: FakeGenAIClient
     synthesis_service: FakeSynthesisApplicationService
+    speech_transcription_service: FakeSpeechTranscriptionService
     source_service: FakeSourceExpertService
     research_service: object
     computation_service: object
@@ -1499,6 +1520,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     genai_client = FakeGenAIClient(FakeAsyncGenAI())
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
     synthesis_service = FakeSynthesisApplicationService(events, blueprint)
+    speech_transcription_service = FakeSpeechTranscriptionService(events)
     source_service = FakeSourceExpertService(client=genai_client)
     research_service = object()
     computation_service = object()
@@ -1743,6 +1765,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         database=database,
         genai_client=genai_client,
         synthesis_service=synthesis_service,
+        speech_transcription_service=speech_transcription_service,
         source_service=source_service,
         research_service=research_service,
         computation_service=computation_service,
@@ -1812,6 +1835,12 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         main,
         "SynthesisApplicationService",
         create_synthesis_service,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "CloudSpeechTranscriptionService",
+        lambda: speech_transcription_service,
         raising=False,
     )
 
@@ -2956,9 +2985,15 @@ async def test_speech_transcribe_allows_body_above_default_api_limit(
         headers={"Content-Type": "audio/webm;codecs=opus"},
     )
 
-    assert response.status_code == 501
-    assert response.json() == {"detail": "Speech transcription is not implemented."}
-    assert service_state.events == []
+    assert response.status_code == 200
+    assert response.json() == {"transcript": "recognized text"}
+    assert service_state.speech_transcription_service.calls == [
+        {
+            "audio": audio_body,
+            "content_type": "audio/webm;codecs=opus",
+        }
+    ]
+    assert service_state.events == [("speech_transcribe",)]
 
 
 @pytest.mark.asyncio
@@ -2978,6 +3013,126 @@ async def test_speech_transcribe_uses_configured_speech_body_limit(
     assert response.status_code == 413
     assert response.json() == {"detail": "Request body is too large."}
     assert service_state.events == []
+    assert service_state.speech_transcription_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_transcribe_requires_google_authentication(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=b"webm audio",
+        headers={"Content-Type": "audio/webm;codecs=opus"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Authorization bearer token is required."
+    }
+    assert service_state.events == []
+    assert service_state.speech_transcription_service.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content_type",
+    (
+        "audio/webm",
+        "audio/webm;codecs=opus",
+        "audio/webm; codecs=opus",
+    ),
+)
+async def test_speech_transcribe_accepts_supported_webm_audio(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    content_type: str,
+) -> None:
+    audio_body = b"webm opus audio"
+
+    response = await client.post(
+        "/api/speech/transcribe",
+        headers={
+            "Authorization": "Bearer token-abc",
+            "Content-Type": content_type,
+        },
+        content=audio_body,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"transcript": "recognized text"}
+    assert service_state.speech_transcription_service.calls == [
+        {
+            "audio": audio_body,
+            "content_type": "audio/webm"
+            if content_type == "audio/webm"
+            else "audio/webm;codecs=opus",
+        }
+    ]
+    assert service_state.database.claim_calls == []
+    assert service_state.database.save_calls == []
+    assert service_state.database.complete_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_transcribe_rejects_unsupported_mime(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=b"not allowed",
+        headers={"Content-Type": "audio/wav"},
+    )
+
+    assert response.status_code == 415
+    assert response.json() == {"detail": "Unsupported audio content type."}
+    assert service_state.events == []
+    assert service_state.speech_transcription_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_transcribe_returns_transcript_only(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.speech_transcription_service.transcript = "draft transcript"
+
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=b"webm audio",
+        headers={"Content-Type": "audio/webm;codecs=opus"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"transcript": "draft transcript"}
+
+
+@pytest.mark.asyncio
+async def test_speech_transcribe_sanitizes_provider_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.speech_transcription_service.error = RuntimeError(
+        "private credential path /secret/project"
+    )
+
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=b"webm audio",
+        headers={"Content-Type": "audio/webm;codecs=opus"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Speech transcription failed."}
+    assert "private credential" not in response.text
 
 
 @pytest.mark.asyncio

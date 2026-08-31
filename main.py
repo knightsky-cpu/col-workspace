@@ -211,6 +211,12 @@ from synthesis_service import (
     SynthesisApplicationService,
     SynthesisCommand,
 )
+from speech_service import (
+    CloudSpeechTranscriptionService,
+    SpeechTranscriptionConfigurationError,
+    UnsupportedAudioContentTypeError,
+    normalize_audio_content_type,
+)
 from trusted_memory_service import (
     DeleteMemorySignalCommand,
     InspectMemoryCommand,
@@ -1395,6 +1401,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             database=database,
             clock=lambda: datetime.now(UTC),
         )
+        speech_transcription_service = CloudSpeechTranscriptionService()
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
             vertex_settings
@@ -1454,6 +1461,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.working_state_service = working_state_service
     app.state.preference_learning_service = preference_learning_service
     app.state.turn_service = turn_service
+    app.state.speech_transcription_service = speech_transcription_service
     app.state.authenticator = Authenticator(load_auth_settings())
     app.state.rate_limiter = InMemoryRateLimiter(
         max_requests=RATE_LIMIT_MAX_REQUESTS,
@@ -1507,11 +1515,48 @@ async def auth_config(request: Request) -> dict[str, object]:
 
 
 @app.post(SPEECH_TRANSCRIBE_PATH)
-async def speech_transcribe_placeholder():
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Speech transcription is not implemented.",
-    )
+async def speech_transcribe(
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> dict[str, str]:
+    try:
+        _get_authenticator(request).session(authorization)
+    except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
+        _raise_auth_http_error(exc)
+    try:
+        content_type = normalize_audio_content_type(
+            request.headers.get("content-type")
+        )
+    except UnsupportedAudioContentTypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported audio content type.",
+        ) from exc
+    audio = await request.body()
+    try:
+        transcript = await request.app.state.speech_transcription_service.transcribe(
+            audio=audio,
+            content_type=content_type,
+        )
+    except SpeechTranscriptionConfigurationError as exc:
+        logger.error("Speech transcription is not configured.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Speech transcription is not configured.",
+        ) from exc
+    except Exception as exc:
+        logger.error(
+            "Speech transcription failed (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Speech transcription failed.",
+        ) from exc
+    return {"transcript": transcript}
 
 
 @app.get("/api/auth/session")
