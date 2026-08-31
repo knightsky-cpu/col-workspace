@@ -685,15 +685,68 @@ p {
 }
 
 .composer-actions {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 1rem;
+}
+
+.composer-speech {
+  align-items: center;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  justify-self: center;
+  min-width: 0;
+}
+
+.speech-toggle {
+  min-height: 2.25rem;
+}
+
+.speech-voice-select {
+  min-height: 2.25rem;
+  max-inline-size: 9rem;
+}
+
+.spoken-response-toggle {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 0.9rem;
+  gap: 0.35rem;
+  min-height: 2.25rem;
+  white-space: nowrap;
+}
+
+.spoken-response-toggle input {
+  margin: 0;
+}
+
+.speech-stop {
+  min-height: 2.25rem;
+}
+
+.speech-toggle[data-speech-state="recording"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.speech-toggle[data-speech-state="transcribing"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+[data-speech-status] {
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
 }
 
 [data-character-count] {
   color: var(--muted);
   font-size: 0.9rem;
+  justify-self: start;
 }
 
 [data-character-count-level="safe"] {
@@ -713,6 +766,7 @@ p {
   border-color: transparent;
   background: linear-gradient(180deg, var(--accent-strong), #2aa998);
   color: #03110f;
+  justify-self: end;
 }
 
 .chat-error {

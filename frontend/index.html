@@ -189,6 +189,34 @@
               ></textarea>
               <div class="composer-actions">
                 <span data-character-count>0 / 10000</span>
+                <div class="composer-speech">
+                  <button
+                    type="button"
+                    class="speech-toggle"
+                    data-speech-toggle
+                    data-speech-state="idle"
+                    aria-label="Start voice input"
+                    aria-pressed="false"
+                  >Mic</button>
+                  <select
+                    class="speech-voice-select"
+                    data-speech-voice
+                    aria-label="Speech voice"
+                  >
+                    <option value="female" selected>Female — Kore</option>
+                    <option value="male">Male — Alnilam</option>
+                  </select>
+                  <label class="spoken-response-toggle">
+                    <input
+                      type="checkbox"
+                      data-spoken-responses-toggle
+                      aria-label="Spoken responses"
+                    >
+                    <span>Spoken responses</span>
+                  </label>
+                  <button type="button" class="speech-stop" data-tts-stop hidden disabled>Stop</button>
+                  <span data-speech-status role="status" aria-live="polite"></span>
+                </div>
                 <button type="submit" data-chat-submit>Send</button>
               </div>
             </form>

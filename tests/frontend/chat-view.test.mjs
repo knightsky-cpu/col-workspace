@@ -53,6 +53,19 @@ function textTree(item) {
   ].join(" ");
 }
 
+function findTree(item, predicate) {
+  if (predicate(item)) {
+    return item;
+  }
+  for (const child of item.children ?? []) {
+    const found = findTree(child, predicate);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
 test("renderTranscript keeps user text literal and renders model Markdown structure", () => {
   const container = node();
   renderTranscript(container, [{
@@ -93,6 +106,54 @@ test("renderTranscript keeps user text literal and renders model Markdown struct
   assert.doesNotMatch(textTree(model), /###|\*\*/);
   assert.equal(user.textContent, "");
   assert.equal(model.textContent, "");
+});
+
+test("renderTranscript does not expose bubble-level Speak controls for completed assistant turns", () => {
+  const container = node();
+  const completedTurn = {
+    request: { key: "chat--1", body: { message: "hello" } },
+    response: { message_id: "turn--1--model", response: "completed answer" },
+  };
+
+  renderTranscript(
+    container,
+    [completedTurn],
+    null,
+    "",
+    null,
+    { onSpeakTurn() {} },
+  );
+
+  assert.equal(findTree(container, (item) => (
+    item.tagName === "button" && item.textContent === "Speak"
+  )), null);
+});
+
+test("renderTranscript does not expose Speak for pending or failed assistant text", () => {
+  const pendingContainer = node();
+  renderTranscript(
+    pendingContainer,
+    [],
+    { key: "chat--1", body: { message: "hello" } },
+    "partial answer",
+    null,
+    { onSpeakTurn() {} },
+  );
+  assert.equal(findTree(pendingContainer, (item) => item.textContent === "Speak"), null);
+
+  const failedContainer = node();
+  renderTranscript(
+    failedContainer,
+    [],
+    null,
+    "",
+    {
+      request: { key: "chat--2", body: { message: "hello" } },
+      provisionalResponseText: "failed answer",
+    },
+    { onSpeakTurn() {} },
+  );
+  assert.equal(findTree(failedContainer, (item) => item.textContent === "Speak"), null);
 });
 
 test("renderTranscript shows an empty conversation title inside the transcript", () => {
@@ -380,6 +441,60 @@ test("createChatView updates the character counter from prompt input", () => {
 
   assert.equal(counter.textContent, "5 / 10000");
   assert.equal(counter.attributes["data-character-count-level"], "safe");
+});
+
+test("createChatView inserts speech transcript into the ordinary composer", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  view.insertComposerText("spoken draft");
+
+  assert.equal(input.value, "spoken draft");
+  assert.equal(counter.textContent, "12 / 10000");
+});
+
+test("createChatView appends speech transcript without destroying existing text", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  input.value = "typed draft";
+  input.oninput();
+  view.insertComposerText("spoken addition");
+
+  assert.equal(input.value, "typed draft\nspoken addition");
+  assert.equal(counter.textContent, "27 / 10000");
 });
 
 test("createChatView sets character counter severity levels", () => {

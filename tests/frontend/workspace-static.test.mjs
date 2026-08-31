@@ -204,6 +204,34 @@ test("chat pending status keeps live text while exposing per-letter reduced-moti
   );
 });
 
+test("composer exposes an accessible optional microphone control", () => {
+  assert.match(html, /data-speech-toggle/);
+  assert.match(html, /aria-label="Start voice input"/);
+  assert.match(html, /aria-pressed="false"/);
+  assert.match(html, /data-speech-status/);
+  assert.match(html, /data-speech-status role="status" aria-live="polite"/);
+  assert.match(styles, /\.composer-speech/);
+  assert.match(styles, /\.speech-toggle\[data-speech-state="recording"\]/);
+  assert.match(app, /MediaRecorder\.isTypeSupported/);
+  assert.match(app, /transcribeSpeechAudio/);
+  assert.doesNotMatch(app, /apiFetchJson\("\/api\/chat"/);
+});
+
+test("composer centers compact speech controls with exactly two approved voices", () => {
+  assert.match(
+    html,
+    /<div class="composer-actions">\s*<span data-character-count>0 \/ 10000<\/span>\s*<div class="composer-speech">[\s\S]*data-speech-toggle[\s\S]*data-speech-voice[\s\S]*data-spoken-responses-toggle[\s\S]*<button type="button" class="speech-stop" data-tts-stop hidden disabled>Stop<\/button>[\s\S]*<\/div>\s*<button type="submit" data-chat-submit>Send<\/button>\s*<\/div>/,
+  );
+  assert.match(html, /<select[^>]+data-speech-voice[^>]+aria-label="Speech voice"[\s\S]*<\/select>/);
+  assert.match(html, /<input[\s\S]*?type="checkbox"[\s\S]*?data-spoken-responses-toggle[\s\S]*?>/);
+  assert.match(html, /Spoken responses/);
+  assert.match(html, /<option value="female" selected>Female — Kore<\/option>/);
+  assert.match(html, /<option value="male">Male — Alnilam<\/option>/);
+  assert.doesNotMatch(html, /en-GB-Chirp3-HD/);
+  assert.match(styles, /\.composer-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(0, 1fr\)/);
+  assert.match(styles, /\.composer-speech\s*\{[\s\S]*?justify-self:\s*center/);
+});
+
 test("chat final state renders before secondary refreshes", () => {
   const submitStart = app.indexOf("async function submitRequest(request)");
   const completion = app.indexOf("state = completePendingTurn(state, response);", submitStart);

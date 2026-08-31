@@ -31,6 +31,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.datastructures import MutableHeaders
 
 from agent_col_artifact_executor import AgentColArtifactExecutor
@@ -211,6 +212,16 @@ from synthesis_service import (
     SynthesisApplicationService,
     SynthesisCommand,
 )
+from speech_service import (
+    CloudSpeechTranscriptionService,
+    CloudTextToSpeechSynthesisService,
+    SpeechTranscriptionConfigurationError,
+    SpeechSynthesisChunkError,
+    SpeechSynthesisConfigurationError,
+    SpeechSynthesisProviderError,
+    UnsupportedAudioContentTypeError,
+    normalize_audio_content_type,
+)
 from trusted_memory_service import (
     DeleteMemorySignalCommand,
     InspectMemoryCommand,
@@ -227,8 +238,39 @@ from vertex_config import load_vertex_ai_settings
 
 logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
+
+
+def _provider_code_label(error: BaseException) -> str:
+    code = getattr(error, "code", None)
+    if callable(code):
+        try:
+            code = code()
+        except Exception:
+            return "unavailable"
+    if code is None:
+        return "unavailable"
+    code_name = getattr(code, "name", None)
+    if isinstance(code_name, str):
+        return code_name
+    return type(code).__name__
+
+
+def _log_speech_provider_failure(operation: str, error: BaseException) -> None:
+    cause = error.__cause__ or error
+    logger.error(
+        "Speech %s failed provider_error=%s provider_cause=%s provider_code=%s",
+        operation,
+        type(error).__name__,
+        type(cause).__name__,
+        _provider_code_label(cause),
+    )
+
+
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 MAX_REQUEST_BODY_BYTES = 64 * 1024
+DEFAULT_SPEECH_REQUEST_BODY_BYTES = 2 * 1024 * 1024
+MAX_SPEECH_REQUEST_BODY_BYTES = 10 * 1024 * 1024
+SPEECH_TRANSCRIBE_PATH = "/api/speech/transcribe"
 RATE_LIMIT_MAX_REQUESTS = 20
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMITED_METHODS = frozenset({"POST", "PATCH", "DELETE"})
@@ -239,6 +281,7 @@ SECURITY_HEADERS = {
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https://*.googleusercontent.com; "
         "connect-src 'self'; "
+        "media-src 'self' blob:; "
         "frame-src https://accounts.google.com/gsi/; "
         "object-src 'none'; "
         "base-uri 'self'; "
@@ -247,10 +290,20 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Permissions-Policy": "camera=(), microphone=(self), geolocation=()",
 }
 
 load_dotenv()
+
+
+class SpeechSynthesizeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: IdentifierStr
+    session_id: IdentifierStr
+    message_id: IdentifierStr
+    chunk_index: int = Field(default=0, ge=0)
+    voice_id: Literal["female", "male"] = "female"
 
 
 class InMemoryRateLimiter:
@@ -314,6 +367,28 @@ def _rate_limit_key(request: Request) -> str:
     return f"{client_host}:expensive-api"
 
 
+def _speech_request_body_limit_bytes() -> int:
+    raw_limit = os.environ.get("AGENT_COL_SPEECH_MAX_AUDIO_BYTES")
+    if raw_limit is None or not raw_limit.strip():
+        return DEFAULT_SPEECH_REQUEST_BODY_BYTES
+    try:
+        configured_limit = int(raw_limit)
+    except ValueError:
+        return DEFAULT_SPEECH_REQUEST_BODY_BYTES
+    if configured_limit < 1:
+        return DEFAULT_SPEECH_REQUEST_BODY_BYTES
+    return min(configured_limit, MAX_SPEECH_REQUEST_BODY_BYTES)
+
+
+def _request_body_limit_bytes(request: Request) -> int:
+    if (
+        request.method.upper() == "POST"
+        and request.url.path == SPEECH_TRANSCRIBE_PATH
+    ):
+        return _speech_request_body_limit_bytes()
+    return MAX_REQUEST_BODY_BYTES
+
+
 def _body_too_large_response() -> Response:
     return _apply_security_headers(
         JSONResponse(
@@ -343,13 +418,14 @@ class RequestPerimeterMiddleware:
             return
 
         request = Request(scope)
+        request_body_limit = _request_body_limit_bytes(request)
         content_length = request.headers.get("content-length")
         if content_length is not None:
             try:
                 body_bytes = int(content_length)
             except ValueError:
-                body_bytes = MAX_REQUEST_BODY_BYTES + 1
-            if body_bytes > MAX_REQUEST_BODY_BYTES:
+                body_bytes = request_body_limit + 1
+            if body_bytes > request_body_limit:
                 response = _body_too_large_response()
                 await response(scope, receive, send)
                 return
@@ -383,7 +459,7 @@ class RequestPerimeterMiddleware:
                 body = message.get("body", b"")
                 if isinstance(body, bytes):
                     body_bytes += len(body)
-                if body_bytes > MAX_REQUEST_BODY_BYTES:
+                if body_bytes > request_body_limit:
                     response = _body_too_large_response()
                     await response(scope, receive, send)
                     return
@@ -1368,6 +1444,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             database=database,
             clock=lambda: datetime.now(UTC),
         )
+        speech_transcription_service = CloudSpeechTranscriptionService()
+        speech_synthesis_service = CloudTextToSpeechSynthesisService()
         source_service = SourceExpertService(client=client)
         research_service = ResearchExpertService.from_vertex_settings(
             vertex_settings
@@ -1427,6 +1505,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.working_state_service = working_state_service
     app.state.preference_learning_service = preference_learning_service
     app.state.turn_service = turn_service
+    app.state.speech_transcription_service = speech_transcription_service
+    app.state.speech_synthesis_service = speech_synthesis_service
     app.state.authenticator = Authenticator(load_auth_settings())
     app.state.rate_limiter = InMemoryRateLimiter(
         max_requests=RATE_LIMIT_MAX_REQUESTS,
@@ -1477,6 +1557,125 @@ async def auth_config(request: Request) -> dict[str, object]:
         "google_signin_required": settings.mode == "google_oidc",
         "local_development": settings.mode == "local_dev",
     }
+
+
+@app.post(SPEECH_TRANSCRIBE_PATH)
+async def speech_transcribe(
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> dict[str, str]:
+    try:
+        _get_authenticator(request).session(authorization)
+    except (AuthRequiredError, AuthForbiddenError, AuthConfigurationError) as exc:
+        _raise_auth_http_error(exc)
+    try:
+        content_type = normalize_audio_content_type(
+            request.headers.get("content-type")
+        )
+    except UnsupportedAudioContentTypeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported audio content type.",
+        ) from exc
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Speech audio is required.",
+        )
+    try:
+        transcript = await request.app.state.speech_transcription_service.transcribe(
+            audio=audio,
+            content_type=content_type,
+        )
+    except SpeechTranscriptionConfigurationError as exc:
+        logger.error("Speech transcription is not configured.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Speech transcription is not configured.",
+        ) from exc
+    except Exception as exc:
+        _log_speech_provider_failure("transcription", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Speech transcription failed.",
+        ) from exc
+    return {"transcript": transcript}
+
+
+@app.post("/api/users/{user_id}/speech/synthesize")
+async def speech_synthesize(
+    user_id: IdentifierStr,
+    payload: SpeechSynthesizeRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> Response:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=payload.project_id,
+        authorization_header=authorization,
+    )
+    try:
+        message = await request.app.state.db.get_completed_model_message(
+            user_id=effective_user_id,
+            project_id=effective_project_id,
+            session_id=payload.session_id,
+            message_id=payload.message_id,
+        )
+    except ChatSessionOwnershipError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Speech message was not found.",
+        ) from exc
+    except ChatTurnStateError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Speech requires a completed model message.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    try:
+        audio = await request.app.state.speech_synthesis_service.synthesize(
+            text=message.text,
+            chunk_index=payload.chunk_index,
+            voice_id=payload.voice_id,
+        )
+    except SpeechSynthesisChunkError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+            detail="Speech chunk was not found.",
+        ) from exc
+    except SpeechSynthesisConfigurationError as exc:
+        logger.error("Speech synthesis is not configured.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Speech synthesis is not configured.",
+        ) from exc
+    except SpeechSynthesisProviderError as exc:
+        _log_speech_provider_failure("synthesis", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Speech synthesis failed.",
+        ) from exc
+    return Response(
+        content=audio.audio,
+        media_type=audio.content_type,
+        headers={
+            "X-Speech-Chunk-Index": str(audio.chunk_index),
+            "X-Speech-Chunk-Count": str(audio.chunk_count),
+        },
+    )
 
 
 @app.get("/api/auth/session")

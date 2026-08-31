@@ -1097,6 +1097,116 @@ def claimed_store(
 
 
 @pytest.mark.asyncio
+async def test_get_completed_model_message_returns_owned_completed_text() -> None:
+    store, claim = claimed_store()
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "role": "model",
+                "text": "Canonical persisted answer.",
+                "timestamp": NOW,
+            },
+        )
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=turn_document(claim.ids, status="completed"),
+        )
+    )
+
+    message = await MemoryEngine(store.client).get_completed_model_message(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+        message_id=claim.ids.model_message_id,
+    )
+
+    assert message.text == "Canonical persisted answer."
+    assert message.project_id == "agent-col"
+    assert message.session_id == "session-1"
+    assert message.message_id == claim.ids.model_message_id
+    store.sessions.document.assert_called_once_with("session-1")
+    store.messages.document.assert_called_once_with(
+        claim.ids.model_message_id
+    )
+    store.turns.document.assert_called_once_with(claim.ids.turn_id)
+
+
+@pytest.mark.asyncio
+async def test_get_completed_model_message_rejects_unowned_session() -> None:
+    store, claim = claimed_store()
+    store.session_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"project_id": "agent-col", "user_id": "other-user"},
+        )
+    )
+
+    with pytest.raises(ChatSessionOwnershipError):
+        await MemoryEngine(store.client).get_completed_model_message(
+            user_id="user-1",
+            project_id="agent-col",
+            session_id="session-1",
+            message_id=claim.ids.model_message_id,
+        )
+
+    store.model_message_ref.get.assert_not_called()
+    store.turn_ref.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_completed_model_message_rejects_user_message() -> None:
+    store, claim = claimed_store()
+    store.user_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=user_message_document("Original user prompt."),
+        )
+    )
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(store.client).get_completed_model_message(
+            user_id="user-1",
+            project_id="agent-col",
+            session_id="session-1",
+            message_id=claim.ids.user_message_id,
+        )
+
+    store.turn_ref.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_completed_model_message_rejects_incomplete_turn() -> None:
+    store, claim = claimed_store()
+    store.model_message_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "role": "model",
+                "text": "Draft answer.",
+                "timestamp": NOW,
+            },
+        )
+    )
+    store.turn_ref.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=turn_document(claim.ids, status="in_progress"),
+        )
+    )
+
+    with pytest.raises(ChatTurnStateError):
+        await MemoryEngine(store.client).get_completed_model_message(
+            user_id="user-1",
+            project_id="agent-col",
+            session_id="session-1",
+            message_id=claim.ids.model_message_id,
+        )
+
+
+@pytest.mark.asyncio
 async def test_claim_chat_turn_atomically_creates_turn_and_user_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

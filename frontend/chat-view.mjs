@@ -238,6 +238,18 @@ export function createChatView(elements, handlers) {
     elements.characterCount.setAttribute("data-character-count-level", level);
   }
 
+  function insertComposerText(text) {
+    const transcript = String(text ?? "").trim();
+    if (!transcript) {
+      return;
+    }
+    const current = String(elements.input.value ?? "");
+    elements.input.value = current.trim()
+      ? `${current}\n${transcript}`
+      : transcript;
+    updateCharacterCount();
+  }
+
   elements.form.addEventListener("submit", (event) => {
     event.preventDefault();
     handlers.onSubmit(elements.input.value);
@@ -258,6 +270,10 @@ export function createChatView(elements, handlers) {
     clearComposer() {
       elements.input.value = "";
       updateCharacterCount();
+    },
+    insertComposerText,
+    submitComposer() {
+      handlers.onSubmit(elements.input.value);
     },
     render(state) {
       renderTranscript(
