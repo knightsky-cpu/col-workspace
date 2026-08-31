@@ -153,6 +153,10 @@ const SPEECH_RECORDING_MIME_TYPES = Object.freeze([
   "audio/webm;codecs=opus",
   "audio/webm",
 ]);
+const SPEECH_TRAILING_SILENCE_MS = 2000;
+const SPEECH_ANALYSER_FFT_SIZE = 2048;
+const SPEECH_BASELINE_RMS = 0.01;
+const SPEECH_MIN_RMS_ABOVE_FLOOR = 0.04;
 
 function showAuthError(message) {
   const error = document.querySelector("[data-auth-error]");
@@ -362,7 +366,97 @@ function stopSpeechTracks(stream) {
   }
 }
 
+function computeSpeechRms(buffer) {
+  let total = 0;
+  for (const value of buffer) {
+    const normalized = (value - 128) / 128;
+    total += normalized * normalized;
+  }
+  return Math.sqrt(total / buffer.length);
+}
+
+function createSpeechSilenceDetector(recording) {
+  const AudioContextConstructor = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+  if (
+    !AudioContextConstructor
+    || typeof globalThis.requestAnimationFrame !== "function"
+    || typeof globalThis.cancelAnimationFrame !== "function"
+  ) {
+    return null;
+  }
+  let audioContext = null;
+  let source = null;
+  let analyser = null;
+  try {
+    audioContext = new AudioContextConstructor();
+    source = audioContext.createMediaStreamSource(recording.stream);
+    analyser = audioContext.createAnalyser();
+  } catch {
+    audioContext?.close?.();
+    return null;
+  }
+  analyser.fftSize = SPEECH_ANALYSER_FFT_SIZE;
+  source.connect(analyser);
+  const samples = new Uint8Array(analyser.fftSize);
+  let animationFrame = null;
+  let cleanedUp = false;
+  let noiseFloor = SPEECH_BASELINE_RMS;
+  let speechHasStarted = false;
+  let silenceStartedAt = null;
+
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    if (animationFrame !== null) {
+      globalThis.cancelAnimationFrame(animationFrame);
+      animationFrame = null;
+    }
+    source.disconnect?.();
+    analyser.disconnect?.();
+    audioContext.close?.();
+  };
+
+  const analyze = (time) => {
+    if (cleanedUp || speechRecording !== recording || recording.stopRequested) {
+      cleanup();
+      return;
+    }
+    analyser.getByteTimeDomainData(samples);
+    const rms = computeSpeechRms(samples);
+    const speechThreshold = Math.max(
+      noiseFloor + SPEECH_MIN_RMS_ABOVE_FLOOR,
+      noiseFloor * 3,
+    );
+    const speechDetected = rms >= speechThreshold;
+    if (speechDetected) {
+      speechHasStarted = true;
+      silenceStartedAt = null;
+    } else {
+      noiseFloor = Math.min(
+        Math.max(rms, SPEECH_BASELINE_RMS),
+        noiseFloor * 0.95 + rms * 0.05,
+      );
+      if (speechHasStarted) {
+        if (silenceStartedAt === null) {
+          silenceStartedAt = time;
+        } else if (time - silenceStartedAt >= SPEECH_TRAILING_SILENCE_MS) {
+          stopSpeechRecording();
+          return;
+        }
+      }
+    }
+    animationFrame = globalThis.requestAnimationFrame(analyze);
+  };
+
+  animationFrame = globalThis.requestAnimationFrame(analyze);
+  return { cleanup };
+}
+
 async function finishSpeechRecording(recording) {
+  recording.silenceDetector?.cleanup();
+  recording.stopWatchingComposer?.();
   stopSpeechTracks(recording.stream);
   setSpeechUi("transcribing", "Transcribing audio...");
   try {
@@ -370,7 +464,7 @@ async function finishSpeechRecording(recording) {
     const response = await transcribeSpeechAudio(audio, authOptions());
     const transcript = String(response?.transcript ?? "").trim();
     ensureChatView().insertComposerText(transcript);
-    if (transcript && recording.composerWasEmpty) {
+    if (transcript && recording.autoSubmitEligible) {
       ensureChatView().submitComposer();
     }
     setSpeechUi("idle", transcript ? "Transcript added." : "No speech recognized.");
@@ -402,12 +496,25 @@ async function startSpeechRecording() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = selectSpeechRecordingMimeType();
     const recorder = new MediaRecorder(stream, { mimeType });
+    const composerWasEmpty = isComposerEmpty();
     const recording = {
       recorder,
       stream,
       chunks: [],
       mimeType,
-      composerWasEmpty: isComposerEmpty(),
+      composerWasEmpty,
+      autoSubmitEligible: composerWasEmpty,
+      stopRequested: false,
+      silenceDetector: null,
+      stopWatchingComposer: null,
+    };
+    const composerInput = document.querySelector("[data-chat-input]");
+    const revokeAutoSubmit = () => {
+      recording.autoSubmitEligible = false;
+    };
+    composerInput?.addEventListener?.("input", revokeAutoSubmit);
+    recording.stopWatchingComposer = () => {
+      composerInput?.removeEventListener?.("input", revokeAutoSubmit);
     };
     recorder.ondataavailable = (event) => {
       if (event.data?.size > 0) {
@@ -419,6 +526,7 @@ async function startSpeechRecording() {
     };
     recorder.start();
     speechRecording = recording;
+    recording.silenceDetector = createSpeechSilenceDetector(recording);
     speechStartPending = false;
     setSpeechUi("recording", "Recording voice input. Press Stop when finished.");
   } catch {
@@ -438,6 +546,11 @@ function stopSpeechRecording() {
     return;
   }
   const { recorder, stream } = speechRecording;
+  if (speechRecording.stopRequested) {
+    return;
+  }
+  speechRecording.stopRequested = true;
+  speechRecording.silenceDetector?.cleanup();
   stopSpeechTracks(stream);
   if (recorder.state !== "inactive") {
     recorder.stop();

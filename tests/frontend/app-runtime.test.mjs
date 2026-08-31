@@ -55,7 +55,21 @@ function node(tagName = "div") {
       delete this.attributes[name];
     },
     addEventListener(name, handler) {
-      this[`on${name}`] = handler;
+      this[`on${name}`] = (...args) => {
+        const results = [];
+        for (const listener of this[`_${name}Listeners`] ?? []) {
+          results.push(listener.apply(this, args));
+        }
+        return results.length === 1 ? results[0] : Promise.all(results);
+      };
+      this[`_${name}Listeners`] = [
+        ...(this[`_${name}Listeners`] ?? []),
+        handler,
+      ];
+    },
+    removeEventListener(name, handler) {
+      this[`_${name}Listeners`] = (this[`_${name}Listeners`] ?? [])
+        .filter((listener) => listener !== handler);
     },
     focus() {},
     matches(selector) {
@@ -342,6 +356,7 @@ function installFakeMediaRecorder({
       this.stream = recordingStream;
       this.mimeType = options.mimeType;
       this.state = "inactive";
+      this.stopCalls = 0;
       recorders.push(this);
     }
 
@@ -350,6 +365,7 @@ function installFakeMediaRecorder({
     }
 
     stop() {
+      this.stopCalls += 1;
       this.state = "inactive";
       this.ondataavailable?.({
         data: new Blob(["webm audio"], { type: this.mimeType }),
@@ -359,6 +375,110 @@ function installFakeMediaRecorder({
   }
   globalThis.MediaRecorder = FakeMediaRecorder;
   return { recorders, stream, tracks };
+}
+
+function installFakeSilenceDetection(t) {
+  const frames = [];
+  const contexts = [];
+  const analysers = [];
+  const samples = [];
+  const originalAudioContext = globalThis.AudioContext;
+  const originalWebkitAudioContext = globalThis.webkitAudioContext;
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+
+  class FakeAnalyser {
+    constructor() {
+      this.fftSize = 2048;
+      this.disconnected = false;
+      analysers.push(this);
+    }
+
+    getByteTimeDomainData(buffer) {
+      const value = samples.length > 0 ? samples.shift() : 128;
+      buffer.fill(value);
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+  }
+
+  class FakeSource {
+    constructor() {
+      this.disconnected = false;
+    }
+
+    connect(analyser) {
+      this.analyser = analyser;
+    }
+
+    disconnect() {
+      this.disconnected = true;
+    }
+  }
+
+  class FakeAudioContext {
+    constructor() {
+      this.closed = false;
+      this.sources = [];
+      contexts.push(this);
+    }
+
+    createMediaStreamSource(stream) {
+      const source = new FakeSource();
+      source.stream = stream;
+      this.sources.push(source);
+      return source;
+    }
+
+    createAnalyser() {
+      return new FakeAnalyser();
+    }
+
+    close() {
+      this.closed = true;
+      return Promise.resolve();
+    }
+  }
+
+  globalThis.AudioContext = FakeAudioContext;
+  globalThis.webkitAudioContext = undefined;
+  globalThis.requestAnimationFrame = (callback) => {
+    const id = frames.length + 1;
+    frames.push({ id, callback, cancelled: false });
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => {
+    const frame = frames.find((item) => item.id === id);
+    if (frame) {
+      frame.cancelled = true;
+    }
+  };
+
+  t.after(() => {
+    globalThis.AudioContext = originalAudioContext;
+    globalThis.webkitAudioContext = originalWebkitAudioContext;
+    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+
+  return {
+    contexts,
+    analysers,
+    pushSample(value) {
+      samples.push(value);
+    },
+    tick(time) {
+      const frame = frames.shift();
+      if (frame && !frame.cancelled) {
+        frame.callback(time);
+      }
+    },
+    pendingFrameCount() {
+      return frames.filter((frame) => !frame.cancelled).length;
+    },
+  };
 }
 
 function installSpeechRuntimeFetch({
@@ -641,6 +761,284 @@ test("empty microphone transcript does not auto-submit chat", async () => {
   assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
 });
 
+test("speech followed by two seconds of trailing silence automatically stops through transcription", async (t) => {
+  const media = installFakeMediaRecorder();
+  const vad = installFakeSilenceDetection(t);
+  const { calls, stream } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-auto-stop");
+
+  const micButton = elements.get("[data-speech-toggle]");
+  micButton.onclick();
+  await waitFor(
+    () => media.recorders.length === 1 && vad.pendingFrameCount() === 1,
+    () => `recorders=${media.recorders.length} frames=${vad.pendingFrameCount()}`,
+  );
+
+  vad.pushSample(190);
+  vad.tick(100);
+  vad.pushSample(128);
+  vad.tick(1100);
+  assert.equal(media.recorders[0].state, "recording");
+  assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), false);
+
+  vad.pushSample(128);
+  vad.tick(3100);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/speech/transcribe"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  assert.equal(media.recorders[0].state, "inactive");
+  assert.equal(media.tracks.every((track) => track.stopped), true);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const [, chatInit] = calls.find(([path]) => path === "/api/chat/stream");
+  assert.equal(JSON.parse(chatInit.body).message, "spoken transcript");
+  stream.complete({
+    response: "Agent response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+});
+
+test("microphone enabled without speech does not stop after two seconds", async (t) => {
+  const media = installFakeMediaRecorder();
+  const vad = installFakeSilenceDetection(t);
+  const { calls } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-no-initial-silence-stop");
+
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => media.recorders.length === 1 && vad.pendingFrameCount() === 1,
+    () => `recorders=${media.recorders.length} frames=${vad.pendingFrameCount()}`,
+  );
+
+  vad.pushSample(128);
+  vad.tick(100);
+  vad.pushSample(128);
+  vad.tick(2100);
+  vad.pushSample(128);
+  vad.tick(4100);
+
+  assert.equal(media.recorders[0].state, "recording");
+  assert.equal(media.recorders[0].stopCalls, 0);
+  assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), false);
+
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/speech/transcribe"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+});
+
+test("speech resuming before two seconds resets trailing silence", async (t) => {
+  const media = installFakeMediaRecorder();
+  const vad = installFakeSilenceDetection(t);
+  const { calls } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-silence-reset");
+
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => media.recorders.length === 1 && vad.pendingFrameCount() === 1,
+    () => `recorders=${media.recorders.length} frames=${vad.pendingFrameCount()}`,
+  );
+
+  vad.pushSample(190);
+  vad.tick(100);
+  vad.pushSample(128);
+  vad.tick(1100);
+  vad.pushSample(190);
+  vad.tick(2500);
+  vad.pushSample(128);
+  vad.tick(3000);
+  vad.pushSample(128);
+  vad.tick(4500);
+
+  assert.equal(media.recorders[0].state, "recording");
+  assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), false);
+
+  vad.pushSample(128);
+  vad.tick(5100);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/speech/transcribe"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  assert.equal(media.recorders[0].state, "inactive");
+});
+
+test("silence-stop appends to existing composer text without auto-send", async (t) => {
+  installFakeMediaRecorder();
+  const vad = installFakeSilenceDetection(t);
+  const { calls } = installSpeechRuntimeFetch({ transcript: "Google streaming TTS API" });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-existing-text-no-autosend");
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "Also compare this against";
+  input.oninput();
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => vad.pendingFrameCount() === 1,
+    () => `frames=${vad.pendingFrameCount()}`,
+  );
+
+  vad.pushSample(190);
+  vad.tick(100);
+  vad.pushSample(128);
+  vad.tick(1100);
+  vad.pushSample(128);
+  vad.tick(3100);
+
+  await waitFor(
+    () => input.value === "Also compare this against\nGoogle streaming TTS API",
+    () => input.value,
+  );
+  assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), true);
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+});
+
+test("editing the composer during recording prevents silence-stop auto-send", async (t) => {
+  installFakeMediaRecorder();
+  const vad = installFakeSilenceDetection(t);
+  const { calls } = installSpeechRuntimeFetch({ transcript: "spoken addition" });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-edit-revokes-autosend");
+
+  const input = elements.get("[data-chat-input]");
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => vad.pendingFrameCount() === 1,
+    () => `frames=${vad.pendingFrameCount()}`,
+  );
+
+  input.value = "typed while recording";
+  input.oninput();
+  vad.pushSample(190);
+  vad.tick(100);
+  vad.pushSample(128);
+  vad.tick(1100);
+  vad.pushSample(128);
+  vad.tick(3100);
+
+  await waitFor(
+    () => input.value === "typed while recording\nspoken addition",
+    () => input.value,
+  );
+  assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), true);
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+});
+
+test("automatic and manual microphone stop share one stop lifecycle", async (t) => {
+  const media = installFakeMediaRecorder();
+  const vad = installFakeSilenceDetection(t);
+  const { calls } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-single-stop-lifecycle");
+
+  const micButton = elements.get("[data-speech-toggle]");
+  micButton.onclick();
+  await waitFor(
+    () => media.recorders.length === 1 && vad.pendingFrameCount() === 1,
+    () => `recorders=${media.recorders.length} frames=${vad.pendingFrameCount()}`,
+  );
+
+  vad.pushSample(190);
+  vad.tick(100);
+  vad.pushSample(128);
+  vad.tick(1100);
+  vad.pushSample(128);
+  vad.tick(3100);
+  micButton.onclick();
+
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/speech/transcribe"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  assert.equal(media.recorders[0].stopCalls, 1);
+  assert.equal(
+    calls.filter(([path]) => path === "/api/speech/transcribe").length,
+    1,
+  );
+});
+
+test("manual microphone stop cleans up silence detection resources", async (t) => {
+  const media = installFakeMediaRecorder();
+  const vad = installFakeSilenceDetection(t);
+  const { calls } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-cleanup");
+
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => media.recorders.length === 1 && vad.contexts.length === 1,
+    () => `recorders=${media.recorders.length} contexts=${vad.contexts.length}`,
+  );
+
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/speech/transcribe"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  assert.equal(vad.pendingFrameCount(), 0);
+  assert.equal(vad.contexts[0].closed, true);
+  assert.equal(vad.contexts[0].sources[0].disconnected, true);
+  assert.equal(vad.analysers[0].disconnected, true);
+});
+
+test("microphone recording still works when browser audio analysis fails", async (t) => {
+  installFakeMediaRecorder();
+  const originalAudioContext = globalThis.AudioContext;
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
+  globalThis.AudioContext = class {
+    constructor() {
+      throw new Error("audio analysis unavailable");
+    }
+  };
+  globalThis.requestAnimationFrame = () => 1;
+  globalThis.cancelAnimationFrame = () => {};
+  t.after(() => {
+    globalThis.AudioContext = originalAudioContext;
+    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+  const { calls, stream } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-analysis-unavailable");
+
+  const micButton = elements.get("[data-speech-toggle]");
+  micButton.onclick();
+  await waitFor(
+    () => micButton.textContent === "Stop",
+    () => micButton.textContent,
+  );
+  micButton.onclick();
+
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const [, chatInit] = calls.find(([path]) => path === "/api/chat/stream");
+  assert.equal(JSON.parse(chatInit.body).message, "spoken transcript");
+  stream.complete({
+    response: "Agent response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+});
+
 test("microphone permission denial leaves typed chat functional", async () => {
   Object.defineProperty(globalThis, "navigator", {
     value: {
@@ -745,7 +1143,7 @@ test("microphone start ignores repeated clicks while permission is pending", asy
   const media = installFakeMediaRecorder({
     getUserMediaImpl: async () => pendingStream,
   });
-  installSpeechRuntimeFetch();
+  const { calls, stream } = installSpeechRuntimeFetch();
   const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-pending");
 
   const micButton = elements.get("[data-speech-toggle]");
@@ -760,6 +1158,22 @@ test("microphone start ignores repeated clicks while permission is pending", asy
   );
   assert.equal(media.recorders.length, 1);
   micButton.onclick();
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  stream.complete({
+    response: "Agent response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
 });
 
 test("spoken responses toggle defaults off and speaks newly completed responses only when enabled", async (t) => {

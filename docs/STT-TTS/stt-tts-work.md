@@ -217,6 +217,248 @@ Spoken responses on:
 newly completed assistant responses play automatically using the selected approved voice
 ```
 
+### Pass 6C: Lower-Latency TTS Chunk Playback
+
+Implemented Option B from the TTS latency investigation: keep the existing
+canonical-response TTS architecture and reduce perceived latency by changing only
+chunking and scheduling.
+
+Preserved boundaries:
+
+- TTS still starts only after the final canonical Agent Col response exists.
+- The browser still calls the authenticated FastAPI TTS route.
+- The backend still uses synchronous Google Cloud Text-to-Speech
+  `synthesize_speech()`.
+- Approved Chirp 3 HD voices and MP3 output are unchanged.
+- No Google streaming TTS, provisional LLM speech, MediaSource, Web Audio
+  playback, or alternate playback architecture was introduced.
+
+Source areas:
+
+- `speech_service.py`: split the provider byte ceiling from latency-oriented
+  chunk sizing.
+  - Provider ceiling remains `TTS_CHUNK_BYTE_LIMIT = 4800` bytes, below the
+    Google provider input limit.
+  - First playback chunk now uses a smaller target
+    `TTS_FIRST_CHUNK_BYTE_LIMIT = 700`.
+  - Later chunks use `TTS_LATER_CHUNK_BYTE_LIMIT = 1800`.
+  - `chunk_text_for_speech()` remains deterministic, preserves exact text when
+    chunks are joined, and remains sentence/paragraph-aware where possible.
+- `speech_service.py`: `CloudTextToSpeechSynthesisService` now applies the
+  latency chunk limits through `_chunks_for_text()` before calling the existing
+  synchronous synthesis path.
+- `frontend/api.mjs`: `synthesizeSpeechAudio()` now accepts an abort signal for
+  cancellation of in-flight prefetch requests.
+- `frontend/app.mjs`: TTS playback now requests chunk 0, begins playback as soon
+  as that chunk returns, and prefetches exactly chunk N+1 while chunk N is
+  playing.
+- `frontend/app.mjs`: playback order remains strict; chunk N+2 is not requested
+  until chunk N finishes and chunk N+1 becomes current.
+- `frontend/app.mjs`: Stop aborts current/in-flight TTS requests and prevents
+  queued/future playback.
+- `tests/test_speech_service.py`: validates latency-sized first chunks, larger
+  later chunks, provider ceiling preservation, and service-level chunk limit
+  wiring.
+- `tests/frontend/app-runtime.test.mjs`: validates first audio can start before
+  all chunks synthesize, exactly one-chunk-ahead prefetch, strict order,
+  short-response behavior, cancellation, and prefetch failure isolation.
+
+Manual acceptance:
+
+```text
+The user verified TTS latency was meaningfully reduced.
+```
+
+Measurement note:
+
+The automated proxy measurement used during the pass compared old and new first
+chunk size on a 7640-byte sample:
+
+```text
+old first chunk: 4777 bytes
+new first chunk: 658 bytes
+first chunk byte reduction: 86.2%
+synthetic final-to-play proxy: 100.90ms -> 18.37ms
+```
+
+The source-backed improvement is reduced time-to-first-audio by requiring only
+the first sentence-sized MP3 chunk before playback, while later chunks synthesize
+one at a time during playback.
+
+Issue found during manual verification:
+
+```text
+ImportError: cannot import name 'texttospeech' from 'google.cloud'
+```
+
+Root cause:
+
+- `requirements.txt` already declared `google-cloud-texttospeech==2.37.0`.
+- The active local `venv` did not actually have `google-cloud-texttospeech`
+  installed, so the existing lazy import failed at runtime.
+
+Resolution:
+
+```bash
+venv/bin/python -m pip install -r requirements.txt
+```
+
+The first sandboxed install attempt failed because DNS/network access to PyPI was
+blocked. The same command was rerun with network approval and installed:
+
+```text
+google-cloud-speech-2.40.0
+google-cloud-texttospeech-2.37.0
+```
+
+Verified after install:
+
+```bash
+venv/bin/python -c 'from google.cloud import texttospeech; print(texttospeech.TextToSpeechClient.__name__)'
+```
+
+Output:
+
+```text
+TextToSpeechClient
+```
+
+No source change was made for that dependency issue. If this error reappears in
+a fresh environment, install from `requirements.txt` before changing source.
+
+Checkpoint:
+
+```text
+77453e9 Optimize TTS chunk playback latency
+```
+
+This commit was pushed to `origin/STT/TTS-research`.
+
+### Pass 6D: Silence-Triggered STT Mic Stop
+
+Implemented browser-side trailing-silence auto-stop for the existing
+MediaRecorder STT user-prompt flow.
+
+Preserved boundaries:
+
+- No live transcription.
+- No backend speech service changes.
+- No second transcription or submission path.
+- The browser still records locally with `MediaRecorder`.
+- Completed recording still becomes one final `Blob`.
+- The final blob still goes to the existing `/api/speech/transcribe` endpoint.
+- Transcription still lands in the existing composer.
+- Existing composer submit rules still decide whether to auto-send.
+- Manual mic on/off behavior is preserved.
+
+Target flow now implemented:
+
+```text
+mic on
+-> MediaRecorder records locally
+-> browser-side RMS detector waits for actual speech
+-> after speech, 2 continuous seconds of trailing silence
+-> calls existing stopSpeechRecording()
+-> MediaRecorder onstop fires
+-> finishSpeechRecording()
+-> transcribeSpeechAudio()
+-> transcript inserted into composer
+-> existing composer auto-send rules apply
+```
+
+Source areas:
+
+- `frontend/app.mjs`: added lightweight browser-side audio amplitude analysis
+  using `AudioContext`, `MediaStreamSource`, `AnalyserNode`,
+  `getByteTimeDomainData()`, RMS calculation, and `requestAnimationFrame`.
+- `frontend/app.mjs`: added detector state equivalent to:
+
+  ```text
+  speechHasStarted = false
+  wait for RMS above adaptive threshold
+  after speech starts, measure trailing silence
+  if speech resumes before 2 seconds, reset the timer
+  if silence lasts 2 continuous seconds, call stopSpeechRecording()
+  ```
+
+- `frontend/app.mjs`: the detector does not start the silence countdown merely
+  because the mic is enabled. Initial silence can continue indefinitely until the
+  user speaks or manually stops.
+- `frontend/app.mjs`: `stopSpeechRecording()` is the single authoritative stop
+  lifecycle for both manual and automatic stop.
+- `frontend/app.mjs`: added a `stopRequested` guard to prevent automatic and
+  manual stop from running the lifecycle twice.
+- `frontend/app.mjs`: silence detection cleanup cancels the animation frame,
+  disconnects analyser/source resources, closes the `AudioContext`, and still
+  stops media tracks through the existing path.
+- `frontend/app.mjs`: if audio analysis is unavailable or throws during setup,
+  the detector fails closed and normal manual MediaRecorder recording continues.
+- `frontend/app.mjs`: added `autoSubmitEligible`, initialized from whether the
+  composer was empty at recording start.
+- `frontend/app.mjs`: composer input during an active recording revokes
+  `autoSubmitEligible`, so typing/editing while recording prevents auto-send.
+- `tests/frontend/app-runtime.test.mjs`: added fake browser audio-analysis
+  support for deterministic VAD/silence tests.
+- `tests/frontend/app-runtime.test.mjs`: validates:
+  - speech followed by two seconds trailing silence auto-stops through the
+    existing transcription path;
+  - mic enabled without speech does not auto-stop;
+  - speech resuming before two seconds resets trailing silence;
+  - existing composer text prevents auto-send;
+  - editing during recording revokes auto-send;
+  - automatic and manual stop share one lifecycle;
+  - manual stop cleans up detector resources;
+  - recording still works if browser audio analysis fails.
+
+Important behavior examples now covered:
+
+```text
+Empty composer:
+click Mic -> speak -> 2s silence -> auto stop -> transcript -> auto-send
+```
+
+```text
+Existing composer text:
+click Mic -> speak -> 2s silence -> auto stop -> transcript appends -> no auto-send
+```
+
+```text
+Empty composer, then user types while recording:
+click Mic -> speak + edit composer -> 2s silence -> transcript appends -> no auto-send
+```
+
+Implementation notes for future sessions:
+
+- The silence detector is intentionally small and heuristic-based.
+- It uses RMS amplitude and a small adaptive noise floor rather than a large VAD
+  dependency.
+- If live testing shows false stops or missed stops in real rooms, tune only the
+  detector constants/heuristics in `frontend/app.mjs` and keep the STT backend
+  architecture unchanged.
+- Do not add live transcription or another STT path to solve threshold tuning.
+
+Verification:
+
+```bash
+node tests/frontend/app-runtime.test.mjs
+node --test tests/frontend/workspace-static.test.mjs
+git diff --check
+```
+
+Latest focused result before this handoff update:
+
+```text
+frontend app-runtime: 27 pass, 0 fail
+workspace-static: 1 pass, 0 fail
+git diff --check: clean
+```
+
+Manual acceptance:
+
+```text
+The user verified the silence-triggered mic-stop pass was successful.
+```
+
 ## Current Manual Acceptance
 
 The user manually verified:
@@ -225,6 +467,8 @@ The user manually verified:
 STT works.
 TTS works.
 Pass 6B behavior is working well.
+Pass 6C TTS latency is meaningfully reduced.
+Pass 6D silence-triggered mic stop is successful.
 ```
 
 ## Known Operational Requirements
@@ -321,16 +565,19 @@ Tests:
 - No live streaming transcription.
 - No wake words.
 - No continuous listening.
-- No voice activity detection.
+- No backend/server-side voice activity detection.
+- Browser-side RMS silence detection is implemented only to stop the existing
+  local MediaRecorder flow after trailing silence.
 - No automatic full-duplex voice conversation.
 - No Gemini TTS.
 - No voice bake-off tooling.
 - No Cloud Run deployment mutation in source.
-- No merge to `main`.
+- Merge to `main` was requested after Pass 6D manual acceptance.
 
 ## Recommended Next Work
 
-Before adding more features, deploy or smoke-test the current branch in the intended Cloud Run-like environment.
+Before adding more features, deploy or smoke-test `main` in the intended Cloud
+Run-like environment after the STT/TTS branch merge is complete.
 
 Suggested next pass:
 
