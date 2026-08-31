@@ -8,6 +8,7 @@ from google.genai import types
 from pydantic import Field, StringConstraints, ValidationError, model_validator
 from typing_extensions import Self
 
+from continuity import ContinuitySourceText
 from schemas import IdentifierStr, StrictModel
 from synthesis_schema import adapt_schema_for_gemini
 from working_state import (
@@ -37,6 +38,11 @@ Track the user's current goal, working intent hypothesis, active constraints,
 unresolved questions, clarification status, next-step hypothesis, and confidence
 when that would help a later response in the same chat. Do not store raw hidden
 chain-of-thought. Store only concise conclusions and rationale summaries.
+
+When server-validated continuity excerpts are present in the update input, use
+them as the current reference anchor for the user's latest message and for
+follow-up phrases such as "it", "that", or "what was it about". Keep only the
+bounded collaborative state that helps the same chat continue naturally.
 
 Make next_step_hypothesis action-oriented: name the next consequential step
 Agent Col should recommend or continue when the current user message already
@@ -90,6 +96,10 @@ class WorkingStateUpdateInput(StrictModel):
     current_message: WorkingStateMessageText
     model_response: WorkingStateMessageText
     previous_state: WorkingStateSnapshot | None = None
+    continuity_source_texts: tuple[ContinuitySourceText, ...] = Field(
+        default_factory=tuple,
+        max_length=4,
+    )
     recent_user_messages: tuple[WorkingStateMessageText, ...] = Field(
         default_factory=tuple,
         max_length=8,

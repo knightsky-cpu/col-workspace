@@ -148,5 +148,11 @@ def should_update_working_state(message: str, *, route: str | None = None) -> bo
         "continue",
         "what did we decide",
         "where were we",
+        "what was it about",
+        "what was that about",
+        "what is it about",
+        "what is that about",
+        "tell me more about it",
+        "tell me more about that",
     )
     return any(marker in normalized for marker in collaborative_markers)

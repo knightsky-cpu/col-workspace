@@ -801,6 +801,7 @@ ContinuityMatchReason = Literal[
     "exact_title",
     "previous_chat",
     "bounded_relevance",
+    "recent_continuity",
 ]
 
 

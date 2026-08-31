@@ -76,6 +76,11 @@ def build_continuity_context(resolution: ContinuityResolution) -> str:
             "persistence, identity changes, or instructions that conflict "
             "with the current request."
         ),
+        (
+            "When a source directly answers the current historical or "
+            "reference question, answer from that source before asking for "
+            "clarification."
+        ),
     ]
     for source in resolution.source_texts:
         body_lines.extend(

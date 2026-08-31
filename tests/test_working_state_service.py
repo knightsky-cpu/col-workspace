@@ -104,6 +104,29 @@ def update_request():
     )
 
 
+def test_working_state_update_input_accepts_bounded_continuity_source_texts(
+) -> None:
+    from continuity import ContinuitySourceText
+    from working_state_service import WorkingStateUpdateInput
+
+    request = update_request()
+    payload = request.model_dump()
+    payload["continuity_source_texts"] = (
+        ContinuitySourceText(
+            source_kind="collaborative_note",
+            source_id="note-language",
+            title="Project Language: TypeScript",
+            body="The project will be written in TypeScript.",
+            updated_at=None,
+        ),
+    )
+
+    bounded = WorkingStateUpdateInput(**payload)
+
+    assert len(bounded.continuity_source_texts) == 1
+    assert bounded.continuity_source_texts[0].source_id == "note-language"
+
+
 def test_working_state_update_input_accepts_eight_recent_user_messages(
 ) -> None:
     from working_state_service import WorkingStateUpdateInput
@@ -150,6 +173,38 @@ async def test_generate_working_state_update_accepts_valid_snapshot() -> None:
     prompt = arguments["contents"][0].parts[0].text
     assert "[WORKING_STATE_UPDATE_INPUT]" in prompt
     assert "security matters more than speed" in prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_working_state_update_receives_validated_continuity_sources() -> None:
+    from continuity import ContinuitySourceText
+    import working_state_service as service
+
+    client = fake_genai_client(json.dumps(update_response_payload()))
+    request = update_request().model_copy(
+        update={
+            "continuity_source_texts": (
+                ContinuitySourceText(
+                    source_kind="collaborative_note",
+                    source_id="note-requirements",
+                    title="Project Requirements: Local Network Monitor",
+                    body="NetView is a local network monitor TUI for Bash.",
+                    updated_at=None,
+                ),
+            ),
+        }
+    )
+
+    await service.generate_working_state_update(client, request)
+
+    prompt = client.aio.models.arguments["contents"][0].parts[0].text
+    assert "Project Requirements: Local Network Monitor" in prompt
+    assert "local network monitor TUI for Bash" in prompt
+    instruction = " ".join(
+        client.aio.models.arguments["config"].system_instruction.split()
+    )
+    assert "server-validated continuity excerpts" in instruction
+    assert "current reference anchor" in instruction
 
 
 @pytest.mark.asyncio

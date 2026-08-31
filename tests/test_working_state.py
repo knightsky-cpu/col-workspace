@@ -98,6 +98,8 @@ def test_working_state_enforces_bounded_fields():
         ),
         ("What detail would change the recommendation the most?", None, True),
         ("Which choice matters most for this architecture?", None, True),
+        ("What was it about?", None, True),
+        ("did we pick a language to write it in already?", None, True),
         ("thanks", "direct", False),
     ),
 )

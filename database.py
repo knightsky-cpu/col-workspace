@@ -5327,6 +5327,72 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("get_chat_history", exc)
 
+    async def list_recent_session_continuity_receipts(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        limit: int,
+    ) -> tuple[ContinuitySourceReceipt, ...]:
+        """Return recent server-validated continuity receipts for a session."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_string(session_id, "session_id")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 20
+        ):
+            raise ValueError("limit must be an integer between 1 and 20.")
+
+        try:
+            session_ref = self._client.collection("sessions").document(
+                session_id
+            )
+            session_snapshot = await session_ref.get()
+            if not session_snapshot.exists:
+                return ()
+            self._validate_chat_session_owner(
+                session_snapshot.to_dict(),
+                user_id=user_id,
+                project_id=project_id,
+            )
+            query = (
+                session_ref.collection("turns")
+                .order_by(
+                    "completed_at",
+                    direction=firestore.Query.DESCENDING,
+                )
+                .limit(limit)
+            )
+            receipts: list[ContinuitySourceReceipt] = []
+            async for snapshot in query.stream():
+                data = snapshot.to_dict()
+                if not isinstance(data, Mapping):
+                    raise ValueError("Stored chat turn state is invalid.")
+                if data.get("status") != "completed":
+                    continue
+                raw_receipts = data.get("continuity_receipts", [])
+                if not isinstance(raw_receipts, list):
+                    raise ValueError("Stored continuity receipts are invalid.")
+                for raw_receipt in raw_receipts:
+                    receipts.append(
+                        ContinuitySourceReceipt.model_validate(raw_receipt)
+                    )
+                    if len(receipts) >= limit:
+                        return tuple(receipts)
+            return tuple(receipts)
+        except (ChatSessionOwnershipError, ChatTurnStateError):
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ValueError("Stored continuity receipts are invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error(
+                "list_recent_session_continuity_receipts",
+                exc,
+            )
+
     async def get_working_state(
         self,
         *,

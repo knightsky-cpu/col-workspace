@@ -110,6 +110,11 @@ def snapshot(
     return SimpleNamespace(exists=exists, to_dict=lambda: data)
 
 
+async def snapshot_stream_from(items: list[dict[str, object]]):
+    for item in items:
+        yield SimpleNamespace(to_dict=lambda item=item: item)
+
+
 def working_state_store(
     *,
     session_exists: bool = True,
@@ -2235,6 +2240,95 @@ async def test_completed_chat_turn_replay_preserves_continuity_receipts_and_choi
         ContinuityChoice.model_validate(continuity_choice_document())
     ]
     store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_recent_session_continuity_receipts_returns_completed_turn_receipts() -> None:
+    client = MagicMock()
+    sessions = MagicMock()
+    session = MagicMock()
+    turns = MagicMock()
+    query = MagicMock()
+    client.collection.return_value = sessions
+    sessions.document.return_value = session
+    session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"project_id": "agent-col", "user_id": "user-1"},
+        )
+    )
+    session.collection.return_value = turns
+    turns.order_by.return_value = query
+    query.limit.return_value = query
+    completed_with_receipt = turn_document(
+        derive_chat_turn_ids("request-1"),
+        status="completed",
+    )
+    completed_with_receipt["continuity_receipts"] = [
+        continuity_receipt_document()
+    ]
+    completed_without_receipt = turn_document(
+        derive_chat_turn_ids("request-2"),
+        status="completed",
+    )
+    in_progress_with_receipt = turn_document(derive_chat_turn_ids("request-3"))
+    in_progress_with_receipt["continuity_receipts"] = [
+        {
+            **continuity_receipt_document(),
+            "source_id": "note-in-progress",
+        }
+    ]
+    query.stream.return_value = snapshot_stream_from(
+        [
+            completed_with_receipt,
+            completed_without_receipt,
+            in_progress_with_receipt,
+        ]
+    )
+
+    receipts = await MemoryEngine(
+        client
+    ).list_recent_session_continuity_receipts(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+        limit=5,
+    )
+
+    assert receipts == (
+        ContinuitySourceReceipt.model_validate(continuity_receipt_document()),
+    )
+    session.collection.assert_called_once_with("turns")
+    turns.order_by.assert_called_once_with(
+        "completed_at",
+        direction=firestore.Query.DESCENDING,
+    )
+    query.limit.assert_called_once_with(5)
+
+
+@pytest.mark.asyncio
+async def test_list_recent_session_continuity_receipts_rejects_session_ownership_mismatch() -> None:
+    client = MagicMock()
+    sessions = MagicMock()
+    session = MagicMock()
+    client.collection.return_value = sessions
+    sessions.document.return_value = session
+    session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"project_id": "other-project", "user_id": "user-1"},
+        )
+    )
+
+    with pytest.raises(ChatSessionOwnershipError):
+        await MemoryEngine(client).list_recent_session_continuity_receipts(
+            user_id="user-1",
+            project_id="agent-col",
+            session_id="session-1",
+            limit=5,
+        )
+
+    session.collection.assert_not_called()
 
 
 @pytest.mark.asyncio

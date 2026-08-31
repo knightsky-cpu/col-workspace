@@ -71,7 +71,7 @@ from chat_turns import (
     ChatTurnStateError,
 )
 from continuity import ContinuityResolution, ContinuitySourceText
-from continuity_service import ContinuityResolutionCommand
+from continuity_service import ContinuityResolutionCommand, ContinuityService
 from database import (
     ArtifactCursorNotFoundError,
     ArtifactNotFoundError,
@@ -6246,6 +6246,406 @@ async def test_chat_resolves_continuity_note_before_turn_service(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    (
+        "what was the name of the project we are working on together",
+        "what was the name of the project we are working on again",
+    ),
+)
+async def test_chat_stream_injects_real_resolver_note_context_for_natural_project_name_request(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    message: str,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    note = CollaborativeNote.model_validate(
+        {
+            **collaborative_note_payload(),
+            "note_id": "note-netview",
+            "owner_user_id": "user-1",
+            "workspace_id": "project-1",
+            "note_kind": "working_context",
+            "title": "Project Name: NetView",
+            "body": "The project name is NetView.",
+            "status": "active",
+            "revision": 1,
+        }
+    )
+
+    class Store:
+        def __init__(self) -> None:
+            self.note_calls: list[tuple[str, str, int]] = []
+            self.chat_calls: list[tuple[str, str, int]] = []
+
+        async def list_active_collaborative_notes_for_continuity(
+            self,
+            *,
+            user_id: str,
+            workspace_id: str,
+            limit: int,
+        ) -> tuple[CollaborativeNote, ...]:
+            self.note_calls.append((user_id, workspace_id, limit))
+            return (note,)
+
+        async def list_chat_sessions(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            limit: int,
+        ) -> ChatSessionListResponse:
+            self.chat_calls.append((user_id, project_id, limit))
+            return ChatSessionListResponse(sessions=[])
+
+        async def get_chat_session_detail(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+            observed_at: datetime,
+        ) -> ChatSessionDetailResponse:
+            raise AssertionError("resolved note should not read chat session detail")
+
+    store = Store()
+    main.app.state.continuity_service = ContinuityService(store=store)
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": message,
+        },
+    )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    final = events[-1][1]
+    assert final["continuity_receipts"][0]["source_kind"] == "collaborative_note"
+    assert final["continuity_receipts"][0]["source_id"] == "note-netview"
+    turn_command = service_state.turn_service.calls[0]
+    continuity_context = "\n".join(
+        part.text
+        for content in turn_command.model_input_context
+        for part in content.parts or ()
+        if part.text
+    )
+    assert "[SERVER_VALIDATED_CONTINUITY_CONTEXT]" in continuity_context
+    assert "Project Name: NetView" in continuity_context
+    assert "The project name is NetView." in continuity_context
+    assert store.note_calls == [("user-1", "project-1", 50)]
+    assert store.chat_calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_injects_recent_continuity_note_anchor_for_anaphoric_follow_up(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    note = CollaborativeNote.model_validate(
+        {
+            **collaborative_note_payload(),
+            "note_id": "note-netview",
+            "owner_user_id": "user-1",
+            "workspace_id": "project-1",
+            "note_kind": "working_context",
+            "title": "Project Name: NetView",
+            "body": "NetView is a local network monitor TUI for Bash.",
+            "status": "active",
+            "revision": 1,
+        }
+    )
+    receipt = ContinuitySourceReceipt(
+        receipt_id="continuity--note-netview--rev-1",
+        source_kind="collaborative_note",
+        source_id="note-netview",
+        display_label="Used note: Project Name: NetView",
+        match_reason="bounded_relevance",
+        source_updated_at=MEMORY_NOW,
+    )
+
+    class Store:
+        def __init__(self) -> None:
+            self.note_calls: list[tuple[str, str, int]] = []
+            self.receipt_calls: list[tuple[str, str, str, int]] = []
+            self.chat_calls: list[tuple[str, str, int]] = []
+
+        async def list_recent_session_continuity_receipts(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+        ) -> tuple[ContinuitySourceReceipt, ...]:
+            self.receipt_calls.append(
+                (user_id, project_id, session_id, limit)
+            )
+            return (receipt,)
+
+        async def list_active_collaborative_notes_for_continuity(
+            self,
+            *,
+            user_id: str,
+            workspace_id: str,
+            limit: int,
+        ) -> tuple[CollaborativeNote, ...]:
+            self.note_calls.append((user_id, workspace_id, limit))
+            return (note,)
+
+        async def list_chat_sessions(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            limit: int,
+        ) -> ChatSessionListResponse:
+            self.chat_calls.append((user_id, project_id, limit))
+            return ChatSessionListResponse(sessions=[])
+
+        async def get_chat_session_detail(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+            observed_at: datetime,
+        ) -> ChatSessionDetailResponse:
+            raise AssertionError("resolved note should not read chat detail")
+
+    store = Store()
+    main.app.state.continuity_service = ContinuityService(store=store)
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "what was it about",
+        },
+    )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    final = events[-1][1]
+    assert final["continuity_receipts"][0]["source_kind"] == (
+        "collaborative_note"
+    )
+    assert final["continuity_receipts"][0]["source_id"] == "note-netview"
+    assert final["continuity_receipts"][0]["match_reason"] == (
+        "recent_continuity"
+    )
+    turn_command = service_state.turn_service.calls[0]
+    continuity_context = "\n".join(
+        part.text
+        for content in turn_command.model_input_context
+        for part in content.parts or ()
+        if part.text
+    )
+    assert "[SERVER_VALIDATED_CONTINUITY_CONTEXT]" in continuity_context
+    assert (
+        "When a source directly answers the current historical or reference "
+        "question, answer from that source before asking for clarification."
+    ) in continuity_context
+    assert "Project Name: NetView" in continuity_context
+    assert "local network monitor TUI for Bash" in continuity_context
+    assert service_state.database.working_state_calls == [
+        ("user-1", "project-1", "session-1")
+    ]
+    assert store.receipt_calls == [("user-1", "project-1", "session-1", 5)]
+    assert store.note_calls == [("user-1", "project-1", 50)]
+    assert store.chat_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "uses_recent_anchor"),
+    (
+        ("what was it going to be written in?", True),
+        ("did we pick a language to write it in already?", True),
+        ("what language did i want to write it in?", False),
+    ),
+)
+async def test_chat_stream_resolves_related_language_note_and_updates_working_state(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    message: str,
+    uses_recent_anchor: bool,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    previous_state = make_working_state_snapshot()
+    service_state.database.working_state = previous_state
+    name_note = CollaborativeNote.model_validate(
+        {
+            **collaborative_note_payload(),
+            "note_id": "note-netview",
+            "owner_user_id": "user-1",
+            "workspace_id": "project-1",
+            "note_kind": "working_context",
+            "title": "Project Name: NetView",
+            "body": "The project name is NetView.",
+            "status": "active",
+            "revision": 1,
+        }
+    )
+    language_note = CollaborativeNote.model_validate(
+        {
+            **collaborative_note_payload(),
+            "note_id": "note-language",
+            "owner_user_id": "user-1",
+            "workspace_id": "project-1",
+            "note_kind": "requirement",
+            "title": "Project Language: TypeScript",
+            "body": "The project will be written in TypeScript.",
+            "status": "active",
+            "revision": 1,
+        }
+    )
+    receipt = ContinuitySourceReceipt(
+        receipt_id="continuity--note-netview--rev-1",
+        source_kind="collaborative_note",
+        source_id="note-netview",
+        display_label="Used note: Project Name: NetView",
+        match_reason="bounded_relevance",
+        source_updated_at=MEMORY_NOW,
+    )
+
+    class Store:
+        def __init__(self) -> None:
+            self.note_calls: list[tuple[str, str, int]] = []
+            self.receipt_calls: list[tuple[str, str, str, int]] = []
+            self.chat_calls: list[tuple[str, str, int]] = []
+
+        async def list_recent_session_continuity_receipts(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+        ) -> tuple[ContinuitySourceReceipt, ...]:
+            self.receipt_calls.append(
+                (user_id, project_id, session_id, limit)
+            )
+            return (receipt,)
+
+        async def list_active_collaborative_notes_for_continuity(
+            self,
+            *,
+            user_id: str,
+            workspace_id: str,
+            limit: int,
+        ) -> tuple[CollaborativeNote, ...]:
+            self.note_calls.append((user_id, workspace_id, limit))
+            return (name_note, language_note)
+
+        async def list_chat_sessions(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            limit: int,
+        ) -> ChatSessionListResponse:
+            self.chat_calls.append((user_id, project_id, limit))
+            return ChatSessionListResponse(sessions=[])
+
+        async def get_chat_session_detail(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+            observed_at: datetime,
+        ) -> ChatSessionDetailResponse:
+            raise AssertionError("resolved note should not read chat detail")
+
+    store = Store()
+    main.app.state.continuity_service = ContinuityService(store=store)
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": message,
+        },
+    )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    final = events[-1][1]
+    assert final["continuity_receipts"][0]["source_id"] == "note-language"
+    turn_command = service_state.turn_service.calls[0]
+    continuity_context = "\n".join(
+        part.text
+        for content in turn_command.model_input_context
+        for part in content.parts or ()
+        if part.text
+    )
+    assert "Project Language: TypeScript" in continuity_context
+    assert "The project will be written in TypeScript." in continuity_context
+    assert turn_command.working_state_context is not None
+    assert len(service_state.working_state_service.calls) == 1
+    update_command = service_state.working_state_service.calls[0]
+    assert update_command.previous_state == previous_state
+    assert update_command.continuity_source_texts[0].source_id == (
+        "note-language"
+    )
+    assert store.receipt_calls == (
+        [("user-1", "project-1", "session-1", 5)]
+        if uses_recent_anchor
+        else []
+    )
+    assert store.note_calls == [("user-1", "project-1", 50)]
+    assert store.chat_calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_consults_existing_working_state_on_plain_follow_up_without_update(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.working_state = make_working_state_snapshot(
+        current_goal="Keep discussing NetView project details.",
+        next_step_hypothesis="Use the recent NetView context when the user says it.",
+    )
+
+    response = await client.post(
+        "/api/chat",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "thanks",
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.database.working_state_calls == [
+        ("user-1", "project-1", "session-1")
+    ]
+    turn_command = service_state.turn_service.calls[0]
+    assert turn_command.working_state_context is not None
+    assert "Keep discussing NetView project details." in (
+        turn_command.working_state_context
+    )
+    assert service_state.working_state_service.calls == []
+    assert service_state.database.working_state_save_calls == []
+
+
+@pytest.mark.asyncio
 async def test_chat_returns_continuity_choices_without_model_context(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -6762,6 +7162,7 @@ async def test_chat_builds_turn_command_and_persists_both_messages(
     assert service_state.events[2:] == [
         ("save", "session-1", "user", "New question"),
         ("continuity_service",),
+        ("working_state", "session-1"),
         ("turn_service",),
         ("save", "session-1", "model", "Generated answer"),
     ]
@@ -7737,6 +8138,7 @@ async def test_chat_completes_claimed_turn_without_duplicate_message_writes(
     }
     assert service_state.events[3:] == [
         ("continuity_service",),
+        ("working_state", "session-1"),
         ("renew_chat_turn_lease",),
         ("turn_service",),
         ("preference_learning",),

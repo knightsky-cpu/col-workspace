@@ -28,57 +28,200 @@ CONTINUITY_TERM_EXPANSION_MODEL = "gemini-3.6-flash"
 CONTINUITY_TERM_EXPANSION_TIMEOUT_SECONDS = 8.0
 CHAT_SESSION_SEARCH_LIMIT = 20
 CHAT_SESSION_DETAIL_LIMIT = 40
+RECENT_CONTINUITY_RECEIPT_LIMIT = 5
 
 
 _PRIOR_REFERENCE_RE = re.compile(
-    r"\b(previous|prior|earlier|last|before|decided|agreed|note|notes|"
+    r"\b(previous|prior|earlier|last|before|decide|decided|agreed|note|notes|"
     r"requirement|requirements|constraint|constraints|task|workspace|"
-    r"recent|recently|talk|talked|spoke|discuss|discussed)\b",
+    r"recent|recently|talk|talked|spoke|discuss|discussed|settled|"
+    r"wanted|remind|leave|left|again|remember|recall)\b",
     re.IGNORECASE,
 )
-_CHAT_REFERENCE_RE = re.compile(
+_QUESTION_SHAPE_RE = re.compile(
+    r"\b(what|which|where|who|when|how)\s+"
+    r"(?:[a-z0-9]+\s+){0,4}(was|were|is|are|did|do|does|had|have)\b",
+    re.IGNORECASE,
+)
+_CONTINUITY_PROMPT_RE = re.compile(
+    r"\b(what|which|where|who|when|how|do|did|does|have|had|remind|recall|"
+    r"remember|tell)\b",
+    re.IGNORECASE,
+)
+_PERSONAL_REFERENCE_RE = re.compile(
+    r"\b(i|me|my|we|our|us|you|your|together)\b",
+    re.IGNORECASE,
+)
+_VAGUE_REFERENCE_RE = re.compile(
+    r"\b(it|that|this|they|those|one|thing|stuff|idea|plan|project|app|"
+    r"application|work|context)\b",
+    re.IGNORECASE,
+)
+_PAST_CONTEXT_RE = re.compile(
+    r"\b(was|were|did|had|already|again|before|earlier|previous|prior|last|"
+    r"recent|recently|back|settled|decided|agreed|picked|chose|selected|"
+    r"mentioned|talked|discussed|said|wanted|needed|leave|left)\b",
+    re.IGNORECASE,
+)
+_CONTINUITY_ACTION_RE = re.compile(
+    r"\b(want|wanted|need|needed|say|said|mention|mentioned|talk|talked|"
+    r"discuss|discussed|pick|picked|choose|chose|chosen|select|selected|"
+    r"decide|decided|agree|agreed|settle|settled|name|named|called|call|"
+    r"write|written|writing|build|built|building|use|using|going|thinking|"
+    r"supposed|should|leave|left|doing|working)\b",
+    re.IGNORECASE,
+)
+_COLLABORATIVE_DECISION_QUESTION_RE = re.compile(
+    r"\b(?:did|do|does|have|had)\s+(?:we|i|you)\b.*\b(?:"
+    r"pick|picked|choose|chose|chosen|select|selected|settle|settled|"
+    r"decide|decided|agree|agreed|already"
+    r")\b",
+    re.IGNORECASE,
+)
+_COLLABORATIVE_REFERENCE_RE = re.compile(
+    r"\b(we|our|us|together)\b",
+    re.IGNORECASE,
+)
+_CONTEXT_TOPIC_RE = re.compile(
+    r"\b(name|named|called|title|project|app|application|requirement|"
+    r"requirements|constraint|constraints|task|decision|decide|decided|"
+    r"agree|agreed|pick|picked|choose|chose|chosen|select|selected|"
+    r"wanted|want|said|say|working|doing|leave|left|language|write|writing|"
+    r"written|build|building|built|implemented|programming|stack|framework|"
+    r"platform|runtime|tool|library|goal|scope|purpose|about|needed|need|"
+    r"should|supposed|using|use)\b",
+    re.IGNORECASE,
+)
+_ANAPHORIC_FOLLOW_UP_RE = re.compile(
     r"\b("
-    r"last|previous|prior|earlier|recent|recently|"
-    r"chat|session|conversation|"
-    r"talk|talked|spoke|discuss|discussed"
+    r"what\s+(?:was|is)\s+(?:it|that|this)\s+about|"
+    r"what\s+(?:was|is)\s+(?:it|that|this)\s+going\s+to\s+be\s+written\s+in|"
+    r"what\s+language\s+(?:was|is)\s+(?:it|that|this)\b|"
+    r"what\s+(?:tech\s+stack|stack|framework)\s+(?:was|is)\s+(?:it|that|this)\b|"
+    r"tell\s+me\s+more\s+about\s+(?:it|that|this)|"
+    r"what\s+(?:did|does)\s+(?:it|that|this)\s+(?:mean|refer\s+to)|"
+    r"what\s+else\s+about\s+(?:it|that|this)"
     r")\b",
     re.IGNORECASE,
 )
 _WORD_RE = re.compile(r"[a-z0-9]+")
+_TOKEN_CONCEPTS = {
+    "app": "project",
+    "application": "project",
+    "build": "implementation",
+    "building": "implementation",
+    "built": "implementation",
+    "call": "name",
+    "called": "name",
+    "choose": "decide",
+    "chosen": "decide",
+    "chose": "decide",
+    "decided": "decide",
+    "decision": "decide",
+    "finalized": "decide",
+    "framework": "language",
+    "frameworks": "language",
+    "implemented": "implementation",
+    "library": "language",
+    "libraries": "language",
+    "need": "requirement",
+    "needed": "requirement",
+    "named": "name",
+    "naming": "name",
+    "pick": "decide",
+    "picked": "decide",
+    "platform": "language",
+    "platforms": "language",
+    "programming": "language",
+    "purpose": "purpose",
+    "required": "requirement",
+    "require": "requirement",
+    "requirements": "requirement",
+    "selected": "decide",
+    "settle": "decide",
+    "settled": "decide",
+    "stack": "language",
+    "supposed": "requirement",
+    "tech": "language",
+    "thing": "project",
+    "tool": "language",
+    "tools": "language",
+    "title": "name",
+    "runtime": "language",
+    "runtimes": "language",
+    "write": "language",
+    "written": "language",
+    "writing": "language",
+}
+_CONTEXT_FACET_CONCEPTS = frozenset(
+    {
+        "constraint",
+        "decide",
+        "description",
+        "goal",
+        "implementation",
+        "language",
+        "name",
+        "purpose",
+        "requirement",
+        "scope",
+        "task",
+    }
+)
 _STOP_WORDS = frozenset(
     {
         "a",
         "an",
         "and",
+        "again",
         "are",
         "as",
         "about",
         "chat",
+        "col",
         "conversation",
         "did",
+        "do",
         "discuss",
         "discussed",
         "for",
+        "hey",
+        "i",
         "in",
+        "is",
+        "it",
         "last",
+        "left",
+        "me",
+        "my",
         "of",
+        "off",
         "on",
         "or",
         "prior",
         "recent",
         "recently",
+        "recall",
+        "remind",
+        "remember",
         "session",
         "spoke",
         "talk",
         "talked",
+        "that",
         "the",
+        "this",
         "to",
         "use",
         "was",
         "we",
         "were",
+        "where",
         "what",
         "with",
+        "working",
+        "you",
+        "your",
     }
 )
 
@@ -91,6 +234,15 @@ class ContinuityStore(Protocol):
         workspace_id: str,
         limit: int,
     ) -> tuple[CollaborativeNote, ...]: ...
+
+    async def list_recent_session_continuity_receipts(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        limit: int,
+    ) -> tuple[ContinuitySourceReceipt, ...]: ...
 
     async def list_chat_sessions(
         self,
@@ -200,16 +352,96 @@ class ContinuityService:
         self,
         command: ContinuityResolutionCommand,
     ) -> ContinuityResolution:
-        if command.selection is None and not _should_resolve(command.message):
+        should_resolve = _should_resolve(command.message)
+        is_anaphoric_follow_up = _is_anaphoric_follow_up(command.message)
+        if (
+            command.selection is None
+            and not should_resolve
+            and not is_anaphoric_follow_up
+        ):
             return ContinuityResolution(status="none")
         if command.selection is not None:
             if command.selection.source_kind == "chat_session":
                 return await self._resolve_selected_chat(command)
             return await self._resolve_selected_note(command)
-        if _should_resolve_chat(command.message):
-            chat_resolution = await self._resolve_prior_chat(command)
-            if chat_resolution.status != "none":
-                return chat_resolution
+        if is_anaphoric_follow_up:
+            recent_resolution = await self._resolve_recent_continuity_anchor(
+                command
+            )
+            if recent_resolution.status != "none":
+                return recent_resolution
+            if not should_resolve:
+                return ContinuityResolution(status="none")
+        note_resolution = await self._resolve_active_notes(command)
+        if note_resolution.status != "none":
+            return note_resolution
+        return await self._resolve_prior_chat(command)
+
+    async def _resolve_recent_continuity_anchor(
+        self,
+        command: ContinuityResolutionCommand,
+    ) -> ContinuityResolution:
+        receipts = await self._store.list_recent_session_continuity_receipts(
+            user_id=command.user_id,
+            project_id=command.workspace_id,
+            session_id=command.session_id,
+            limit=RECENT_CONTINUITY_RECEIPT_LIMIT,
+        )
+        if not receipts:
+            return ContinuityResolution(status="none")
+
+        active_notes: tuple[CollaborativeNote, ...] | None = None
+        for receipt in receipts:
+            if receipt.source_kind == "collaborative_note":
+                if active_notes is None:
+                    notes = (
+                        await self._store.list_active_collaborative_notes_for_continuity(
+                            user_id=command.user_id,
+                            workspace_id=command.workspace_id,
+                            limit=50,
+                        )
+                    )
+                    active_notes = tuple(
+                        note for note in notes if note.status == "active"
+                    )
+                note = next(
+                    (
+                        note
+                        for note in active_notes
+                        if note.note_id == receipt.source_id
+                    ),
+                    None,
+                )
+                if note is not None:
+                    related_resolution = _resolve_related_note_from_anchor(
+                        active_notes,
+                        note,
+                        command.message,
+                    )
+                    if related_resolution.status != "none":
+                        return related_resolution
+                    return _resolved_note(note, "recent_continuity")
+            elif receipt.source_kind == "chat_session":
+                detail = await self._store.get_chat_session_detail(
+                    user_id=command.user_id,
+                    project_id=command.workspace_id,
+                    session_id=receipt.source_id,
+                    limit=CHAT_SESSION_DETAIL_LIMIT,
+                    observed_at=datetime.now(UTC),
+                )
+                if detail.session_id != command.session_id and detail.messages:
+                    summary = _summary_from_detail(detail)
+                    return _resolved_chat_session(
+                        summary,
+                        detail,
+                        "recent_continuity",
+                    )
+        return ContinuityResolution(status="none")
+
+    async def _resolve_active_notes(
+        self,
+        command: ContinuityResolutionCommand,
+    ) -> ContinuityResolution:
         notes = await self._store.list_active_collaborative_notes_for_continuity(
             user_id=command.user_id,
             workspace_id=command.workspace_id,
@@ -227,15 +459,23 @@ class ContinuityService:
         if len(exact_matches) > 1:
             return _ambiguous_notes(exact_matches[:5])
 
-        candidates = tuple(
-            note
-            for note in active_notes
-            if _note_matches_message_tokens(note, command.message)
+        scored_candidates = _score_note_matches(
+            active_notes,
+            command.message,
+            allow_single_facet_match=_has_historical_reference_intent(
+                command.message
+            ),
         )
-        if len(candidates) == 1:
-            return _resolved_note(candidates[0], "bounded_relevance")
-        if len(candidates) > 1:
-            return _ambiguous_notes(candidates[:5])
+        if len(scored_candidates) == 1:
+            return _resolved_note(scored_candidates[0][1], "bounded_relevance")
+        if len(scored_candidates) > 1:
+            top_score = scored_candidates[0][0]
+            top_notes = tuple(
+                note for score, note in scored_candidates if score == top_score
+            )
+            if len(top_notes) == 1:
+                return _resolved_note(top_notes[0], "bounded_relevance")
+            return _ambiguous_notes(top_notes[:5])
         return ContinuityResolution(status="none")
 
     async def _resolve_selected_note(
@@ -351,11 +591,83 @@ class ContinuityService:
 
 
 def _should_resolve(message: str) -> bool:
-    return bool(_PRIOR_REFERENCE_RE.search(message))
+    return bool(
+        _PRIOR_REFERENCE_RE.search(message)
+        or _has_historical_question_shape(message)
+        or _has_collaborative_decision_question_shape(message)
+        or _has_broad_continuity_intent(message)
+    )
 
 
-def _should_resolve_chat(message: str) -> bool:
-    return bool(_CHAT_REFERENCE_RE.search(message))
+def _is_anaphoric_follow_up(message: str) -> bool:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    return bool(
+        _ANAPHORIC_FOLLOW_UP_RE.search(normalized)
+        or _has_pronoun_facet_follow_up(normalized)
+    )
+
+
+def _has_pronoun_facet_follow_up(normalized_message: str) -> bool:
+    if not re.search(r"\b(it|that|this)\b", normalized_message):
+        return False
+    if not _has_collaborative_decision_question_shape(normalized_message):
+        return False
+    return bool(_follow_up_facet_concepts(normalized_message))
+
+
+def _has_historical_question_shape(message: str) -> bool:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    if not _QUESTION_SHAPE_RE.search(normalized):
+        return False
+    return bool(
+        _COLLABORATIVE_REFERENCE_RE.search(normalized)
+        and _CONTEXT_TOPIC_RE.search(normalized)
+    )
+
+
+def _has_collaborative_decision_question_shape(message: str) -> bool:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    if not _COLLABORATIVE_DECISION_QUESTION_RE.search(normalized):
+        return False
+    return bool(_CONTEXT_TOPIC_RE.search(normalized))
+
+
+def _has_broad_continuity_intent(message: str) -> bool:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    if not normalized or not _CONTINUITY_PROMPT_RE.search(normalized):
+        return False
+    if re.search(r"\b(what|which|how)\s+(?:is|are)\s+(?:a|an)\b", normalized):
+        return False
+    if re.search(r"\bwhat\s+do\s+you\s+call\s+(?:a|an)\b", normalized):
+        return False
+    has_topic = bool(_CONTEXT_TOPIC_RE.search(normalized))
+    has_reference = bool(_VAGUE_REFERENCE_RE.search(normalized))
+    has_personal = bool(_PERSONAL_REFERENCE_RE.search(normalized))
+    has_past = bool(_PAST_CONTEXT_RE.search(normalized))
+    has_action = bool(_CONTINUITY_ACTION_RE.search(normalized))
+    if re.search(r"\b(remind|recall|remember)\b", normalized) and (
+        has_topic or has_reference or has_personal
+    ):
+        return True
+    if has_topic and has_past and (has_reference or has_personal):
+        return True
+    if has_topic and has_action and (has_reference or has_personal):
+        return True
+    if has_reference and has_personal and has_action:
+        return True
+    if has_topic and re.search(r"\b(was|were|did|had|have)\b", normalized):
+        return True
+    return False
+
+
+def _has_historical_reference_intent(message: str) -> bool:
+    return bool(
+        _PRIOR_REFERENCE_RE.search(message)
+        or _has_historical_question_shape(message)
+        or _has_collaborative_decision_question_shape(message)
+        or _is_anaphoric_follow_up(message)
+        or _has_broad_continuity_intent(message)
+    )
 
 
 def _normalized_title(value: str) -> str:
@@ -372,6 +684,10 @@ def _tokens(value: str) -> tuple[str, ...]:
         for token in _WORD_RE.findall(value.casefold())
         if token not in _STOP_WORDS
     )
+
+
+def _concepts(value: str) -> set[str]:
+    return {_TOKEN_CONCEPTS.get(token, token) for token in _tokens(value)}
 
 
 def _sanitize_terms(terms: tuple[object, ...], *, maximum: int) -> tuple[str, ...]:
@@ -406,12 +722,165 @@ def _extract_chat_search_terms(message: str) -> tuple[str, ...]:
     return _sanitize_terms(_tokens(message), maximum=5)
 
 
-def _note_matches_message_tokens(note: CollaborativeNote, message: str) -> bool:
-    note_tokens = set(_tokens(note.title))
-    message_tokens = set(_tokens(message))
-    if not note_tokens or not message_tokens:
+def _note_matches_message_tokens(
+    note: CollaborativeNote,
+    message: str,
+    *,
+    allow_single_facet_match: bool = False,
+) -> bool:
+    note_concepts = _concepts(f"{note.title} {note.body}")
+    message_concepts = _concepts(message)
+    if not note_concepts or not message_concepts:
         return False
-    return len(note_tokens & message_tokens) >= min(2, len(note_tokens))
+    overlap = note_concepts & message_concepts
+    if "note" in _tokens(message) and overlap:
+        return True
+    if allow_single_facet_match and overlap & _CONTEXT_FACET_CONCEPTS:
+        return True
+    if _score_note_match(note, message, allow_single_facet_match) > 0:
+        return True
+    return len(overlap) >= min(2, len(note_concepts))
+
+
+def _score_note_matches(
+    notes: tuple[CollaborativeNote, ...],
+    message: str,
+    *,
+    allow_single_facet_match: bool,
+) -> tuple[tuple[int, CollaborativeNote], ...]:
+    scored = tuple(
+        (score, note)
+        for note in notes
+        if (
+            score := _score_note_match(
+                note,
+                message,
+                allow_single_facet_match,
+            )
+        )
+        > 0
+    )
+    return tuple(sorted(scored, key=lambda item: item[0], reverse=True))
+
+
+def _score_note_match(
+    note: CollaborativeNote,
+    message: str,
+    allow_single_facet_match: bool,
+) -> int:
+    note_concepts = _concepts(f"{note.title} {note.body}")
+    message_concepts = _concepts(message)
+    if not note_concepts:
+        return 0
+    overlap = note_concepts & message_concepts
+    requested_facets = _requested_facet_concepts(message)
+    requested_overlap = note_concepts & requested_facets
+    score = len(overlap) * 2
+    score += len(requested_overlap) * 5
+    if "note" in _tokens(message) and overlap:
+        score += 4
+    if "project" in note_concepts and _VAGUE_REFERENCE_RE.search(message):
+        score += 1
+    if allow_single_facet_match and requested_overlap:
+        return score
+    if len(overlap) >= min(2, len(note_concepts)):
+        return score
+    return 0
+
+
+def _resolve_related_note_from_anchor(
+    active_notes: tuple[CollaborativeNote, ...],
+    anchor_note: CollaborativeNote,
+    message: str,
+) -> ContinuityResolution:
+    facet_concepts = _follow_up_facet_concepts(message)
+    if not facet_concepts:
+        return ContinuityResolution(status="none")
+
+    anchor_concepts = _concepts(f"{anchor_note.title} {anchor_note.body}")
+    scored = []
+    for note in active_notes:
+        note_concepts = _concepts(f"{note.title} {note.body}")
+        if not note_concepts:
+            continue
+        facet_score = len(note_concepts & facet_concepts)
+        requested_title_score = _requested_title_facet_score(note, message)
+        requested_score = len(note_concepts & _requested_facet_concepts(message))
+        anchor_score = len(note_concepts & anchor_concepts)
+        if note.note_id == anchor_note.note_id:
+            continue
+        score = (
+            requested_title_score * 10
+            + requested_score * 4
+            + facet_score
+            + min(anchor_score, 1)
+        )
+        if score > 0 and facet_score > 0:
+            scored.append((score, note))
+    if not scored:
+        return ContinuityResolution(status="none")
+    top_score = max(score for score, _ in scored)
+    top_notes = tuple(note for score, note in scored if score == top_score)
+    if len(top_notes) == 1:
+        return _resolved_note(top_notes[0], "recent_continuity")
+    return _ambiguous_notes(top_notes[:5])
+
+
+def _follow_up_facet_concepts(message: str) -> set[str]:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    concepts = _concepts(normalized)
+    facets = _requested_facet_concepts(normalized)
+    return concepts | facets
+
+
+def _requested_title_facet_score(note: CollaborativeNote, message: str) -> int:
+    title_concepts = _concepts(note.title)
+    requested_facets = _requested_facet_concepts(message)
+    return len(title_concepts & requested_facets)
+
+
+def _requested_facet_concepts(message: str) -> set[str]:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    facets: set[str] = set()
+    if re.search(
+        r"\b(name|named|called|call|title)\b",
+        normalized,
+    ) or re.search(
+        r"\bwhat\s+(?:was|is)\s+(?:that|the)?\s*(?:project|app|application|"
+        r"thing)\b",
+        normalized,
+    ):
+        facets.update({"name"})
+    has_language_facet = bool(
+        re.search(
+            r"\b(language|written|programming|tech|stack|framework|build|built|"
+            r"building|write|writing|tool|tools|library|libraries|use|using)\b",
+            normalized,
+        )
+    )
+    has_contextual_left_off = bool(
+        re.search(r"\b(?:leave|left)\s+off\b", normalized)
+        and re.search(
+            r"\b(it|that|this|project|app|application|thing|plan|idea|work)\b",
+            normalized,
+        )
+    )
+    has_requirement_facet = bool(
+        has_contextual_left_off
+        or re.search(
+            r"\b(about|purpose|goal|scope|overview|description|needed|need|"
+            r"requirements?|constraints?|supposed|"
+            r"want(?:ed)?\b(?!.*\b(language|written|programming|tech|stack|"
+            r"framework|build|built|building|write|writing|tool|tools|library|"
+            r"libraries|use|using)\b)|should\s+(?:do|be|have|support))\b",
+            normalized,
+        )
+    )
+    if has_requirement_facet:
+        facets.update({"requirement", "purpose", "scope", "goal", "description"})
+    if has_language_facet:
+        facets.update({"language", "implementation"})
+    return facets
 
 
 def _receipt_for_note(

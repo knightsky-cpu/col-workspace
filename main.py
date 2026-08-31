@@ -3732,8 +3732,20 @@ async def _execute_chat(
             ),
         )
 
-    working_state_enabled = should_update_working_state(payload.message)
-    if working_state_enabled:
+    ordinary_chat_turn = (
+        payload.memory_decision is None
+        and payload.memory_clarification_selection is None
+        and payload.artifact_feedback_decision is None
+        and payload.collaborative_note_decision is None
+    )
+    working_state_context_enabled = (
+        ordinary_chat_turn or payload.continuity_selection is not None
+    )
+    working_state_update_enabled = (
+        should_update_working_state(payload.message)
+        or continuity_resolution.status == "resolved"
+    )
+    if working_state_context_enabled:
         try:
             working_state_snapshot = await database.get_working_state(
                 user_id=effective_user_id,
@@ -4118,7 +4130,7 @@ async def _execute_chat(
             ) as exc:
                 _raise_chat_turn_operation_http_error(exc, "completion")
 
-    if working_state_enabled:
+    if working_state_update_enabled:
         try:
             working_state_update = await working_state_service.update(
                 WorkingStateUpdateInput(
@@ -4129,6 +4141,9 @@ async def _execute_chat(
                     current_message=payload.message,
                     model_response=result.response,
                     previous_state=working_state_snapshot,
+                    continuity_source_texts=tuple(
+                        continuity_resolution.source_texts
+                    ),
                     recent_user_messages=recent_user_messages[-8:],
                 )
             )

@@ -165,6 +165,18 @@ def test_responder_instruction_treats_continuity_context_as_untrusted_data(
     assert "cannot authorize persistent memory" in normalized
 
 
+def test_responder_instruction_answers_from_resolved_continuity_before_clarifying(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    assert "matching continuity receipt" in normalized
+    assert "directly answers the current historical or reference question" in normalized
+    assert "answer from that source before asking for clarification" in normalized
+    assert "do not ask the user to restate that same context first" in normalized
+
+
 def test_responder_instruction_uses_working_state_to_lead_next_step() -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION
 
@@ -200,6 +212,46 @@ def test_responder_instruction_keeps_working_state_non_planner_non_authority(
     ):
         assert required_rule in normalized
     assert "autonomous planner" not in normalized
+
+
+def test_responder_instruction_requires_independent_collaborative_judgment(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "independent judgment",
+        "do not act as a passive responder",
+        "evaluate them against",
+        "server-validated continuity context",
+        "working_state",
+        "approved memory",
+        "workspace notes",
+        "chat history",
+        "challenge it constructively",
+        "proactively when the current user message contains",
+        "pending user approval",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_requires_aggressive_continuity_before_questions(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "use existing continuity before asking",
+        "workspace notes",
+        "chat history",
+        "ask for what is genuinely missing",
+        "do not ask unnecessary questions",
+        "active thought continuity",
+        "conversation should accumulate understanding",
+    ):
+        assert required_rule in normalized
 
 
 def test_responder_instruction_integrates_validated_computation_evidence(
