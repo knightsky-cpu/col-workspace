@@ -325,6 +325,16 @@ class ChatTurnNoteDecisionEffectResult:
     event: CollaborativeNoteEvent
 
 
+@dataclass(frozen=True, slots=True)
+class CompletedModelMessage:
+    """One completed canonical model message owned by a chat session."""
+
+    project_id: str
+    session_id: str
+    message_id: str
+    text: str
+
+
 class MemoryEngine:
     """Provide asynchronous persistence for chat messages and user profiles."""
 
@@ -1699,6 +1709,92 @@ class MemoryEngine:
             raise ValueError("Stored chat session detail is invalid.") from exc
         except GoogleAPIError as exc:
             self._raise_firestore_error("get_chat_session_detail", exc)
+
+    async def get_completed_model_message(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        message_id: str,
+    ) -> CompletedModelMessage:
+        """Return one owned completed model message for speech rendering."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_string(session_id, "session_id")
+        self._validate_string(message_id, "message_id")
+
+        try:
+            session_ref = self._client.collection("sessions").document(
+                session_id
+            )
+            session_snapshot = await session_ref.get()
+            if not session_snapshot.exists:
+                raise ChatSessionOwnershipError(
+                    "Speech message is unavailable."
+                )
+            self._validate_chat_session_owner(
+                session_snapshot.to_dict(),
+                user_id=user_id,
+                project_id=project_id,
+            )
+
+            message_ref = session_ref.collection("messages").document(
+                message_id
+            )
+            message_snapshot = await message_ref.get()
+            message_data = message_snapshot.to_dict()
+            if (
+                not message_snapshot.exists
+                or not isinstance(message_data, Mapping)
+            ):
+                raise ChatSessionOwnershipError(
+                    "Speech message is unavailable."
+                )
+            if message_data.get("role") != "model":
+                raise ChatTurnStateError(
+                    "Speech requires a completed model message."
+                )
+            if (
+                not isinstance(message_data.get("text"), str)
+                or not self._is_aware_datetime(
+                    message_data.get("timestamp")
+                )
+            ):
+                raise ChatTurnStateError(
+                    "Stored model message is invalid."
+                )
+
+            turn_id = self._turn_id_from_model_message_id(message_id)
+            if turn_id is None:
+                raise ChatTurnStateError(
+                    "Speech requires a completed model message."
+                )
+            turn_ref = session_ref.collection("turns").document(turn_id)
+            turn_snapshot = await turn_ref.get()
+            turn_data = turn_snapshot.to_dict()
+            if (
+                not turn_snapshot.exists
+                or not isinstance(turn_data, Mapping)
+                or turn_data.get("status") != "completed"
+                or turn_data.get("project_id") != project_id
+                or turn_data.get("user_id") != user_id
+                or turn_data.get("model_message_id") != message_id
+                or not self._is_aware_datetime(turn_data.get("completed_at"))
+            ):
+                raise ChatTurnStateError(
+                    "Speech requires a completed model message."
+                )
+            return CompletedModelMessage(
+                project_id=project_id,
+                session_id=session_id,
+                message_id=message_id,
+                text=message_data["text"],
+            )
+        except (ChatSessionOwnershipError, ChatTurnStateError):
+            raise
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("get_completed_model_message", exc)
 
     async def claim_chat_turn(
         self,
@@ -3369,6 +3465,13 @@ class MemoryEngine:
             raise ChatTurnConflictError(
                 "Idempotency key conflicts with a different chat request."
             )
+
+    @staticmethod
+    def _turn_id_from_model_message_id(message_id: str) -> str | None:
+        match = re.fullmatch(r"turn--([a-f0-9]{64})--model", message_id)
+        if match is None:
+            return None
+        return match.group(1)
 
     @staticmethod
     def _validate_chat_session_owner(
