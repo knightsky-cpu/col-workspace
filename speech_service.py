@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from collections.abc import Callable
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -9,6 +10,12 @@ from typing import Any
 DEFAULT_STT_LANGUAGE_CODES = ("en-US",)
 DEFAULT_STT_MODEL = "latest_short"
 DEFAULT_STT_LOCATION = "global"
+DEFAULT_TTS_LANGUAGE_CODE = "en-GB"
+DEFAULT_TTS_VOICE = "en-GB-Chirp3-HD-Kore"
+DEFAULT_TTS_SPEAKING_RATE = 1.0
+DEFAULT_TTS_AUDIO_CONTENT_TYPE = "audio/mpeg"
+TTS_PROVIDER_INPUT_BYTE_LIMIT = 5000
+TTS_CHUNK_BYTE_LIMIT = 4800
 SUPPORTED_AUDIO_CONTENT_TYPES = frozenset(
     {
         "audio/webm",
@@ -33,12 +40,44 @@ class UnsupportedAudioContentTypeError(ValueError):
     """Raised when an audio MIME type is outside the allowlist."""
 
 
+class SpeechSynthesisError(RuntimeError):
+    """Base error for speech synthesis failures."""
+
+
+class SpeechSynthesisConfigurationError(SpeechSynthesisError):
+    """Raised when speech synthesis is not configured."""
+
+
+class SpeechSynthesisProviderError(SpeechSynthesisError):
+    """Raised when the synthesis provider fails."""
+
+
+class SpeechSynthesisChunkError(ValueError):
+    """Raised when a requested speech chunk is invalid."""
+
+
 @dataclass(frozen=True)
 class SpeechTranscriptionConfig:
     project_id: str
     location: str
     language_codes: tuple[str, ...]
     model: str
+
+
+@dataclass(frozen=True)
+class SpeechSynthesisConfig:
+    language_code: str
+    voice_name: str
+    speaking_rate: float
+    audio_content_type: str
+
+
+@dataclass(frozen=True)
+class SpeechSynthesisResult:
+    audio: bytes
+    content_type: str
+    chunk_index: int
+    chunk_count: int
 
 
 def normalize_audio_content_type(content_type: str | None) -> str:
@@ -83,6 +122,87 @@ def load_speech_transcription_config(
         ),
         model=model or DEFAULT_STT_MODEL,
     )
+
+
+def load_speech_synthesis_config(
+    source: Mapping[str, str] = os.environ,
+) -> SpeechSynthesisConfig:
+    del source
+    return SpeechSynthesisConfig(
+        language_code=DEFAULT_TTS_LANGUAGE_CODE,
+        voice_name=DEFAULT_TTS_VOICE,
+        speaking_rate=DEFAULT_TTS_SPEAKING_RATE,
+        audio_content_type=DEFAULT_TTS_AUDIO_CONTENT_TYPE,
+    )
+
+
+def chunk_text_for_speech(
+    text: str,
+    *,
+    max_bytes: int = TTS_CHUNK_BYTE_LIMIT,
+) -> tuple[str, ...]:
+    if max_bytes < 1 or max_bytes > TTS_PROVIDER_INPUT_BYTE_LIMIT:
+        raise ValueError("max_bytes must fit the provider limit.")
+    if not text:
+        raise SpeechSynthesisChunkError("Speech text cannot be empty.")
+    chunks: list[str] = []
+    current = ""
+
+    def flush() -> None:
+        nonlocal current
+        if current:
+            chunks.append(current)
+            current = ""
+
+    def append_unit(unit: str) -> None:
+        nonlocal current
+        if not unit:
+            return
+        if len(unit.encode("utf-8")) > max_bytes:
+            flush()
+            chunks.extend(_split_text_by_utf8_limit(unit, max_bytes))
+            return
+        if current and len((current + unit).encode("utf-8")) > max_bytes:
+            flush()
+        current += unit
+
+    for paragraph in _split_after_boundary(text, r"\n\s*\n"):
+        if len(paragraph.encode("utf-8")) <= max_bytes:
+            append_unit(paragraph)
+            continue
+        for sentence in _split_after_boundary(paragraph, r"(?<=[.!?])\s+"):
+            append_unit(sentence)
+    flush()
+    return tuple(chunks)
+
+
+def _split_after_boundary(text: str, pattern: str) -> tuple[str, ...]:
+    units: list[str] = []
+    start = 0
+    for match in re.finditer(pattern, text):
+        end = match.end()
+        units.append(text[start:end])
+        start = end
+    if start < len(text):
+        units.append(text[start:])
+    return tuple(units) if units else (text,)
+
+
+def _split_text_by_utf8_limit(text: str, max_bytes: int) -> tuple[str, ...]:
+    chunks: list[str] = []
+    current = ""
+    current_bytes = 0
+    for character in text:
+        character_bytes = len(character.encode("utf-8"))
+        if current and current_bytes + character_bytes > max_bytes:
+            chunks.append(current)
+            current = ""
+            current_bytes = 0
+        current += character
+        current_bytes += character_bytes
+    if current:
+        chunks.append(current)
+    return tuple(chunks)
 
 
 class CloudSpeechTranscriptionService:
@@ -155,6 +275,92 @@ class CloudSpeechTranscriptionService:
                 "Speech transcription provider failed."
             ) from exc
         return _extract_transcript(response)
+
+
+class CloudTextToSpeechSynthesisService:
+    def __init__(
+        self,
+        *,
+        client_factory: Callable[[], object] | None = None,
+        texttospeech_module: object | None = None,
+        config_loader: Callable[[], SpeechSynthesisConfig] = (
+            load_speech_synthesis_config
+        ),
+        chunk_byte_limit: int = TTS_CHUNK_BYTE_LIMIT,
+    ) -> None:
+        self._client_factory = client_factory
+        self._texttospeech_module = texttospeech_module
+        self._config_loader = config_loader
+        self._chunk_byte_limit = chunk_byte_limit
+
+    async def synthesize(
+        self,
+        *,
+        text: str,
+        chunk_index: int,
+    ) -> SpeechSynthesisResult:
+        chunks = chunk_text_for_speech(
+            text,
+            max_bytes=self._chunk_byte_limit,
+        )
+        if chunk_index < 0 or chunk_index >= len(chunks):
+            raise SpeechSynthesisChunkError("Speech chunk is unavailable.")
+        return await asyncio.to_thread(
+            self._synthesize_sync,
+            chunks[chunk_index],
+            chunk_index,
+            len(chunks),
+        )
+
+    def _texttospeech(self) -> object:
+        if self._texttospeech_module is not None:
+            return self._texttospeech_module
+        from google.cloud import texttospeech
+
+        return texttospeech
+
+    def _client(self) -> object:
+        if self._client_factory is not None:
+            return self._client_factory()
+        texttospeech = self._texttospeech()
+        return texttospeech.TextToSpeechClient()
+
+    def _synthesize_sync(
+        self,
+        text: str,
+        chunk_index: int,
+        chunk_count: int,
+    ) -> SpeechSynthesisResult:
+        config = self._config_loader()
+        texttospeech = self._texttospeech()
+        client = self._client()
+        try:
+            response = client.synthesize_speech(
+                input=texttospeech.SynthesisInput(text=text),
+                voice=texttospeech.VoiceSelectionParams(
+                    language_code=config.language_code,
+                    name=config.voice_name,
+                ),
+                audio_config=texttospeech.AudioConfig(
+                    audio_encoding=texttospeech.AudioEncoding.MP3,
+                    speaking_rate=config.speaking_rate,
+                ),
+            )
+        except Exception as exc:
+            raise SpeechSynthesisProviderError(
+                "Speech synthesis provider failed."
+            ) from exc
+        audio_content = getattr(response, "audio_content", b"")
+        if not isinstance(audio_content, bytes) or not audio_content:
+            raise SpeechSynthesisProviderError(
+                "Speech synthesis provider returned no audio."
+            )
+        return SpeechSynthesisResult(
+            audio=audio_content,
+            content_type=config.audio_content_type,
+            chunk_index=chunk_index,
+            chunk_count=chunk_count,
+        )
 
 
 def _extract_transcript(response: Any) -> str:

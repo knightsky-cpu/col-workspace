@@ -93,6 +93,10 @@ from database import (
     WorkspaceDeletionConflictError,
     WorkspaceNotFoundError,
 )
+from speech_service import (
+    SpeechSynthesisChunkError,
+    SpeechSynthesisProviderError,
+)
 from memory_proposals import ProposalTurnLease
 from schemas import (
     AdaptationReceipt,
@@ -456,11 +460,16 @@ class FakeMemoryEngine:
         )
     )
     chat_session_error: Exception | None = None
+    completed_model_message_text: str = "Canonical persisted answer."
+    completed_model_message_error: Exception | None = None
     chat_session_list_calls: list[
         tuple[str, str, int]
     ] = field(default_factory=list)
     chat_session_detail_calls: list[
         tuple[str, str, str, int, datetime]
+    ] = field(default_factory=list)
+    completed_model_message_calls: list[
+        tuple[str, str, str, str]
     ] = field(default_factory=list)
     workspace_list_result: WorkspaceListResponse = field(
         default_factory=lambda: WorkspaceListResponse(workspaces=[])
@@ -620,6 +629,30 @@ class FakeMemoryEngine:
         if self.chat_session_error is not None:
             raise self.chat_session_error
         return self.chat_session_detail_result
+
+    async def get_completed_model_message(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        message_id: str,
+    ) -> object:
+        self.completed_model_message_calls.append(
+            (user_id, project_id, session_id, message_id)
+        )
+        self.events.append(
+            (
+                "completed_model_message",
+                user_id,
+                project_id,
+                session_id,
+                message_id,
+            )
+        )
+        if self.completed_model_message_error is not None:
+            raise self.completed_model_message_error
+        return SimpleNamespace(text=self.completed_model_message_text)
 
     async def list_workspaces(
         self,
@@ -838,6 +871,33 @@ class FakeSpeechTranscriptionService:
         if self.error is not None:
             raise self.error
         return self.transcript
+
+
+@dataclass
+class FakeSpeechSynthesisService:
+    events: list[tuple[Any, ...]]
+    audio: bytes = b"mp3 audio bytes"
+    content_type: str = "audio/mpeg"
+    chunk_count: int = 1
+    error: Exception | None = None
+    calls: list[dict[str, object]] = field(default_factory=list)
+
+    async def synthesize(
+        self,
+        *,
+        text: str,
+        chunk_index: int,
+    ) -> object:
+        self.calls.append({"text": text, "chunk_index": chunk_index})
+        self.events.append(("speech_synthesize", chunk_index))
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(
+            audio=self.audio,
+            content_type=self.content_type,
+            chunk_index=chunk_index,
+            chunk_count=self.chunk_count,
+        )
 
 
 @dataclass
@@ -1473,6 +1533,7 @@ class ServiceState:
     genai_client: FakeGenAIClient
     synthesis_service: FakeSynthesisApplicationService
     speech_transcription_service: FakeSpeechTranscriptionService
+    speech_synthesis_service: FakeSpeechSynthesisService
     source_service: FakeSourceExpertService
     research_service: object
     computation_service: object
@@ -1521,6 +1582,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
     synthesis_service = FakeSynthesisApplicationService(events, blueprint)
     speech_transcription_service = FakeSpeechTranscriptionService(events)
+    speech_synthesis_service = FakeSpeechSynthesisService(events)
     source_service = FakeSourceExpertService(client=genai_client)
     research_service = object()
     computation_service = object()
@@ -1766,6 +1828,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         genai_client=genai_client,
         synthesis_service=synthesis_service,
         speech_transcription_service=speech_transcription_service,
+        speech_synthesis_service=speech_synthesis_service,
         source_service=source_service,
         research_service=research_service,
         computation_service=computation_service,
@@ -1841,6 +1904,12 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         main,
         "CloudSpeechTranscriptionService",
         lambda: speech_transcription_service,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "CloudTextToSpeechSynthesisService",
+        lambda: speech_synthesis_service,
         raising=False,
     )
 
@@ -3133,6 +3202,221 @@ async def test_speech_transcribe_sanitizes_provider_failure(
     assert response.status_code == 502
     assert response.json() == {"detail": "Speech transcription failed."}
     assert "private credential" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_returns_canonical_audio_bytes(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    message_id = "turn--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--model"
+
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": message_id,
+            "chunk_index": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"mp3 audio bytes"
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert response.headers["x-speech-chunk-index"] == "0"
+    assert response.headers["x-speech-chunk-count"] == "1"
+    assert service_state.database.completed_model_message_calls == [
+        ("user-1", "project-1", "session-1", message_id)
+    ]
+    assert service_state.speech_synthesis_service.calls == [
+        {"text": "Canonical persisted answer.", "chunk_index": 0}
+    ]
+    assert service_state.speech_transcription_service.calls == []
+    assert service_state.database.claim_calls == []
+    assert service_state.database.save_calls == []
+    assert service_state.database.complete_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_rejects_browser_supplied_text(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+            "text": "Browser replacement text",
+        },
+    )
+
+    assert response.status_code == 422
+    assert service_state.database.completed_model_message_calls == []
+    assert service_state.speech_synthesis_service.calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_requires_google_authentication(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": "109876543210"},
+    )
+
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "detail": "Authorization bearer token is required."
+    }
+    assert service_state.database.completed_model_message_calls == []
+    assert service_state.speech_synthesis_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_uses_verified_google_owner(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    public_user_id = public_user_locator(subject)
+    project_id = google_subject_to_workspace_project_id(subject)
+    message_id = "turn--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--model"
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+
+    response = await client.post(
+        f"/api/users/{public_user_id}/speech/synthesize",
+        headers={"Authorization": "Bearer token-abc"},
+        json={
+            "project_id": project_id,
+            "session_id": "google-session-1",
+            "message_id": message_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.database.completed_model_message_calls == [
+        (
+            f"google--{subject}",
+            project_id,
+            "google-session-1",
+            message_id,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_rejects_unowned_message(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.completed_model_message_error = (
+        ChatSessionOwnershipError("private ownership marker")
+    )
+
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Speech message was not found."}
+    assert "private ownership" not in response.text
+    assert service_state.speech_synthesis_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_rejects_non_completed_model_message(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.completed_model_message_error = ChatTurnStateError(
+        "private state marker"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "turn--aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa--user",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Speech requires a completed model message."
+    }
+    assert "private state" not in response.text
+    assert service_state.speech_synthesis_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_rejects_unavailable_chunk(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.speech_synthesis_service.error = SpeechSynthesisChunkError(
+        "private chunk marker"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+            "chunk_index": 3,
+        },
+    )
+
+    assert response.status_code == 416
+    assert response.json() == {"detail": "Speech chunk was not found."}
+    assert "private chunk" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_speech_synthesize_sanitizes_provider_failure(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.speech_synthesis_service.error = SpeechSynthesisProviderError(
+        "private provider path"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/speech/synthesize",
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "message_id": "message-1",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Speech synthesis failed."}
+    assert "private provider" not in response.text
 
 
 @pytest.mark.asyncio

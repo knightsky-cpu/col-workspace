@@ -4,10 +4,16 @@ import pytest
 
 from speech_service import (
     CloudSpeechTranscriptionService,
+    CloudTextToSpeechSynthesisService,
     SpeechTranscriptionConfig,
     SpeechTranscriptionProviderError,
+    SpeechSynthesisChunkError,
+    SpeechSynthesisConfig,
+    SpeechSynthesisProviderError,
+    chunk_text_for_speech,
     UnsupportedAudioContentTypeError,
     load_speech_transcription_config,
+    load_speech_synthesis_config,
     normalize_audio_content_type,
 )
 
@@ -77,6 +83,63 @@ class FakeSpeechClient:
         )
 
 
+@dataclass
+class FakeSynthesisInput:
+    text: str
+
+
+@dataclass
+class FakeVoiceSelectionParams:
+    language_code: str
+    name: str
+
+
+@dataclass
+class FakeAudioConfig:
+    audio_encoding: str
+    speaking_rate: float
+
+
+@dataclass
+class FakeSynthesizeResponse:
+    audio_content: bytes
+
+
+class FakeAudioEncoding:
+    MP3 = "MP3"
+
+
+class FakeTextToSpeechModule:
+    AudioConfig = FakeAudioConfig
+    AudioEncoding = FakeAudioEncoding
+    SynthesisInput = FakeSynthesisInput
+    VoiceSelectionParams = FakeVoiceSelectionParams
+
+
+class FakeTextToSpeechClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.error: Exception | None = None
+
+    def synthesize_speech(
+        self,
+        *,
+        input: FakeSynthesisInput,
+        voice: FakeVoiceSelectionParams,
+        audio_config: FakeAudioConfig,
+    ) -> FakeSynthesizeResponse:
+        self.calls.append(
+            {
+                "input": input,
+                "voice": voice,
+                "audio_config": audio_config,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return FakeSynthesizeResponse(audio_content=b"mp3 bytes")
+
+
 def test_normalize_audio_content_type_accepts_browser_webm_baseline() -> None:
     assert normalize_audio_content_type("audio/webm") == "audio/webm"
     assert (
@@ -110,6 +173,141 @@ def test_load_speech_transcription_config_uses_stt_environment(
         language_codes=("en-US", "es-US"),
         model="latest_short",
     )
+
+
+def test_load_speech_synthesis_config_uses_chirp_3_hd_baseline() -> None:
+    config = load_speech_synthesis_config({})
+
+    assert config == SpeechSynthesisConfig(
+        language_code="en-GB",
+        voice_name="en-GB-Chirp3-HD-Kore",
+        speaking_rate=1.0,
+        audio_content_type="audio/mpeg",
+    )
+
+
+def test_chunk_text_for_speech_preserves_text_under_byte_limit() -> None:
+    text = (
+        "First paragraph has one sentence. It has another sentence.\n\n"
+        "Second paragraph includes technical terms like FastAPI and Firestore."
+    )
+
+    chunks = chunk_text_for_speech(text, max_bytes=70)
+
+    assert "".join(chunks) == text
+    assert all(len(chunk.encode("utf-8")) <= 70 for chunk in chunks)
+    assert chunks == (
+        "First paragraph has one sentence. It has another sentence.\n\n",
+        "Second paragraph includes technical terms like FastAPI and Firestore.",
+    )
+
+
+def test_chunk_text_for_speech_splits_oversized_sentence_by_bytes() -> None:
+    text = "alpha " * 20
+
+    chunks = chunk_text_for_speech(text, max_bytes=25)
+
+    assert "".join(chunks) == text
+    assert len(chunks) > 1
+    assert all(len(chunk.encode("utf-8")) <= 25 for chunk in chunks)
+
+
+@pytest.mark.asyncio
+async def test_cloud_text_to_speech_service_builds_chirp_request() -> None:
+    client = FakeTextToSpeechClient()
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=lambda: client,
+        texttospeech_module=FakeTextToSpeechModule,
+        config_loader=lambda: SpeechSynthesisConfig(
+            language_code="en-GB",
+            voice_name="en-GB-Chirp3-HD-Kore",
+            speaking_rate=1.0,
+            audio_content_type="audio/mpeg",
+        ),
+    )
+
+    result = await service.synthesize(
+        text="Canonical persisted answer.",
+        chunk_index=0,
+    )
+
+    assert result.audio == b"mp3 bytes"
+    assert result.content_type == "audio/mpeg"
+    assert result.chunk_index == 0
+    assert result.chunk_count == 1
+    assert client.calls == [
+        {
+            "input": FakeSynthesisInput(text="Canonical persisted answer."),
+            "voice": FakeVoiceSelectionParams(
+                language_code="en-GB",
+                name="en-GB-Chirp3-HD-Kore",
+            ),
+            "audio_config": FakeAudioConfig(
+                audio_encoding="MP3",
+                speaking_rate=1.0,
+            ),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cloud_text_to_speech_service_synthesizes_requested_chunk() -> None:
+    client = FakeTextToSpeechClient()
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=lambda: client,
+        texttospeech_module=FakeTextToSpeechModule,
+        config_loader=lambda: SpeechSynthesisConfig(
+            language_code="en-GB",
+            voice_name="en-GB-Chirp3-HD-Kore",
+            speaking_rate=1.0,
+            audio_content_type="audio/mpeg",
+        ),
+        chunk_byte_limit=30,
+    )
+
+    result = await service.synthesize(
+        text="First sentence. Second sentence. Third sentence.",
+        chunk_index=1,
+    )
+
+    assert result.chunk_index == 1
+    assert result.chunk_count == 3
+    assert client.calls[0]["input"] == FakeSynthesisInput(
+        text="Second sentence. "
+    )
+
+
+@pytest.mark.asyncio
+async def test_cloud_text_to_speech_service_rejects_out_of_range_chunk() -> None:
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=FakeTextToSpeechClient,
+        texttospeech_module=FakeTextToSpeechModule,
+        chunk_byte_limit=30,
+    )
+
+    with pytest.raises(SpeechSynthesisChunkError):
+        await service.synthesize(
+            text="First sentence. Second sentence.",
+            chunk_index=3,
+        )
+
+
+@pytest.mark.asyncio
+async def test_cloud_text_to_speech_service_wraps_provider_errors() -> None:
+    client = FakeTextToSpeechClient()
+    client.error = RuntimeError("private provider internals")
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=lambda: client,
+        texttospeech_module=FakeTextToSpeechModule,
+    )
+
+    with pytest.raises(SpeechSynthesisProviderError) as exc_info:
+        await service.synthesize(
+            text="Canonical persisted answer.",
+            chunk_index=0,
+        )
+
+    assert "private provider internals" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
