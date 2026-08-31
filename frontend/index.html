@@ -188,6 +188,17 @@
                 required
               ></textarea>
               <div class="composer-actions">
+                <div class="composer-speech">
+                  <button
+                    type="button"
+                    class="speech-toggle"
+                    data-speech-toggle
+                    data-speech-state="idle"
+                    aria-label="Start voice input"
+                    aria-pressed="false"
+                  >Mic</button>
+                  <span data-speech-status role="status" aria-live="polite"></span>
+                </div>
                 <span data-character-count>0 / 10000</span>
                 <button type="submit" data-chat-submit>Send</button>
               </div>

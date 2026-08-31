@@ -27,6 +27,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  transcribeSpeechAudio,
   updateArtifactMetadata,
 } from "./api.mjs";
 import {
@@ -140,6 +141,13 @@ let workspaceView = null;
 let layoutState = createInitialLayoutState();
 let authConfig = null;
 let verifiedGoogleContext = null;
+let speechRecording = null;
+let speechStartPending = false;
+
+const SPEECH_RECORDING_MIME_TYPES = Object.freeze([
+  "audio/webm;codecs=opus",
+  "audio/webm",
+]);
 
 function showAuthError(message) {
   const error = document.querySelector("[data-auth-error]");
@@ -295,6 +303,126 @@ function setChatStatus(message, statusState = "") {
   }
   setText(status, message);
   delete status.dataset.chatStatusState;
+}
+
+function setSpeechStatus(message) {
+  const statusElement = document.querySelector("[data-speech-status]");
+  if (statusElement) {
+    setText(statusElement, message);
+  }
+}
+
+function setSpeechToggleState(stateName, label) {
+  const button = document.querySelector("[data-speech-toggle]");
+  if (!button) {
+    return;
+  }
+  button.dataset.speechState = stateName;
+  button.textContent = label;
+  button.disabled = stateName === "starting" || stateName === "transcribing";
+  button.setAttribute("aria-pressed", stateName === "recording" ? "true" : "false");
+  button.setAttribute(
+    "aria-label",
+    stateName === "recording" ? "Stop voice input" : "Start voice input",
+  );
+}
+
+function setSpeechUi(stateName, message) {
+  setSpeechToggleState(stateName, stateName === "recording" ? "Stop" : "Mic");
+  setSpeechStatus(message);
+}
+
+function selectSpeechRecordingMimeType() {
+  if (!globalThis.MediaRecorder) {
+    throw new Error("Microphone recording is unavailable.");
+  }
+  if (typeof globalThis.MediaRecorder.isTypeSupported !== "function") {
+    return "audio/webm";
+  }
+  for (const mimeType of SPEECH_RECORDING_MIME_TYPES) {
+    if (globalThis.MediaRecorder.isTypeSupported(mimeType)) {
+      return mimeType;
+    }
+  }
+  throw new Error("Microphone recording is unavailable.");
+}
+
+function stopSpeechTracks(stream) {
+  for (const track of stream?.getTracks?.() ?? []) {
+    track.stop();
+  }
+}
+
+async function finishSpeechRecording(recording) {
+  stopSpeechTracks(recording.stream);
+  setSpeechUi("transcribing", "Transcribing audio...");
+  try {
+    const audio = new Blob(recording.chunks, { type: recording.mimeType });
+    const response = await transcribeSpeechAudio(audio, authOptions());
+    ensureChatView().insertComposerText(response?.transcript ?? "");
+    setSpeechUi("idle", response?.transcript ? "Transcript added." : "No speech recognized.");
+  } catch {
+    setSpeechUi("error", "Unable to transcribe audio.");
+  } finally {
+    if (speechRecording === recording) {
+      speechRecording = null;
+    }
+    speechStartPending = false;
+    const button = document.querySelector("[data-speech-toggle]");
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
+async function startSpeechRecording() {
+  if (speechRecording !== null || speechStartPending) {
+    return;
+  }
+  speechStartPending = true;
+  setSpeechUi("starting", "Requesting microphone...");
+  let stream = null;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Microphone access is unavailable.");
+    }
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = selectSpeechRecordingMimeType();
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const recording = { recorder, stream, chunks: [], mimeType };
+    recorder.ondataavailable = (event) => {
+      if (event.data?.size > 0) {
+        recording.chunks.push(event.data);
+      }
+    };
+    recorder.onstop = () => {
+      finishSpeechRecording(recording);
+    };
+    recorder.start();
+    speechRecording = recording;
+    speechStartPending = false;
+    setSpeechUi("recording", "Recording voice input. Press Stop when finished.");
+  } catch {
+    stopSpeechTracks(stream);
+    speechRecording = null;
+    speechStartPending = false;
+    setSpeechUi("error", "Microphone access denied or unavailable.");
+    const button = document.querySelector("[data-speech-toggle]");
+    if (button) {
+      button.disabled = false;
+    }
+  }
+}
+
+function stopSpeechRecording() {
+  if (speechRecording === null) {
+    return;
+  }
+  const { recorder, stream } = speechRecording;
+  stopSpeechTracks(stream);
+  if (recorder.state !== "inactive") {
+    recorder.stop();
+  }
 }
 
 function authOptions(options = {}) {
@@ -1428,6 +1556,14 @@ document.querySelector("[data-left-refresh]").addEventListener("click", () => {
   loadNotes();
   loadMemory();
   loadChatSessions();
+});
+
+document.querySelector("[data-speech-toggle]")?.addEventListener("click", () => {
+  if (speechRecording !== null) {
+    stopSpeechRecording();
+    return;
+  }
+  startSpeechRecording();
 });
 
 bootstrapAuth();

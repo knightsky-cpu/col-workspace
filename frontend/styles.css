@@ -691,6 +691,34 @@ p {
   gap: 1rem;
 }
 
+.composer-speech {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.speech-toggle {
+  min-height: 2.25rem;
+}
+
+.speech-toggle[data-speech-state="recording"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.speech-toggle[data-speech-state="transcribing"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+[data-speech-status] {
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
 [data-character-count] {
   color: var(--muted);
   font-size: 0.9rem;

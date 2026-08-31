@@ -199,6 +199,8 @@ function installOrdinaryChatRuntimeDom() {
     "[data-chat-form]",
     "[data-chat-input]",
     "[data-chat-submit]",
+    "[data-speech-toggle]",
+    "[data-speech-status]",
     "[data-retry-turn]",
     "[data-chat-transcript]",
     "[data-character-count]",
@@ -216,6 +218,7 @@ function installOrdinaryChatRuntimeDom() {
     }
   }
   elements.get("[data-chat-form]").tagName = "form";
+  elements.get("[data-speech-toggle]").tagName = "button";
 
   const drawerButtons = [node("button"), node("button")];
   drawerButtons[0].setAttribute("data-drawer-toggle", "left");
@@ -306,6 +309,331 @@ function createControlledSseResponse() {
     },
   };
 }
+
+function installFakeMediaRecorder({
+  supportedTypes = ["audio/webm;codecs=opus", "audio/webm"],
+  getUserMediaImpl,
+} = {}) {
+  const recorders = [];
+  const tracks = [{ stopped: false, stop() { this.stopped = true; } }];
+  const stream = { getTracks: () => tracks };
+  const mediaDevices = {
+    getUserMedia: getUserMediaImpl ?? (async () => stream),
+  };
+  Object.defineProperty(globalThis, "navigator", {
+    value: { mediaDevices },
+    configurable: true,
+  });
+  class FakeMediaRecorder {
+    static isTypeSupported(type) {
+      return supportedTypes.includes(type);
+    }
+
+    constructor(recordingStream, options = {}) {
+      this.stream = recordingStream;
+      this.mimeType = options.mimeType;
+      this.state = "inactive";
+      recorders.push(this);
+    }
+
+    start() {
+      this.state = "recording";
+    }
+
+    stop() {
+      this.state = "inactive";
+      this.ondataavailable?.({
+        data: new Blob(["webm audio"], { type: this.mimeType }),
+      });
+      this.onstop?.();
+    }
+  }
+  globalThis.MediaRecorder = FakeMediaRecorder;
+  return { recorders, stream, tracks };
+}
+
+function installSpeechRuntimeFetch({ transcript = "spoken transcript", transcribeStatus = 200 } = {}) {
+  const stream = createControlledSseResponse();
+  const calls = [];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path === "/api/speech/transcribe") {
+      return jsonResponse(
+        transcribeStatus,
+        transcribeStatus === 200
+          ? { transcript }
+          : { detail: "Speech transcription failed." },
+      );
+    }
+    if (path === "/api/chat/stream") {
+      return stream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+  return { calls, stream };
+}
+
+async function enterSpeechRuntimeWorkspace(importTag) {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  await import(`../../frontend/app.mjs?${importTag}-${Date.now()}`);
+  await waitFor(
+    () => contextForm.onsubmit !== undefined,
+    () => "context form was not initialized",
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  await waitFor(
+    () => elements.get("[data-chat-input]").oninput !== undefined,
+    () => "chat view was not initialized",
+  );
+  return { contextForm, elements };
+}
+
+test("microphone records webm opus audio, transcribes it, and leaves chat submission manual", async () => {
+  const media = installFakeMediaRecorder();
+  const { calls, stream } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-success");
+
+  const input = elements.get("[data-chat-input]");
+  const micButton = elements.get("[data-speech-toggle]");
+  const speechStatus = elements.get("[data-speech-status]");
+
+  micButton.onclick();
+  await waitFor(
+    () => media.recorders.length === 1 && micButton.textContent === "Stop",
+    () => `recorders=${media.recorders.length} button=${micButton.textContent}`,
+  );
+
+  assert.equal(media.recorders[0].mimeType, "audio/webm;codecs=opus");
+  assert.equal(micButton.attributes["aria-pressed"], "true");
+  assert.match(speechStatus.textContent, /Recording/);
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+
+  micButton.onclick();
+  await waitFor(
+    () => input.value === "spoken transcript",
+    () => `input=${input.value} status=${speechStatus.textContent}`,
+  );
+
+  const speechCall = calls.find(([path]) => path === "/api/speech/transcribe");
+  assert.ok(speechCall);
+  assert.equal(speechCall[1].method, "POST");
+  assert.equal(speechCall[1].headers["Content-Type"], "audio/webm;codecs=opus");
+  assert.equal(speechCall[1].body instanceof Blob, true);
+  assert.equal(media.tracks.every((track) => track.stopped), true);
+  assert.equal(micButton.attributes["aria-pressed"], "false");
+  assert.doesNotMatch(speechStatus.textContent, /Recording/);
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+
+  input.value = "edited transcript";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const [, chatInit] = calls.find(([path]) => path === "/api/chat/stream");
+  assert.equal(JSON.parse(chatInit.body).message, "edited transcript");
+  stream.complete({
+    response: "Agent response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+});
+
+test("microphone appends transcript without destroying existing composer text", async () => {
+  installFakeMediaRecorder();
+  installSpeechRuntimeFetch({ transcript: "spoken addition" });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-append");
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "typed draft";
+  input.oninput();
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => elements.get("[data-speech-toggle]").textContent === "Stop",
+    () => elements.get("[data-speech-toggle]").textContent,
+  );
+  elements.get("[data-speech-toggle]").onclick();
+
+  await waitFor(
+    () => input.value === "typed draft\nspoken addition",
+    () => input.value,
+  );
+});
+
+test("microphone permission denial leaves typed chat functional", async () => {
+  Object.defineProperty(globalThis, "navigator", {
+    value: {
+      mediaDevices: {
+        getUserMedia: async () => {
+          throw new Error("permission denied by browser");
+        },
+      },
+    },
+    configurable: true,
+  });
+  globalThis.MediaRecorder = class {
+    static isTypeSupported() {
+      return true;
+    }
+  };
+  const { calls, stream } = installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-denied");
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "typed prompt survives";
+  input.oninput();
+  elements.get("[data-speech-toggle]").onclick();
+
+  await waitFor(
+    () => /Microphone access denied/.test(elements.get("[data-speech-status]").textContent),
+    () => elements.get("[data-speech-status]").textContent,
+  );
+  assert.equal(input.value, "typed prompt survives");
+  assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), false);
+  assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
+
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const [, chatInit] = calls.find(([path]) => path === "/api/chat/stream");
+  assert.equal(JSON.parse(chatInit.body).message, "typed prompt survives");
+  stream.complete({
+    response: "Agent response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+});
+
+test("transcription failure stops tracks and leaves typed chat functional", async () => {
+  const media = installFakeMediaRecorder();
+  const { calls, stream } = installSpeechRuntimeFetch({ transcribeStatus: 502 });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-failure");
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "typed draft";
+  input.oninput();
+  elements.get("[data-speech-toggle]").onclick();
+  await waitFor(
+    () => elements.get("[data-speech-toggle]").textContent === "Stop",
+    () => elements.get("[data-speech-toggle]").textContent,
+  );
+  elements.get("[data-speech-toggle]").onclick();
+
+  await waitFor(
+    () => /Unable to transcribe audio/.test(elements.get("[data-speech-status]").textContent),
+    () => elements.get("[data-speech-status]").textContent,
+  );
+  assert.equal(media.tracks.every((track) => track.stopped), true);
+  assert.equal(input.value, "typed draft");
+
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const [, chatInit] = calls.find(([path]) => path === "/api/chat/stream");
+  assert.equal(JSON.parse(chatInit.body).message, "typed draft");
+  stream.complete({
+    response: "Agent response",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+});
+
+test("microphone start ignores repeated clicks while permission is pending", async () => {
+  let resolveStream;
+  const pendingStream = new Promise((resolve) => {
+    resolveStream = resolve;
+  });
+  const media = installFakeMediaRecorder({
+    getUserMediaImpl: async () => pendingStream,
+  });
+  installSpeechRuntimeFetch();
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-speech-pending");
+
+  const micButton = elements.get("[data-speech-toggle]");
+  micButton.onclick();
+  micButton.onclick();
+
+  assert.equal(media.recorders.length, 0);
+  resolveStream(media.stream);
+  await waitFor(
+    () => media.recorders.length === 1,
+    () => `recorders=${media.recorders.length}`,
+  );
+  assert.equal(media.recorders.length, 1);
+  micButton.onclick();
+});
 
 test("ordinary submit shows an approved waiting quip without contaminating the request or transcript", async (t) => {
   const originalRandom = Math.random;

@@ -204,6 +204,19 @@ test("chat pending status keeps live text while exposing per-letter reduced-moti
   );
 });
 
+test("composer exposes an accessible optional microphone control", () => {
+  assert.match(html, /data-speech-toggle/);
+  assert.match(html, /aria-label="Start voice input"/);
+  assert.match(html, /aria-pressed="false"/);
+  assert.match(html, /data-speech-status/);
+  assert.match(html, /data-speech-status role="status" aria-live="polite"/);
+  assert.match(styles, /\.composer-speech/);
+  assert.match(styles, /\.speech-toggle\[data-speech-state="recording"\]/);
+  assert.match(app, /MediaRecorder\.isTypeSupported/);
+  assert.match(app, /transcribeSpeechAudio/);
+  assert.doesNotMatch(app, /apiFetchJson\("\/api\/chat"/);
+});
+
 test("chat final state renders before secondary refreshes", () => {
   const submitStart = app.indexOf("async function submitRequest(request)");
   const completion = app.indexOf("state = completePendingTurn(state, response);", submitStart);

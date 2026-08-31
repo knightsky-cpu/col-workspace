@@ -305,6 +305,30 @@ export function getAuthConfig(fetchLike = globalThis.fetch) {
   );
 }
 
+export async function transcribeSpeechAudio(
+  audio,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  assertSameOriginPath("/api/speech/transcribe");
+  const headers = {
+    "Content-Type": audio?.type ?? "application/octet-stream",
+  };
+  if (options.authToken) {
+    headers.Authorization = `Bearer ${options.authToken}`;
+  }
+  const response = await fetchLike("/api/speech/transcribe", {
+    method: "POST",
+    headers,
+    body: audio,
+  });
+  const body = await parseBody(response);
+  if (!response.ok) {
+    throw normalizeApiError(response, body);
+  }
+  return body;
+}
+
 function assertIdentifier(name, value) {
   if (!isValidIdentifier(value)) {
     throw new Error(`${name} is invalid.`);

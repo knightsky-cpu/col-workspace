@@ -382,6 +382,60 @@ test("createChatView updates the character counter from prompt input", () => {
   assert.equal(counter.attributes["data-character-count-level"], "safe");
 });
 
+test("createChatView inserts speech transcript into the ordinary composer", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  view.insertComposerText("spoken draft");
+
+  assert.equal(input.value, "spoken draft");
+  assert.equal(counter.textContent, "12 / 10000");
+});
+
+test("createChatView appends speech transcript without destroying existing text", () => {
+  const form = node("form");
+  const input = node("textarea");
+  const submitButton = node("button");
+  const retryButton = node("button");
+  const transcript = node();
+  const counter = node("span");
+
+  const view = createChatView({
+    form,
+    input,
+    submitButton,
+    retryButton,
+    transcript,
+    characterCount: counter,
+  }, {
+    onSubmit: () => {},
+    onRetry: () => {},
+  });
+
+  input.value = "typed draft";
+  input.oninput();
+  view.insertComposerText("spoken addition");
+
+  assert.equal(input.value, "typed draft\nspoken addition");
+  assert.equal(counter.textContent, "27 / 10000");
+});
+
 test("createChatView sets character counter severity levels", () => {
   const form = node("form");
   const input = node("textarea");

@@ -31,6 +31,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  transcribeSpeechAudio,
   updateArtifactMetadata,
 } from "../../frontend/api.mjs";
 
@@ -183,6 +184,27 @@ test("apiFetchJson attaches bearer token when supplied", async () => {
   );
 
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+});
+
+test("transcribeSpeechAudio posts raw audio with the recording MIME type", async () => {
+  const calls = [];
+  const audio = new Blob(["webm audio"], { type: "audio/webm;codecs=opus" });
+
+  const result = await transcribeSpeechAudio(
+    audio,
+    { authToken: "google-id-token" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, { transcript: "recognized text" });
+    },
+  );
+
+  assert.deepEqual(result, { transcript: "recognized text" });
+  assert.equal(calls[0][0], "/api/speech/transcribe");
+  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+  assert.equal(calls[0][1].headers["Content-Type"], "audio/webm;codecs=opus");
+  assert.equal(calls[0][1].body, audio);
 });
 
 test("getAuthSession calls the canonical auth session path", async () => {
