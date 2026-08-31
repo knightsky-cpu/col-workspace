@@ -232,6 +232,45 @@ def test_chunk_text_for_speech_splits_oversized_sentence_by_bytes() -> None:
     assert all(len(chunk.encode("utf-8")) <= 25 for chunk in chunks)
 
 
+def test_chunk_text_for_speech_uses_latency_sized_first_chunk() -> None:
+    text = (
+        "Short first sentence. "
+        "Second sentence can share a later playback chunk. "
+        "Third sentence also belongs after the quick-start chunk."
+    )
+
+    chunks = chunk_text_for_speech(
+        text,
+        max_bytes=140,
+        first_chunk_max_bytes=24,
+        later_chunk_max_bytes=140,
+    )
+
+    assert chunks == (
+        "Short first sentence. ",
+        "Second sentence can share a later playback chunk. "
+        "Third sentence also belongs after the quick-start chunk.",
+    )
+    assert "".join(chunks) == text
+    assert all(len(chunk.encode("utf-8")) <= 140 for chunk in chunks)
+
+
+def test_chunk_text_for_speech_uses_larger_later_chunks_for_oversized_text() -> None:
+    text = "alpha " * 20
+
+    chunks = chunk_text_for_speech(
+        text,
+        max_bytes=90,
+        first_chunk_max_bytes=30,
+        later_chunk_max_bytes=90,
+    )
+
+    assert "".join(chunks) == text
+    assert len(chunks[0].encode("utf-8")) <= 30
+    assert len(chunks[1].encode("utf-8")) > 30
+    assert all(len(chunk.encode("utf-8")) <= 90 for chunk in chunks)
+
+
 @pytest.mark.asyncio
 async def test_cloud_text_to_speech_service_builds_chirp_request() -> None:
     client = FakeTextToSpeechClient()
@@ -294,6 +333,28 @@ async def test_cloud_text_to_speech_service_synthesizes_requested_chunk() -> Non
     assert result.chunk_count == 3
     assert client.calls[0]["input"] == FakeSynthesisInput(
         text="Second sentence. "
+    )
+
+
+def test_cloud_text_to_speech_service_uses_latency_chunk_limits() -> None:
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=FakeTextToSpeechClient,
+        texttospeech_module=FakeTextToSpeechModule,
+        chunk_byte_limit=140,
+        first_chunk_byte_limit=24,
+        later_chunk_byte_limit=140,
+    )
+
+    chunks = service._chunks_for_text(
+        "Short first sentence. "
+        "Second sentence can share a later playback chunk. "
+        "Third sentence also belongs after the quick-start chunk."
+    )
+
+    assert chunks == (
+        "Short first sentence. ",
+        "Second sentence can share a later playback chunk. "
+        "Third sentence also belongs after the quick-start chunk.",
     )
 
 

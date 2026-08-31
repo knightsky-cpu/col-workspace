@@ -349,6 +349,7 @@ export async function synthesizeSpeechAudio(
         ...(options.authToken ? { Authorization: `Bearer ${options.authToken}` } : {}),
       },
       body: JSON.stringify(request),
+      signal: options.signal,
     },
   );
   if (!response.ok) {

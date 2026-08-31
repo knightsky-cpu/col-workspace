@@ -17,6 +17,8 @@ DEFAULT_TTS_SPEAKING_RATE = 1.0
 DEFAULT_TTS_AUDIO_CONTENT_TYPE = "audio/mpeg"
 TTS_PROVIDER_INPUT_BYTE_LIMIT = 5000
 TTS_CHUNK_BYTE_LIMIT = 4800
+TTS_FIRST_CHUNK_BYTE_LIMIT = 700
+TTS_LATER_CHUNK_BYTE_LIMIT = 1800
 TTS_VOICE_NAMES_BY_ID = {
     "female": DEFAULT_TTS_VOICE,
     "male": ALTERNATE_TTS_MALE_VOICE,
@@ -145,9 +147,17 @@ def chunk_text_for_speech(
     text: str,
     *,
     max_bytes: int = TTS_CHUNK_BYTE_LIMIT,
+    first_chunk_max_bytes: int | None = None,
+    later_chunk_max_bytes: int | None = None,
 ) -> tuple[str, ...]:
     if max_bytes < 1 or max_bytes > TTS_PROVIDER_INPUT_BYTE_LIMIT:
         raise ValueError("max_bytes must fit the provider limit.")
+    first_limit = first_chunk_max_bytes if first_chunk_max_bytes is not None else max_bytes
+    later_limit = later_chunk_max_bytes if later_chunk_max_bytes is not None else max_bytes
+    if first_limit < 1 or first_limit > max_bytes:
+        raise ValueError("first_chunk_max_bytes must fit max_bytes.")
+    if later_limit < 1 or later_limit > max_bytes:
+        raise ValueError("later_chunk_max_bytes must fit max_bytes.")
     if not text:
         raise SpeechSynthesisChunkError("Speech text cannot be empty.")
     chunks: list[str] = []
@@ -163,16 +173,24 @@ def chunk_text_for_speech(
         nonlocal current
         if not unit:
             return
-        if len(unit.encode("utf-8")) > max_bytes:
+        active_limit = first_limit if not chunks else later_limit
+        if current and len((current + unit).encode("utf-8")) > active_limit:
             flush()
-            chunks.extend(_split_text_by_utf8_limit(unit, max_bytes))
+        chunk_limit = first_limit if not chunks else later_limit
+        if len(unit.encode("utf-8")) > chunk_limit:
+            flush()
+            split_chunks = _split_text_by_utf8_limits(
+                unit,
+                first_limit=first_limit if not chunks else later_limit,
+                later_limit=later_limit,
+            )
+            chunks.extend(split_chunks)
             return
-        if current and len((current + unit).encode("utf-8")) > max_bytes:
-            flush()
         current += unit
 
     for paragraph in _split_after_boundary(text, r"\n\s*\n"):
-        if len(paragraph.encode("utf-8")) <= max_bytes:
+        active_limit = first_limit if not chunks else later_limit
+        if len(paragraph.encode("utf-8")) <= active_limit:
             append_unit(paragraph)
             continue
         for sentence in _split_after_boundary(paragraph, r"(?<=[.!?])\s+"):
@@ -194,12 +212,26 @@ def _split_after_boundary(text: str, pattern: str) -> tuple[str, ...]:
 
 
 def _split_text_by_utf8_limit(text: str, max_bytes: int) -> tuple[str, ...]:
+    return _split_text_by_utf8_limits(
+        text,
+        first_limit=max_bytes,
+        later_limit=max_bytes,
+    )
+
+
+def _split_text_by_utf8_limits(
+    text: str,
+    *,
+    first_limit: int,
+    later_limit: int,
+) -> tuple[str, ...]:
     chunks: list[str] = []
     current = ""
     current_bytes = 0
     for character in text:
         character_bytes = len(character.encode("utf-8"))
-        if current and current_bytes + character_bytes > max_bytes:
+        active_limit = first_limit if not chunks else later_limit
+        if current and current_bytes + character_bytes > active_limit:
             chunks.append(current)
             current = ""
             current_bytes = 0
@@ -292,11 +324,15 @@ class CloudTextToSpeechSynthesisService:
             load_speech_synthesis_config
         ),
         chunk_byte_limit: int = TTS_CHUNK_BYTE_LIMIT,
+        first_chunk_byte_limit: int = TTS_FIRST_CHUNK_BYTE_LIMIT,
+        later_chunk_byte_limit: int = TTS_LATER_CHUNK_BYTE_LIMIT,
     ) -> None:
         self._client_factory = client_factory
         self._texttospeech_module = texttospeech_module
         self._config_loader = config_loader
         self._chunk_byte_limit = chunk_byte_limit
+        self._first_chunk_byte_limit = first_chunk_byte_limit
+        self._later_chunk_byte_limit = later_chunk_byte_limit
 
     async def synthesize(
         self,
@@ -305,10 +341,7 @@ class CloudTextToSpeechSynthesisService:
         chunk_index: int,
         voice_id: str = "female",
     ) -> SpeechSynthesisResult:
-        chunks = chunk_text_for_speech(
-            text,
-            max_bytes=self._chunk_byte_limit,
-        )
+        chunks = self._chunks_for_text(text)
         if chunk_index < 0 or chunk_index >= len(chunks):
             raise SpeechSynthesisChunkError("Speech chunk is unavailable.")
         return await asyncio.to_thread(
@@ -317,6 +350,14 @@ class CloudTextToSpeechSynthesisService:
             chunk_index,
             len(chunks),
             voice_id,
+        )
+
+    def _chunks_for_text(self, text: str) -> tuple[str, ...]:
+        return chunk_text_for_speech(
+            text,
+            max_bytes=self._chunk_byte_limit,
+            first_chunk_max_bytes=self._first_chunk_byte_limit,
+            later_chunk_max_bytes=self._later_chunk_byte_limit,
         )
 
     def _texttospeech(self) -> object:

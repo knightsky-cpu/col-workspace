@@ -147,6 +147,7 @@ let speechStartPending = false;
 let speechPlaybackToken = 0;
 let speechPlaybackAudio = null;
 let speechPlaybackObjectUrl = null;
+let speechPlaybackAbortControllers = new Set();
 
 const SPEECH_RECORDING_MIME_TYPES = Object.freeze([
   "audio/webm;codecs=opus",
@@ -474,6 +475,10 @@ function cleanupSpeechPlaybackAudio() {
 
 function stopSpeechPlayback() {
   speechPlaybackToken += 1;
+  for (const controller of speechPlaybackAbortControllers) {
+    controller.abort();
+  }
+  speechPlaybackAbortControllers.clear();
   cleanupSpeechPlaybackAudio();
   setSpeechPlaybackUi(false);
 }
@@ -530,6 +535,41 @@ function playSpeechAudio(audioBlob, token) {
   });
 }
 
+function requestSpeechAudioChunk({
+  userId,
+  projectId,
+  sessionId,
+  messageId,
+  chunkIndex,
+  voiceId,
+}) {
+  const controller = new AbortController();
+  speechPlaybackAbortControllers.add(controller);
+  return synthesizeSpeechAudio(
+    userId,
+    {
+      project_id: projectId,
+      session_id: sessionId,
+      message_id: messageId,
+      chunk_index: chunkIndex,
+      voice_id: voiceId,
+    },
+    {
+      ...authOptions(),
+      signal: controller.signal,
+    },
+  ).finally(() => {
+    speechPlaybackAbortControllers.delete(controller);
+  });
+}
+
+function settleSpeechChunk(promise) {
+  return promise.then(
+    (chunk) => ({ chunk, error: null }),
+    (error) => ({ chunk: null, error }),
+  );
+}
+
 async function speakAssistantTurn(turn) {
   if (!state.context) {
     return;
@@ -543,27 +583,46 @@ async function speakAssistantTurn(turn) {
     const voiceId = selectedSpeechVoiceId();
     let chunkIndex = 0;
     let chunkCount = 1;
-    do {
+    let nextChunk = requestSpeechAudioChunk({
+      userId: state.context.user_id,
+      projectId: state.context.project_id,
+      sessionId: state.context.session_id,
+      messageId,
+      chunkIndex,
+      voiceId,
+    });
+    while (chunkIndex < chunkCount) {
       if (token !== speechPlaybackToken) {
         return;
       }
-      const chunk = await synthesizeSpeechAudio(
-        state.context.user_id,
-        {
-          project_id: state.context.project_id,
-          session_id: state.context.session_id,
-          message_id: messageId,
-          chunk_index: chunkIndex,
-          voice_id: voiceId,
-        },
-        authOptions(),
-      );
+      const chunk = await nextChunk;
+      if (token !== speechPlaybackToken) {
+        return;
+      }
       chunkCount = Number.isFinite(chunk.chunkCount) && chunk.chunkCount > 0
         ? chunk.chunkCount
         : 1;
+      const nextChunkIndex = chunkIndex + 1;
+      const prefetchedNextChunk = nextChunkIndex < chunkCount
+        ? settleSpeechChunk(requestSpeechAudioChunk({
+          userId: state.context.user_id,
+          projectId: state.context.project_id,
+          sessionId: state.context.session_id,
+          messageId,
+          chunkIndex: nextChunkIndex,
+          voiceId,
+        }))
+        : null;
       await playSpeechAudio(chunk.audio, token);
       chunkIndex += 1;
-    } while (chunkIndex < chunkCount);
+      if (prefetchedNextChunk !== null) {
+        const result = await prefetchedNextChunk;
+        if (result.error !== null) {
+          throw result.error;
+        }
+        nextChunk = Promise.resolve(result.chunk);
+      }
+    }
     if (token === speechPlaybackToken) {
       setSpeechStatus("");
       setSpeechPlaybackUi(false);

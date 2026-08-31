@@ -365,6 +365,8 @@ function installSpeechRuntimeFetch({
   transcript = "spoken transcript",
   transcribeStatus = 200,
   ttsChunkCount = 1,
+  ttsStatusByChunk = {},
+  deferredTtsChunks = new Map(),
 } = {}) {
   const stream = createControlledSseResponse();
   const calls = [];
@@ -428,12 +430,18 @@ function installSpeechRuntimeFetch({
     }
     if (path === "/api/users/wifiknight/speech/synthesize") {
       const body = JSON.parse(init.body);
+      if (deferredTtsChunks.has(body.chunk_index)) {
+        await deferredTtsChunks.get(body.chunk_index).promise;
+      }
+      const status = ttsStatusByChunk[body.chunk_index] ?? 200;
       return new Response(
-        new Blob([`audio chunk ${body.chunk_index}`], { type: "audio/mpeg" }),
+        status === 200
+          ? new Blob([`audio chunk ${body.chunk_index}`], { type: "audio/mpeg" })
+          : JSON.stringify({ detail: "Speech synthesis failed." }),
         {
-          status: 200,
+          status,
           headers: {
-            "Content-Type": "audio/mpeg",
+            "Content-Type": status === 200 ? "audio/mpeg" : "application/json",
             "X-Speech-Chunk-Index": String(body.chunk_index),
             "X-Speech-Chunk-Count": String(ttsChunkCount),
           },
@@ -447,11 +455,16 @@ function installSpeechRuntimeFetch({
 
 function installFakeAudio(t) {
   const audios = [];
+  const objectUrls = [];
   const revokedUrls = [];
   const originalCreateObjectURL = globalThis.URL.createObjectURL;
   const originalRevokeObjectURL = globalThis.URL.revokeObjectURL;
   const originalAudio = globalThis.Audio;
-  globalThis.URL.createObjectURL = (blob) => `blob:audio-${audios.length}-${blob.size}`;
+  globalThis.URL.createObjectURL = (blob) => {
+    const url = `blob:audio-${objectUrls.length}-${blob.size}`;
+    objectUrls.push({ url, blob });
+    return url;
+  };
   globalThis.URL.revokeObjectURL = (url) => {
     revokedUrls.push(url);
   };
@@ -480,7 +493,17 @@ function installFakeAudio(t) {
     globalThis.URL.revokeObjectURL = originalRevokeObjectURL;
     globalThis.Audio = originalAudio;
   });
-  return { audios, revokedUrls };
+  return { audios, objectUrls, revokedUrls };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 }
 
 async function submitCompletedRuntimeTurn(elements, stream, message = "Prompt for TTS") {
@@ -767,7 +790,7 @@ test("spoken responses toggle defaults off and speaks newly completed responses 
   spokenToggle.onchange();
   await submitCompletedRuntimeTurn(elements, nextStream, "Prompt with auto speech");
   await waitFor(
-    () => calls.filter(([path]) => path === "/api/users/wifiknight/speech/synthesize").length === 1,
+    () => calls.filter(([path]) => path === "/api/users/wifiknight/speech/synthesize").length >= 1,
     () => JSON.stringify(calls.map(([path]) => path)),
   );
 
@@ -783,7 +806,6 @@ test("spoken responses toggle defaults off and speaks newly completed responses 
   assert.equal(JSON.stringify(firstBody).includes("Agent response"), false);
 
   await waitFor(() => audio.audios.length === 1);
-  audio.audios[0].onended();
   await waitFor(
     () => calls.filter(([path]) => path === "/api/users/wifiknight/speech/synthesize").length === 2,
     () => JSON.stringify(calls.map(([path, init]) => [path, init.body])),
@@ -797,7 +819,7 @@ test("spoken responses toggle defaults off and speaks newly completed responses 
 
 test("Stop halts current playback and prevents remaining chunk requests", async (t) => {
   const audio = installFakeAudio(t);
-  const { calls, stream } = installSpeechRuntimeFetch({ ttsChunkCount: 2 });
+  const { calls, stream } = installSpeechRuntimeFetch({ ttsChunkCount: 3 });
   const { elements } = await enterSpeechRuntimeWorkspace("runtime-tts-stop");
   const spokenToggle = elements.get("[data-spoken-responses-toggle]");
   spokenToggle.checked = true;
@@ -815,8 +837,141 @@ test("Stop halts current playback and prevents remaining chunk requests", async 
 
   assert.equal(
     calls.filter(([path]) => path === "/api/users/wifiknight/speech/synthesize").length,
-    1,
+    2,
   );
+  assert.equal(audio.audios.length, 1);
+});
+
+test("spoken response prefetches exactly one next chunk while current chunk plays", async (t) => {
+  const audio = installFakeAudio(t);
+  const { calls, stream } = installSpeechRuntimeFetch({ ttsChunkCount: 3 });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-tts-prefetch-one-ahead");
+  const spokenToggle = elements.get("[data-spoken-responses-toggle]");
+  spokenToggle.checked = true;
+  spokenToggle.onchange();
+
+  await submitCompletedRuntimeTurn(elements, stream);
+  await waitFor(() => audio.audios.length === 1);
+  await waitFor(
+    () => calls.filter(([path]) => path === "/api/users/wifiknight/speech/synthesize").length === 2,
+    () => JSON.stringify(calls.map(([path, init]) => [path, init.body])),
+  );
+
+  const speechBodies = calls
+    .filter(([path]) => path === "/api/users/wifiknight/speech/synthesize")
+    .map(([, init]) => JSON.parse(init.body));
+  assert.deepEqual(speechBodies.map((body) => body.chunk_index), [0, 1]);
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(
+    calls.filter(([path]) => path === "/api/users/wifiknight/speech/synthesize").length,
+    2,
+  );
+});
+
+test("spoken response plays prefetched chunks in strict order", async (t) => {
+  const audio = installFakeAudio(t);
+  const { calls, stream } = installSpeechRuntimeFetch({ ttsChunkCount: 3 });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-tts-strict-order");
+  const spokenToggle = elements.get("[data-spoken-responses-toggle]");
+  spokenToggle.checked = true;
+  spokenToggle.onchange();
+
+  await submitCompletedRuntimeTurn(elements, stream);
+  await waitFor(() => audio.audios.length === 1);
+  assert.equal(audio.audios[0].url, "blob:audio-0-13");
+  audio.audios[0].onended();
+
+  await waitFor(() => audio.audios.length === 2);
+  assert.equal(audio.audios[1].url, "blob:audio-1-13");
+  audio.audios[1].onended();
+
+  await waitFor(() => audio.audios.length === 3);
+  assert.equal(audio.audios[2].url, "blob:audio-2-13");
+  const speechBodies = calls
+    .filter(([path]) => path === "/api/users/wifiknight/speech/synthesize")
+    .map(([, init]) => JSON.parse(init.body));
+  assert.deepEqual(speechBodies.map((body) => body.chunk_index), [0, 1, 2]);
+});
+
+test("short spoken response plays without prefetching another chunk", async (t) => {
+  const audio = installFakeAudio(t);
+  const { calls, stream } = installSpeechRuntimeFetch({ ttsChunkCount: 1 });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-tts-short-response");
+  const spokenToggle = elements.get("[data-spoken-responses-toggle]");
+  spokenToggle.checked = true;
+  spokenToggle.onchange();
+
+  await submitCompletedRuntimeTurn(elements, stream);
+  await waitFor(() => audio.audios.length === 1);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const speechBodies = calls
+    .filter(([path]) => path === "/api/users/wifiknight/speech/synthesize")
+    .map(([, init]) => JSON.parse(init.body));
+  assert.deepEqual(speechBodies.map((body) => body.chunk_index), [0]);
+});
+
+test("Stop prevents in-flight prefetched audio from playing or requesting later chunks", async (t) => {
+  const audio = installFakeAudio(t);
+  const delayedChunk = deferred();
+  const deferredTtsChunks = new Map([[1, delayedChunk]]);
+  const { calls, stream } = installSpeechRuntimeFetch({
+    ttsChunkCount: 3,
+    deferredTtsChunks,
+  });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-tts-stop-prefetch");
+  const spokenToggle = elements.get("[data-spoken-responses-toggle]");
+  spokenToggle.checked = true;
+  spokenToggle.onchange();
+
+  await submitCompletedRuntimeTurn(elements, stream);
+  await waitFor(() => audio.audios.length === 1);
+  await waitFor(
+    () => calls.filter(([path]) => path === "/api/users/wifiknight/speech/synthesize").length === 2,
+    () => JSON.stringify(calls.map(([path, init]) => [path, init.body])),
+  );
+
+  elements.get("[data-tts-stop]").onclick();
+  const speechCalls = calls
+    .filter(([path]) => path === "/api/users/wifiknight/speech/synthesize");
+  assert.equal(speechCalls[1][1].signal.aborted, true);
+  delayedChunk.resolve();
+  audio.audios[0].onended();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const speechBodies = speechCalls
+    .map(([, init]) => JSON.parse(init.body));
+  assert.deepEqual(speechBodies.map((body) => body.chunk_index), [0, 1]);
+  assert.equal(audio.audios.length, 1);
+});
+
+test("prefetch failure leaves current playback intact and does not play later chunks", async (t) => {
+  const audio = installFakeAudio(t);
+  const { calls, stream } = installSpeechRuntimeFetch({
+    ttsChunkCount: 3,
+    ttsStatusByChunk: { 1: 502 },
+  });
+  const { elements } = await enterSpeechRuntimeWorkspace("runtime-tts-prefetch-failure");
+  const spokenToggle = elements.get("[data-spoken-responses-toggle]");
+  spokenToggle.checked = true;
+  spokenToggle.onchange();
+
+  await submitCompletedRuntimeTurn(elements, stream);
+  await waitFor(() => audio.audios.length === 1);
+  assert.equal(audio.audios[0].paused, false);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(audio.audios.length, 1);
+
+  audio.audios[0].onended();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const speechBodies = calls
+    .filter(([path]) => path === "/api/users/wifiknight/speech/synthesize")
+    .map(([, init]) => JSON.parse(init.body));
+  assert.deepEqual(speechBodies.map((body) => body.chunk_index), [0, 1]);
+  assert.equal(audio.audios.length, 1);
+  assert.equal(elements.get("[data-tts-stop]").hidden, true);
 });
 
 test("ordinary submit shows an approved waiting quip without contaminating the request or transcript", async (t) => {
