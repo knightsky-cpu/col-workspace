@@ -2944,6 +2944,43 @@ async def test_streamed_oversized_raw_body_is_rejected_before_json_parsing(
 
 
 @pytest.mark.asyncio
+async def test_speech_transcribe_allows_body_above_default_api_limit(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    audio_body = b"x" * (main.MAX_REQUEST_BODY_BYTES + 1)
+
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=audio_body,
+        headers={"Content-Type": "audio/webm;codecs=opus"},
+    )
+
+    assert response.status_code == 501
+    assert response.json() == {"detail": "Speech transcription is not implemented."}
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_speech_transcribe_uses_configured_speech_body_limit(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_COL_SPEECH_MAX_AUDIO_BYTES", "1024")
+
+    response = await client.post(
+        "/api/speech/transcribe",
+        content=b"x" * 1025,
+        headers={"Content-Type": "audio/webm;codecs=opus"},
+    )
+
+    assert response.status_code == 413
+    assert response.json() == {"detail": "Request body is too large."}
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
 async def test_schema_chat_limit_remains_distinct_from_raw_body_limit(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -3049,7 +3086,7 @@ async def test_security_headers_cover_workspace_static_and_api(
         "x-content-type-options": "nosniff",
         "x-frame-options": "DENY",
         "referrer-policy": "strict-origin-when-cross-origin",
-        "permissions-policy": "camera=(), microphone=(), geolocation=()",
+        "permissions-policy": "camera=(), microphone=(self), geolocation=()",
     }
 
     responses = [
@@ -3072,6 +3109,8 @@ async def test_security_headers_cover_workspace_static_and_api(
             content_security_policy
         )
         assert "connect-src 'self'" in content_security_policy
+        assert "media-src 'self' blob:" in content_security_policy
+        assert "object-src 'none'" in content_security_policy
 
 
 @pytest.mark.asyncio

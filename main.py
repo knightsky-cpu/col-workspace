@@ -229,6 +229,9 @@ logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 MAX_REQUEST_BODY_BYTES = 64 * 1024
+DEFAULT_SPEECH_REQUEST_BODY_BYTES = 2 * 1024 * 1024
+MAX_SPEECH_REQUEST_BODY_BYTES = 10 * 1024 * 1024
+SPEECH_TRANSCRIBE_PATH = "/api/speech/transcribe"
 RATE_LIMIT_MAX_REQUESTS = 20
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMITED_METHODS = frozenset({"POST", "PATCH", "DELETE"})
@@ -239,6 +242,7 @@ SECURITY_HEADERS = {
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: https://*.googleusercontent.com; "
         "connect-src 'self'; "
+        "media-src 'self' blob:; "
         "frame-src https://accounts.google.com/gsi/; "
         "object-src 'none'; "
         "base-uri 'self'; "
@@ -247,7 +251,7 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Permissions-Policy": "camera=(), microphone=(self), geolocation=()",
 }
 
 load_dotenv()
@@ -314,6 +318,28 @@ def _rate_limit_key(request: Request) -> str:
     return f"{client_host}:expensive-api"
 
 
+def _speech_request_body_limit_bytes() -> int:
+    raw_limit = os.environ.get("AGENT_COL_SPEECH_MAX_AUDIO_BYTES")
+    if raw_limit is None or not raw_limit.strip():
+        return DEFAULT_SPEECH_REQUEST_BODY_BYTES
+    try:
+        configured_limit = int(raw_limit)
+    except ValueError:
+        return DEFAULT_SPEECH_REQUEST_BODY_BYTES
+    if configured_limit < 1:
+        return DEFAULT_SPEECH_REQUEST_BODY_BYTES
+    return min(configured_limit, MAX_SPEECH_REQUEST_BODY_BYTES)
+
+
+def _request_body_limit_bytes(request: Request) -> int:
+    if (
+        request.method.upper() == "POST"
+        and request.url.path == SPEECH_TRANSCRIBE_PATH
+    ):
+        return _speech_request_body_limit_bytes()
+    return MAX_REQUEST_BODY_BYTES
+
+
 def _body_too_large_response() -> Response:
     return _apply_security_headers(
         JSONResponse(
@@ -343,13 +369,14 @@ class RequestPerimeterMiddleware:
             return
 
         request = Request(scope)
+        request_body_limit = _request_body_limit_bytes(request)
         content_length = request.headers.get("content-length")
         if content_length is not None:
             try:
                 body_bytes = int(content_length)
             except ValueError:
-                body_bytes = MAX_REQUEST_BODY_BYTES + 1
-            if body_bytes > MAX_REQUEST_BODY_BYTES:
+                body_bytes = request_body_limit + 1
+            if body_bytes > request_body_limit:
                 response = _body_too_large_response()
                 await response(scope, receive, send)
                 return
@@ -383,7 +410,7 @@ class RequestPerimeterMiddleware:
                 body = message.get("body", b"")
                 if isinstance(body, bytes):
                     body_bytes += len(body)
-                if body_bytes > MAX_REQUEST_BODY_BYTES:
+                if body_bytes > request_body_limit:
                     response = _body_too_large_response()
                     await response(scope, receive, send)
                     return
@@ -1477,6 +1504,14 @@ async def auth_config(request: Request) -> dict[str, object]:
         "google_signin_required": settings.mode == "google_oidc",
         "local_development": settings.mode == "local_dev",
     }
+
+
+@app.post(SPEECH_TRANSCRIBE_PATH)
+async def speech_transcribe_placeholder():
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Speech transcription is not implemented.",
+    )
 
 
 @app.get("/api/auth/session")
