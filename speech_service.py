@@ -242,6 +242,66 @@ def _split_text_by_utf8_limits(
     return tuple(chunks)
 
 
+class SpeechTextRenderer:
+    """Render assistant Markdown into plain text suitable for speech."""
+
+    _INLINE_CODE_PATTERN = re.compile(r"`([^`\n]+)`")
+    _LINK_PATTERN = re.compile(r"\[([^\]\n]+)\]\([^)]+\)")
+    _INLINE_MARKER_PATTERNS = (
+        re.compile(r"\*\*([^*\n]+)\*\*"),
+        re.compile(r"(?<!\w)__([^_\n]+)__(?!\w)"),
+        re.compile(r"~~([^~\n]+)~~"),
+        re.compile(r"(?<!\*)\*([^*\n]+)\*(?!\*)"),
+        re.compile(r"(?<![\w_])_([^_\n]+)_(?![\w_])"),
+    )
+
+    def render(self, source: str) -> str:
+        rendered_lines: list[str] = []
+        in_code_block = False
+        normalized_source = (
+            str(source)
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+        )
+        for raw_line in normalized_source.split("\n"):
+            stripped = raw_line.strip()
+            if stripped.startswith("```"):
+                in_code_block = not in_code_block
+                continue
+            if in_code_block:
+                rendered_lines.append(raw_line.rstrip())
+                continue
+            if re.fullmatch(r"\s*(?:-{3,}|\*{3,}|_{3,})\s*", raw_line):
+                continue
+            line = re.sub(r"^\s{0,3}#{1,6}\s+", "", raw_line).rstrip()
+            line = re.sub(r"^\s{0,3}[-*+]\s+", "", line)
+            line = re.sub(r"^\s{0,3}\d+[.)]\s+", "", line)
+            rendered_lines.append(self._render_inline(line))
+        rendered = "\n".join(rendered_lines)
+        rendered = re.sub(r"\n{3,}", "\n\n", rendered)
+        return rendered.strip()
+
+    def _render_inline(self, line: str) -> str:
+        code_spans: list[str] = []
+
+        def stash_code(match: re.Match[str]) -> str:
+            code_spans.append(match.group(1))
+            return f"\0{len(code_spans) - 1}\0"
+
+        rendered = self._INLINE_CODE_PATTERN.sub(stash_code, line)
+        rendered = self._LINK_PATTERN.sub(
+            lambda match: match.group(1),
+            rendered,
+        )
+        for pattern in self._INLINE_MARKER_PATTERNS:
+            rendered = pattern.sub(r"\1", rendered)
+
+        def restore_code(match: re.Match[str]) -> str:
+            return code_spans[int(match.group(1))]
+
+        return re.sub(r"\0(\d+)\0", restore_code, rendered).strip()
+
+
 class CloudSpeechTranscriptionService:
     def __init__(
         self,
@@ -326,6 +386,7 @@ class CloudTextToSpeechSynthesisService:
         chunk_byte_limit: int = TTS_CHUNK_BYTE_LIMIT,
         first_chunk_byte_limit: int = TTS_FIRST_CHUNK_BYTE_LIMIT,
         later_chunk_byte_limit: int = TTS_LATER_CHUNK_BYTE_LIMIT,
+        speech_text_renderer: SpeechTextRenderer | None = None,
     ) -> None:
         self._client_factory = client_factory
         self._texttospeech_module = texttospeech_module
@@ -333,6 +394,7 @@ class CloudTextToSpeechSynthesisService:
         self._chunk_byte_limit = chunk_byte_limit
         self._first_chunk_byte_limit = first_chunk_byte_limit
         self._later_chunk_byte_limit = later_chunk_byte_limit
+        self._speech_text_renderer = speech_text_renderer or SpeechTextRenderer()
 
     async def synthesize(
         self,
@@ -353,11 +415,18 @@ class CloudTextToSpeechSynthesisService:
         )
 
     def _chunks_for_text(self, text: str) -> tuple[str, ...]:
+        clean_text = self._speech_text_renderer.render(text)
         return chunk_text_for_speech(
-            text,
+            clean_text,
             max_bytes=self._chunk_byte_limit,
-            first_chunk_max_bytes=self._first_chunk_byte_limit,
-            later_chunk_max_bytes=self._later_chunk_byte_limit,
+            first_chunk_max_bytes=min(
+                self._first_chunk_byte_limit,
+                self._chunk_byte_limit,
+            ),
+            later_chunk_max_bytes=min(
+                self._later_chunk_byte_limit,
+                self._chunk_byte_limit,
+            ),
         )
 
     def _texttospeech(self) -> object:

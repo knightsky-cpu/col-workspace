@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
+import speech_service
 from speech_service import (
     CloudSpeechTranscriptionService,
     CloudTextToSpeechSynthesisService,
@@ -271,6 +272,61 @@ def test_chunk_text_for_speech_uses_larger_later_chunks_for_oversized_text() -> 
     assert all(len(chunk.encode("utf-8")) <= 90 for chunk in chunks)
 
 
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("### Root cause\n\nUse this.", "Root cause\n\nUse this."),
+        (
+            "Use **bounded context**, *tests*, and ~~dead code~~ cleanup.",
+            "Use bounded context, tests, and dead code cleanup.",
+        ),
+        (
+            "Read [the deployment guide](https://example.com/deploy) before release.",
+            "Read the deployment guide before release.",
+        ),
+        (
+            "Run `git diff --check` before checkpointing.",
+            "Run git diff --check before checkpointing.",
+        ),
+        (
+            "- Read the docs\n- Run tests\n\n1. Verify audio\n2. Stop playback",
+            "Read the docs\nRun tests\n\nVerify audio\nStop playback",
+        ),
+        (
+            "```bash\ngit status --short\npytest -q\n```",
+            "git status --short\npytest -q",
+        ),
+        ("Before\n\n---\n\nAfter", "Before\n\nAfter"),
+    ],
+)
+def test_speech_text_renderer_removes_markdown_syntax_for_speech(
+    source: str,
+    expected: str,
+) -> None:
+    renderer_class = getattr(speech_service, "SpeechTextRenderer", None)
+    assert renderer_class is not None
+    renderer = renderer_class()
+
+    assert renderer.render(source) == expected
+
+
+def test_cloud_text_to_speech_service_chunks_normalized_speech_text() -> None:
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=FakeTextToSpeechClient,
+        texttospeech_module=FakeTextToSpeechModule,
+        chunk_byte_limit=64,
+        first_chunk_byte_limit=18,
+        later_chunk_byte_limit=64,
+    )
+
+    chunks = service._chunks_for_text(
+        "### Title\n\n"
+        "[short](https://example.com/this-url-would-force-extra-raw-markdown-chunks)"
+    )
+
+    assert chunks == ("Title\n\nshort",)
+
+
 @pytest.mark.asyncio
 async def test_cloud_text_to_speech_service_builds_chirp_request() -> None:
     client = FakeTextToSpeechClient()
@@ -310,6 +366,30 @@ async def test_cloud_text_to_speech_service_builds_chirp_request() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cloud_text_to_speech_service_sends_clean_speech_text_to_provider() -> None:
+    client = FakeTextToSpeechClient()
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=lambda: client,
+        texttospeech_module=FakeTextToSpeechModule,
+        config_loader=lambda: SpeechSynthesisConfig(
+            language_code="en-GB",
+            voice_name="en-GB-Chirp3-HD-Kore",
+            speaking_rate=1.0,
+            audio_content_type="audio/mpeg",
+        ),
+    )
+
+    await service.synthesize(
+        text="### Fix\n\nUse **TDD** and [docs](https://example.com).",
+        chunk_index=0,
+    )
+
+    assert client.calls[0]["input"] == FakeSynthesisInput(
+        text="Fix\n\nUse TDD and docs."
+    )
+
+
+@pytest.mark.asyncio
 async def test_cloud_text_to_speech_service_synthesizes_requested_chunk() -> None:
     client = FakeTextToSpeechClient()
     service = CloudTextToSpeechSynthesisService(
@@ -334,6 +414,36 @@ async def test_cloud_text_to_speech_service_synthesizes_requested_chunk() -> Non
     assert client.calls[0]["input"] == FakeSynthesisInput(
         text="Second sentence. "
     )
+
+
+@pytest.mark.asyncio
+async def test_cloud_text_to_speech_service_indexes_chunks_after_normalization() -> None:
+    client = FakeTextToSpeechClient()
+    service = CloudTextToSpeechSynthesisService(
+        client_factory=lambda: client,
+        texttospeech_module=FakeTextToSpeechModule,
+        config_loader=lambda: SpeechSynthesisConfig(
+            language_code="en-GB",
+            voice_name="en-GB-Chirp3-HD-Kore",
+            speaking_rate=1.0,
+            audio_content_type="audio/mpeg",
+        ),
+        chunk_byte_limit=36,
+        first_chunk_byte_limit=12,
+        later_chunk_byte_limit=36,
+    )
+
+    result = await service.synthesize(
+        text=(
+            "### Title\n\n"
+            "[short](https://example.com/this-url-would-be-raw-chunk-two)"
+        ),
+        chunk_index=0,
+    )
+
+    assert result.chunk_index == 0
+    assert result.chunk_count == 1
+    assert client.calls[0]["input"] == FakeSynthesisInput(text="Title\n\nshort")
 
 
 def test_cloud_text_to_speech_service_uses_latency_chunk_limits() -> None:
