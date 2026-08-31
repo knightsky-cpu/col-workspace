@@ -91,7 +91,7 @@ Verify required Google APIs:
 ```bash
 gcloud services list --enabled \
   --project=project-e1e2a890-4566-48a8-a32 \
-  --filter='config.name:(run.googleapis.com OR artifactregistry.googleapis.com OR orgpolicy.googleapis.com OR firestore.googleapis.com OR aiplatform.googleapis.com OR logging.googleapis.com OR serviceusage.googleapis.com)' \
+  --filter='config.name:(run.googleapis.com OR artifactregistry.googleapis.com OR orgpolicy.googleapis.com OR firestore.googleapis.com OR aiplatform.googleapis.com OR logging.googleapis.com OR serviceusage.googleapis.com OR speech.googleapis.com OR texttospeech.googleapis.com)' \
   --format='value(config.name)'
 ```
 
@@ -105,6 +105,16 @@ logging.googleapis.com
 orgpolicy.googleapis.com
 run.googleapis.com
 serviceusage.googleapis.com
+speech.googleapis.com
+texttospeech.googleapis.com
+```
+
+If either speech API is missing, enable it before deployment and rerun the
+verification command:
+
+```bash
+gcloud services enable speech.googleapis.com texttospeech.googleapis.com \
+  --project=project-e1e2a890-4566-48a8-a32
 ```
 
 Verify Docker is available:
@@ -131,6 +141,54 @@ gcloud run services describe agent-col \
 
 The deployer must have permission to push to Artifact Registry, deploy Cloud
 Run services, and act as the runtime service account.
+
+Verify the runtime service account has the Google client permissions needed by
+hosted speech features:
+
+```bash
+RUNTIME_SA="agent-col-cloud-run@project-e1e2a890-4566-48a8-a32.iam.gserviceaccount.com"
+
+gcloud projects get-iam-policy project-e1e2a890-4566-48a8-a32 \
+  --flatten='bindings[].members' \
+  --filter="bindings.members:serviceAccount:${RUNTIME_SA} AND bindings.role:(roles/aiplatform.user OR roles/datastore.user OR roles/speech.client OR roles/serviceusage.serviceUsageConsumer)" \
+  --format='value(bindings.role)'
+```
+
+Expected runtime service account roles:
+
+```text
+roles/aiplatform.user
+roles/datastore.user
+roles/serviceusage.serviceUsageConsumer
+roles/speech.client
+```
+
+`roles/speech.client` grants Speech-to-Text recognition access.
+`roles/serviceusage.serviceUsageConsumer` must include
+`serviceusage.services.use`, which Google client libraries can require when
+using the project as the quota/billing project:
+
+```bash
+gcloud iam roles describe roles/serviceusage.serviceUsageConsumer \
+  --format='value(includedPermissions)' | tr ';' '\n' | grep '^serviceusage.services.use$'
+```
+
+If either runtime speech role is missing, grant it before deployment and rerun
+the IAM verification command:
+
+```bash
+gcloud projects add-iam-policy-binding project-e1e2a890-4566-48a8-a32 \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role=roles/speech.client
+
+gcloud projects add-iam-policy-binding project-e1e2a890-4566-48a8-a32 \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role=roles/serviceusage.serviceUsageConsumer
+```
+
+Text-to-Speech does not use a separate runtime role in this runbook. Verify
+`texttospeech.googleapis.com` is enabled and that the runtime service account
+has `serviceusage.services.use` through Service Usage Consumer.
 
 ## 3. Synchronize Newest Approved Source
 
@@ -363,6 +421,50 @@ Manual browser smoke test:
 9. Verify continuity from a prior chat or note.
 10. Verify a representative specialist flow with receipts or citations.
 11. Verify artifact creation/read behavior used by the demo.
+
+Hosted Speech-to-Text smoke test:
+
+```bash
+BASE_URL="https://agent-col-994154906699.us-east4.run.app"
+AUTH_TOKEN="<fresh Google OIDC ID token for a permitted Agent Col user>"
+STT_AUDIO="/absolute/path/to/known-good-webm-opus-speech.webm"
+
+curl -fsS -X POST "${BASE_URL}/api/speech/transcribe" \
+  -H "Authorization: Bearer ${AUTH_TOKEN}" \
+  -H "Content-Type: audio/webm;codecs=opus" \
+  --data-binary @"${STT_AUDIO}"
+```
+
+Expected result: HTTP `200` JSON with a non-empty `transcript` value matching
+the sample audio. Do not use empty or silent audio for this smoke test.
+
+Hosted Text-to-Speech smoke test:
+
+```bash
+BASE_URL="https://agent-col-994154906699.us-east4.run.app"
+AUTH_TOKEN="<fresh Google OIDC ID token for the message owner>"
+USER_ID="<canonical user id>"
+PROJECT_ID="<canonical project id>"
+SESSION_ID="<canonical chat session id>"
+MESSAGE_ID="<completed model message id>"
+
+curl -fsS -X POST "${BASE_URL}/api/users/${USER_ID}/speech/synthesize" \
+  -H "Authorization: Bearer ${AUTH_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -D /tmp/agent-col-tts.headers \
+  -o /tmp/agent-col-tts.mp3 \
+  --data "{\"project_id\":\"${PROJECT_ID}\",\"session_id\":\"${SESSION_ID}\",\"message_id\":\"${MESSAGE_ID}\",\"chunk_index\":0,\"voice_id\":\"female\"}"
+
+wc -c /tmp/agent-col-tts.mp3
+grep -i '^content-type: audio/mpeg' /tmp/agent-col-tts.headers
+grep -i '^x-speech-chunk-index: 0' /tmp/agent-col-tts.headers
+grep -i '^x-speech-chunk-count:' /tmp/agent-col-tts.headers
+```
+
+Expected result: HTTP `200`, a non-empty MP3 file, `Content-Type:
+audio/mpeg`, `X-Speech-Chunk-Index: 0`, and an `X-Speech-Chunk-Count` header of
+`1` or greater. The TTS API remains locator-only; do not add caller-supplied
+text to this smoke test.
 
 Read recent Cloud Run service logs:
 
