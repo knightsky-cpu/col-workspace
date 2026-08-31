@@ -7,7 +7,7 @@ from google.genai import types
 from agent_col_responder_context_v3 import (
     AgentColResponderContextV3 as AgentColResponderContext,
 )
-from agent_col_routing_v3 import AgentColRoutingDirective
+from agent_col_routing_v3 import AgentColRoute, AgentColRoutingDirective
 from memory_proposals import ProposalTurnLease
 from schemas import (
     AgentActionReceipt,
@@ -1453,6 +1453,70 @@ async def test_turn_service_preserves_continuity_receipts_on_success() -> None:
     )
 
     assert result.continuity_receipts == (receipt,)
+
+
+@pytest.mark.asyncio
+async def test_turn_service_resolved_continuity_overrides_clarify_route(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    receipt = continuity_receipt()
+    continuity_context = types.Content(
+        role="user",
+        parts=[
+            types.Part.from_text(
+                text=(
+                    "[SERVER_VALIDATED_CONTINUITY_CONTEXT]\n"
+                    "Title: Project Language: TypeScript\n"
+                    "Body: The project will be written in TypeScript.\n"
+                    "[/SERVER_VALIDATED_CONTINUITY_CONTEXT]"
+                )
+            )
+        ],
+    )
+    clarify_directive = AgentColRoutingDirective(
+        route="clarify",
+        clarifying_question=(
+            "Which project or context are you referring to?"
+        ),
+    )
+    routing_request = RecordingRoutingRequest(clarify_directive)
+    executor = RecordingExecutor()
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=executor,
+        responder_runtime=responder,
+        routing_request=routing_request,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=(
+                "hey col what language was that project we are working on "
+                "written in"
+            ),
+            model_input_context=(continuity_context,),
+            continuity_receipts=(receipt,),
+        )
+    )
+
+    assert result.continuity_receipts == (receipt,)
+    routed_directive, _ = executor.calls[0]
+    assert routed_directive.route is AgentColRoute.DIRECT
+    responder_context = responder.contexts[0]
+    routed_context_text = responder_context.model_input_context[-1].parts[
+        0
+    ].text
+    assert routed_context_text is not None
+    assert '"route":"direct"' in routed_context_text
+    assert '"route":"clarify"' not in routed_context_text
+    assert "Which project or context are you referring to?" not in (
+        routed_context_text
+    )
 
 
 @pytest.mark.asyncio

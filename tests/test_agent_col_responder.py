@@ -254,6 +254,83 @@ def test_responder_instruction_requires_aggressive_continuity_before_questions(
         assert required_rule in normalized
 
 
+def test_responder_instruction_evaluates_user_assumptions_before_deciding(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "assumptions, assertions, conclusions, plans, or interpretations",
+        "examine whether it is actually supported",
+        "look for contradictions",
+        "look for missing assumptions",
+        "dependencies that may have been overlooked",
+        "apparently successful solution creates another problem",
+        "alternative explanations before settling on a conclusion",
+        "collaborative correction, not agreement",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_asks_useful_followups_and_leads_work(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "understand the user's underlying objective",
+        "uncover unstated requirements",
+        "identify important constraints",
+        "expose tradeoffs the user may not have considered",
+        "identify the next decision",
+        "recommend when a decision should be recorded",
+        "do not dominate the conversation",
+        "lead when there is a meaningful direction to advance",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_maintains_workspace_notes_proactively(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "maintain useful workspace notes",
+        "do not wait for the user to explicitly say",
+        "formulate a clear note candidate through the available note mechanism",
+        "notes should capture useful meaning",
+        "not merely repeat conversation text",
+        "use existing workspace notes frequently",
+        "prevent rediscovery of decisions",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_uses_working_state_as_active_continuity_loop(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "working_state should help maintain awareness",
+        "the current objective",
+        "competing hypotheses",
+        "what has been established",
+        "what remains uncertain",
+        "what should be revisited later",
+        "use working_state together with memory, workspace notes, and chat history",
+        "understand the current message",
+        "identify the user's larger objective",
+        "carry the resulting understanding forward in working_state",
+    ):
+        assert required_rule in normalized
+
+
 def test_responder_instruction_integrates_validated_computation_evidence(
 ) -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION

@@ -216,6 +216,18 @@ class AgentColTurnResult:
     chat_turn_claim: ChatTurnClaim | None = None
 
 
+def _directive_with_resolved_continuity_priority(
+    command: AgentColTurnCommand,
+    directive: AgentColRoutingDirective,
+) -> AgentColRoutingDirective:
+    if (
+        command.continuity_receipts
+        and directive.route == AgentColRoute.CLARIFY
+    ):
+        return AgentColRoutingDirective(route=AgentColRoute.DIRECT)
+    return directive
+
+
 @dataclass(frozen=True, slots=True)
 class AgentColTextDelta:
     text: str
@@ -1022,6 +1034,10 @@ class AgentColTurnService:
                     continuity_receipts=command.continuity_receipts,
                     continuity_choices=command.continuity_choices,
                 ) from exc
+        directive = _directive_with_resolved_continuity_priority(
+            command,
+            directive,
+        )
         expert_routes = {
             AgentColRoute.SOURCE,
             AgentColRoute.RESEARCH,
