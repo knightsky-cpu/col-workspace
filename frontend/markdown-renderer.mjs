@@ -1,6 +1,6 @@
 import { element, setText } from "./render.mjs";
 
-const BLOCK_TAGS = new Set(["blockquote", "h1", "h2", "h3", "ol", "p", "pre", "table", "ul"]);
+const BLOCK_TAGS = new Set(["blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "hr", "ol", "p", "pre", "table", "ul"]);
 const INLINE_PATTERNS = [
   { kind: "code", expression: /`([^`\n]+)`/ },
   { kind: "strong", expression: /\*\*([^*\n]+)\*\*/ },
@@ -82,15 +82,19 @@ function appendParagraph(container, lines) {
 }
 
 function appendHeading(container, line) {
-  const match = /^(#{1,3})\s+(.+)$/.exec(line);
+  const match = /^(#{1,6})\s+(.+)$/.exec(line);
   if (!match) {
     return false;
   }
-  const level = Math.min(match[1].length, 3);
+  const level = match[1].length;
   const heading = element(`h${level}`, `markdown-heading markdown-heading--${level}`);
   appendInline(heading, match[2].trim());
   container.append(heading);
   return true;
+}
+
+function appendHorizontalRule(container) {
+  container.append(element("hr", "markdown-rule"));
 }
 
 function appendList(container, lines, ordered = false) {
@@ -197,9 +201,16 @@ export function renderSafeMarkdown(container, source) {
       continue;
     }
 
-    if (/^(#{1,3})\s+/.test(trimmed)) {
+    if (/^(#{1,6})\s+/.test(trimmed)) {
       flushParagraph();
       appendHeading(root, trimmed);
+      index += 1;
+      continue;
+    }
+
+    if (/^(?:---|\*\*\*|___)$/.test(trimmed)) {
+      flushParagraph();
+      appendHorizontalRule(root);
       index += 1;
       continue;
     }

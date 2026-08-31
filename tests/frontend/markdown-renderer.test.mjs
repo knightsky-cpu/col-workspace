@@ -140,6 +140,46 @@ test("renderSafeMarkdown keeps raw HTML inert and link URLs bounded", () => {
   assert.doesNotMatch(JSON.stringify(container), /javascript:alert/);
 });
 
+test("renderSafeMarkdown renders ATX headings through level six", () => {
+  useBasicDocument();
+  const container = node();
+
+  renderSafeMarkdown(container, [
+    "#### Sources",
+    "##### Level Five",
+    "###### Level Six",
+  ].join("\n"));
+
+  assert.deepEqual(
+    container.children.map((child) => child.tagName),
+    ["h4", "h5", "h6"],
+  );
+  assert.equal(textTree(container.children[0]).trim(), "Sources");
+  assert.equal(textTree(container.children[1]).trim(), "Level Five");
+  assert.equal(textTree(container.children[2]).trim(), "Level Six");
+  assert.doesNotMatch(textTree(container), /####|#####|######/);
+});
+
+test("renderSafeMarkdown renders standalone horizontal rules", () => {
+  useBasicDocument();
+  const container = node();
+
+  renderSafeMarkdown(container, [
+    "***",
+    "---",
+    "___",
+    "- list item",
+  ].join("\n"));
+
+  assert.deepEqual(
+    container.children.map((child) => child.tagName),
+    ["hr", "hr", "hr", "ul"],
+  );
+  assert.equal(container.children[3].children[0].tagName, "li");
+  assert.equal(textTree(container.children[3]).trim(), "list item");
+  assert.doesNotMatch(textTree(container), /\*\*\*|---|___/);
+});
+
 test("renderSafeMarkdown keeps blocks when browser tagName values are uppercase", () => {
   useBrowserLikeDocument();
   const container = browserLikeNode();
