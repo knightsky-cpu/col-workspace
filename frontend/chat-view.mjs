@@ -56,21 +56,6 @@ function appendTurnMessage(container, kind, message) {
   container.append(turnAuthorIcon(kind), messageText);
 }
 
-function appendSpeakControl(container, turn, onSpeakTurn) {
-  if (typeof onSpeakTurn !== "function" || !String(turn.response?.response ?? "").trim()) {
-    return;
-  }
-  const controls = element("div", "turn-speech-actions");
-  const button = element("button", "turn-speak", "Speak");
-  button.setAttribute("type", "button");
-  button.setAttribute("aria-label", "Speak assistant response");
-  button.addEventListener("click", () => {
-    onSpeakTurn(turn);
-  });
-  controls.append(button);
-  container.append(controls);
-}
-
 function appendEmptyConversationIntro(container) {
   const section = element("section", "conversation-intro");
   section.setAttribute("aria-labelledby", "empty-conversation-title");
@@ -128,7 +113,7 @@ export function renderReceipts(container, response) {
 function appendTranscriptTurn(
   container,
   turn,
-  { className = "", includeReceipts = true, onSpeakTurn = null } = {},
+  { className = "", includeReceipts = true } = {},
 ) {
   const article = element("article", `turn ${className}`.trim());
   if (className === "chat-turn--incomplete") {
@@ -138,9 +123,6 @@ function appendTranscriptTurn(
   const model = element("div", "turn-model");
   appendTurnMessage(user, "user", turn.request?.body?.message ?? "");
   appendTurnMessage(model, "model", turn.response?.response ?? "");
-  if (!className) {
-    appendSpeakControl(model, turn, onSpeakTurn);
-  }
   article.append(user, model);
   if (includeReceipts) {
     const receipts = element("div", "turn-receipts");
@@ -156,7 +138,6 @@ export function renderTranscript(
   pendingTurn = null,
   pendingResponseText = "",
   lastFailure = null,
-  options = {},
 ) {
   container.replaceChildren();
   if (transcript.length === 0 && pendingTurn === null && lastFailure === null) {
@@ -164,7 +145,7 @@ export function renderTranscript(
     return;
   }
   for (const turn of transcript) {
-    appendTranscriptTurn(container, turn, { onSpeakTurn: options.onSpeakTurn });
+    appendTranscriptTurn(container, turn);
   }
   if (pendingTurn !== null) {
     appendTranscriptTurn(
@@ -291,6 +272,9 @@ export function createChatView(elements, handlers) {
       updateCharacterCount();
     },
     insertComposerText,
+    submitComposer() {
+      handlers.onSubmit(elements.input.value);
+    },
     render(state) {
       renderTranscript(
         elements.transcript,
@@ -298,7 +282,6 @@ export function createChatView(elements, handlers) {
         state.pendingTurn,
         state.pendingResponseText,
         state.lastFailure,
-        { onSpeakTurn: handlers.onSpeakTurn },
       );
       elements.transcript.scrollTop = elements.transcript.scrollHeight;
       elements.retryButton.hidden = state.lastFailure === null;

@@ -220,9 +220,11 @@ test("composer exposes an accessible optional microphone control", () => {
 test("composer centers compact speech controls with exactly two approved voices", () => {
   assert.match(
     html,
-    /<div class="composer-actions">\s*<span data-character-count>0 \/ 10000<\/span>\s*<div class="composer-speech">[\s\S]*data-speech-toggle[\s\S]*data-speech-voice[\s\S]*<button type="button" class="speech-stop" data-tts-stop hidden disabled>Stop<\/button>[\s\S]*<\/div>\s*<button type="submit" data-chat-submit>Send<\/button>\s*<\/div>/,
+    /<div class="composer-actions">\s*<span data-character-count>0 \/ 10000<\/span>\s*<div class="composer-speech">[\s\S]*data-speech-toggle[\s\S]*data-speech-voice[\s\S]*data-spoken-responses-toggle[\s\S]*<button type="button" class="speech-stop" data-tts-stop hidden disabled>Stop<\/button>[\s\S]*<\/div>\s*<button type="submit" data-chat-submit>Send<\/button>\s*<\/div>/,
   );
   assert.match(html, /<select[^>]+data-speech-voice[^>]+aria-label="Speech voice"[\s\S]*<\/select>/);
+  assert.match(html, /<input[\s\S]*?type="checkbox"[\s\S]*?data-spoken-responses-toggle[\s\S]*?>/);
+  assert.match(html, /Spoken responses/);
   assert.match(html, /<option value="female" selected>Female — Kore<\/option>/);
   assert.match(html, /<option value="male">Male — Alnilam<\/option>/);
   assert.doesNotMatch(html, /en-GB-Chirp3-HD/);

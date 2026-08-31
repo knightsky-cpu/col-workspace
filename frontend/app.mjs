@@ -336,6 +336,10 @@ function setSpeechUi(stateName, message) {
   setSpeechStatus(message);
 }
 
+function isComposerEmpty() {
+  return !String(document.querySelector("[data-chat-input]")?.value ?? "").trim();
+}
+
 function selectSpeechRecordingMimeType() {
   if (!globalThis.MediaRecorder) {
     throw new Error("Microphone recording is unavailable.");
@@ -363,8 +367,12 @@ async function finishSpeechRecording(recording) {
   try {
     const audio = new Blob(recording.chunks, { type: recording.mimeType });
     const response = await transcribeSpeechAudio(audio, authOptions());
-    ensureChatView().insertComposerText(response?.transcript ?? "");
-    setSpeechUi("idle", response?.transcript ? "Transcript added." : "No speech recognized.");
+    const transcript = String(response?.transcript ?? "").trim();
+    ensureChatView().insertComposerText(transcript);
+    if (transcript && recording.composerWasEmpty) {
+      ensureChatView().submitComposer();
+    }
+    setSpeechUi("idle", transcript ? "Transcript added." : "No speech recognized.");
   } catch {
     setSpeechUi("error", "Unable to transcribe audio.");
   } finally {
@@ -393,7 +401,13 @@ async function startSpeechRecording() {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mimeType = selectSpeechRecordingMimeType();
     const recorder = new MediaRecorder(stream, { mimeType });
-    const recording = { recorder, stream, chunks: [], mimeType };
+    const recording = {
+      recorder,
+      stream,
+      chunks: [],
+      mimeType,
+      composerWasEmpty: isComposerEmpty(),
+    };
     recorder.ondataavailable = (event) => {
       if (event.data?.size > 0) {
         recording.chunks.push(event.data);
@@ -432,6 +446,10 @@ function stopSpeechRecording() {
 function selectedSpeechVoiceId() {
   const select = document.querySelector("[data-speech-voice]");
   return select?.value === "male" ? "male" : "female";
+}
+
+function spokenResponsesEnabled() {
+  return document.querySelector("[data-spoken-responses-toggle]")?.checked === true;
 }
 
 function setSpeechPlaybackUi(active) {
@@ -556,6 +574,16 @@ async function speakAssistantTurn(turn) {
       setSpeechPlaybackUi(false);
     }
   }
+}
+
+function speakCompletedTurnIfEnabled(turn) {
+  if (!spokenResponsesEnabled()) {
+    return;
+  }
+  if (!String(turn?.response?.response ?? "").trim()) {
+    return;
+  }
+  speakAssistantTurn(turn);
 }
 
 function authOptions(options = {}) {
@@ -985,9 +1013,11 @@ async function submitRequest(request) {
       })
       : await apiFetchJson(endpoint, options);
     state = completePendingTurn(state, response);
+    const completedTurn = state.transcript.at(-1) ?? null;
     clearOrdinaryChatRequest(request);
     setChatStatus("");
     renderWorkspace();
+    speakCompletedTurnIfEnabled(completedTurn);
     await refreshAuthoritativeEffects(response);
     await loadChatSessions();
   } catch (error) {
@@ -1042,9 +1072,6 @@ function ensureChatView() {
           return;
         }
         submitRequest(buildExactRetryRequest(state.lastFailure.request));
-      },
-      onSpeakTurn(turn) {
-        speakAssistantTurn(turn);
       },
       onSelectMemoryClarification(choice) {
         if (!selectCanSubmit(state)) {
@@ -1709,6 +1736,12 @@ document.querySelector("[data-speech-toggle]")?.addEventListener("click", () => 
 
 document.querySelector("[data-tts-stop]")?.addEventListener("click", () => {
   stopSpeechPlayback();
+});
+
+document.querySelector("[data-spoken-responses-toggle]")?.addEventListener("change", () => {
+  if (!spokenResponsesEnabled()) {
+    stopSpeechPlayback();
+  }
 });
 
 bootstrapAuth();

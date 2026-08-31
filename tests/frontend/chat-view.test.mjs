@@ -108,13 +108,12 @@ test("renderTranscript keeps user text literal and renders model Markdown struct
   assert.equal(model.textContent, "");
 });
 
-test("renderTranscript exposes Speak only for completed assistant turns", () => {
+test("renderTranscript does not expose bubble-level Speak controls for completed assistant turns", () => {
   const container = node();
   const completedTurn = {
     request: { key: "chat--1", body: { message: "hello" } },
     response: { message_id: "turn--1--model", response: "completed answer" },
   };
-  let spokenTurn = null;
 
   renderTranscript(
     container,
@@ -122,21 +121,12 @@ test("renderTranscript exposes Speak only for completed assistant turns", () => 
     null,
     "",
     null,
-    {
-      onSpeakTurn(turn) {
-        spokenTurn = turn;
-      },
-    },
+    { onSpeakTurn() {} },
   );
 
-  const speakButton = findTree(container, (item) => (
+  assert.equal(findTree(container, (item) => (
     item.tagName === "button" && item.textContent === "Speak"
-  ));
-  assert.ok(speakButton);
-  assert.equal(speakButton.attributes.type, "button");
-  assert.equal(speakButton.attributes["aria-label"], "Speak assistant response");
-  speakButton.onclick();
-  assert.equal(spokenTurn, completedTurn);
+  )), null);
 });
 
 test("renderTranscript does not expose Speak for pending or failed assistant text", () => {
