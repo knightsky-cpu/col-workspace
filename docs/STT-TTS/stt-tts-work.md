@@ -357,7 +357,7 @@ Target flow now implemented:
 mic on
 -> MediaRecorder records locally
 -> browser-side RMS detector waits for actual speech
--> after speech, 2 continuous seconds of trailing silence
+-> after speech, 3 continuous seconds of trailing silence
 -> calls existing stopSpeechRecording()
 -> MediaRecorder onstop fires
 -> finishSpeechRecording()
@@ -377,8 +377,8 @@ Source areas:
   speechHasStarted = false
   wait for RMS above adaptive threshold
   after speech starts, measure trailing silence
-  if speech resumes before 2 seconds, reset the timer
-  if silence lasts 2 continuous seconds, call stopSpeechRecording()
+  if speech resumes before 3 seconds, reset the timer
+  if silence lasts 3 continuous seconds, call stopSpeechRecording()
   ```
 
 - `frontend/app.mjs`: the detector does not start the silence countdown merely
@@ -400,10 +400,10 @@ Source areas:
 - `tests/frontend/app-runtime.test.mjs`: added fake browser audio-analysis
   support for deterministic VAD/silence tests.
 - `tests/frontend/app-runtime.test.mjs`: validates:
-  - speech followed by two seconds trailing silence auto-stops through the
+  - speech followed by three seconds trailing silence auto-stops through the
     existing transcription path;
   - mic enabled without speech does not auto-stop;
-  - speech resuming before two seconds resets trailing silence;
+  - speech resuming before three seconds resets trailing silence;
   - existing composer text prevents auto-send;
   - editing during recording revokes auto-send;
   - automatic and manual stop share one lifecycle;
@@ -414,17 +414,17 @@ Important behavior examples now covered:
 
 ```text
 Empty composer:
-click Mic -> speak -> 2s silence -> auto stop -> transcript -> auto-send
+click Mic -> speak -> 3s silence -> auto stop -> transcript -> auto-send
 ```
 
 ```text
 Existing composer text:
-click Mic -> speak -> 2s silence -> auto stop -> transcript appends -> no auto-send
+click Mic -> speak -> 3s silence -> auto stop -> transcript appends -> no auto-send
 ```
 
 ```text
 Empty composer, then user types while recording:
-click Mic -> speak + edit composer -> 2s silence -> transcript appends -> no auto-send
+click Mic -> speak + edit composer -> 3s silence -> transcript appends -> no auto-send
 ```
 
 Implementation notes for future sessions:

@@ -153,7 +153,7 @@ const SPEECH_RECORDING_MIME_TYPES = Object.freeze([
   "audio/webm;codecs=opus",
   "audio/webm",
 ]);
-const SPEECH_TRAILING_SILENCE_MS = 2000;
+const SPEECH_TRAILING_SILENCE_MS = 3000;
 const SPEECH_ANALYSER_FFT_SIZE = 2048;
 const SPEECH_BASELINE_RMS = 0.01;
 const SPEECH_MIN_RMS_ABOVE_FLOOR = 0.04;

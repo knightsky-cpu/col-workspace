@@ -761,7 +761,7 @@ test("empty microphone transcript does not auto-submit chat", async () => {
   assert.equal(calls.some(([path]) => path === "/api/chat/stream"), false);
 });
 
-test("speech followed by two seconds of trailing silence automatically stops through transcription", async (t) => {
+test("speech followed by three seconds of trailing silence automatically stops through transcription", async (t) => {
   const media = installFakeMediaRecorder();
   const vad = installFakeSilenceDetection(t);
   const { calls, stream } = installSpeechRuntimeFetch();
@@ -783,6 +783,11 @@ test("speech followed by two seconds of trailing silence automatically stops thr
 
   vad.pushSample(128);
   vad.tick(3100);
+  assert.equal(media.recorders[0].state, "recording");
+  assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), false);
+
+  vad.pushSample(128);
+  vad.tick(4100);
   await waitFor(
     () => calls.some(([path]) => path === "/api/speech/transcribe"),
     () => JSON.stringify(calls.map(([path]) => path)),
@@ -810,7 +815,7 @@ test("speech followed by two seconds of trailing silence automatically stops thr
   });
 });
 
-test("microphone enabled without speech does not stop after two seconds", async (t) => {
+test("microphone enabled without speech does not stop after three seconds", async (t) => {
   const media = installFakeMediaRecorder();
   const vad = installFakeSilenceDetection(t);
   const { calls } = installSpeechRuntimeFetch();
@@ -827,7 +832,7 @@ test("microphone enabled without speech does not stop after two seconds", async 
   vad.pushSample(128);
   vad.tick(2100);
   vad.pushSample(128);
-  vad.tick(4100);
+  vad.tick(6100);
 
   assert.equal(media.recorders[0].state, "recording");
   assert.equal(media.recorders[0].stopCalls, 0);
@@ -840,7 +845,7 @@ test("microphone enabled without speech does not stop after two seconds", async 
   );
 });
 
-test("speech resuming before two seconds resets trailing silence", async (t) => {
+test("speech resuming before three seconds resets trailing silence", async (t) => {
   const media = installFakeMediaRecorder();
   const vad = installFakeSilenceDetection(t);
   const { calls } = installSpeechRuntimeFetch();
@@ -861,13 +866,13 @@ test("speech resuming before two seconds resets trailing silence", async (t) => 
   vad.pushSample(128);
   vad.tick(3000);
   vad.pushSample(128);
-  vad.tick(4500);
+  vad.tick(5500);
 
   assert.equal(media.recorders[0].state, "recording");
   assert.equal(calls.some(([path]) => path === "/api/speech/transcribe"), false);
 
   vad.pushSample(128);
-  vad.tick(5100);
+  vad.tick(6100);
   await waitFor(
     () => calls.some(([path]) => path === "/api/speech/transcribe"),
     () => JSON.stringify(calls.map(([path]) => path)),
@@ -895,7 +900,7 @@ test("silence-stop appends to existing composer text without auto-send", async (
   vad.pushSample(128);
   vad.tick(1100);
   vad.pushSample(128);
-  vad.tick(3100);
+  vad.tick(4100);
 
   await waitFor(
     () => input.value === "Also compare this against\nGoogle streaming TTS API",
@@ -925,7 +930,7 @@ test("editing the composer during recording prevents silence-stop auto-send", as
   vad.pushSample(128);
   vad.tick(1100);
   vad.pushSample(128);
-  vad.tick(3100);
+  vad.tick(4100);
 
   await waitFor(
     () => input.value === "typed while recording\nspoken addition",
@@ -953,7 +958,7 @@ test("automatic and manual microphone stop share one stop lifecycle", async (t) 
   vad.pushSample(128);
   vad.tick(1100);
   vad.pushSample(128);
-  vad.tick(3100);
+  vad.tick(4100);
   micButton.onclick();
 
   await waitFor(
