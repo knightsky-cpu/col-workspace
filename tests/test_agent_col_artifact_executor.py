@@ -356,6 +356,119 @@ class FakeGenericArtifactReader:
         return self.detail
 
 
+class RecordingAgentJobRepository:
+    def __init__(self) -> None:
+        self.enqueued = []
+        self.events = []
+        self.leased = []
+        self.completed = []
+        self.failed = []
+
+    async def enqueue_job(self, job):
+        self.enqueued.append(job)
+        return job
+
+    async def append_event(self, *, user_id, workspace_id, event):
+        self.events.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "event": event,
+            }
+        )
+        return event
+
+    async def lease_queued_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        lease_expires_at,
+        observed_at,
+    ):
+        self.leased.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+                "observed_at": observed_at,
+            }
+        )
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "running",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+            }
+        )
+
+    async def complete_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        observed_at,
+        result_refs,
+    ):
+        self.completed.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "observed_at": observed_at,
+                "result_refs": result_refs,
+            }
+        )
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "completed",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "result_refs": result_refs,
+            }
+        )
+
+    async def fail_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        observed_at,
+        failure,
+    ):
+        self.failed.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "observed_at": observed_at,
+                "failure": failure,
+            }
+        )
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "failed",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "failure_summary": failure,
+            }
+        )
+
+
 @pytest.mark.asyncio
 async def test_artifact_executor_generates_once_and_projects_canonical_receipts(
 ) -> None:
@@ -451,6 +564,199 @@ async def test_artifact_executor_generates_once_and_projects_canonical_receipts(
     assert result.adaptations == (adaptation,)
     assert result.projection.adaptations == (adaptation,)
     assert result.projection.limitations == ()
+
+
+@pytest.mark.asyncio
+async def test_artifact_executor_records_blueprint_agent_job_lifecycle(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactExecutionCommand,
+        AgentColArtifactExecutor,
+    )
+
+    claim = initial_claim()
+    generated = blueprint()
+    artifact = artifact_for_claim(claim)
+    action = AgentActionReceipt(
+        action_name="synthesize_project",
+        status="completed",
+    )
+    effect_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    repository = RecordingAgentJobRepository()
+    executor = AgentColArtifactExecutor(
+        synthesis_service=FakeSynthesisService(generated),
+        artifact_ledger=FakeArtifactLedger(
+            ChatTurnArtifactEffectResult(
+                claim=effect_claim,
+                artifact=artifact,
+            )
+        ),
+        artifact_reader=FakeArtifactReader(
+            artifact_detail(effect_claim, artifact, generated)
+        ),
+        agent_job_repository=repository,
+    )
+
+    result = await executor.execute(
+        AgentColArtifactExecutionCommand(
+            claim=claim,
+            routing_directive=artifact_directive(),
+            observed_at=NOW,
+        )
+    )
+
+    assert result.artifacts == (artifact,)
+    assert len(repository.enqueued) == 1
+    job = repository.enqueued[0]
+    assert job.action_kind == "create_artifact"
+    assert job.status == "queued"
+    assert job.agent_label == "Artifact Builder"
+    assert job.display_label == "Artifact: structured blueprint"
+    assert [entry["event"].event_type for entry in repository.events] == [
+        "queued",
+        "started",
+        "completed",
+    ]
+    assert repository.completed[0]["result_refs"] == {
+        "artifact_id": artifact.artifact_id
+    }
+
+
+@pytest.mark.asyncio
+async def test_artifact_executor_records_single_file_agent_job_lifecycle(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactExecutionCommand,
+        AgentColArtifactExecutor,
+    )
+
+    claim = initial_claim()
+    generated = single_file_artifact()
+    artifact = single_file_reference_for_claim(claim)
+    action = AgentActionReceipt(
+        action_name="create_artifact",
+        status="completed",
+    )
+    effect_claim = replace(
+        claim,
+        precompleted_actions=(action,),
+        precompleted_artifacts=(artifact,),
+    )
+    repository = RecordingAgentJobRepository()
+    executor = AgentColArtifactExecutor(
+        synthesis_service=FakeSynthesisService(blueprint()),
+        artifact_ledger=FakeArtifactLedger(
+            ChatTurnArtifactEffectResult(
+                claim=effect_claim,
+                artifact=artifact,
+            )
+        ),
+        artifact_reader=FakeArtifactReader(
+            artifact_detail(effect_claim, artifact_for_claim(claim), blueprint())
+        ),
+        generic_artifact_generator=FakeGenericArtifactGenerator(generated),
+        generic_artifact_reader=FakeGenericArtifactReader(
+            single_file_detail(effect_claim, artifact, generated)
+        ),
+        genai_client=object(),
+        agent_job_repository=repository,
+    )
+
+    result = await executor.execute(
+        AgentColArtifactExecutionCommand(
+            claim=claim,
+            routing_directive=single_file_artifact_directive(),
+            observed_at=NOW,
+            source_text="Create a Python password generator.",
+        )
+    )
+
+    assert result.artifacts == (artifact,)
+    assert len(repository.enqueued) == 1
+    job = repository.enqueued[0]
+    assert job.action_kind == "create_artifact"
+    assert job.status == "queued"
+    assert job.agent_label == "Artifact Builder"
+    assert job.display_label == "Artifact: password_generator.py"
+    assert job.user_id == "user-1"
+    assert job.workspace_id == "agent-col"
+    assert job.project_id == "agent-col"
+    assert job.session_id == "session-1"
+    assert job.source_turn_id == claim.ids.turn_id
+    assert job.source_message_id == claim.ids.user_message_id
+    assert job.idempotency_key.startswith("artifact-create-")
+    assert [entry["event"].event_type for entry in repository.events] == [
+        "queued",
+        "started",
+        "completed",
+    ]
+    assert repository.completed[0]["result_refs"] == {
+        "artifact_id": artifact.artifact_id
+    }
+
+
+@pytest.mark.asyncio
+async def test_artifact_executor_records_failed_agent_job_without_private_detail(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactExecutionCommand,
+        AgentColArtifactExecutor,
+    )
+
+    class FailingGenericArtifactGenerator:
+        async def __call__(self, client: object, request: object) -> object:
+            raise RuntimeError("private generation prompt details")
+
+    claim = initial_claim()
+    repository = RecordingAgentJobRepository()
+    executor = AgentColArtifactExecutor(
+        synthesis_service=FakeSynthesisService(blueprint()),
+        artifact_ledger=FakeArtifactLedger(
+            ChatTurnArtifactEffectResult(
+                claim=claim,
+                artifact=single_file_reference_for_claim(claim),
+            )
+        ),
+        artifact_reader=FakeArtifactReader(
+            artifact_detail(claim, artifact_for_claim(claim), blueprint())
+        ),
+        generic_artifact_generator=FailingGenericArtifactGenerator(),
+        generic_artifact_reader=FakeGenericArtifactReader(
+            single_file_detail(
+                claim,
+                single_file_reference_for_claim(claim),
+                single_file_artifact(),
+            )
+        ),
+        genai_client=object(),
+        agent_job_repository=repository,
+    )
+
+    with pytest.raises(RuntimeError, match="private generation"):
+        await executor.execute(
+            AgentColArtifactExecutionCommand(
+                claim=claim,
+                routing_directive=single_file_artifact_directive(),
+                observed_at=NOW,
+                source_text="Create a Python password generator.",
+            )
+        )
+
+    assert len(repository.enqueued) == 1
+    assert [entry["event"].event_type for entry in repository.events] == [
+        "queued",
+        "started",
+        "failed",
+    ]
+    assert repository.failed[0]["failure"].code == "artifact_creation_failed"
+    assert repository.failed[0]["failure"].summary == (
+        "Artifact could not be created."
+    )
+    assert "private" not in str(repository.failed[0]["failure"])
 
 
 @pytest.mark.asyncio

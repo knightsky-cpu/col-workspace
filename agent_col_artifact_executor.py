@@ -1,15 +1,19 @@
 """Deterministic synchronous artifact execution for routed Agent_Col turns."""
 
+import hashlib
 import json
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
 
 from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent_col_agent_jobs import AgentJob, AgentJobEvent, AgentJobFailure
+from agent_job_repository import AgentJobRepository
 from agent_col_routing_v4 import AgentColRoute, AgentColRoutingDirective
 from artifact_read_service import GetBlueprintArtifactCommand
 from chat_turns import ChatTurnClaim
@@ -47,6 +51,9 @@ _ARTIFACT_TRIGGER_WORDS = re.compile(
     re.IGNORECASE,
 )
 _MAX_RECENT_ARTIFACT_CONTEXT_MESSAGES = 6
+_ARTIFACT_AGENT_LABEL = "Artifact Builder"
+_ARTIFACT_JOB_LEASE_SECONDS = 120
+logger = logging.getLogger(__name__)
 
 
 class ArtifactSynthesisService(Protocol):
@@ -153,6 +160,255 @@ class AgentColArtifactExecutionResult:
     projection: AgentColArtifactResponderProjection
 
 
+def _artifact_job_digest(command: AgentColArtifactExecutionCommand) -> str:
+    intent = command.routing_directive.artifact_intent
+    assert intent is not None
+    material = json.dumps(
+        {
+            "project_id": command.claim.request.project_id,
+            "session_id": command.claim.request.session_id,
+            "user_id": command.claim.request.user_id,
+            "turn_id": command.claim.ids.turn_id,
+            "source_message_id": command.claim.ids.user_message_id,
+            "operation": intent.operation,
+            "artifact_family": intent.artifact_family,
+            "format": intent.format,
+            "filename": intent.filename,
+            "source_text": command.source_text or command.claim.request.message,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def _artifact_job_display_label(
+    command: AgentColArtifactExecutionCommand,
+) -> str:
+    intent = command.routing_directive.artifact_intent
+    assert intent is not None
+    if intent.filename:
+        return f"Artifact: {intent.filename}"[:160]
+    return "Artifact: structured blueprint"[:160]
+
+
+def _artifact_job(command: AgentColArtifactExecutionCommand) -> AgentJob:
+    digest = _artifact_job_digest(command)
+    return AgentJob(
+        job_id=f"artifact-job-{digest}",
+        user_id=command.claim.request.user_id,
+        project_id=command.claim.request.project_id,
+        workspace_id=command.claim.request.project_id,
+        session_id=command.claim.request.session_id,
+        source_turn_id=command.claim.ids.turn_id,
+        source_message_id=command.claim.ids.user_message_id,
+        action_kind="create_artifact",
+        status="queued",
+        display_label=_artifact_job_display_label(command),
+        agent_label=_ARTIFACT_AGENT_LABEL,
+        created_at=command.observed_at,
+        updated_at=command.observed_at,
+        idempotency_key=f"artifact-create-{digest}",
+    )
+
+
+def _artifact_job_event(
+    *,
+    job: AgentJob,
+    event_type: Literal["queued", "started", "completed", "failed"],
+    message: str,
+    observed_at: datetime,
+) -> AgentJobEvent:
+    return AgentJobEvent(
+        event_id=f"{job.job_id}-{event_type}",
+        job_id=job.job_id,
+        event_type=event_type,
+        message=message,
+        created_at=observed_at,
+        status=job.status,
+    )
+
+
+async def _append_artifact_job_event(
+    *,
+    agent_job_repository: AgentJobRepository,
+    user_id: str,
+    workspace_id: str,
+    event: AgentJobEvent,
+) -> None:
+    await agent_job_repository.append_event(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        event=event,
+    )
+
+
+async def _start_artifact_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    command: AgentColArtifactExecutionCommand,
+) -> tuple[AgentJob, str]:
+    queued = await agent_job_repository.enqueue_job(_artifact_job(command))
+    await _append_artifact_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        event=_artifact_job_event(
+            job=queued,
+            event_type="queued",
+            message="Artifact creation queued.",
+            observed_at=queued.created_at,
+        ),
+    )
+    lease_owner = f"artifact-tool-{_artifact_job_digest(command)}"[:128]
+    running_at = datetime.now(UTC)
+    running = await agent_job_repository.lease_queued_job(
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        job_id=queued.job_id,
+        lease_owner=lease_owner,
+        lease_expires_at=running_at + timedelta(
+            seconds=_ARTIFACT_JOB_LEASE_SECONDS
+        ),
+        observed_at=running_at,
+    )
+    await _append_artifact_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=running.user_id,
+        workspace_id=running.workspace_id,
+        event=_artifact_job_event(
+            job=running,
+            event_type="started",
+            message="Artifact creation started.",
+            observed_at=running_at,
+        ),
+    )
+    return running, lease_owner
+
+
+async def _complete_artifact_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    job: AgentJob,
+    lease_owner: str,
+    artifact_id: str,
+) -> None:
+    observed_at = datetime.now(UTC)
+    completed = await agent_job_repository.complete_job(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        job_id=job.job_id,
+        lease_owner=lease_owner,
+        observed_at=observed_at,
+        result_refs={"artifact_id": artifact_id},
+    )
+    await _append_artifact_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=completed.user_id,
+        workspace_id=completed.workspace_id,
+        event=_artifact_job_event(
+            job=completed,
+            event_type="completed",
+            message="Artifact created.",
+            observed_at=observed_at,
+        ),
+    )
+
+
+async def _fail_artifact_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    job: AgentJob,
+    lease_owner: str,
+) -> None:
+    observed_at = datetime.now(UTC)
+    failed = await agent_job_repository.fail_job(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        job_id=job.job_id,
+        lease_owner=lease_owner,
+        observed_at=observed_at,
+        failure=AgentJobFailure(
+            code="artifact_creation_failed",
+            summary="Artifact could not be created.",
+            retryable=False,
+        ),
+    )
+    await _append_artifact_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=failed.user_id,
+        workspace_id=failed.workspace_id,
+        event=_artifact_job_event(
+            job=failed,
+            event_type="failed",
+            message="Artifact creation failed.",
+            observed_at=observed_at,
+        ),
+    )
+
+
+async def _try_start_artifact_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository | None,
+    command: AgentColArtifactExecutionCommand,
+) -> tuple[AgentJob | None, str | None]:
+    if agent_job_repository is None:
+        return None, None
+    try:
+        return await _start_artifact_agent_job(
+            agent_job_repository=agent_job_repository,
+            command=command,
+        )
+    except Exception:
+        logger.exception(
+            "Agent Col artifact job lifecycle could not start for source turn."
+        )
+        return None, None
+
+
+async def _try_complete_artifact_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository | None,
+    job: AgentJob | None,
+    lease_owner: str | None,
+    artifact_id: str,
+) -> None:
+    if agent_job_repository is None or job is None or lease_owner is None:
+        return
+    try:
+        await _complete_artifact_agent_job(
+            agent_job_repository=agent_job_repository,
+            job=job,
+            lease_owner=lease_owner,
+            artifact_id=artifact_id,
+        )
+    except Exception:
+        logger.exception(
+            "Agent Col artifact job lifecycle could not complete for source turn."
+        )
+
+
+async def _try_fail_artifact_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository | None,
+    job: AgentJob | None,
+    lease_owner: str | None,
+) -> None:
+    if agent_job_repository is None or job is None or lease_owner is None:
+        return
+    try:
+        await _fail_artifact_agent_job(
+            agent_job_repository=agent_job_repository,
+            job=job,
+            lease_owner=lease_owner,
+        )
+    except Exception:
+        logger.exception(
+            "Agent Col artifact job lifecycle could not fail for source turn."
+        )
+
+
 class AgentColArtifactExecutor:
     def __init__(
         self,
@@ -163,6 +419,7 @@ class AgentColArtifactExecutor:
         generic_artifact_generator: GenericArtifactGenerator | None = None,
         generic_artifact_reader: GenericArtifactReader | None = None,
         genai_client: object | None = None,
+        agent_job_repository: AgentJobRepository | None = None,
     ) -> None:
         self._synthesis_service = synthesis_service
         self._artifact_ledger = artifact_ledger
@@ -170,6 +427,7 @@ class AgentColArtifactExecutor:
         self._generic_artifact_generator = generic_artifact_generator
         self._generic_artifact_reader = generic_artifact_reader
         self._genai_client = genai_client
+        self._agent_job_repository = agent_job_repository
 
     async def execute(
         self,
@@ -192,47 +450,69 @@ class AgentColArtifactExecutor:
             claim,
             expected_action_name="synthesize_project",
         )
+        job: AgentJob | None = None
+        lease_owner: str | None = None
         if artifact is None:
-            generated = await (
-                self._synthesis_service.generate_governed_blueprint(
-                    SynthesisCommand(
-                        project_id=claim.request.project_id,
-                        session_id=claim.request.session_id,
-                        user_id=claim.request.user_id,
-                        source_text=(
-                            command.source_text or claim.request.message
-                        ),
+            job, lease_owner = await _try_start_artifact_agent_job(
+                agent_job_repository=self._agent_job_repository,
+                command=command,
+            )
+            try:
+                generated = await (
+                    self._synthesis_service.generate_governed_blueprint(
+                        SynthesisCommand(
+                            project_id=claim.request.project_id,
+                            session_id=claim.request.session_id,
+                            user_id=claim.request.user_id,
+                            source_text=(
+                                command.source_text or claim.request.message
+                            ),
+                        )
                     )
                 )
-            )
-            blueprint = generated.blueprint
-            effect = (
-                await self._artifact_ledger.record_chat_turn_blueprint_effect(
-                    claim,
-                    model_name=SYNTHESIS_MODEL_NAME,
-                    schema_version=SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
-                    blueprint=blueprint.model_dump(mode="json"),
-                    display_label=(
-                        blueprint.synthesized_conceptual_model.project_name
-                    ),
-                    observed_at=command.observed_at,
-                    adaptations=generated.adaptations,
+                blueprint = generated.blueprint
+                effect = (
+                    await self._artifact_ledger.record_chat_turn_blueprint_effect(
+                        claim,
+                        model_name=SYNTHESIS_MODEL_NAME,
+                        schema_version=SYNTHESIS_BLUEPRINT_SCHEMA_VERSION,
+                        blueprint=blueprint.model_dump(mode="json"),
+                        display_label=(
+                            blueprint.synthesized_conceptual_model.project_name
+                        ),
+                        observed_at=command.observed_at,
+                        adaptations=generated.adaptations,
+                    )
                 )
-            )
-            claim = effect.claim
-            artifact = effect.artifact
+                claim = effect.claim
+                artifact = effect.artifact
+            except Exception:
+                await _try_fail_artifact_agent_job(
+                    agent_job_repository=self._agent_job_repository,
+                    job=job,
+                    lease_owner=lease_owner,
+                )
+                raise
 
         if artifact.artifact_type != "synthesis_blueprint":
             raise AgentColArtifactExecutorConfigurationError(
                 "Precompleted artifact effects are inconsistent."
             )
-        detail = await self._artifact_reader.get_blueprint(
-            GetBlueprintArtifactCommand(
-                project_id=claim.request.project_id,
-                blueprint_id=artifact.artifact_id,
+        try:
+            detail = await self._artifact_reader.get_blueprint(
+                GetBlueprintArtifactCommand(
+                    project_id=claim.request.project_id,
+                    blueprint_id=artifact.artifact_id,
+                )
             )
-        )
-        self._validate_canonical_detail(claim, artifact, detail)
+            self._validate_canonical_detail(claim, artifact, detail)
+        except Exception:
+            await _try_fail_artifact_agent_job(
+                agent_job_repository=self._agent_job_repository,
+                job=job,
+                lease_owner=lease_owner,
+            )
+            raise
         action = AgentActionReceipt(
             action_name="synthesize_project",
             status="completed",
@@ -244,6 +524,12 @@ class AgentColArtifactExecutor:
                 "Artifact effect receipts are inconsistent."
             )
         projection = self._projection(detail)
+        await _try_complete_artifact_agent_job(
+            agent_job_repository=self._agent_job_repository,
+            job=job,
+            lease_owner=lease_owner,
+            artifact_id=artifact.artifact_id,
+        )
         return AgentColArtifactExecutionResult(
             claim=claim,
             actions=(action,),
@@ -275,44 +561,66 @@ class AgentColArtifactExecutor:
             claim,
             expected_action_name="create_artifact",
         )
+        job: AgentJob | None = None
+        lease_owner: str | None = None
         if artifact is None:
-            generated = await self._generic_artifact_generator(
-                self._genai_client,
-                GenericArtifactGenerationRequest(
-                    artifact_family=intent.artifact_family,
-                    artifact_format=intent.format,
-                    filename=intent.filename,
-                    source_text=command.source_text or claim.request.message,
-                    context_messages=(),
-                ),
+            job, lease_owner = await _try_start_artifact_agent_job(
+                agent_job_repository=self._agent_job_repository,
+                command=command,
             )
-            effect = await (
-                self._artifact_ledger
-                .record_chat_turn_single_file_artifact_effect(
-                    claim,
-                    model_name=GENERIC_ARTIFACT_MODEL_NAME,
-                    artifact=generated.model_dump(mode="json"),
-                    display_label=derive_single_file_artifact_display_label(
-                        display_label=None,
-                        summary=generated.summary,
-                        filename=generated.filename,
+            try:
+                generated = await self._generic_artifact_generator(
+                    self._genai_client,
+                    GenericArtifactGenerationRequest(
+                        artifact_family=intent.artifact_family,
+                        artifact_format=intent.format,
+                        filename=intent.filename,
+                        source_text=command.source_text or claim.request.message,
+                        context_messages=(),
                     ),
-                    observed_at=command.observed_at,
                 )
-            )
-            claim = effect.claim
-            artifact = effect.artifact
+                effect = await (
+                    self._artifact_ledger
+                    .record_chat_turn_single_file_artifact_effect(
+                        claim,
+                        model_name=GENERIC_ARTIFACT_MODEL_NAME,
+                        artifact=generated.model_dump(mode="json"),
+                        display_label=derive_single_file_artifact_display_label(
+                            display_label=None,
+                            summary=generated.summary,
+                            filename=generated.filename,
+                        ),
+                        observed_at=command.observed_at,
+                    )
+                )
+                claim = effect.claim
+                artifact = effect.artifact
+            except Exception:
+                await _try_fail_artifact_agent_job(
+                    agent_job_repository=self._agent_job_repository,
+                    job=job,
+                    lease_owner=lease_owner,
+                )
+                raise
         if artifact.artifact_type != "single_file_artifact":
             raise AgentColArtifactExecutorConfigurationError(
                 "Precompleted artifact effects are inconsistent."
             )
-        detail = await self._generic_artifact_reader.get_artifact(
-            GetGenericArtifactCommand(
-                project_id=claim.request.project_id,
-                artifact_id=artifact.artifact_id,
+        try:
+            detail = await self._generic_artifact_reader.get_artifact(
+                GetGenericArtifactCommand(
+                    project_id=claim.request.project_id,
+                    artifact_id=artifact.artifact_id,
+                )
             )
-        )
-        self._validate_single_file_canonical_detail(claim, artifact, detail)
+            self._validate_single_file_canonical_detail(claim, artifact, detail)
+        except Exception:
+            await _try_fail_artifact_agent_job(
+                agent_job_repository=self._agent_job_repository,
+                job=job,
+                lease_owner=lease_owner,
+            )
+            raise
         action = AgentActionReceipt(
             action_name="create_artifact",
             status="completed",
@@ -324,6 +632,12 @@ class AgentColArtifactExecutor:
                 "Artifact effect receipts are inconsistent."
             )
         projection = self._single_file_projection(detail)
+        await _try_complete_artifact_agent_job(
+            agent_job_repository=self._agent_job_repository,
+            job=job,
+            lease_owner=lease_owner,
+            artifact_id=artifact.artifact_id,
+        )
         return AgentColArtifactExecutionResult(
             claim=claim,
             actions=(action,),

@@ -2385,6 +2385,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         generic_artifact_generator: object,
         generic_artifact_reader: object,
         genai_client: object,
+        agent_job_repository: object | None = None,
     ) -> object:
         artifact_executor_dependencies.append(
             (
@@ -2394,6 +2395,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 generic_artifact_generator,
                 generic_artifact_reader,
                 genai_client,
+                agent_job_repository,
             )
         )
         return artifact_executor
@@ -5517,6 +5519,7 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 main.generate_generic_artifact,
                 service_state.generic_artifact_service,
                 service_state.genai_client,
+                service_state.agent_job_repository,
             )
         ]
         assert service_state.artifact_feedback_service_dependencies == [

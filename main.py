@@ -1846,6 +1846,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         generic_artifact_creation_service = (
             GenericArtifactCreationService(artifact_writer=database)
         )
+        agent_job_repository = database.agent_jobs()
         artifact_executor = AgentColArtifactExecutor(
             synthesis_service=synthesis_service,
             artifact_ledger=database,
@@ -1853,6 +1854,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             generic_artifact_generator=generate_generic_artifact,
             generic_artifact_reader=generic_artifact_service,
             genai_client=client,
+            agent_job_repository=agent_job_repository,
         )
         artifact_feedback_service = ArtifactFeedbackService(
             artifact_reader=artifact_service,
@@ -1866,7 +1868,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
-        agent_job_repository = database.agent_jobs()
         continuity_service = ContinuityService(
             store=database,
             term_expander=GeminiContinuityTermExpander(client=client),
