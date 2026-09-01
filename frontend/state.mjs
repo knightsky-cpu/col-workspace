@@ -905,7 +905,7 @@ function nextActiveContinuityChoices(current, response, completedSelection) {
   if (completedSelection) {
     return [];
   }
-  return current ?? [];
+  return [];
 }
 
 function isContinuitySelectionRequest(request) {

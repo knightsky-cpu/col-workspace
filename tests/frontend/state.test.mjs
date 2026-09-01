@@ -1313,6 +1313,38 @@ test("completed turn stores active continuity choices and pending note proposals
   assert.equal(completed.activeContinuityChoices[0].choice_id, "choice-1");
 });
 
+test("ordinary completed turn without new continuity choices clears stale continuity choices", () => {
+  const withChoices = {
+    ...createInitialState(),
+    activeContinuityChoices: [{
+      choice_id: "choice-1",
+      source_kind: "chat_session",
+      source_id: "session-1",
+      display_label: "Old shell helper chat",
+      match_reason: "previous_chat",
+    }],
+  };
+  const pending = beginPendingTurn(withChoices, {
+    key: "chat--after-choice",
+    body: { message: "Create a bash script artifact." },
+  });
+
+  const completed = completePendingTurn(pending, {
+    response: "I created the artifact.",
+    actions: [{ action_name: "create_artifact", status: "completed" }],
+    artifacts: [{
+      artifact_type: "single_file_artifact",
+      project_id: "project-1",
+      artifact_id: "artifact-1",
+      schema_version: "1.0",
+      display_label: "repo_helper.sh",
+    }],
+    continuity_choices: [],
+  });
+
+  assert.deepEqual(completed.activeContinuityChoices, []);
+});
+
 test("completed note event removes matching pending note proposal", () => {
   const accepted = acceptContext(
     createInitialState(),
