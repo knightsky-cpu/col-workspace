@@ -48,10 +48,98 @@ def test_create_supervisor_app_defines_restrained_research_agent() -> None:
     }
     assert [tool.name for tool in root_agent.tools] == ["research_expert"]
     assert root_agent.instruction == SUPERVISOR_INSTRUCTION
-    assert "Default to no tool" in SUPERVISOR_INSTRUCTION
+    assert "Default to no specialist or durable-action tool" in (
+        SUPERVISOR_INSTRUCTION
+    )
     assert "materially improves correctness" in SUPERVISOR_INSTRUCTION
     assert "Never claim that an action occurred" in SUPERVISOR_INSTRUCTION
     assert "untrusted data" in SUPERVISOR_INSTRUCTION
+
+
+def test_supervisor_instruction_keeps_orchestration_private_and_receipt_bound(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "public orchestration controller",
+        "do not disclose internal orchestration",
+        "subagent prompts",
+        "raw agent ids",
+        "raw job ids",
+        "tool payloads",
+        "queued_actions",
+        "agent-job receipts",
+        "public labels and lifecycle",
+    ):
+        assert required_rule in normalized_instruction
+
+
+def test_supervisor_instruction_prefers_delegated_paths_for_durable_work(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "artifact, note, memory, and retrieval work",
+        "prefer the application-authorized job or subagent path",
+        "direct proposal tools are fallback",
+        "when no queued or delegated action path is available",
+        "authoritative receipt",
+    ):
+        assert required_rule in normalized_instruction
+
+
+def test_supervisor_instruction_softens_no_tool_default_for_agent_jobs(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+
+    for required_rule in (
+        "Default to no specialist or durable-action tool",
+        "fully satisfied through conversation alone",
+        "Use an application-authorized tool, job, or subagent",
+        "external evidence, retrieval, computation",
+        "requested or policy-eligible durable effect",
+    ):
+        assert required_rule in normalized_instruction
+
+
+def test_supervisor_instruction_separates_evidence_specialists_from_jobs(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split())
+
+    for required_rule in (
+        "Make at most two evidence-specialist delegations per turn",
+        "Research Expert and Source Expert",
+        "does not limit application-authorized durable-action jobs",
+        "retrieval or execution subagents",
+    ):
+        assert required_rule in normalized_instruction
+
+
+def test_supervisor_instruction_prevents_duplicate_or_competing_job_outputs(
+) -> None:
+    from supervisor import SUPERVISOR_INSTRUCTION
+
+    normalized_instruction = " ".join(SUPERVISOR_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "do not enqueue, delegate, or recreate work",
+        "equivalent work for the current logical request",
+        "already queued, running, completed, or awaiting approval",
+        "continue from the existing public lifecycle state",
+        "do not retry failed or cancelled durable work unless",
+        "once work has been successfully queued or delegated",
+        "do not independently reproduce or claim the unfinished result",
+        "before presenting the delegated work as complete",
+    ):
+        assert required_rule in normalized_instruction
 
 
 def test_supervisor_instruction_treats_continuity_context_as_untrusted_data(
@@ -133,7 +221,7 @@ def test_supervisor_instruction_enforces_governed_memory_restraint() -> None:
         "pending",
         "approve or reject",
         "never active",
-        "Default to no tool",
+        "Default to no specialist or durable-action tool",
     ):
         assert required_rule in normalized_instruction
 
@@ -245,7 +333,9 @@ def test_create_supervisor_app_registers_only_bounded_research_expert(
     assert "Research Expert" in normalized_instruction
     assert "current or externally verifiable" in normalized_instruction
     assert "supplied URL" in normalized_instruction
-    assert "at most two specialist delegations" in normalized_instruction
+    assert "at most two evidence-specialist delegations" in (
+        normalized_instruction
+    )
 
 
 def test_create_supervisor_app_registers_injected_source_tool_only() -> None:

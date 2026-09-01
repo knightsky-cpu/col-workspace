@@ -6,6 +6,7 @@ from typing import Literal, Self
 from google.adk.tools import FunctionTool, ToolContext
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
 from collaborative_note_candidates import (
     NaturalCollaborativeNoteDecision,
     NoteCandidateDecision,
@@ -17,6 +18,10 @@ from collaborative_note_service import (
     CollaborativeNoteProposalResult,
     CollaborativeNoteService,
     NaturalCollaborativeNoteCommand,
+)
+from database import (
+    MemoryProposalConflictError,
+    MemoryProposalOriginConflictError,
 )
 from memory_proposals import ProposalTurnLease
 from schemas import AgentActionReceipt, CollaborativeNoteProposal
@@ -54,7 +59,11 @@ class PendingCollaborativeNoteToolResponse(_StrictToolResponse):
 
 class RejectedCollaborativeNoteToolResponse(_StrictToolResponse):
     status: Literal["rejected"]
-    error_code: Literal["invalid_collaborative_note_candidate"]
+    error_code: Literal[
+        "invalid_collaborative_note_candidate",
+        "collaborative_note_proposal_conflict",
+        "collaborative_note_turn_conflict",
+    ]
 
 
 class NoEffectCollaborativeNoteToolResponse(_StrictToolResponse):
@@ -208,6 +217,19 @@ def create_propose_collaborative_note_tool(
             return {
                 "status": "rejected",
                 "error_code": "invalid_collaborative_note_candidate",
+            }
+        except (
+            MemoryProposalConflictError,
+            MemoryProposalOriginConflictError,
+        ):
+            return {
+                "status": "rejected",
+                "error_code": "collaborative_note_proposal_conflict",
+            }
+        except (ChatTurnOwnershipError, ChatTurnStateError):
+            return {
+                "status": "rejected",
+                "error_code": "collaborative_note_turn_conflict",
             }
         if isinstance(result, CollaborativeNoteProposalResult):
             if result.action is None:

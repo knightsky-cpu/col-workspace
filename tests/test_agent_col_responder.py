@@ -103,6 +103,83 @@ def test_responder_instruction_preserves_final_response_authority() -> None:
         assert required_rule in normalized
 
 
+def test_responder_instruction_keeps_orchestration_private_and_receipt_bound(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "public conversational orchestrator",
+        "do not narrate internal orchestration",
+        "subagent prompts",
+        "raw agent ids",
+        "raw job ids",
+        "tool payloads",
+        "queued_actions",
+        "agent-job receipts",
+        "public labels and lifecycle",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_prefers_background_delegation_for_durable_work(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "artifact, note, memory, and retrieval work",
+        "prefer the application-authorized job or subagent path",
+        "prefer the application-authorized background or delegated path",
+        "when one is available",
+        "direct memory proposal fallback",
+        "direct collaborative-note fallback",
+        "when no queued or delegated action path is available",
+        "appropriate direct governed mechanism only for the bounded effect",
+        "public receipts/status",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_prevents_duplicate_or_competing_job_outputs(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "do not enqueue, delegate, or recreate work",
+        "equivalent work for the current logical request",
+        "already queued, running, completed, or awaiting approval",
+        "continue from the existing public lifecycle state",
+        "do not retry failed or cancelled durable work unless",
+        "once work has been successfully queued or delegated",
+        "do not independently reproduce or claim the unfinished result",
+        "before presenting the delegated work as complete",
+    ):
+        assert required_rule in normalized
+
+
+def test_responder_instruction_limits_proactive_notes_to_persistence_value(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "propose a workspace note only when retaining the information",
+        "prevent meaningful rediscovery",
+        "contradiction",
+        "repeated investigation",
+        "loss of an established workspace decision",
+        "do not propose notes merely because information is technically project-related",
+        "provided relevant working_state, memory, workspace notes, and chat history",
+    ):
+        assert required_rule in normalized
+
+
 def test_responder_answers_who_are_you_as_agent_col_collaborative_partner(
 ) -> None:
     from agent_col_responder import create_responder_app
@@ -303,6 +380,7 @@ def test_responder_instruction_maintains_workspace_notes_proactively(
         "maintain useful workspace notes",
         "do not wait for the user to explicitly say",
         "formulate a clear note candidate through the available note mechanism",
+        "prevent meaningful rediscovery",
         "notes should capture useful meaning",
         "not merely repeat conversation text",
         "use existing workspace notes frequently",
@@ -324,7 +402,7 @@ def test_responder_instruction_uses_working_state_as_active_continuity_loop(
         "what has been established",
         "what remains uncertain",
         "what should be revisited later",
-        "use working_state together with memory, workspace notes, and chat history",
+        "use provided relevant working_state, memory, workspace notes, and chat history",
         "understand the current message",
         "identify the user's larger objective",
         "carry the resulting understanding forward in working_state",

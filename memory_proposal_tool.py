@@ -11,6 +11,12 @@ from pydantic import (
     model_validator,
 )
 
+from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
+from database import (
+    MemoryProposalConflictError,
+    MemoryProposalOriginConflictError,
+    MemorySignalAlreadyActiveError,
+)
 from memory_candidate_decisions import (
     NaturalMemoryDecision,
     ProviderNaturalMemoryDecision,
@@ -61,7 +67,12 @@ class PendingMemoryProposalToolResponse(_StrictToolResponse):
 
 class RejectedMemoryProposalToolResponse(_StrictToolResponse):
     status: Literal["rejected"]
-    error_code: Literal["invalid_memory_candidate"]
+    error_code: Literal[
+        "invalid_memory_candidate",
+        "memory_proposal_conflict",
+        "memory_signal_already_active",
+        "memory_turn_conflict",
+    ]
 
 
 class ClarificationMemoryProposalToolResponse(_StrictToolResponse):
@@ -226,6 +237,24 @@ def create_propose_memory_signal_tool(
             return {
                 "status": "rejected",
                 "error_code": "invalid_memory_candidate",
+            }
+        except (
+            MemoryProposalConflictError,
+            MemoryProposalOriginConflictError,
+        ):
+            return {
+                "status": "rejected",
+                "error_code": "memory_proposal_conflict",
+            }
+        except MemorySignalAlreadyActiveError:
+            return {
+                "status": "rejected",
+                "error_code": "memory_signal_already_active",
+            }
+        except (ChatTurnOwnershipError, ChatTurnStateError):
+            return {
+                "status": "rejected",
+                "error_code": "memory_turn_conflict",
             }
         if isinstance(result, NaturalMemoryProposalResult):
             return {

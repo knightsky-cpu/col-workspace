@@ -216,3 +216,96 @@ async def test_note_tool_rejects_unsafe_or_ungrounded_candidates() -> None:
 
     assert result["status"] == "rejected"
     assert service.commands == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service_error", "expected_error_code"),
+    (
+        (
+            "MemoryProposalConflictError",
+            "collaborative_note_proposal_conflict",
+        ),
+        (
+            "MemoryProposalOriginConflictError",
+            "collaborative_note_proposal_conflict",
+        ),
+        (
+            "ChatTurnStateError",
+            "collaborative_note_turn_conflict",
+        ),
+        (
+            "ChatTurnOwnershipError",
+            "collaborative_note_turn_conflict",
+        ),
+    ),
+)
+async def test_note_tool_returns_rejected_response_for_state_conflicts(
+    service_error: str,
+    expected_error_code: str,
+) -> None:
+    from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
+    from collaborative_note_tool import create_propose_collaborative_note_tool
+    from database import (
+        MemoryProposalConflictError,
+        MemoryProposalOriginConflictError,
+    )
+
+    error_types = {
+        "MemoryProposalConflictError": MemoryProposalConflictError,
+        "MemoryProposalOriginConflictError": MemoryProposalOriginConflictError,
+        "ChatTurnStateError": ChatTurnStateError,
+        "ChatTurnOwnershipError": ChatTurnOwnershipError,
+    }
+    service = RecordingCollaborativeNoteService(
+        error=error_types[service_error]("private conflict detail")
+    )
+    tool = create_propose_collaborative_note_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "note_candidate",
+                "note_kind": "constraint",
+                "title": "API version",
+                "body": "Use API version 2.",
+                "evidence_text": "this workspace must use API version 2",
+            }
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=note_tool_state(), delta={})
+        ),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": expected_error_code,
+    }
+    assert len(service.commands) == 1
+    assert "private" not in str(result)
+
+
+def test_note_tool_response_parser_accepts_state_conflict_rejections() -> None:
+    from collaborative_note_tool import (
+        RejectedCollaborativeNoteToolResponse,
+        parse_collaborative_note_tool_response,
+    )
+
+    proposal_conflict = parse_collaborative_note_tool_response(
+        {
+            "status": "rejected",
+            "error_code": "collaborative_note_proposal_conflict",
+        }
+    )
+    turn_conflict = parse_collaborative_note_tool_response(
+        {
+            "status": "rejected",
+            "error_code": "collaborative_note_turn_conflict",
+        }
+    )
+
+    assert isinstance(
+        proposal_conflict,
+        RejectedCollaborativeNoteToolResponse,
+    )
+    assert isinstance(turn_conflict, RejectedCollaborativeNoteToolResponse)

@@ -365,6 +365,76 @@ async def test_proposal_tool_rejects_invalid_candidate_without_receipt() -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service_error", "expected_error_code"),
+    (
+        (
+            "MemoryProposalConflictError",
+            "memory_proposal_conflict",
+        ),
+        (
+            "MemoryProposalOriginConflictError",
+            "memory_proposal_conflict",
+        ),
+        (
+            "MemorySignalAlreadyActiveError",
+            "memory_signal_already_active",
+        ),
+        (
+            "ChatTurnStateError",
+            "memory_turn_conflict",
+        ),
+        (
+            "ChatTurnOwnershipError",
+            "memory_turn_conflict",
+        ),
+    ),
+)
+async def test_proposal_tool_returns_rejected_response_for_state_conflicts(
+    service_error: str,
+    expected_error_code: str,
+) -> None:
+    from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
+    from database import (
+        MemoryProposalConflictError,
+        MemoryProposalOriginConflictError,
+        MemorySignalAlreadyActiveError,
+    )
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    error_types = {
+        "MemoryProposalConflictError": MemoryProposalConflictError,
+        "MemoryProposalOriginConflictError": MemoryProposalOriginConflictError,
+        "MemorySignalAlreadyActiveError": MemorySignalAlreadyActiveError,
+        "ChatTurnStateError": ChatTurnStateError,
+        "ChatTurnOwnershipError": ChatTurnOwnershipError,
+    }
+    service = RecordingMemoryService(
+        error=error_types[service_error]("private conflict detail")
+    )
+    tool = create_propose_memory_signal_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "response_length",
+                "canonical_value": "concise",
+                "evidence_text": "I prefer concise responses.",
+            },
+        },
+        tool_context=SimpleNamespace(state=tool_context_state()),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": expected_error_code,
+    }
+    assert len(service.commands) == 1
+    assert "private" not in str(result)
+
+
+@pytest.mark.asyncio
 async def test_proposal_tool_refuses_artifact_feedback_turn() -> None:
     from memory_proposal_tool import create_propose_memory_signal_tool
 
@@ -519,10 +589,17 @@ def test_proposal_tool_response_parser_accepts_strict_envelopes() -> None:
             "error_code": "invalid_memory_candidate",
         }
     )
+    conflict = parse_memory_proposal_tool_response(
+        {
+            "status": "rejected",
+            "error_code": "memory_proposal_conflict",
+        }
+    )
 
     assert isinstance(pending, PendingMemoryProposalToolResponse)
     assert pending.action.action_name == "propose_memory_signal"
     assert isinstance(rejected, RejectedMemoryProposalToolResponse)
+    assert isinstance(conflict, RejectedMemoryProposalToolResponse)
 
 
 @pytest.mark.parametrize(

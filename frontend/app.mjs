@@ -154,6 +154,9 @@ let speechPlaybackToken = 0;
 let speechPlaybackAudio = null;
 let speechPlaybackObjectUrl = null;
 let speechPlaybackAbortControllers = new Set();
+let agentJobsRefreshTimer = null;
+let agentJobsRefreshToken = 0;
+let agentJobsConsecutiveFailures = 0;
 
 const SPEECH_RECORDING_MIME_TYPES = Object.freeze([
   "audio/webm;codecs=opus",
@@ -163,6 +166,9 @@ const SPEECH_TRAILING_SILENCE_MS = 3000;
 const SPEECH_ANALYSER_FFT_SIZE = 2048;
 const SPEECH_BASELINE_RMS = 0.01;
 const SPEECH_MIN_RMS_ABOVE_FLOOR = 0.04;
+const AGENT_JOBS_REFRESH_MS = 3000;
+const AGENT_JOBS_RETRY_LIMIT = 2;
+const AGENT_JOB_ACTIVE_STATUSES = new Set(["queued", "running"]);
 
 function showAuthError(message) {
   const error = document.querySelector("[data-auth-error]");
@@ -1129,26 +1135,92 @@ async function loadChatSessions() {
   ensureChatsView().render(state);
 }
 
+function sameAgentJobsContext(left, right) {
+  return (
+    left !== null
+    && right !== null
+    && left.user_id === right.user_id
+    && left.project_id === right.project_id
+    && left.session_id === right.session_id
+  );
+}
+
+function hasActiveAgentJobs(jobs) {
+  return Array.isArray(jobs)
+    && jobs.some((job) => AGENT_JOB_ACTIVE_STATUSES.has(job.status));
+}
+
+function clearAgentJobsRefreshTimer() {
+  if (agentJobsRefreshTimer !== null) {
+    globalThis.clearTimeout(agentJobsRefreshTimer);
+    agentJobsRefreshTimer = null;
+  }
+}
+
+function resetAgentJobsRefreshLoop() {
+  clearAgentJobsRefreshTimer();
+  agentJobsRefreshToken += 1;
+  agentJobsConsecutiveFailures = 0;
+}
+
+function scheduleAgentJobsRefresh() {
+  clearAgentJobsRefreshTimer();
+  if (!state.context || !hasActiveAgentJobs(state.agents.jobs)) {
+    return;
+  }
+  const refreshToken = agentJobsRefreshToken;
+  agentJobsRefreshTimer = globalThis.setTimeout(() => {
+    agentJobsRefreshTimer = null;
+    if (refreshToken !== agentJobsRefreshToken) {
+      return;
+    }
+    loadAgentJobs();
+  }, AGENT_JOBS_REFRESH_MS);
+}
+
 async function loadAgentJobs() {
   if (!state.context) {
     return;
   }
+  const loadContext = { ...state.context };
+  const refreshToken = agentJobsRefreshToken;
+  clearAgentJobsRefreshTimer();
   state = beginAgentJobsLoad(state);
   ensureAgentsView().render(state);
   try {
     const response = await listAgentJobs(
-      state.context.user_id,
-      state.context.project_id,
+      loadContext.user_id,
+      loadContext.project_id,
       authOptions({
         limit: 50,
-        session_id: state.context.session_id,
+        session_id: loadContext.session_id,
       }),
     );
+    if (
+      refreshToken !== agentJobsRefreshToken
+      || !sameAgentJobsContext(loadContext, state.context)
+    ) {
+      return;
+    }
     state = completeAgentJobsLoad(state, response);
+    agentJobsConsecutiveFailures = 0;
   } catch (error) {
+    if (
+      refreshToken !== agentJobsRefreshToken
+      || !sameAgentJobsContext(loadContext, state.context)
+    ) {
+      return;
+    }
     state = failAgentJobsLoad(state, error);
+    agentJobsConsecutiveFailures += 1;
   }
   ensureAgentsView().render(state);
+  if (
+    agentJobsConsecutiveFailures < AGENT_JOBS_RETRY_LIMIT
+    && hasActiveAgentJobs(state.agents.jobs)
+  ) {
+    scheduleAgentJobsRefresh();
+  }
 }
 
 async function loadChatSession(sessionId) {
@@ -1156,6 +1228,7 @@ async function loadChatSession(sessionId) {
     return;
   }
   stopSpeechPlayback();
+  resetAgentJobsRefreshLoop();
   state = beginChatSessionDetailLoad(state, sessionId);
   renderWorkspace();
   try {
@@ -1322,6 +1395,7 @@ function ensureWorkspaceView() {
           return;
         }
         stopSpeechPlayback();
+        resetAgentJobsRefreshLoop();
         state = selectWorkspace(state, workspace);
         renderWorkspace();
         await loadWorkList();
@@ -1334,6 +1408,7 @@ function ensureWorkspaceView() {
         if (!state.context || state.pendingTurn !== null) {
           return;
         }
+        resetAgentJobsRefreshLoop();
         clearWorkspaceError();
         try {
           const response = await createWorkspace(
@@ -1362,6 +1437,9 @@ function ensureWorkspaceView() {
           workspace.workspace_id === state.workspaces.selectedWorkspaceId
         );
         try {
+          if (deletedSelected) {
+            resetAgentJobsRefreshLoop();
+          }
           await deleteWorkspace(
             state.context.user_id,
             workspace.workspace_id,
@@ -1850,6 +1928,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", async (
   event.preventDefault();
   try {
     stopSpeechPlayback();
+    resetAgentJobsRefreshLoop();
     state = acceptContext(
       state,
       contextForSubmit(event.currentTarget),
@@ -1895,6 +1974,7 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
     return;
   }
   stopSpeechPlayback();
+  resetAgentJobsRefreshLoop();
   state = startNewConversation(state);
   document.querySelector("[data-chat-error]").hidden = true;
   setChatStatus("");
@@ -1946,6 +2026,7 @@ document.querySelector("[data-artifacts-expand]").addEventListener("click", () =
 });
 
 document.querySelector("[data-left-refresh]").addEventListener("click", () => {
+  clearAgentJobsRefreshTimer();
   loadWorkspaces();
   loadWorkList();
   loadNotes();
