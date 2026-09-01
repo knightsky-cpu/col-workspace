@@ -4896,6 +4896,23 @@ async def test_lifespan_does_not_expose_unrestricted_supervisor(
 
 
 @pytest.mark.asyncio
+async def test_lifespan_configures_agent_col_logging(
+    monkeypatch: pytest.MonkeyPatch,
+    service_state: ServiceState,
+) -> None:
+    calls = 0
+
+    def configure_logging() -> None:
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr(main, "configure_agent_col_logging", configure_logging)
+
+    async with main.lifespan(main.app):
+        assert calls == 1
+
+
+@pytest.mark.asyncio
 async def test_lifespan_exposes_agent_col_turn_service(
     service_state: ServiceState,
 ) -> None:

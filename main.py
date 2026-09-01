@@ -4,13 +4,14 @@ import logging
 import math
 import os
 import re
+import sys
 import time
 from collections import defaultdict, deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Awaitable, Callable, Literal, NoReturn, TypeVar
+from typing import Annotated, Awaitable, Callable, Literal, NoReturn, TextIO, TypeVar
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -238,6 +239,25 @@ from vertex_config import load_vertex_ai_settings
 
 logger = logging.getLogger(__name__)
 ReceiptT = TypeVar("ReceiptT")
+AGENT_COL_LOGGER_NAMES = ("main", "agent_col_turn_service")
+_AGENT_COL_LOG_HANDLER_MARKER = "_agent_col_stdout_diagnostics_handler"
+
+
+def configure_agent_col_logging(stream: TextIO | None = None) -> None:
+    target_stream = stream if stream is not None else sys.stdout
+    formatter = logging.Formatter("%(levelname)s:%(name)s:%(message)s")
+    for logger_name in AGENT_COL_LOGGER_NAMES:
+        diagnostic_logger = logging.getLogger(logger_name)
+        diagnostic_logger.setLevel(logging.INFO)
+        for handler in tuple(diagnostic_logger.handlers):
+            if getattr(handler, _AGENT_COL_LOG_HANDLER_MARKER, False):
+                diagnostic_logger.removeHandler(handler)
+                handler.close()
+        handler = logging.StreamHandler(target_stream)
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(formatter)
+        setattr(handler, _AGENT_COL_LOG_HANDLER_MARKER, True)
+        diagnostic_logger.addHandler(handler)
 
 
 def _provider_code_label(error: BaseException) -> str:
@@ -1539,6 +1559,7 @@ def _raise_governed_tool_cause_http_error(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    configure_agent_col_logging()
     vertex_settings = load_vertex_ai_settings(os.environ)
     client = genai.Client(**vertex_settings.client_kwargs())
     database = None
