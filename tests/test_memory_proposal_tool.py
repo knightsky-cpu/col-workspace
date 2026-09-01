@@ -47,6 +47,119 @@ class RecordingMemoryService:
         )
 
 
+class RecordingAgentJobRepository:
+    def __init__(self) -> None:
+        self.enqueued = []
+        self.events = []
+        self.leased = []
+        self.completed = []
+        self.failed = []
+
+    async def enqueue_job(self, job):
+        self.enqueued.append(job)
+        return job
+
+    async def append_event(self, *, user_id, workspace_id, event):
+        self.events.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "event": event,
+            }
+        )
+        return event
+
+    async def lease_queued_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        lease_expires_at,
+        observed_at,
+    ):
+        self.leased.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+                "observed_at": observed_at,
+            }
+        )
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "running",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+            }
+        )
+
+    async def complete_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        observed_at,
+        result_refs,
+    ):
+        self.completed.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "observed_at": observed_at,
+                "result_refs": result_refs,
+            }
+        )
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "completed",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "result_refs": result_refs,
+            }
+        )
+
+    async def fail_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        observed_at,
+        failure,
+    ):
+        self.failed.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "observed_at": observed_at,
+                "failure": failure,
+            }
+        )
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "failed",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "failure_summary": failure,
+            }
+        )
+
+
 def tool_context_state() -> dict[str, object]:
     return {
         "memory_user_id": "user-1",
@@ -237,6 +350,101 @@ async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
     assert command.clarification_selection is None
     assert command.turn_lease.turn_id == "a" * 64
     assert command.turn_lease.owner_token == "owner-1"
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_records_memory_agent_job_lifecycle() -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    service = RecordingMemoryService()
+    repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "response_length",
+                "canonical_value": "concise",
+                "evidence_text": "I prefer concise responses.",
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=tool_context_state(), delta={})
+        ),
+    )
+
+    assert result["status"] == "pending"
+    assert len(repository.enqueued) == 1
+    job = repository.enqueued[0]
+    assert job.action_kind == "propose_memory_signal"
+    assert job.status == "queued"
+    assert job.agent_label == "Memory Analyst"
+    assert job.display_label == "Memory proposal: response_length"
+    assert job.user_id == "user-1"
+    assert job.workspace_id == "workspace-1"
+    assert job.project_id == "workspace-1"
+    assert job.session_id == "session-1"
+    assert job.source_turn_id == "a" * 64
+    assert job.source_message_id == "message-1"
+    assert job.idempotency_key.startswith("memory-proposal-")
+    assert [entry["event"].event_type for entry in repository.events] == [
+        "queued",
+        "started",
+        "completed",
+    ]
+    assert repository.completed[0]["result_refs"] == {
+        "proposal_id": "response_length--e82366f7699ee2e39bff6a68154e09b7"
+    }
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_records_failed_memory_agent_job_for_conflicts(
+) -> None:
+    from database import MemoryProposalConflictError
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    service = RecordingMemoryService(
+        error=MemoryProposalConflictError("private conflict detail")
+    )
+    repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "response_length",
+                "canonical_value": "concise",
+                "evidence_text": "I prefer concise responses.",
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=tool_context_state(), delta={})
+        ),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": "memory_proposal_conflict",
+    }
+    assert len(repository.enqueued) == 1
+    assert [entry["event"].event_type for entry in repository.events] == [
+        "queued",
+        "started",
+        "failed",
+    ]
+    assert repository.failed[0]["failure"].code == "memory_proposal_conflict"
+    assert repository.failed[0]["failure"].summary == (
+        "Memory proposal could not be created."
+    )
+    assert "private" not in str(repository.failed[0]["failure"])
 
 
 @pytest.mark.asyncio

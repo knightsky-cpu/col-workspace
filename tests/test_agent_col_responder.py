@@ -34,17 +34,47 @@ def test_responder_app_catalog_exposes_no_cognitive_expert() -> None:
     assert tuple(agent.name for agent in root_agent.sub_agents) == ()
 
 
-def test_responder_app_catalog_exposes_only_governed_memory_tool() -> None:
-    from agent_col_responder import create_responder_app
+def test_responder_app_catalog_exposes_only_governed_memory_tool(
+    monkeypatch,
+) -> None:
+    from google.adk.tools import FunctionTool
+    import agent_col_responder
 
-    app = create_responder_app(
+    captured = {}
+
+    async def memory_tool() -> dict[str, object]:
+        return {"status": "no_memory"}
+
+    def fake_create_propose_memory_signal_tool(
+        memory_service,
+        *,
+        agent_job_repository=None,
+    ):
+        captured["memory_service"] = memory_service
+        captured["agent_job_repository"] = agent_job_repository
+        return FunctionTool(memory_tool)
+
+    monkeypatch.setattr(
+        agent_col_responder,
+        "create_propose_memory_signal_tool",
+        fake_create_propose_memory_signal_tool,
+    )
+
+    service = object()
+    repository = object()
+    app = agent_col_responder.create_responder_app(
         vertex_settings=VERTEX_SETTINGS,
-        memory_service=object(),
+        memory_service=service,
+        agent_job_repository=repository,
     )
 
     assert tuple(tool.name for tool in app.root_agent.tools) == (
-        "propose_memory_signal",
+        "memory_tool",
     )
+    assert captured == {
+        "memory_service": service,
+        "agent_job_repository": repository,
+    }
     assert tuple(agent.name for agent in app.root_agent.sub_agents) == ()
     cognitive_names = {
         "analyze_source",

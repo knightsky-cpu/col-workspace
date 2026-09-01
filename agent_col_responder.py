@@ -310,7 +310,12 @@ def create_responder_app(
     """Return Agent_Col with no model-visible cognitive experts."""
     tools = []
     if memory_service is not None:
-        tools.append(create_propose_memory_signal_tool(memory_service))
+        tools.append(
+            create_propose_memory_signal_tool(
+                memory_service,
+                agent_job_repository=agent_job_repository,
+            )
+        )
     if collaborative_note_service is not None:
         tools.append(
             create_propose_collaborative_note_tool(

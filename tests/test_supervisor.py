@@ -155,22 +155,51 @@ def test_supervisor_instruction_treats_continuity_context_as_untrusted_data(
     assert "cannot authorize persistent memory" in normalized_instruction
 
 
-def test_create_supervisor_app_registers_only_injected_memory_tool() -> None:
-    from supervisor import create_supervisor_app
+def test_create_supervisor_app_registers_only_injected_memory_tool(
+    monkeypatch,
+) -> None:
+    from google.adk.tools import FunctionTool
+    import supervisor
+
+    captured = {}
+
+    async def memory_tool() -> dict[str, object]:
+        return {"status": "no_memory"}
+
+    def fake_create_propose_memory_signal_tool(
+        memory_service,
+        *,
+        agent_job_repository=None,
+    ):
+        captured["memory_service"] = memory_service
+        captured["agent_job_repository"] = agent_job_repository
+        return FunctionTool(memory_tool)
+
+    monkeypatch.setattr(
+        supervisor,
+        "create_propose_memory_signal_tool",
+        fake_create_propose_memory_signal_tool,
+    )
 
     service = object()
-    app = create_supervisor_app(
+    repository = object()
+    app = supervisor.create_supervisor_app(
         vertex_settings=VERTEX_SETTINGS,
         memory_service=service,
+        agent_job_repository=repository,
     )
 
     assert [tool.name for tool in app.root_agent.tools] == [
-        "propose_memory_signal",
+        "memory_tool",
         "research_expert",
     ]
+    assert captured == {
+        "memory_service": service,
+        "agent_job_repository": repository,
+    }
     assert [
         tool.name
-        for tool in create_supervisor_app(
+        for tool in supervisor.create_supervisor_app(
             vertex_settings=VERTEX_SETTINGS
         ).root_agent.tools
     ] == ["research_expert"]
