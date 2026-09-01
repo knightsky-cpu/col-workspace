@@ -326,10 +326,18 @@ function createControlledSseResponse() {
         `event: delta\ndata: ${JSON.stringify({ text })}\n\n`,
       ));
     },
+    event(name, body) {
+      controller.enqueue(encoder.encode(
+        `event: ${name}\ndata: ${JSON.stringify(body)}\n\n`,
+      ));
+    },
     complete(body) {
       controller.enqueue(encoder.encode(
         `event: final\ndata: ${JSON.stringify(body)}\n\n`,
       ));
+      controller.close();
+    },
+    close() {
       controller.close();
     },
   };
@@ -1981,6 +1989,9 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
         sessions: [],
       });
     }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs/stream")) {
+      return jsonResponse(404, { detail: "Agent job stream is unavailable." });
+    }
     if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
       const response = agentJobResponses[
         Math.min(agentJobLoadCount, agentJobResponses.length - 1)
@@ -2174,6 +2185,9 @@ test("agent jobs use fast refresh while chat stream is pending", async (t) => {
         sessions: [],
       });
     }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs/stream")) {
+      return jsonResponse(404, { detail: "Agent job stream is unavailable." });
+    }
     if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
       const response = agentJobResponses[
         Math.min(agentJobLoadCount, agentJobResponses.length - 1)
@@ -2241,7 +2255,9 @@ test("agent jobs use fast refresh while chat stream is pending", async (t) => {
   const input = elements.get("[data-chat-input]");
   input.value = "Create a workspace note while chat streams";
   input.oninput();
-  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  const submitPromise = elements.get("[data-chat-form]").onsubmit({
+    preventDefault() {},
+  });
   await nextRealTick();
 
   assert.equal(agentJobLoadCount, 2);
@@ -2281,7 +2297,171 @@ test("agent jobs use fast refresh while chat stream is pending", async (t) => {
   }
   assert.ok(agentJobLoadCount >= 4);
   assert.match(textTree(elements.get("[data-agents-panel]")), /Workspace note proposal created/);
+  await submitPromise;
   restoreTimers();
+});
+
+test("agent panel updates from job stream before polling interval", async (t) => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const chatStream = createControlledSseResponse();
+  const agentStream = createControlledSseResponse();
+  const calls = [];
+  let listCalls = 0;
+
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs/stream")) {
+      return agentStream.response;
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      listCalls += 1;
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return chatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-agent-job-stream-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = {
+      id: timers.length + 1,
+      callback,
+      delay,
+      cleared: false,
+    };
+    timers.push(timer);
+    return timer.id;
+  };
+  globalThis.clearTimeout = (id) => {
+    const timer = timers.find((item) => item.id === id);
+    if (timer) {
+      timer.cleared = true;
+    }
+  };
+  t.after(() => {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  });
+  const nextRealTick = () => new Promise((resolve) => realSetTimeout(resolve, 0));
+  const waitForReal = async (predicate, describe = () => "") => {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (predicate()) {
+        return;
+      }
+      await nextRealTick();
+    }
+    throw new Error(`Timed out waiting for app runtime condition. ${describe()}`);
+  };
+
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  await nextRealTick();
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "Create a workspace note while chat streams";
+  input.oninput();
+  const submitPromise = elements.get("[data-chat-form]").onsubmit({
+    preventDefault() {},
+  });
+
+  await waitForReal(
+    () => calls.some(([path]) => path.includes("/agent/jobs/stream")),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  agentStream.event("snapshot", {
+    agent_job_contract_version: "1.0",
+    jobs: [{
+      job_id: "job-1",
+      status: "running",
+      action_kind: "propose_collaborative_note",
+      agent_label: "Note Curator",
+      display_label: "Workspace note",
+      description: "Preparing workspace note",
+      created_at: "2026-09-01T12:00:00Z",
+    }],
+  });
+  await nextRealTick();
+  await nextRealTick();
+
+  assert.match(textTree(elements.get("[data-agents-panel]")), /Note Curator/);
+  assert.match(textTree(elements.get("[data-agents-panel]")), /Preparing workspace note/);
+  assert.equal(
+    timers.some((timer) => !timer.cleared && timer.delay === 300),
+    false,
+  );
+  assert.ok(listCalls <= 2);
+  agentStream.close();
+  chatStream.complete({
+    response: "Chat stayed open while agent jobs streamed",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+  await submitPromise;
 });
 
 test("JSON partial failure from submit refreshes authoritative memory and notes", async () => {

@@ -32,6 +32,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  streamAgentJobs,
   synthesizeSpeechAudio,
   transcribeSpeechAudio,
   updateArtifactMetadata,
@@ -214,6 +215,44 @@ test("listAgentJobs fetches the public agent job projection for a workspace", as
   assert.equal(
     calls[0][0],
     "/api/users/user-1/projects/project-1/agent/jobs?limit=30&session_id=session-1",
+  );
+  assert.equal(calls[0][1].method, "GET");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+});
+
+test("streamAgentJobs reads public snapshot events", async () => {
+  const calls = [];
+  const snapshots = [];
+
+  await streamAgentJobs(
+    "user-1",
+    "project-1",
+    {
+      authToken: "google-id-token",
+      limit: 50,
+      session_id: "session-1",
+    },
+    {
+      onSnapshot(payload) {
+        snapshots.push(payload);
+      },
+    },
+    async (path, init) => {
+      calls.push([path, init]);
+      return sseResponse([
+        "event: snapshot\n",
+        'data: {"agent_job_contract_version":"1.0","jobs":[{"job_id":"job-1","status":"running"}]}\n\n',
+      ]);
+    },
+  );
+
+  assert.deepEqual(snapshots, [{
+    agent_job_contract_version: "1.0",
+    jobs: [{ job_id: "job-1", status: "running" }],
+  }]);
+  assert.equal(
+    calls[0][0],
+    "/api/users/user-1/projects/project-1/agent/jobs/stream?limit=50&session_id=session-1",
   );
   assert.equal(calls[0][1].method, "GET");
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");

@@ -859,6 +859,49 @@ def _public_agent_job_event(event: AgentJobEvent) -> AgentJobEventPublic:
     )
 
 
+AGENT_JOB_STREAM_POLL_SECONDS = 0.25
+AGENT_JOB_STREAM_MAX_CYCLES = 2
+AGENT_JOB_STREAM_ACTIVE_STATUSES = {"queued", "running"}
+
+
+async def _public_agent_job_list_response(
+    *,
+    repository: object,
+    effective_user_id: str,
+    public_user_id: str,
+    effective_project_id: str,
+    session_id: str | None,
+    limit: int,
+) -> AgentJobListResponse:
+    jobs = [
+        _public_agent_job(
+            job=job,
+            effective_user_id=effective_user_id,
+            public_user_id=public_user_id,
+            effective_project_id=effective_project_id,
+        )
+        async for job in repository.list_jobs(
+            user_id=effective_user_id,
+            workspace_id=effective_project_id,
+            project_id=effective_project_id,
+            session_id=session_id,
+            limit=limit,
+        )
+    ]
+    return AgentJobListResponse(jobs=jobs)
+
+
+def _agent_job_sse_event(event: str, payload: BaseModel | dict[str, object]) -> str:
+    if isinstance(payload, BaseModel):
+        data = payload.model_dump(mode="json")
+    else:
+        data = payload
+    return (
+        f"event: {event}\n"
+        f"data: {json.dumps(data, separators=(',', ':'))}\n\n"
+    )
+
+
 def _raise_agent_job_http_error(exc: Exception) -> NoReturn:
     if isinstance(exc, AgentJobNotFoundError):
         raise HTTPException(
@@ -2797,22 +2840,14 @@ async def list_agent_jobs(
     )
     try:
         repository = request.app.state.db.agent_jobs()
-        jobs = [
-            _public_agent_job(
-                job=job,
-                effective_user_id=effective_user_id,
-                public_user_id=user_id,
-                effective_project_id=effective_project_id,
-            )
-            async for job in repository.list_jobs(
-                user_id=effective_user_id,
-                workspace_id=effective_project_id,
-                project_id=effective_project_id,
-                session_id=session_id,
-                limit=limit,
-            )
-        ]
-        return AgentJobListResponse(jobs=jobs)
+        return await _public_agent_job_list_response(
+            repository=repository,
+            effective_user_id=effective_user_id,
+            public_user_id=user_id,
+            effective_project_id=effective_project_id,
+            session_id=session_id,
+            limit=limit,
+        )
     except (
         AgentJobConflictError,
         AgentJobLeaseError,
@@ -2822,6 +2857,84 @@ async def list_agent_jobs(
         ValueError,
     ) as exc:
         _raise_agent_job_http_error(exc)
+
+
+@app.get("/api/users/{user_id}/projects/{project_id}/agent/jobs/stream")
+async def stream_agent_jobs(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    session_id: Annotated[IdentifierStr | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> StreamingResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    repository = request.app.state.db.agent_jobs()
+
+    async def stream_events() -> AsyncIterator[str]:
+        previous_payload: str | None = None
+        try:
+            for cycle_index in range(AGENT_JOB_STREAM_MAX_CYCLES):
+                response = await _public_agent_job_list_response(
+                    repository=repository,
+                    effective_user_id=effective_user_id,
+                    public_user_id=user_id,
+                    effective_project_id=effective_project_id,
+                    session_id=session_id,
+                    limit=limit,
+                )
+                payload = response.model_dump(mode="json")
+                encoded_payload = json.dumps(
+                    payload,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                if encoded_payload != previous_payload:
+                    yield _agent_job_sse_event("snapshot", payload)
+                    previous_payload = encoded_payload
+                has_active_job = any(
+                    job.status in AGENT_JOB_STREAM_ACTIVE_STATUSES
+                    for job in response.jobs
+                )
+                if not has_active_job:
+                    break
+                if cycle_index + 1 < AGENT_JOB_STREAM_MAX_CYCLES:
+                    await asyncio.sleep(AGENT_JOB_STREAM_POLL_SECONDS)
+                else:
+                    yield _agent_job_sse_event(
+                        "heartbeat",
+                        {"agent_job_contract_version": "1.0"},
+                    )
+        except (
+            AgentJobConflictError,
+            AgentJobLeaseError,
+            AgentJobNotFoundError,
+            AgentJobRepositoryError,
+            AgentJobStateError,
+            ValueError,
+        ):
+            yield _agent_job_sse_event(
+                "error",
+                {"detail": "Agent job stream failed.", "status": 500},
+            )
+
+    return StreamingResponse(
+        stream_events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get(

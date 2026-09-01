@@ -28,6 +28,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  streamAgentJobs,
   synthesizeSpeechAudio,
   transcribeSpeechAudio,
   updateArtifactMetadata,
@@ -157,6 +158,8 @@ let speechPlaybackAbortControllers = new Set();
 let agentJobsRefreshTimer = null;
 let agentJobsRefreshToken = 0;
 let agentJobsConsecutiveFailures = 0;
+let agentJobsStreamAbortController = null;
+let agentJobsStreamUnavailable = false;
 
 const SPEECH_RECORDING_MIME_TYPES = Object.freeze([
   "audio/webm;codecs=opus",
@@ -1169,13 +1172,25 @@ function clearAgentJobsRefreshTimer() {
 
 function resetAgentJobsRefreshLoop() {
   clearAgentJobsRefreshTimer();
+  if (agentJobsStreamAbortController !== null) {
+    agentJobsStreamAbortController.abort();
+    agentJobsStreamAbortController = null;
+  }
   agentJobsRefreshToken += 1;
   agentJobsConsecutiveFailures = 0;
+  agentJobsStreamUnavailable = false;
 }
 
-function scheduleAgentJobsRefresh() {
+function scheduleAgentJobsRefresh(options = {}) {
   clearAgentJobsRefreshTimer();
   if (!shouldRefreshAgentJobs()) {
+    return;
+  }
+  if (
+    options.preferStream !== false
+    && !agentJobsStreamUnavailable
+    && startAgentJobsStream()
+  ) {
     return;
   }
   const refreshToken = agentJobsRefreshToken;
@@ -1186,6 +1201,70 @@ function scheduleAgentJobsRefresh() {
     }
     loadAgentJobs();
   }, AGENT_JOBS_FAST_REFRESH_MS);
+}
+
+function startAgentJobsStream() {
+  if (
+    !state.context
+    || agentJobsStreamAbortController !== null
+    || agentJobsStreamUnavailable
+  ) {
+    return false;
+  }
+  const streamContext = { ...state.context };
+  const refreshToken = agentJobsRefreshToken;
+  const abortController = new AbortController();
+  agentJobsStreamAbortController = abortController;
+
+  streamAgentJobs(
+    streamContext.user_id,
+    streamContext.project_id,
+    authOptions({
+      limit: 50,
+      session_id: streamContext.session_id,
+      signal: abortController.signal,
+    }),
+    {
+      onSnapshot(payload) {
+        if (
+          abortController.signal.aborted
+          || refreshToken !== agentJobsRefreshToken
+          || !sameAgentJobsContext(streamContext, state.context)
+        ) {
+          return;
+        }
+        state = completeAgentJobsLoad(state, payload);
+        agentJobsConsecutiveFailures = 0;
+        ensureAgentsView().render(state);
+      },
+    },
+  ).catch((error) => {
+    if (
+      abortController.signal.aborted
+      || refreshToken !== agentJobsRefreshToken
+      || !sameAgentJobsContext(streamContext, state.context)
+    ) {
+      return;
+    }
+    agentJobsStreamUnavailable = true;
+    if (!state.agents.jobs.length) {
+      state = failAgentJobsLoad(state, error);
+      ensureAgentsView().render(state);
+    }
+  }).finally(() => {
+    if (agentJobsStreamAbortController === abortController) {
+      agentJobsStreamAbortController = null;
+    }
+    if (
+      !abortController.signal.aborted
+      && refreshToken === agentJobsRefreshToken
+      && sameAgentJobsContext(streamContext, state.context)
+      && shouldRefreshAgentJobs()
+    ) {
+      scheduleAgentJobsRefresh({ preferStream: false });
+    }
+  });
+  return true;
 }
 
 async function loadAgentJobs() {
@@ -1286,7 +1365,9 @@ async function submitRequest(request) {
       ? selectOrdinaryChatWaitingQuip()
       : "Waiting for Agent Col";
     setChatStatus(waitingMessage, "pending");
-    loadAgentJobs();
+    loadAgentJobs().finally(() => {
+      startAgentJobsStream();
+    });
     const options = {
       method: "POST",
       idempotencyKey: request.key,

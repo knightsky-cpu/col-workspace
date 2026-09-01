@@ -876,6 +876,7 @@ class FakeAgentJobRepository:
     jobs: list[AgentJob] = field(
         default_factory=lambda: [make_agent_job()]
     )
+    job_batches: list[list[AgentJob]] = field(default_factory=list)
     events: list[AgentJobEvent] = field(
         default_factory=lambda: [make_agent_job_event()]
     )
@@ -906,8 +907,11 @@ class FakeAgentJobRepository:
         )
         if self.error is not None:
             raise self.error
+        jobs = self.jobs
+        if self.job_batches:
+            jobs = self.job_batches.pop(0)
         yielded = 0
-        for job in self.jobs:
+        for job in jobs:
             if project_id is not None and job.project_id != project_id:
                 continue
             if session_id is not None and job.session_id != session_id:
@@ -4905,6 +4909,56 @@ async def test_agent_job_list_returns_public_owned_projection(
             "limit": 10,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_agent_job_stream_emits_public_snapshot(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_repository.jobs = [
+        make_agent_job(
+            status="running",
+            lease_owner="worker-private",
+            lease_expires_at=MEMORY_NOW + timedelta(minutes=5),
+            result_refs={"artifact_id": "artifact-1"},
+        )
+    ]
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/agent/jobs/stream",
+        params={"session_id": "session-1", "limit": 50},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: snapshot" in response.text
+    assert '"agent_job_contract_version":"1.0"' in response.text
+    assert '"status":"running"' in response.text
+    assert '"result_refs":{"artifact_id":"artifact-1"}' in response.text
+    assert "worker-private" not in response.text
+    assert "private-idempotency-key" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_job_stream_rechecks_until_job_reaches_terminal_state(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_repository.job_batches = [
+        [make_agent_job(status="running")],
+        [make_agent_job(status="completed")],
+    ]
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/agent/jobs/stream",
+        params={"session_id": "session-1", "limit": 50},
+    )
+
+    assert response.status_code == 200
+    assert response.text.count("event: snapshot") >= 2
+    assert '"status":"running"' in response.text
+    assert '"status":"completed"' in response.text
 
 
 @pytest.mark.asyncio

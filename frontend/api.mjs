@@ -281,6 +281,88 @@ export async function apiFetchSse(
   });
 }
 
+export async function streamAgentJobs(
+  userId,
+  projectId,
+  options = {},
+  handlers = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  const path = `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/agent/jobs/stream${buildAgentJobQuery(options)}`;
+  assertSameOriginPath(path);
+  const headers = { ...(options.headers ?? {}) };
+  if (options.authToken) {
+    headers.Authorization = `Bearer ${options.authToken}`;
+  }
+  const response = await fetchLike(path, {
+    method: "GET",
+    headers,
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    throw normalizeApiError(response, await parseBody(response));
+  }
+  if (!response.body) {
+    throw new ApiError({
+      status: 0,
+      message: "Agent job stream was unavailable.",
+      detail: null,
+      retryAfterSeconds: null,
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      let extracted = nextSseFrame(buffer);
+      while (extracted !== null) {
+        buffer = extracted.rest;
+        const parsed = parseSseFrame(extracted.frame);
+        if (parsed?.event === "snapshot") {
+          await handlers.onSnapshot?.(parsed.data);
+        } else if (parsed?.event === "heartbeat") {
+          await handlers.onHeartbeat?.(parsed.data);
+        } else if (parsed?.event === "error") {
+          const detail = parsed.data?.detail;
+          const status = Number.isInteger(parsed.data?.status)
+            ? parsed.data.status
+            : 500;
+          throw new ApiError({
+            status,
+            message: detailToMessage(detail),
+            detail,
+            retryAfterSeconds: null,
+          });
+        }
+        extracted = nextSseFrame(buffer);
+      }
+      if (done) {
+        break;
+      }
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError({
+      status: 0,
+      message: "Agent job stream was interrupted.",
+      detail: null,
+      retryAfterSeconds: null,
+      provisional: true,
+    });
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export function getAuthSession(
   authToken = null,
   fetchLike = globalThis.fetch,
