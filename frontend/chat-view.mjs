@@ -84,6 +84,17 @@ export function renderReceipts(container, response) {
       humanLabel(feedback.decision),
     );
   }
+  for (const queuedAction of response.queued_actions ?? []) {
+    appendReceipt(
+      list,
+      "Queued action",
+      [
+        queuedAction.agent_label,
+        queuedAction.display_label,
+        humanLabel(queuedAction.status ?? "queued"),
+      ].filter(Boolean).join(" · "),
+    );
+  }
   for (const proposal of response.memory_proposals ?? []) {
     appendReceipt(list, "Memory proposal", humanLabel(proposal.category));
   }

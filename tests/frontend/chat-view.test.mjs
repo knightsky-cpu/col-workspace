@@ -355,6 +355,24 @@ test("renderReceipts labels collaborative note and continuity receipts distinctl
   assert.doesNotMatch(text, /continuity--note-1/);
 });
 
+test("renderReceipts shows queued action receipts without raw job ids", () => {
+  const container = node();
+  renderReceipts(container, {
+    response: "I queued job--create-artifact-1 in prose.",
+    queued_actions: [{
+      job_id: "job--create-artifact-1",
+      action_kind: "create_artifact",
+      status: "queued",
+      display_label: "Create repo_helper.sh",
+      agent_label: "Artifact Agent",
+    }],
+  });
+
+  const text = textTree(container);
+  assert.match(text, /Queued action: Artifact Agent · Create repo_helper\.sh · Queued/);
+  assert.doesNotMatch(text, /job--create-artifact-1/);
+});
+
 test("createChatView renders continuity choices as buttons without bodies or raw ids", () => {
   const form = node("form");
   const input = node("textarea");

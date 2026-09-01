@@ -865,6 +865,13 @@ test("completed turn projects authoritative receipts into activity", () => {
         feedback_id: "feedback--1",
         decision: "accepted",
       }],
+      queued_actions: [{
+        job_id: "job--create-artifact-1",
+        action_kind: "create_artifact",
+        status: "queued",
+        display_label: "Create repo_helper.sh",
+        agent_label: "Artifact Agent",
+      }],
       memory_proposals: [{
         proposal_id: "preferred_name--proposal-1",
         category: "preferred_name",
@@ -886,15 +893,26 @@ test("completed turn projects authoritative receipts into activity", () => {
 
   assert.deepEqual(
     completed.activity.entries.map((entry) => entry.kind),
-    ["action", "citation", "work", "feedback", "memory", "note", "adaptation"],
+    [
+      "action",
+      "citation",
+      "work",
+      "feedback",
+      "queued_action",
+      "memory",
+      "note",
+      "adaptation",
+    ],
   );
   assert.equal(completed.activity.entries[0].label, "synthesize_project");
   assert.equal(completed.activity.entries[2].detail, "created");
   assert.equal(completed.activity.entries[3].detail, "recorded");
-  assert.equal(completed.activity.entries[4].detail, "pending");
-  assert.equal(completed.activity.entries[5].detail, "API decision");
-  assert.equal(completed.activity.entries[6].label, "Preferred name");
-  assert.equal(completed.activity.entries[6].detail, "Wifiknight");
+  assert.equal(completed.activity.entries[4].label, "Artifact Agent");
+  assert.equal(completed.activity.entries[4].detail, "Create repo_helper.sh · Queued");
+  assert.equal(completed.activity.entries[5].detail, "pending");
+  assert.equal(completed.activity.entries[6].detail, "API decision");
+  assert.equal(completed.activity.entries[7].label, "Preferred name");
+  assert.equal(completed.activity.entries[7].detail, "Wifiknight");
   assert.equal(JSON.stringify(completed.activity.entries).includes("--"), false);
 });
 

@@ -1325,6 +1325,8 @@ def _partial_failure_response(
         content.pop("artifacts")
     if not response.artifact_feedback:
         content.pop("artifact_feedback")
+    if not response.queued_actions:
+        content.pop("queued_actions")
     if not response.adaptations:
         content.pop("adaptations")
     if not response.memory_clarifications:

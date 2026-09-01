@@ -828,6 +828,31 @@ class ContinuitySelectionRequest(StrictModel):
     source_id: IdentifierStr
 
 
+QueuedActionKind = Literal[
+    "create_artifact",
+    "propose_collaborative_note",
+    "propose_memory_signal",
+]
+
+
+QueuedActionStatus = Literal[
+    "queued",
+    "running",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+
+class QueuedActionReceipt(StrictModel):
+    job_id: IdentifierStr
+    action_kind: QueuedActionKind
+    status: QueuedActionStatus
+    display_label: DisplayLabelStr
+    created_at: datetime
+    agent_label: DisplayLabelStr | None = None
+
+
 class ChatRequest(StrictModel):
     project_id: IdentifierStr
     session_id: IdentifierStr
@@ -864,6 +889,10 @@ class ChatResponse(StrictModel):
     artifact_feedback: list[ArtifactFeedbackReference] = Field(
         default_factory=list,
         max_length=1,
+    )
+    queued_actions: list[QueuedActionReceipt] = Field(
+        default_factory=list,
+        max_length=10,
     )
     citations: list[CitationReference] = Field(default_factory=list)
     memory_proposals: list[VersionedMemoryProposalReceipt] = Field(
@@ -962,6 +991,10 @@ class ChatPartialFailureResponse(StrictModel):
     artifact_feedback: list[ArtifactFeedbackReference] = Field(
         default_factory=list,
         max_length=1,
+    )
+    queued_actions: list[QueuedActionReceipt] = Field(
+        default_factory=list,
+        max_length=10,
     )
     memory_proposals: list[VersionedMemoryProposalReceipt] = Field(
         default_factory=list,

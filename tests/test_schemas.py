@@ -233,6 +233,80 @@ def test_chat_response_carries_continuity_receipts_and_choices_without_bodies() 
     assert "body" not in str(document)
 
 
+def test_chat_response_accepts_bounded_queued_action_receipts() -> None:
+    from datetime import UTC, datetime
+
+    from schemas import ChatResponse, QueuedActionReceipt
+
+    response = ChatResponse(
+        response="I queued the requested work.",
+        queued_actions=[
+            QueuedActionReceipt(
+                job_id="job-1",
+                action_kind="create_artifact",
+                status="queued",
+                display_label="Create repo_helper.sh",
+                created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                agent_label="Artifact Agent",
+            ),
+            QueuedActionReceipt(
+                job_id="job-2",
+                action_kind="propose_collaborative_note",
+                status="queued",
+                display_label="Remember Bash-only constraint",
+                created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                agent_label="Notes Agent",
+            ),
+        ],
+    )
+
+    document = response.model_dump(mode="json")
+    assert [item["action_kind"] for item in document["queued_actions"]] == [
+        "create_artifact",
+        "propose_collaborative_note",
+    ]
+    assert document["queued_actions"][0] == {
+        "job_id": "job-1",
+        "action_kind": "create_artifact",
+        "status": "queued",
+        "display_label": "Create repo_helper.sh",
+        "created_at": "2026-09-01T00:00:00Z",
+        "agent_label": "Artifact Agent",
+    }
+
+
+def test_chat_partial_failure_accepts_bounded_queued_action_receipts() -> None:
+    from datetime import UTC, datetime
+
+    from schemas import ChatPartialFailureResponse, QueuedActionReceipt
+
+    response = ChatPartialFailureResponse(
+        detail="Agent_Col response failed after a completed action.",
+        actions=[],
+        queued_actions=[
+            QueuedActionReceipt(
+                job_id="job-1",
+                action_kind="create_artifact",
+                status="queued",
+                display_label="Create repo_helper.sh",
+                created_at=datetime(2026, 9, 1, tzinfo=UTC),
+                agent_label="Artifact Agent",
+            )
+        ],
+    )
+
+    assert response.model_dump(mode="json")["queued_actions"] == [
+        {
+            "job_id": "job-1",
+            "action_kind": "create_artifact",
+            "status": "queued",
+            "display_label": "Create repo_helper.sh",
+            "created_at": "2026-09-01T00:00:00Z",
+            "agent_label": "Artifact Agent",
+        }
+    ]
+
+
 def test_chat_request_continuity_selection_is_mutually_exclusive_with_decisions() -> None:
     from schemas import (
         ChatRequest,
@@ -725,6 +799,7 @@ def test_chat_contract_is_project_owned_and_defaults_empty_receipts() -> None:
         "actions": [],
         "artifacts": [],
         "artifact_feedback": [],
+        "queued_actions": [],
         "citations": [],
         "memory_proposals": [],
         "memory_clarifications": [],

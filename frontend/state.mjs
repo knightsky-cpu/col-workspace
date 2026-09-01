@@ -957,6 +957,22 @@ function activityEntriesFromResponse(response) {
     });
   }
   for (
+    const rawQueuedAction of Array.isArray(response.queued_actions)
+      ? response.queued_actions
+      : []
+  ) {
+    const queuedAction = objectOrEmpty(rawQueuedAction);
+    const fallbackLabel = humanLabel(queuedAction.action_kind ?? "Queued action");
+    entries.push({
+      kind: "queued_action",
+      label: queuedAction.agent_label ?? fallbackLabel,
+      detail: compactText([
+        queuedAction.display_label ?? "Queued work",
+        humanLabel(queuedAction.status ?? "queued"),
+      ]),
+    });
+  }
+  for (
     const rawProposal of Array.isArray(response.memory_proposals)
       ? response.memory_proposals
       : []
