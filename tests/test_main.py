@@ -8368,6 +8368,7 @@ async def test_chat_completes_artifact_turn_with_refreshed_claim_and_receipts(
 async def test_artifact_responder_failure_releases_refreshed_claim_and_receipts(
     client: httpx.AsyncClient,
     service_state: ServiceState,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     claim = make_chat_turn_claim()
     renewed_claim = replace(
@@ -8410,15 +8411,16 @@ async def test_artifact_responder_failure_releases_refreshed_claim_and_receipts(
         adaptations=(adaptation,),
         chat_turn_claim=effect_claim,
     )
+    caplog.set_level(logging.INFO, logger=main.logger.name)
 
     response = await client.post(
         "/api/chat",
         headers={"Idempotency-Key": "artifact-failure-key-1"},
         json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "New question",
+            "project_id": "private-project",
+            "session_id": "private-session",
+            "user_id": "private-user",
+            "message": "private script request marker",
         },
     )
 
@@ -8432,6 +8434,20 @@ async def test_artifact_responder_failure_releases_refreshed_claim_and_receipts(
     }
     assert service_state.database.release_calls[0][0] is effect_claim
     assert service_state.database.complete_calls == []
+    assert "Agent_Col chat pipeline" in caplog.text
+    assert "stage=turn_service_failure" in caplog.text
+    assert "route=chat_json" in caplog.text
+    assert "error=AgentColTurnResponderError" in caplog.text
+    assert "completed_actions=1" in caplog.text
+    assert "artifacts=1" in caplog.text
+    for private_marker in (
+        "private responder failure",
+        "private-project",
+        "private-session",
+        "private-user",
+        "private script request marker",
+    ):
+        assert private_marker not in caplog.text
 
 
 @pytest.mark.asyncio

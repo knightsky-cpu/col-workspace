@@ -258,7 +258,10 @@ def _provider_code_label(error: BaseException) -> str:
 def _log_speech_provider_failure(operation: str, error: BaseException) -> None:
     cause = error.__cause__ or error
     logger.error(
-        "Speech %s failed provider_error=%s provider_cause=%s provider_code=%s",
+        (
+            "Agent_Col speech pipeline stage=%s_failure "
+            "provider_error=%s provider_cause=%s provider_code=%s"
+        ),
         operation,
         type(error).__name__,
         type(cause).__name__,
@@ -1390,6 +1393,86 @@ def _log_chat_turn_timeout(exc: AgentColTurnServiceError) -> None:
         len(exc.memory_proposals),
         len(exc.memory_clarifications),
         len(exc.adaptations),
+    )
+
+
+def _log_chat_pipeline(
+    stage: str,
+    *,
+    route: str,
+    started_at: float,
+    stream_started: bool,
+    runtime_error: AgentColTurnServiceError | None = None,
+    response: ChatResponse | None = None,
+) -> None:
+    logger.info(
+        (
+            "Agent_Col chat pipeline stage=%s route=%s stream=%s "
+            "elapsed_ms=%d error=%s completed_actions=%d artifacts=%d "
+            "artifact_feedback=%d memory_proposals=%d "
+            "memory_clarifications=%d collaborative_note_proposals=%d "
+            "collaborative_note_events=%d continuity_receipts=%d "
+            "continuity_choices=%d adaptations=%d"
+        ),
+        stage,
+        route,
+        stream_started,
+        max(0, int((time.monotonic() - started_at) * 1000)),
+        type(runtime_error).__name__ if runtime_error is not None else "none",
+        len(runtime_error.actions if runtime_error is not None else ()),
+        len(
+            runtime_error.artifacts
+            if runtime_error is not None
+            else response.artifacts if response is not None else ()
+        ),
+        len(
+            runtime_error.artifact_feedback
+            if runtime_error is not None
+            else response.artifact_feedback if response is not None else ()
+        ),
+        len(
+            runtime_error.memory_proposals
+            if runtime_error is not None
+            else response.memory_proposals if response is not None else ()
+        ),
+        len(
+            runtime_error.memory_clarifications
+            if runtime_error is not None
+            else response.memory_clarifications if response is not None else ()
+        ),
+        len(
+            runtime_error.collaborative_note_proposals
+            if runtime_error is not None
+            else (
+                response.collaborative_note_proposals
+                if response is not None
+                else ()
+            )
+        ),
+        len(
+            runtime_error.collaborative_note_events
+            if runtime_error is not None
+            else (
+                response.collaborative_note_events
+                if response is not None
+                else ()
+            )
+        ),
+        len(
+            runtime_error.continuity_receipts
+            if runtime_error is not None
+            else response.continuity_receipts if response is not None else ()
+        ),
+        len(
+            runtime_error.continuity_choices
+            if runtime_error is not None
+            else response.continuity_choices if response is not None else ()
+        ),
+        len(
+            runtime_error.adaptations
+            if runtime_error is not None
+            else response.adaptations if response is not None else ()
+        ),
     )
 
 
@@ -3128,6 +3211,8 @@ async def _execute_chat(
     stream_delta: Callable[[str], Awaitable[None]] | None = None,
     ordinary_only: bool = False,
 ) -> ChatResponse | JSONResponse:
+    pipeline_started_at = time.monotonic()
+    pipeline_route = "chat_stream" if stream_delta is not None else "chat_json"
     database = request.app.state.db
     memory_service = request.app.state.memory_service
     continuity_service = request.app.state.continuity_service
@@ -3147,6 +3232,12 @@ async def _execute_chat(
     working_state_snapshot: WorkingStateSnapshot | None = None
     working_state_context: str | None = None
     chat_turn_claim: ChatTurnClaim | None = None
+    _log_chat_pipeline(
+        "start",
+        route=pipeline_route,
+        started_at=pipeline_started_at,
+        stream_started=stream_delta is not None,
+    )
     effective_user_id = _resolve_effective_user_id(
         request=request,
         supplied_user_id=payload.user_id,
@@ -3714,6 +3805,12 @@ async def _execute_chat(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Continuity request is invalid.",
             ) from exc
+        _log_chat_pipeline(
+            f"continuity_{continuity_resolution.status}",
+            route=pipeline_route,
+            started_at=pipeline_started_at,
+            stream_started=stream_delta is not None,
+        )
 
     if continuity_resolution.status == "ambiguous":
         continuity_choice_kind = (
@@ -3952,6 +4049,13 @@ async def _execute_chat(
         AgentColTurnRoutingTimeoutError,
         AgentColTurnTimeoutError,
     ) as exc:
+        _log_chat_pipeline(
+            "turn_service_timeout",
+            route=pipeline_route,
+            started_at=pipeline_started_at,
+            stream_started=stream_delta is not None,
+            runtime_error=exc,
+        )
         _log_chat_turn_timeout(exc)
         fallback_response = (
             _memory_clarification_selection_fallback_response(
@@ -4006,6 +4110,13 @@ async def _execute_chat(
             detail="Agent_Col response timed out.",
         ) from exc
     except AgentColTurnServiceError as exc:
+        _log_chat_pipeline(
+            "turn_service_failure",
+            route=pipeline_route,
+            started_at=pipeline_started_at,
+            stream_started=stream_delta is not None,
+            runtime_error=exc,
+        )
         logger.error(
             "Agent_Col response failed (%s).",
             type(exc).__name__,
@@ -4117,6 +4228,13 @@ async def _execute_chat(
                 result.continuity_choices,
             )
         ),
+    )
+    _log_chat_pipeline(
+        "turn_service_finish",
+        route=pipeline_route,
+        started_at=pipeline_started_at,
+        stream_started=stream_delta is not None,
+        response=chat_response,
     )
     if (
         chat_turn_claim is not None

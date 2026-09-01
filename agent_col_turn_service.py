@@ -311,6 +311,58 @@ def _project_recent_user_messages_for_routing(
     return projected[-MAX_ROUTING_RECENT_USER_MESSAGES:]
 
 
+def _route_label(route: object | None) -> str:
+    if route is None:
+        return "none"
+    value = getattr(route, "value", None)
+    if isinstance(value, str):
+        return value
+    return type(route).__name__
+
+
+def _log_turn_pipeline(
+    stage: str,
+    *,
+    started_at: float,
+    clock: Callable[[], float],
+    route: object | None = None,
+    error: BaseException | None = None,
+    actions: tuple[object, ...] = (),
+    artifacts: tuple[object, ...] = (),
+    artifact_feedback: tuple[object, ...] = (),
+    memory_proposals: tuple[object, ...] = (),
+    memory_clarifications: tuple[object, ...] = (),
+    collaborative_note_proposals: tuple[object, ...] = (),
+    collaborative_note_events: tuple[object, ...] = (),
+    continuity_receipts: tuple[object, ...] = (),
+    continuity_choices: tuple[object, ...] = (),
+    adaptations: tuple[object, ...] = (),
+) -> None:
+    logger.info(
+        (
+            "Agent_Col turn pipeline stage=%s route=%s elapsed_ms=%d "
+            "error=%s actions=%d artifacts=%d artifact_feedback=%d "
+            "memory_proposals=%d memory_clarifications=%d "
+            "collaborative_note_proposals=%d collaborative_note_events=%d "
+            "continuity_receipts=%d continuity_choices=%d adaptations=%d"
+        ),
+        stage,
+        _route_label(route),
+        max(0, int((clock() - started_at) * 1000)),
+        type(error).__name__ if error is not None else "none",
+        len(actions),
+        len(artifacts),
+        len(artifact_feedback),
+        len(memory_proposals),
+        len(memory_clarifications),
+        len(collaborative_note_proposals),
+        len(collaborative_note_events),
+        len(continuity_receipts),
+        len(continuity_choices),
+        len(adaptations),
+    )
+
+
 class AgentColTurnService:
     def __init__(
         self,
@@ -653,6 +705,7 @@ class AgentColTurnService:
         *,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> AgentColTurnResult:
+        started_at = self._clock()
         claim = command.chat_turn_claim
         artifact_executor = self._artifact_executor
         if claim is None or artifact_executor is None:
@@ -705,6 +758,21 @@ class AgentColTurnService:
                 timeout_seconds=routing_timeout,
             )
         except AgentColRoutingV4ProviderTimeoutError as exc:
+            _log_turn_pipeline(
+                "routing_timeout",
+                started_at=started_at,
+                clock=self._clock,
+                route=None,
+                error=exc,
+                actions=claim.precompleted_actions,
+                artifacts=claim.precompleted_artifacts,
+                memory_proposals=claim.precompleted_memory_proposals,
+                memory_clarifications=(
+                    claim.precompleted_memory_clarifications
+                ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
+            )
             raise AgentColTurnRoutingTimeoutError(
                 "Agent_Col routing timed out.",
                 actions=claim.precompleted_actions,
@@ -721,6 +789,21 @@ class AgentColTurnService:
             AgentColRoutingV4ProviderError,
             RoutingDirectiveInputErrorV4,
         ) as exc:
+            _log_turn_pipeline(
+                "routing_failure",
+                started_at=started_at,
+                clock=self._clock,
+                route=None,
+                error=exc,
+                actions=claim.precompleted_actions,
+                artifacts=claim.precompleted_artifacts,
+                memory_proposals=claim.precompleted_memory_proposals,
+                memory_clarifications=(
+                    claim.precompleted_memory_clarifications
+                ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
+            )
             raise AgentColTurnRoutingError(
                 "Agent_Col routing failed.",
                 actions=claim.precompleted_actions,
@@ -733,6 +816,18 @@ class AgentColTurnService:
                 continuity_choices=command.continuity_choices,
                 chat_turn_claim=claim,
             ) from exc
+        _log_turn_pipeline(
+            "routing_finish",
+            started_at=started_at,
+            clock=self._clock,
+            route=directive.route,
+            actions=claim.precompleted_actions,
+            artifacts=claim.precompleted_artifacts,
+            memory_proposals=claim.precompleted_memory_proposals,
+            memory_clarifications=claim.precompleted_memory_clarifications,
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
+        )
 
         if directive.route is AgentColRouteV4.ARTIFACT:
             return await self._complete_artifact_turn(
@@ -740,6 +835,7 @@ class AgentColTurnService:
                 claim,
                 directive,
                 deadline,
+                started_at=started_at,
                 on_delta=on_delta,
             )
 
@@ -773,6 +869,7 @@ class AgentColTurnService:
         directive: AgentColRoutingDirectiveV4,
         deadline: float,
         *,
+        started_at: float,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> AgentColTurnResult:
         artifact_executor = self._artifact_executor
@@ -796,6 +893,21 @@ class AgentColTurnService:
             AgentColArtifactExecutorConfigurationError,
             ValidationError,
         ) as exc:
+            _log_turn_pipeline(
+                "artifact_failure",
+                started_at=started_at,
+                clock=self._clock,
+                route=directive.route,
+                error=exc,
+                actions=claim.precompleted_actions,
+                artifacts=claim.precompleted_artifacts,
+                memory_proposals=claim.precompleted_memory_proposals,
+                memory_clarifications=(
+                    claim.precompleted_memory_clarifications
+                ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
+            )
             raise AgentColTurnServiceError(
                 "Agent_Col artifact execution failed.",
                 actions=claim.precompleted_actions,
@@ -808,6 +920,19 @@ class AgentColTurnService:
                 continuity_choices=command.continuity_choices,
                 chat_turn_claim=claim,
             ) from exc
+        _log_turn_pipeline(
+            "artifact_finish",
+            started_at=started_at,
+            clock=self._clock,
+            route=directive.route,
+            actions=execution.actions,
+            artifacts=execution.artifacts,
+            memory_proposals=claim.precompleted_memory_proposals,
+            memory_clarifications=claim.precompleted_memory_clarifications,
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
+            adaptations=execution.adaptations,
+        )
 
         model_input_context = (
             *self._model_input_with_working_state(command),
@@ -842,6 +967,26 @@ class AgentColTurnService:
                     on_delta=on_delta,
                 )
         except SupervisorTimeoutError as exc:
+            _log_turn_pipeline(
+                "responder_timeout",
+                started_at=started_at,
+                clock=self._clock,
+                route=directive.route,
+                error=exc,
+                actions=_stable_merge(authoritative_actions, exc.actions),
+                artifacts=execution.artifacts,
+                memory_proposals=_stable_merge(
+                    command.precompleted_memory_proposals,
+                    exc.memory_proposals,
+                ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
+                adaptations=execution.adaptations,
+            )
             raise AgentColTurnTimeoutError(
                 "Agent_Col turn timed out.",
                 actions=_stable_merge(
@@ -863,6 +1008,26 @@ class AgentColTurnService:
                 chat_turn_claim=execution.claim,
             ) from exc
         except SupervisorRuntimeError as exc:
+            _log_turn_pipeline(
+                "responder_failure",
+                started_at=started_at,
+                clock=self._clock,
+                route=directive.route,
+                error=exc,
+                actions=_stable_merge(authoritative_actions, exc.actions),
+                artifacts=execution.artifacts,
+                memory_proposals=_stable_merge(
+                    command.precompleted_memory_proposals,
+                    exc.memory_proposals,
+                ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
+                adaptations=execution.adaptations,
+            )
             raise AgentColTurnResponderError(
                 "Agent_Col responder failed.",
                 actions=_stable_merge(
@@ -883,6 +1048,25 @@ class AgentColTurnService:
                 adaptations=execution.adaptations,
                 chat_turn_claim=execution.claim,
             ) from exc
+        _log_turn_pipeline(
+            "responder_finish",
+            started_at=started_at,
+            clock=self._clock,
+            route=directive.route,
+            actions=_stable_merge(authoritative_actions, result.actions),
+            artifacts=execution.artifacts,
+            memory_proposals=_stable_merge(
+                command.precompleted_memory_proposals,
+                result.memory_proposals,
+            ),
+            memory_clarifications=_stable_merge(
+                command.precompleted_memory_clarifications,
+                result.memory_clarifications,
+            ),
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
+            adaptations=execution.adaptations,
+        )
         return AgentColTurnResult(
             response=result.response,
             actions=_stable_merge(authoritative_actions, result.actions),
@@ -954,6 +1138,7 @@ class AgentColTurnService:
         directive: AgentColRoutingDirective | None = None,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> AgentColTurnResult:
+        started_at = self._clock()
         if routing_input is None or directive is None:
             numeric_projection = project_routing_numeric_candidates(
                 command.message
@@ -993,6 +1178,20 @@ class AgentColTurnService:
                     timeout_seconds=routing_timeout,
                 )
             except AgentColRoutingV3ProviderTimeoutError as exc:
+                _log_turn_pipeline(
+                    "routing_timeout",
+                    started_at=started_at,
+                    clock=self._clock,
+                    route=None,
+                    error=exc,
+                    actions=command.precompleted_actions,
+                    memory_proposals=command.precompleted_memory_proposals,
+                    memory_clarifications=(
+                        command.precompleted_memory_clarifications
+                    ),
+                    continuity_receipts=command.continuity_receipts,
+                    continuity_choices=command.continuity_choices,
+                )
                 logger.error(
                     "Agent_Col routing failed (%s).",
                     type(exc).__name__,
@@ -1018,6 +1217,20 @@ class AgentColTurnService:
                     failure_classification = (
                         f"routing_directive_input:{exc.reason.value}"
                     )
+                _log_turn_pipeline(
+                    "routing_failure",
+                    started_at=started_at,
+                    clock=self._clock,
+                    route=None,
+                    error=exc,
+                    actions=command.precompleted_actions,
+                    memory_proposals=command.precompleted_memory_proposals,
+                    memory_clarifications=(
+                        command.precompleted_memory_clarifications
+                    ),
+                    continuity_receipts=command.continuity_receipts,
+                    continuity_choices=command.continuity_choices,
+                )
                 logger.error(
                     "Agent_Col routing failed (%s).",
                     failure_classification,
@@ -1037,6 +1250,17 @@ class AgentColTurnService:
         directive = _directive_with_resolved_continuity_priority(
             command,
             directive,
+        )
+        _log_turn_pipeline(
+            "routing_finish",
+            started_at=started_at,
+            clock=self._clock,
+            route=directive.route,
+            actions=command.precompleted_actions,
+            memory_proposals=command.precompleted_memory_proposals,
+            memory_clarifications=command.precompleted_memory_clarifications,
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
         )
         expert_routes = {
             AgentColRoute.SOURCE,
@@ -1065,6 +1289,21 @@ class AgentColTurnService:
                             )
                         )
                 except TimeoutError:
+                    _log_turn_pipeline(
+                        "expert_timeout",
+                        started_at=started_at,
+                        clock=self._clock,
+                        route=directive.route,
+                        actions=command.precompleted_actions,
+                        memory_proposals=(
+                            command.precompleted_memory_proposals
+                        ),
+                        memory_clarifications=(
+                            command.precompleted_memory_clarifications
+                        ),
+                        continuity_receipts=command.continuity_receipts,
+                        continuity_choices=command.continuity_choices,
+                    )
                     responder_context = self._timed_out_expert_context(
                         directive
                     )
@@ -1072,6 +1311,22 @@ class AgentColTurnService:
                     AgentColExpertExecutorV3ConfigurationError,
                     RoutingDirectiveInputError,
                 ) as exc:
+                    _log_turn_pipeline(
+                        "expert_failure",
+                        started_at=started_at,
+                        clock=self._clock,
+                        route=directive.route,
+                        error=exc,
+                        actions=command.precompleted_actions,
+                        memory_proposals=(
+                            command.precompleted_memory_proposals
+                        ),
+                        memory_clarifications=(
+                            command.precompleted_memory_clarifications
+                        ),
+                        continuity_receipts=command.continuity_receipts,
+                        continuity_choices=command.continuity_choices,
+                    )
                     logger.error(
                         "Agent_Col expert execution failed (%s).",
                         type(exc).__name__,
@@ -1098,6 +1353,20 @@ class AgentColTurnService:
                 AgentColExpertExecutorV3ConfigurationError,
                 RoutingDirectiveInputError,
             ) as exc:
+                _log_turn_pipeline(
+                    "expert_failure",
+                    started_at=started_at,
+                    clock=self._clock,
+                    route=directive.route,
+                    error=exc,
+                    actions=command.precompleted_actions,
+                    memory_proposals=command.precompleted_memory_proposals,
+                    memory_clarifications=(
+                        command.precompleted_memory_clarifications
+                    ),
+                    continuity_receipts=command.continuity_receipts,
+                    continuity_choices=command.continuity_choices,
+                )
                 logger.error(
                     "Agent_Col expert execution failed (%s).",
                     type(exc).__name__,
@@ -1149,6 +1418,36 @@ class AgentColTurnService:
                     on_delta=on_delta,
                 )
         except SupervisorTimeoutError as exc:
+            _log_turn_pipeline(
+                "responder_timeout",
+                started_at=started_at,
+                clock=self._clock,
+                route=directive.route,
+                error=exc,
+                actions=_stable_merge(
+                    command.precompleted_actions,
+                    responder_context.actions,
+                    exc.actions,
+                ),
+                memory_proposals=_stable_merge(
+                    command.precompleted_memory_proposals,
+                    exc.memory_proposals,
+                ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
+                collaborative_note_proposals=_stable_merge(
+                    command.precompleted_collaborative_note_proposals,
+                    exc.collaborative_note_proposals,
+                ),
+                collaborative_note_events=_stable_merge(
+                    command.precompleted_collaborative_note_events,
+                    exc.collaborative_note_events,
+                ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
+            )
             logger.error(
                 "Agent_Col responder failed (%s).",
                 type(exc).__name__,
@@ -1180,6 +1479,36 @@ class AgentColTurnService:
                 continuity_choices=command.continuity_choices,
             ) from exc
         except SupervisorRuntimeError as exc:
+            _log_turn_pipeline(
+                "responder_failure",
+                started_at=started_at,
+                clock=self._clock,
+                route=directive.route,
+                error=exc,
+                actions=_stable_merge(
+                    command.precompleted_actions,
+                    responder_context.actions,
+                    exc.actions,
+                ),
+                memory_proposals=_stable_merge(
+                    command.precompleted_memory_proposals,
+                    exc.memory_proposals,
+                ),
+                memory_clarifications=_stable_merge(
+                    command.precompleted_memory_clarifications,
+                    exc.memory_clarifications,
+                ),
+                collaborative_note_proposals=_stable_merge(
+                    command.precompleted_collaborative_note_proposals,
+                    exc.collaborative_note_proposals,
+                ),
+                collaborative_note_events=_stable_merge(
+                    command.precompleted_collaborative_note_events,
+                    exc.collaborative_note_events,
+                ),
+                continuity_receipts=command.continuity_receipts,
+                continuity_choices=command.continuity_choices,
+            )
             logger.error(
                 "Agent_Col responder failed (%s).",
                 type(exc).__name__,
@@ -1210,6 +1539,36 @@ class AgentColTurnService:
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
             ) from exc
+        _log_turn_pipeline(
+            "responder_finish",
+            started_at=started_at,
+            clock=self._clock,
+            route=directive.route,
+            actions=_stable_merge(
+                command.precompleted_actions,
+                responder_context.actions,
+                result.actions,
+            ),
+            artifacts=result.artifacts,
+            memory_proposals=_stable_merge(
+                command.precompleted_memory_proposals,
+                result.memory_proposals,
+            ),
+            memory_clarifications=_stable_merge(
+                command.precompleted_memory_clarifications,
+                result.memory_clarifications,
+            ),
+            collaborative_note_proposals=_stable_merge(
+                command.precompleted_collaborative_note_proposals,
+                result.collaborative_note_proposals,
+            ),
+            collaborative_note_events=_stable_merge(
+                command.precompleted_collaborative_note_events,
+                result.collaborative_note_events,
+            ),
+            continuity_receipts=command.continuity_receipts,
+            continuity_choices=command.continuity_choices,
+        )
         return AgentColTurnResult(
             response=result.response,
             actions=_stable_merge(

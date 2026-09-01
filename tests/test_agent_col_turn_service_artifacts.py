@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+import logging
 
 import pytest
 from pydantic import BaseModel, ValidationError
@@ -252,6 +253,56 @@ async def test_turn_service_routes_artifact_through_application_executor(
     assert result.artifacts == execution.artifacts
     assert result.adaptations == execution.adaptations
     assert result.chat_turn_claim is execution.claim
+
+
+@pytest.mark.asyncio
+async def test_turn_service_logs_artifact_pipeline_without_private_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    import agent_col_turn_service
+
+    claim = initial_claim()
+    claim = replace(
+        claim,
+        request=replace(
+            claim.request,
+            message="private artifact prompt marker",
+        ),
+    )
+    execution = artifact_execution_result(claim)
+    routing = RecordingV4RoutingRequest(artifact_directive())
+    artifact_executor = RecordingArtifactExecutor(execution)
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=responder,
+        artifact_executor=artifact_executor,
+        artifact_routing_request=routing,
+        wall_clock=lambda: NOW,
+    )
+    caplog.set_level(logging.INFO, logger=agent_col_turn_service.logger.name)
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id=claim.request.project_id,
+            session_id=claim.request.session_id,
+            user_id=claim.request.user_id,
+            message=claim.request.message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert result.artifacts == execution.artifacts
+    assert "Agent_Col turn pipeline" in caplog.text
+    assert "stage=routing_finish" in caplog.text
+    assert "route=artifact" in caplog.text
+    assert "stage=artifact_finish" in caplog.text
+    assert "artifacts=1" in caplog.text
+    assert "stage=responder_finish" in caplog.text
+    assert "private artifact prompt marker" not in caplog.text
+    assert "Collaborative Study Workflow" not in caplog.text
 
 
 @pytest.mark.asyncio
