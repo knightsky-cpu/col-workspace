@@ -144,6 +144,34 @@ async def test_note_tool_builds_pending_result_from_adk_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_note_tool_skips_candidate_when_turn_already_has_durable_effect(
+) -> None:
+    from collaborative_note_tool import create_propose_collaborative_note_tool
+
+    service = RecordingCollaborativeNoteService()
+    tool = create_propose_collaborative_note_tool(service)
+    state = note_tool_state() | {
+        "governed_turn_has_precompleted_durable_effect": True,
+    }
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "note_candidate",
+                "note_kind": "constraint",
+                "title": "API version",
+                "body": "Use API version 2.",
+                "evidence_text": "this workspace must use API version 2",
+            }
+        },
+        tool_context=SimpleNamespace(state=State(value=state, delta={})),
+    )
+
+    assert result == {"status": "no_note"}
+    assert service.commands == []
+
+
+@pytest.mark.asyncio
 async def test_note_tool_rejects_unsafe_or_ungrounded_candidates() -> None:
     from collaborative_note_tool import create_propose_collaborative_note_tool
 

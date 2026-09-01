@@ -109,6 +109,7 @@ def test_create_supervisor_app_registers_injected_note_tool_separately(
         normalized_instruction
     )
     assert "memory request must not become a note" in normalized_instruction
+    assert "already completed an artifact" in normalized_instruction
 
 
 def test_supervisor_instruction_enforces_governed_memory_restraint() -> None:

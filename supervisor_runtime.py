@@ -42,6 +42,13 @@ from source_expert_runtime import SourceExpertTurnTracker
 logger = logging.getLogger(__name__)
 SUPERVISOR_MAX_LLM_CALLS = 4
 SUPERVISOR_TIMEOUT_SECONDS = 90
+_DURABLE_PRECOMPLETED_ACTION_NAMES = frozenset(
+    {
+        "synthesize_project",
+        "create_artifact",
+        "record_blueprint_feedback",
+    }
+)
 
 
 class SupervisorRuntimeError(RuntimeError):
@@ -264,6 +271,15 @@ class SupervisorRuntime:
                     "expert_delegation_token": delegation_token,
                 }
                 if context.source_message_id is not None:
+                    has_precompleted_durable_effect = (
+                        self._has_precompleted_durable_effect(
+                            actions,
+                            memory_proposals,
+                            memory_clarifications,
+                            collaborative_note_proposals,
+                            collaborative_note_events,
+                        )
+                    )
                     session_state.update(
                         {
                             "memory_user_id": context.user_id,
@@ -291,6 +307,10 @@ class SupervisorRuntime:
                             ),
                         }
                     )
+                    if has_precompleted_durable_effect:
+                        session_state[
+                            "governed_turn_has_precompleted_durable_effect"
+                        ] = True
                     if context.turn_lease is not None:
                         session_state.update(
                             {
@@ -659,6 +679,25 @@ class SupervisorRuntime:
             )
 
     @staticmethod
+    def _has_precompleted_durable_effect(
+        actions: list[AgentActionReceipt],
+        memory_proposals: list[VersionedMemoryProposalReceipt],
+        memory_clarifications: list[MemoryClarificationReceipt],
+        collaborative_note_proposals: list[CollaborativeNoteProposal],
+        collaborative_note_events: list[CollaborativeNoteEvent],
+    ) -> bool:
+        return (
+            any(
+                action.action_name in _DURABLE_PRECOMPLETED_ACTION_NAMES
+                for action in actions
+            )
+            or bool(memory_proposals)
+            or bool(memory_clarifications)
+            or bool(collaborative_note_proposals)
+            or bool(collaborative_note_events)
+        )
+
+    @staticmethod
     def _precompleted_effect_context(
         actions: list[AgentActionReceipt],
         memory_proposals: list[VersionedMemoryProposalReceipt],
@@ -731,10 +770,11 @@ class SupervisorRuntime:
         }
         text = (
             "The following application actions already completed for this "
-            "logical turn. Do not claim rollback or repeat them. If a memory "
-            "proposal is present, do not call propose_memory_signal again; "
-            "tell the user it remains pending and ask them to approve or "
-            "reject it.\n"
+            "logical turn. Do not claim rollback or repeat them; do not call "
+            "propose_collaborative_note after any precompleted action or "
+            "effect in this context. If a memory proposal is present, do not "
+            "call propose_memory_signal again; tell the user it remains "
+            "pending and ask them to approve or reject it.\n"
             "[SERVER_VALIDATED_PRECOMPLETED_ACTIONS]\n"
             f"{json.dumps(payload, ensure_ascii=False)}\n"
             "[/SERVER_VALIDATED_PRECOMPLETED_ACTIONS]"

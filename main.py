@@ -810,6 +810,63 @@ def _public_chat_response(
     )
 
 
+async def _run_hidden_working_state_update(
+    *,
+    database: object,
+    working_state_service: object,
+    command: WorkingStateUpdateInput,
+) -> None:
+    try:
+        working_state_update = await working_state_service.update(command)
+        if (
+            working_state_update.update_required
+            and working_state_update.snapshot is not None
+        ):
+            await database.save_working_state(
+                working_state_update.snapshot,
+                observed_at=datetime.now(UTC),
+            )
+    except (
+        WorkingStateGenerationError,
+        WorkingStateGenerationTimeoutError,
+        ChatSessionOwnershipError,
+        MemoryEngineError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        logger.error(
+            "Hidden working state update failed (%s).",
+            type(exc).__name__,
+        )
+    except Exception as exc:
+        logger.error(
+            "Hidden working state update failed unexpectedly (%s).",
+            type(exc).__name__,
+        )
+
+
+def _schedule_hidden_working_state_update(
+    *,
+    app: FastAPI,
+    database: object,
+    working_state_service: object,
+    command: WorkingStateUpdateInput,
+) -> None:
+    tasks = getattr(app.state, "working_state_background_tasks", None)
+    if tasks is None:
+        tasks = set()
+        app.state.working_state_background_tasks = tasks
+    task = asyncio.create_task(
+        _run_hidden_working_state_update(
+            database=database,
+            working_state_service=working_state_service,
+            command=command,
+        )
+    )
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+
+
 def _workspace_defaults_for_request(
     *,
     request: Request,
@@ -1512,10 +1569,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         max_requests=RATE_LIMIT_MAX_REQUESTS,
         window_seconds=RATE_LIMIT_WINDOW_SECONDS,
     )
+    app.state.working_state_background_tasks = set()
 
     try:
         yield
     finally:
+        working_state_background_tasks = tuple(
+            getattr(app.state, "working_state_background_tasks", set())
+        )
+        for task in working_state_background_tasks:
+            task.cancel()
+        if working_state_background_tasks:
+            await asyncio.gather(
+                *working_state_background_tasks,
+                return_exceptions=True,
+            )
         try:
             await client.aio.aclose()
         finally:
@@ -4131,42 +4199,24 @@ async def _execute_chat(
                 _raise_chat_turn_operation_http_error(exc, "completion")
 
     if working_state_update_enabled:
-        try:
-            working_state_update = await working_state_service.update(
-                WorkingStateUpdateInput(
-                    user_id=effective_user_id,
-                    project_id=effective_project_id,
-                    session_id=payload.session_id,
-                    source_message_id=user_message_id,
-                    current_message=payload.message,
-                    model_response=result.response,
-                    previous_state=working_state_snapshot,
-                    continuity_source_texts=tuple(
-                        continuity_resolution.source_texts
-                    ),
-                    recent_user_messages=recent_user_messages[-8:],
-                )
-            )
-            if (
-                working_state_update.update_required
-                and working_state_update.snapshot is not None
-            ):
-                await database.save_working_state(
-                    working_state_update.snapshot,
-                    observed_at=datetime.now(UTC),
-                )
-        except (
-            WorkingStateGenerationError,
-            WorkingStateGenerationTimeoutError,
-            ChatSessionOwnershipError,
-            MemoryEngineError,
-            TypeError,
-            ValueError,
-        ) as exc:
-            logger.error(
-                "Hidden working state update failed (%s).",
-                type(exc).__name__,
-            )
+        _schedule_hidden_working_state_update(
+            app=request.app,
+            database=database,
+            working_state_service=working_state_service,
+            command=WorkingStateUpdateInput(
+                user_id=effective_user_id,
+                project_id=effective_project_id,
+                session_id=payload.session_id,
+                source_message_id=user_message_id,
+                current_message=payload.message,
+                model_response=result.response,
+                previous_state=working_state_snapshot,
+                continuity_source_texts=tuple(
+                    continuity_resolution.source_texts
+                ),
+                recent_user_messages=recent_user_messages[-8:],
+            ),
+        )
 
     return _public_chat_response(
         response=chat_response,

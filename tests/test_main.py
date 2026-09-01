@@ -2243,6 +2243,12 @@ def parse_sse_events(body: str) -> list[tuple[str, object]]:
     return events
 
 
+async def wait_for_working_state_background_tasks() -> None:
+    tasks = getattr(main.app.state, "working_state_background_tasks", set())
+    if tasks:
+        await asyncio.gather(*tuple(tasks), return_exceptions=True)
+
+
 @pytest.mark.asyncio
 async def test_health_check(client: httpx.AsyncClient) -> None:
     response = await client.get("/")
@@ -2902,7 +2908,7 @@ async def test_chat_stream_disconnect_cancels_responder_without_completing_claim
 
 
 @pytest.mark.asyncio
-async def test_chat_stream_disconnect_after_persistence_replays_canonical_final(
+async def test_chat_stream_emits_final_before_slow_working_state_update(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     monkeypatch: pytest.MonkeyPatch,
@@ -2917,16 +2923,14 @@ async def test_chat_stream_disconnect_after_persistence_replays_canonical_final(
         request=replace(claim.request, message=message),
     )
     maintenance_started = asyncio.Event()
-    maintenance_cancelled = asyncio.Event()
+    unblock_maintenance = asyncio.Event()
+    final_sent = asyncio.Event()
 
     async def blocked_update(command: WorkingStateUpdateInput):
         service_state.working_state_service.calls.append(command)
         maintenance_started.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            maintenance_cancelled.set()
-            raise
+        await unblock_maintenance.wait()
+        return WorkingStateUpdateResult(update_required=False)
 
     monkeypatch.setattr(
         service_state.working_state_service,
@@ -2961,24 +2965,30 @@ async def test_chat_stream_disconnect_after_persistence_replays_canonical_final(
 
     async def send(event: dict[str, object]) -> None:
         sent_messages.append(event)
+        body = bytes(event.get("body", b"")).decode()
+        if '"event": "final"' in body or "event: final" in body:
+            final_sent.set()
 
     async def receive() -> dict[str, object]:
-        await maintenance_started.wait()
+        await final_sent.wait()
         return {"type": "http.disconnect"}
 
-    await asyncio.wait_for(
-        response(
-            {
-                "type": "http",
-                "asgi": {"version": "3.0", "spec_version": "2.3"},
-            },
-            receive,
-            send,
-        ),
-        timeout=1.0,
-    )
+    try:
+        await asyncio.wait_for(
+            response(
+                {
+                    "type": "http",
+                    "asgi": {"version": "3.0", "spec_version": "2.3"},
+                },
+                receive,
+                send,
+            ),
+            timeout=1.0,
+        )
+    finally:
+        unblock_maintenance.set()
+        await wait_for_working_state_background_tasks()
 
-    assert maintenance_cancelled.is_set()
     assert len(service_state.database.complete_calls) == 1
     assert service_state.database.release_calls == []
     bodies = [
@@ -2986,9 +2996,9 @@ async def test_chat_stream_disconnect_after_persistence_replays_canonical_final(
         for event in sent_messages
         if event["type"] == "http.response.body" and event.get("body")
     ]
-    assert "final" not in [
+    assert [
         event for body in bodies for event, _ in parse_sse_events(body)
-    ]
+    ] == ["delta", "delta", "final"]
 
     stored_response = service_state.database.complete_calls[0][1]
     service_state.database.chat_turn_result = ChatTurnReplay(
@@ -3008,6 +3018,116 @@ async def test_chat_stream_disconnect_after_persistence_replays_canonical_final(
     assert parse_sse_events(replay.text) == [
         ("final", stored_response.model_dump(mode="json"))
     ]
+
+
+@pytest.mark.asyncio
+async def test_chat_json_returns_before_slow_working_state_update(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    message = (
+        "I want a deployment plan, probably Cloud Run, but security "
+        "matters more than speed."
+    )
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = replace(
+        claim,
+        request=replace(claim.request, message=message),
+    )
+    maintenance_started = asyncio.Event()
+    unblock_maintenance = asyncio.Event()
+
+    async def blocked_update(command: WorkingStateUpdateInput):
+        service_state.working_state_service.calls.append(command)
+        maintenance_started.set()
+        await unblock_maintenance.wait()
+        return WorkingStateUpdateResult(update_required=False)
+
+    monkeypatch.setattr(
+        service_state.working_state_service,
+        "update",
+        blocked_update,
+    )
+
+    request_task = asyncio.create_task(
+        client.post(
+            "/api/chat",
+            headers={"Idempotency-Key": "slow-maintenance-key-1"},
+            json={
+                "project_id": "project-1",
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "message": message,
+            },
+        )
+    )
+
+    try:
+        response = await asyncio.wait_for(request_task, timeout=1.0)
+        await asyncio.wait_for(maintenance_started.wait(), timeout=1.0)
+    finally:
+        unblock_maintenance.set()
+        await wait_for_working_state_background_tasks()
+        if not request_task.done():
+            request_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await request_task
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "Generated answer"
+    assert len(service_state.database.complete_calls) == 1
+    assert len(service_state.working_state_service.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_background_working_state_unexpected_failure_is_logged(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    message = (
+        "I want a deployment plan, probably Cloud Run, but security "
+        "matters more than speed."
+    )
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = replace(
+        claim,
+        request=replace(claim.request, message=message),
+    )
+
+    async def unexpected_failure(command: WorkingStateUpdateInput):
+        service_state.working_state_service.calls.append(command)
+        raise RuntimeError("private unexpected working-state marker")
+
+    monkeypatch.setattr(
+        service_state.working_state_service,
+        "update",
+        unexpected_failure,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        response = await client.post(
+            "/api/chat",
+            headers={"Idempotency-Key": "unexpected-maintenance-key-1"},
+            json={
+                "project_id": "project-1",
+                "session_id": "session-1",
+                "user_id": "user-1",
+                "message": message,
+            },
+        )
+        await wait_for_working_state_background_tasks()
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "Generated answer"
+    assert len(service_state.working_state_service.calls) == 1
+    assert "Hidden working state update failed unexpectedly (RuntimeError)." in (
+        caplog.text
+    )
+    assert "private unexpected working-state marker" not in response.text
+    assert "private unexpected working-state marker" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -7222,6 +7342,7 @@ async def test_chat_uses_hidden_working_state_without_public_response_fields(
     assert body["response"] == "Generated answer"
     assert "working_state" not in body
     assert "model_thoughts" not in body
+    await wait_for_working_state_background_tasks()
     assert service_state.database.working_state_calls == [
         ("user-1", "project-1", "session-1")
     ]

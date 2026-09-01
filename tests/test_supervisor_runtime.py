@@ -627,6 +627,37 @@ async def test_run_turn_includes_precompleted_note_decision_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_turn_marks_precompleted_artifact_as_durable_tool_state(
+) -> None:
+    from schemas import AgentActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    action = AgentActionReceipt(
+        action_name="create_artifact",
+        status="completed",
+    )
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(events=[FakeEvent("Created the script.", True)]),
+        session_service=sessions,
+    )
+
+    await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Write a bash script.",
+            source_message_id="turn--source-message--user",
+            precompleted_actions=(action,),
+        )
+    )
+
+    state = dict(sessions.created[0]["state"])
+    assert state["governed_turn_has_precompleted_durable_effect"] is True
+
+
+@pytest.mark.asyncio
 async def test_run_turn_collects_note_proposal_receipt_truthfully() -> None:
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
 
@@ -825,6 +856,7 @@ async def test_run_turn_recovers_precompleted_proposal_without_new_tool_call(
     ].model_input_context[-1].parts[0].text
     assert "already completed" in operational_context
     assert "do not call propose_memory_signal" in operational_context
+    assert "do not call propose_collaborative_note" in operational_context
     assert "response_length" in operational_context
     assert "concise" in operational_context
     assert "response_length--private-proposal" not in operational_context

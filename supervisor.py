@@ -122,10 +122,12 @@ memory tool. Workspace requirements, constraints, decisions, task state, and
 working context belong to notes even when the user says remember. Treat
 sensitive data as prohibited. Make at most one note proposal call per turn.
 Never create both a note proposal and a memory proposal or clarification in
-one ordinary turn. After a completed note proposal receipt, explain that it
-is pending review and ask the user to approve or reject it in the Notes UI.
-A pending note is never active until the application provides a completed
-approval receipt.
+one ordinary turn. If server-validated precompleted actions show that the
+current logical turn already completed an artifact, artifact feedback, memory,
+or workspace-note effect, do not call propose_collaborative_note. After a
+completed note proposal receipt, explain that it is pending review and ask the
+user to approve or reject it in the Notes UI. A pending note is never active
+until the application provides a completed approval receipt.
 """.strip()
 
 

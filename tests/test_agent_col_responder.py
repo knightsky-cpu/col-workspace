@@ -73,6 +73,7 @@ def test_responder_app_catalog_exposes_governed_note_tool_separately() -> None:
     assert "notes are workspace scoped" in normalized
     assert "note request must not become profile memory" in normalized
     assert "memory request must not become a note" in normalized
+    assert "already completed an artifact" in normalized
 
 
 def test_responder_instruction_preserves_final_response_authority() -> None:

@@ -23,6 +23,9 @@ from schemas import AgentActionReceipt, CollaborativeNoteProposal
 
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_PRECOMPLETED_DURABLE_EFFECT_STATE_KEY = (
+    "governed_turn_has_precompleted_durable_effect"
+)
 
 
 class CollaborativeNoteToolConfigurationError(RuntimeError):
@@ -160,6 +163,20 @@ def _server_command(
     )
 
 
+def _turn_has_precompleted_durable_effect(tool_context: ToolContext) -> bool:
+    state = getattr(tool_context, "state", None)
+    if not callable(getattr(state, "get", None)):
+        raise CollaborativeNoteToolConfigurationError(
+            "Collaborative note tool context is invalid."
+        )
+    value = state.get(_PRECOMPLETED_DURABLE_EFFECT_STATE_KEY, False)
+    if type(value) is not bool:
+        raise CollaborativeNoteToolConfigurationError(
+            "Collaborative note tool context is invalid."
+        )
+    return value
+
+
 def create_propose_collaborative_note_tool(
     note_service: CollaborativeNoteService,
 ) -> FunctionTool:
@@ -175,6 +192,8 @@ def create_propose_collaborative_note_tool(
             if isinstance(validated_decision, ProhibitedNoteDecision):
                 return {"status": "prohibited"}
             if not isinstance(validated_decision, NoteCandidateDecision):
+                return {"status": "no_note"}
+            if _turn_has_precompleted_durable_effect(tool_context):
                 return {"status": "no_note"}
             command = _server_command(
                 decision=validated_decision,
