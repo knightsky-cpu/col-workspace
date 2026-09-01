@@ -49,6 +49,57 @@ class RecordingCollaborativeNoteService:
         )
 
 
+class RecordingAgentJobRepository:
+    def __init__(self) -> None:
+        self.enqueued: list[object] = []
+        self.leases: list[dict[str, object]] = []
+        self.completed: list[dict[str, object]] = []
+        self.failed: list[dict[str, object]] = []
+        self.events: list[object] = []
+
+    async def enqueue_job(self, job):
+        self.enqueued.append(job)
+        return job
+
+    async def lease_queued_job(self, **kwargs):
+        self.leases.append(kwargs)
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "running",
+                "lease_owner": kwargs["lease_owner"],
+                "lease_expires_at": kwargs["lease_expires_at"],
+                "updated_at": kwargs["observed_at"],
+            }
+        )
+
+    async def complete_job(self, **kwargs):
+        self.completed.append(kwargs)
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "completed",
+                "updated_at": kwargs["observed_at"],
+                "result_refs": kwargs["result_refs"],
+            }
+        )
+
+    async def fail_job(self, **kwargs):
+        self.failed.append(kwargs)
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": "failed",
+                "updated_at": kwargs["observed_at"],
+                "failure_summary": kwargs["failure"],
+            }
+        )
+
+    async def append_event(self, **kwargs):
+        self.events.append(kwargs["event"])
+        return kwargs["event"]
+
+
 def note_tool_state() -> dict[str, object]:
     return {
         "note_user_id": "user-1",
@@ -141,6 +192,58 @@ async def test_note_tool_builds_pending_result_from_adk_state() -> None:
     assert command.collaborative_note_decision_present is False
     assert isinstance(command.decision, NoteCandidateDecision)
     assert command.turn_lease.turn_id == "a" * 64
+
+
+@pytest.mark.asyncio
+async def test_note_tool_records_agent_job_lifecycle_for_pending_proposal(
+) -> None:
+    from collaborative_note_tool import create_propose_collaborative_note_tool
+
+    jobs = RecordingAgentJobRepository()
+    service = RecordingCollaborativeNoteService()
+    tool = create_propose_collaborative_note_tool(
+        service,
+        agent_job_repository=jobs,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "note_candidate",
+                "note_kind": "constraint",
+                "title": "API version",
+                "body": "Use API version 2.",
+                "evidence_text": "this workspace must use API version 2",
+            }
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=note_tool_state(), delta={})
+        ),
+    )
+
+    assert result["status"] == "pending"
+    assert len(jobs.enqueued) == 1
+    job = jobs.enqueued[0]
+    assert job.action_kind == "propose_collaborative_note"
+    assert job.status == "queued"
+    assert job.user_id == "user-1"
+    assert job.project_id == "workspace-1"
+    assert job.workspace_id == "workspace-1"
+    assert job.session_id == "session-1"
+    assert job.source_message_id == "message-1"
+    assert job.source_turn_id == "a" * 64
+    assert job.agent_label == "Note Curator"
+    assert "API version" in job.display_label
+    assert jobs.leases[0]["job_id"] == job.job_id
+    assert jobs.completed[0]["job_id"] == job.job_id
+    assert jobs.completed[0]["result_refs"] == {
+        "proposal_id": "note-proposal-1",
+    }
+    assert [event.event_type for event in jobs.events] == [
+        "queued",
+        "started",
+        "completed",
+    ]
 
 
 @pytest.mark.asyncio
@@ -283,6 +386,53 @@ async def test_note_tool_returns_rejected_response_for_state_conflicts(
     }
     assert len(service.commands) == 1
     assert "private" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_note_tool_marks_agent_job_failed_when_note_service_errors(
+) -> None:
+    from collaborative_note_tool import create_propose_collaborative_note_tool
+    from database import MemoryProposalConflictError
+
+    jobs = RecordingAgentJobRepository()
+    service = RecordingCollaborativeNoteService(
+        error=MemoryProposalConflictError("private conflict detail")
+    )
+    tool = create_propose_collaborative_note_tool(
+        service,
+        agent_job_repository=jobs,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "note_candidate",
+                "note_kind": "constraint",
+                "title": "API version",
+                "body": "Use API version 2.",
+                "evidence_text": "this workspace must use API version 2",
+            }
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=note_tool_state(), delta={})
+        ),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": "collaborative_note_proposal_conflict",
+    }
+    assert jobs.failed[0]["job_id"] == jobs.enqueued[0].job_id
+    failure = jobs.failed[0]["failure"]
+    assert failure.code == "collaborative_note_proposal_conflict"
+    assert failure.summary == "Workspace note proposal could not be created."
+    assert failure.retryable is False
+    assert [event.event_type for event in jobs.events] == [
+        "queued",
+        "started",
+        "failed",
+    ]
+    assert "private" not in failure.summary
 
 
 def test_note_tool_response_parser_accepts_state_conflict_rejections() -> None:

@@ -2025,6 +2025,11 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
   };
   t.after(restoreTimers);
   const nextRealTick = () => new Promise((resolve) => realSetTimeout(resolve, 0));
+  const settleRealTicks = async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await nextRealTick();
+    }
+  };
   const activeTimers = () => timers.filter((timer) => !timer.cleared);
   const runNextTimer = async () => {
     const [timer] = activeTimers();
@@ -2040,7 +2045,7 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
   assert.equal(agentJobLoadCount, 1);
   assert.match(textTree(elements.get("[data-agents-panel]")), /Updating architecture document/);
   assert.equal(activeTimers().length, 1);
-  assert.equal(activeTimers()[0].delay, 3000);
+  assert.equal(activeTimers()[0].delay, 300);
 
   const input = elements.get("[data-chat-input]");
   input.value = "Keep chatting while jobs refresh";
@@ -2051,17 +2056,16 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
     calls.some(([path]) => path === "/api/chat/stream"),
     true,
   );
-
-  await runNextTimer();
   assert.equal(agentJobLoadCount, 2);
   assert.match(textTree(elements.get("[data-agents-panel]")), /Doc Writer/);
   assert.equal(activeTimers().length, 1);
+  assert.equal(activeTimers()[0].delay, 300);
 
   await runNextTimer();
   assert.equal(agentJobLoadCount, 3);
   assert.match(textTree(elements.get("[data-agents-panel]")), /Architecture document updated/);
-  assert.equal(activeTimers().length, 0);
-  restoreTimers();
+  assert.equal(activeTimers().length, 1);
+  assert.equal(activeTimers()[0].delay, 300);
   stream.complete({
     response: "Chat stayed usable while jobs refreshed",
     actions: [],
@@ -2074,12 +2078,210 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
     continuity_receipts: [],
     adaptations: [],
   });
-  await waitFor(
-    () => textTree(elements.get("[data-chat-transcript]")).includes(
-      "Chat stayed usable while jobs refreshed",
-    ),
-    () => textTree(elements.get("[data-chat-transcript]")),
+  await settleRealTicks();
+  assert.match(
+    textTree(elements.get("[data-chat-transcript]")),
+    /Chat stayed usable while jobs refreshed/,
   );
+  await nextRealTick();
+  assert.equal(activeTimers().length, 0);
+  restoreTimers();
+});
+
+test("agent jobs use fast refresh while chat stream is pending", async (t) => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const stream = createControlledSseResponse();
+  const calls = [];
+  const agentJobResponses = [
+    {
+      agent_job_contract_version: "1.0",
+      jobs: [],
+    },
+    {
+      agent_job_contract_version: "1.0",
+      jobs: [],
+    },
+    {
+      agent_job_contract_version: "1.0",
+      jobs: [{
+        job_id: "job-running",
+        status: "running",
+        agent_label: "Note Curator",
+        description: "Preparing workspace note",
+        created_at: "2026-09-01T12:00:00Z",
+        started_at: "2026-09-01T12:00:01Z",
+      }],
+    },
+    {
+      agent_job_contract_version: "1.0",
+      jobs: [{
+        job_id: "job-completed",
+        status: "completed",
+        agent_label: "Note Curator",
+        result_description: "Workspace note proposal created",
+        created_at: "2026-09-01T12:00:00Z",
+        started_at: "2026-09-01T12:00:01Z",
+        completed_at: "2026-09-01T12:00:02Z",
+      }],
+    },
+  ];
+  let agentJobLoadCount = 0;
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      const response = agentJobResponses[
+        Math.min(agentJobLoadCount, agentJobResponses.length - 1)
+      ];
+      agentJobLoadCount += 1;
+      return jsonResponse(200, response);
+    }
+    if (path === "/api/chat/stream") {
+      return stream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-agent-jobs-fast-refresh-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  const timers = [];
+  globalThis.setTimeout = (callback, delay) => {
+    const timer = {
+      id: timers.length + 1,
+      callback,
+      delay,
+      cleared: false,
+    };
+    timers.push(timer);
+    return timer.id;
+  };
+  globalThis.clearTimeout = (id) => {
+    const timer = timers.find((item) => item.id === id);
+    if (timer) {
+      timer.cleared = true;
+    }
+  };
+  const restoreTimers = () => {
+    globalThis.setTimeout = realSetTimeout;
+    globalThis.clearTimeout = realClearTimeout;
+  };
+  t.after(restoreTimers);
+  const nextRealTick = () => new Promise((resolve) => realSetTimeout(resolve, 0));
+  const settleRealTicks = async () => {
+    for (let i = 0; i < 5; i += 1) {
+      await nextRealTick();
+    }
+  };
+  const activeTimers = () => timers.filter((timer) => !timer.cleared);
+  const runNextTimer = async () => {
+    const [timer] = activeTimers();
+    assert.ok(timer, "expected an active agent job refresh timer");
+    timer.cleared = true;
+    timer.callback();
+    await nextRealTick();
+  };
+
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  await nextRealTick();
+
+  assert.equal(agentJobLoadCount, 1);
+  assert.equal(activeTimers().length, 0);
+
+  const input = elements.get("[data-chat-input]");
+  input.value = "Create a workspace note while chat streams";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await nextRealTick();
+
+  assert.equal(agentJobLoadCount, 2);
+  assert.equal(activeTimers().length, 1);
+  assert.equal(activeTimers()[0].delay, 300);
+
+  await runNextTimer();
+  assert.equal(agentJobLoadCount, 3);
+  assert.match(textTree(elements.get("[data-agents-panel]")), /Preparing workspace note/);
+  assert.equal(activeTimers().length, 1);
+  assert.equal(activeTimers()[0].delay, 300);
+
+  stream.complete({
+    response: "Queued note visibility stayed live",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+  await settleRealTicks();
+  assert.match(
+    textTree(elements.get("[data-chat-transcript]")),
+    /Queued note visibility stayed live/,
+  );
+  if (
+    !textTree(elements.get("[data-agents-panel]")).includes(
+      "Workspace note proposal created"
+    )
+    && activeTimers().length > 0
+  ) {
+    await runNextTimer();
+  }
+  assert.ok(agentJobLoadCount >= 4);
+  assert.match(textTree(elements.get("[data-agents-panel]")), /Workspace note proposal created/);
+  restoreTimers();
 });
 
 test("JSON partial failure from submit refreshes authoritative memory and notes", async () => {

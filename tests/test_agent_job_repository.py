@@ -384,6 +384,48 @@ async def test_lease_next_queued_job_moves_oldest_job_to_running(
 
 
 @pytest.mark.asyncio
+async def test_lease_queued_job_moves_specific_job_to_running(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(
+        make_job(
+            job_id="job-older",
+            idempotency_key="idem-older",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    await repository.enqueue_job(
+        make_job(
+            job_id="job-target",
+            idempotency_key="idem-target",
+            created_at=NOW + timedelta(seconds=5),
+            updated_at=NOW + timedelta(seconds=5),
+        )
+    )
+
+    leased = await repository.lease_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-target",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW + timedelta(seconds=10),
+    )
+
+    assert leased.job_id == "job-target"
+    assert leased.status == "running"
+    assert leased.lease_owner == "worker-1"
+    assert leased.updated_at == NOW + timedelta(seconds=10)
+    older = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-older",
+    )
+    assert older.status == "queued"
+
+
+@pytest.mark.asyncio
 async def test_complete_job_requires_matching_live_lease(
     repository: AgentJobRepository,
 ) -> None:

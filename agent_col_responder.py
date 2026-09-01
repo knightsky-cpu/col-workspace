@@ -4,6 +4,7 @@ from google.adk.models import Gemini
 
 from collaborative_note_service import CollaborativeNoteService
 from collaborative_note_tool import create_propose_collaborative_note_tool
+from agent_job_repository import AgentJobRepository
 from memory_proposal_tool import create_propose_memory_signal_tool
 from trusted_memory_service import TrustedMemoryService
 from vertex_config import VertexAISettings
@@ -304,6 +305,7 @@ def create_responder_app(
     vertex_settings: VertexAISettings,
     memory_service: TrustedMemoryService | None = None,
     collaborative_note_service: CollaborativeNoteService | None = None,
+    agent_job_repository: AgentJobRepository | None = None,
 ) -> App:
     """Return Agent_Col with no model-visible cognitive experts."""
     tools = []
@@ -312,7 +314,8 @@ def create_responder_app(
     if collaborative_note_service is not None:
         tools.append(
             create_propose_collaborative_note_tool(
-                collaborative_note_service
+                collaborative_note_service,
+                agent_job_repository=agent_job_repository,
             )
         )
     root_agent = Agent(

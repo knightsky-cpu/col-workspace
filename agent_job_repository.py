@@ -222,6 +222,56 @@ class AgentJobRepository:
         except GoogleAPIError as exc:
             self._raise_firestore_error("lease_next_queued_job", exc)
 
+    async def lease_queued_job(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+        lease_owner: str,
+        lease_expires_at: datetime,
+        observed_at: datetime,
+    ) -> AgentJob:
+        try:
+            job_ref = self._job_ref(user_id, workspace_id, job_id)
+            transaction = self._client.transaction()
+
+            async def lease_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> AgentJob:
+                snapshot = await job_ref.get(transaction=transaction)
+                job = self._available_scoped_job(
+                    snapshot,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+                if job.status != "queued":
+                    raise AgentJobStateError("AgentJob is not queued.")
+                leased = transition_agent_job(
+                    job,
+                    status="running",
+                    updated_at=observed_at,
+                    lease_owner=lease_owner,
+                    lease_expires_at=lease_expires_at,
+                )
+                transaction.set(
+                    job_ref,
+                    self._job_document(leased),
+                    merge=True,
+                )
+                return leased
+
+            run_transaction = firestore.async_transactional(
+                lease_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (AgentJobNotFoundError, AgentJobStateError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("lease_queued_job", exc)
+
     async def complete_job(
         self,
         *,

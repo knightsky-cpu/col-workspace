@@ -1792,6 +1792,7 @@ class ServiceState:
     artifact_feedback_service_dependencies: list[tuple[object, object]]
     artifact_feedback_executor_dependencies: list[tuple[object, object]]
     responder_note_services: list[object]
+    responder_agent_job_repositories: list[object]
     continuity_service_dependencies: list[object]
     working_state_service_dependencies: list[object]
     preference_learning_service_dependencies: list[object]
@@ -2044,6 +2045,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     artifact_feedback_service_dependencies: list[tuple[object, object]] = []
     artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
     responder_note_services: list[object] = []
+    responder_agent_job_repositories: list[object] = []
     continuity_service_dependencies: list[object] = []
     working_state_service_dependencies: list[object] = []
     preference_learning_service_dependencies: list[object] = []
@@ -2094,6 +2096,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             artifact_feedback_executor_dependencies
         ),
         responder_note_services=responder_note_services,
+        responder_agent_job_repositories=responder_agent_job_repositories,
         continuity_service_dependencies=continuity_service_dependencies,
         working_state_service_dependencies=(
             working_state_service_dependencies
@@ -2198,10 +2201,12 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         vertex_settings: VertexAISettings,
         memory_service: object | None = None,
         collaborative_note_service: object | None = None,
+        agent_job_repository: object | None = None,
     ) -> object:
         responder_vertex_settings.append(vertex_settings)
         responder_memory_services.append(memory_service)
         responder_note_services.append(collaborative_note_service)
+        responder_agent_job_repositories.append(agent_job_repository)
         return responder_app
 
     monkeypatch.setattr(
@@ -5419,6 +5424,9 @@ async def test_lifespan_injects_memory_and_notes_into_responder_app(
         ]
         assert service_state.responder_note_services == [
             service_state.collaborative_note_service
+        ]
+        assert service_state.responder_agent_job_repositories == [
+            service_state.agent_job_repository
         ]
 
 

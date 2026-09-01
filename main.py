@@ -1823,6 +1823,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
+        agent_job_repository = database.agent_jobs()
         continuity_service = ContinuityService(
             store=database,
             term_expander=GeminiContinuityTermExpander(client=client),
@@ -1857,6 +1858,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 vertex_settings=vertex_settings,
                 memory_service=memory_service,
                 collaborative_note_service=collaborative_note_service,
+                agent_job_repository=agent_job_repository,
             )
         )
         turn_service = AgentColTurnService(

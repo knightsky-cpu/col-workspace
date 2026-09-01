@@ -166,7 +166,7 @@ const SPEECH_TRAILING_SILENCE_MS = 3000;
 const SPEECH_ANALYSER_FFT_SIZE = 2048;
 const SPEECH_BASELINE_RMS = 0.01;
 const SPEECH_MIN_RMS_ABOVE_FLOOR = 0.04;
-const AGENT_JOBS_REFRESH_MS = 3000;
+const AGENT_JOBS_FAST_REFRESH_MS = 300;
 const AGENT_JOBS_RETRY_LIMIT = 2;
 const AGENT_JOB_ACTIVE_STATUSES = new Set(["queued", "running"]);
 
@@ -1150,6 +1150,16 @@ function hasActiveAgentJobs(jobs) {
     && jobs.some((job) => AGENT_JOB_ACTIVE_STATUSES.has(job.status));
 }
 
+function shouldRefreshAgentJobs() {
+  return Boolean(
+    state.context
+    && (
+      state.pendingTurn !== null
+      || hasActiveAgentJobs(state.agents.jobs)
+    ),
+  );
+}
+
 function clearAgentJobsRefreshTimer() {
   if (agentJobsRefreshTimer !== null) {
     globalThis.clearTimeout(agentJobsRefreshTimer);
@@ -1165,7 +1175,7 @@ function resetAgentJobsRefreshLoop() {
 
 function scheduleAgentJobsRefresh() {
   clearAgentJobsRefreshTimer();
-  if (!state.context || !hasActiveAgentJobs(state.agents.jobs)) {
+  if (!shouldRefreshAgentJobs()) {
     return;
   }
   const refreshToken = agentJobsRefreshToken;
@@ -1175,7 +1185,7 @@ function scheduleAgentJobsRefresh() {
       return;
     }
     loadAgentJobs();
-  }, AGENT_JOBS_REFRESH_MS);
+  }, AGENT_JOBS_FAST_REFRESH_MS);
 }
 
 async function loadAgentJobs() {
@@ -1217,7 +1227,7 @@ async function loadAgentJobs() {
   ensureAgentsView().render(state);
   if (
     agentJobsConsecutiveFailures < AGENT_JOBS_RETRY_LIMIT
-    && hasActiveAgentJobs(state.agents.jobs)
+    && shouldRefreshAgentJobs()
   ) {
     scheduleAgentJobsRefresh();
   }
@@ -1276,6 +1286,7 @@ async function submitRequest(request) {
       ? selectOrdinaryChatWaitingQuip()
       : "Waiting for Agent Col";
     setChatStatus(waitingMessage, "pending");
+    loadAgentJobs();
     const options = {
       method: "POST",
       idempotencyKey: request.key,
