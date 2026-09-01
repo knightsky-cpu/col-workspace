@@ -54,6 +54,7 @@ export function createInitialState() {
       detailStatus: "idle",
       error: null,
     },
+    agents: emptyAgentState(),
     activity: {
       entries: [],
     },
@@ -156,6 +157,14 @@ function emptyChatSessionState() {
     sessions: [],
     selectedSessionId: null,
     detailStatus: "idle",
+    error: null,
+  };
+}
+
+function emptyAgentState() {
+  return {
+    status: "idle",
+    jobs: [],
     error: null,
   };
 }
@@ -267,6 +276,7 @@ export function selectWorkspace(
     work: emptyWorkState(),
     notes: emptyNotesState(),
     chats: emptyChatSessionState(),
+    agents: emptyAgentState(),
     disclosure: emptyDisclosureState(),
     workspaces: {
       ...state.workspaces,
@@ -481,9 +491,43 @@ export function startNewConversation(state, cryptoLike = globalThis.crypto) {
       detailStatus: "idle",
       error: null,
     },
+    agents: emptyAgentState(),
     disclosure: {
       ...state.disclosure,
       chats: { sessionIds: [] },
+    },
+  };
+}
+
+export function beginAgentJobsLoad(state) {
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      status: "loading",
+      error: null,
+    },
+  };
+}
+
+export function completeAgentJobsLoad(state, response) {
+  return {
+    ...state,
+    agents: {
+      status: "loaded",
+      jobs: Array.isArray(response.jobs) ? response.jobs : [],
+      error: null,
+    },
+  };
+}
+
+export function failAgentJobsLoad(state, error) {
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      status: "error",
+      error: errorMessage(error),
     },
   };
 }

@@ -403,6 +403,20 @@ function buildMemoryQuery(options = {}) {
   return query ? `?${query}` : "";
 }
 
+function buildAgentJobQuery(options = {}) {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.session_id !== undefined && options.session_id !== null) {
+    const sessionId = String(options.session_id);
+    assertIdentifier("session_id", sessionId);
+    params.set("session_id", sessionId);
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 function normalizeOptionsAndFetch(options, fetchLike) {
   if (typeof options === "function") {
     return [{}, options];
@@ -618,6 +632,22 @@ export function listWorkspaces(
   assertIdentifier("user_id", userId);
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/workspaces${buildQuery(options)}`,
+    { method: "GET", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function listAgentJobs(
+  userId,
+  projectId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/agent/jobs${buildAgentJobQuery(options)}`,
     { method: "GET", authToken: options.authToken },
     fetchLike,
   );

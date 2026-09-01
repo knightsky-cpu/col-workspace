@@ -15,6 +15,7 @@ import {
   getBlueprint,
   getChatSession,
   inspectMemory,
+  listAgentJobs,
   listArtifacts,
   listChatSessions,
   listBlueprintFeedback,
@@ -184,6 +185,37 @@ test("apiFetchJson attaches bearer token when supplied", async () => {
     },
   );
 
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+});
+
+test("listAgentJobs fetches the public agent job projection for a workspace", async () => {
+  const calls = [];
+  const response = await listAgentJobs(
+    "user-1",
+    "project-1",
+    {
+      authToken: "google-id-token",
+      limit: 30,
+      session_id: "session-1",
+    },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    },
+  );
+
+  assert.deepEqual(response, {
+    agent_job_contract_version: "1.0",
+    jobs: [],
+  });
+  assert.equal(
+    calls[0][0],
+    "/api/users/user-1/projects/project-1/agent/jobs?limit=30&session_id=session-1",
+  );
+  assert.equal(calls[0][1].method, "GET");
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
 });
 

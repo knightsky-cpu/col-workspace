@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   acceptContext,
   appendPendingResponseDelta,
+  beginAgentJobsLoad,
   beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
@@ -28,12 +29,14 @@ import {
   completeNoteDetailLoad,
   completeNotesLoad,
   completePendingTurn,
+  completeAgentJobsLoad,
   completeChatSessionDetailLoad,
   completeChatSessionListLoad,
   createInitialState,
   expandChatDisclosure,
   expandNoteDetailDisclosure,
   failWorkDetailLoad,
+  failAgentJobsLoad,
   failWorkspaceListLoad,
   failWorkListLoad,
   failMemoryLoad,
@@ -169,6 +172,31 @@ test("acceptContext stores verified auth token separately from request locators"
     "user--fbea9ffc3b3e25366ddfd4fe47be9bc5",
   );
   assert.equal(state.context.auth_token, "google-id-token");
+});
+
+test("agent job state loads backend-authoritative public jobs", () => {
+  const initial = createInitialState();
+  assert.deepEqual(initial.agents, {
+    status: "idle",
+    jobs: [],
+    error: null,
+  });
+
+  const loading = beginAgentJobsLoad(initial);
+  assert.equal(loading.agents.status, "loading");
+
+  const loaded = completeAgentJobsLoad(loading, {
+    agent_job_contract_version: "1.0",
+    jobs: [{ job_id: "job-1", status: "queued" }],
+  });
+  assert.equal(loaded.agents.status, "loaded");
+  assert.deepEqual(loaded.agents.jobs, [{ job_id: "job-1", status: "queued" }]);
+  assert.equal(loaded.agents.error, null);
+
+  const failed = failAgentJobsLoad(loaded, new Error("job load failed"));
+  assert.equal(failed.agents.status, "error");
+  assert.equal(failed.agents.error, "job load failed");
+  assert.deepEqual(failed.agents.jobs, loaded.agents.jobs);
 });
 
 test("workspace list lifecycle stores selectable user containers", () => {

@@ -18,6 +18,7 @@ import {
   getBlueprint,
   getNote,
   inspectMemory,
+  listAgentJobs,
   listNotes,
   listChatSessions,
   listArtifacts,
@@ -39,6 +40,7 @@ import {
   initializeGoogleSignIn,
   loadGoogleIdentityScript,
 } from "./auth-view.mjs";
+import { createAgentsView } from "./agents-view.mjs";
 import { createChatsView } from "./chats-view.mjs";
 import { createChatView } from "./chat-view.mjs";
 import {
@@ -73,6 +75,7 @@ import {
 import {
   acceptContext,
   appendPendingResponseDelta,
+  beginAgentJobsLoad,
   beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
@@ -101,9 +104,11 @@ import {
   completeWorkVersionCreate,
   completeWorkRestore,
   completePendingTurn,
+  completeAgentJobsLoad,
   createInitialState,
   expandChatDisclosure,
   expandNoteDetailDisclosure,
+  failAgentJobsLoad,
   failMemoryLoad,
   failNoteDetailLoad,
   failNoteRequest,
@@ -138,6 +143,7 @@ let workView = null;
 let memoryView = null;
 let notesView = null;
 let chatsView = null;
+let agentsView = null;
 let workspaceView = null;
 let layoutState = createInitialLayoutState();
 let authConfig = null;
@@ -870,6 +876,7 @@ function renderWorkspace() {
   ensureNotesView().render(state);
   ensureMemoryView().render(state);
   ensureChatsView().render(state);
+  ensureAgentsView().render(state);
   renderLayout();
 }
 
@@ -924,7 +931,14 @@ function renderLayout() {
   );
   artifactExpandButton.setAttribute("aria-expanded", String(artifactsExpanded));
 
-  for (const section of ["workspace", "work", "notes", "memory", "chats"]) {
+  for (const section of [
+    "workspace",
+    "work",
+    "notes",
+    "memory",
+    "chats",
+    "agents",
+  ]) {
     const expanded = isSectionExpanded(layoutState, section);
     const content = document.querySelector(`[data-section-content="${section}"]`);
     const toggle = document.querySelector(`[data-section-toggle="${section}"]`);
@@ -1115,6 +1129,28 @@ async function loadChatSessions() {
   ensureChatsView().render(state);
 }
 
+async function loadAgentJobs() {
+  if (!state.context) {
+    return;
+  }
+  state = beginAgentJobsLoad(state);
+  ensureAgentsView().render(state);
+  try {
+    const response = await listAgentJobs(
+      state.context.user_id,
+      state.context.project_id,
+      authOptions({
+        limit: 50,
+        session_id: state.context.session_id,
+      }),
+    );
+    state = completeAgentJobsLoad(state, response);
+  } catch (error) {
+    state = failAgentJobsLoad(state, error);
+  }
+  ensureAgentsView().render(state);
+}
+
 async function loadChatSession(sessionId) {
   if (!state.context || !selectCanSubmit(state)) {
     return;
@@ -1132,6 +1168,7 @@ async function loadChatSession(sessionId) {
     state = completeChatSessionDetailLoad(state, response);
     document.querySelector("[data-chat-error]").hidden = true;
     setChatStatus("");
+    await loadAgentJobs();
   } catch (error) {
     state = failChatSessionDetailLoad(state, error);
   }
@@ -1153,6 +1190,7 @@ async function refreshAuthoritativeEffects(response) {
   if (receiptRefresh.notes) {
     await loadNotes();
   }
+  await loadAgentJobs();
 }
 
 async function submitRequest(request) {
@@ -1290,6 +1328,7 @@ function ensureWorkspaceView() {
         await loadNotes();
         await loadMemory();
         await loadChatSessions();
+        await loadAgentJobs();
       },
       async onCreateWorkspace(displayName) {
         if (!state.context || state.pendingTurn !== null) {
@@ -1309,6 +1348,7 @@ function ensureWorkspaceView() {
           await loadNotes();
           await loadMemory();
           await loadChatSessions();
+          await loadAgentJobs();
         } catch (error) {
           showWorkspaceError(error.message);
         }
@@ -1335,6 +1375,7 @@ function ensureWorkspaceView() {
             await loadNotes();
             await loadMemory();
             await loadChatSessions();
+            await loadAgentJobs();
           }
         } catch (error) {
           showWorkspaceError(error.message);
@@ -1619,6 +1660,17 @@ function ensureChatsView() {
   return chatsView;
 }
 
+function ensureAgentsView() {
+  if (agentsView !== null) {
+    return agentsView;
+  }
+  agentsView = createAgentsView({
+    panel: document.querySelector("[data-agents-panel]"),
+    summary: document.querySelector("[data-agents-summary]"),
+  });
+  return agentsView;
+}
+
 async function submitArtifactFeedback(decision) {
   if (!selectCanSubmit(state)) {
     return;
@@ -1808,6 +1860,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", async (
     ensureNotesView();
     ensureMemoryView();
     ensureChatsView();
+    ensureAgentsView();
     ensureWorkspaceView();
     showWorkspace();
     renderWorkspace();
@@ -1831,6 +1884,7 @@ document.querySelector("[data-context-form]").addEventListener("submit", async (
     loadNotes();
     loadMemory();
     loadChatSessions();
+    loadAgentJobs();
   } catch (error) {
     showContextError(error.message);
   }
@@ -1847,6 +1901,7 @@ document.querySelector("[data-new-conversation]").addEventListener("click", () =
   renderWorkspace();
   loadNotes();
   loadChatSessions();
+  loadAgentJobs();
   document.querySelector("#conversation-workspace").focus();
 });
 
@@ -1896,6 +1951,7 @@ document.querySelector("[data-left-refresh]").addEventListener("click", () => {
   loadNotes();
   loadMemory();
   loadChatSessions();
+  loadAgentJobs();
 });
 
 document.querySelector("[data-speech-toggle]")?.addEventListener("click", () => {

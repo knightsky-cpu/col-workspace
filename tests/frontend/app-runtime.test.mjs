@@ -229,6 +229,8 @@ function installOrdinaryChatRuntimeDom() {
     "[data-memory-panel]",
     "[data-notes-panel]",
     "[data-chats-list]",
+    "[data-agents-panel]",
+    "[data-agents-summary]",
   ]) {
     if (!elements.has(selector)) {
       elements.set(selector, node());
@@ -246,7 +248,7 @@ function installOrdinaryChatRuntimeDom() {
   const drawerButtons = [node("button"), node("button")];
   drawerButtons[0].setAttribute("data-drawer-toggle", "left");
   drawerButtons[1].setAttribute("data-drawer-toggle", "right");
-  const sectionButtons = ["workspace", "work", "notes", "memory", "chats"]
+  const sectionButtons = ["workspace", "work", "notes", "memory", "chats", "agents"]
     .map((section) => {
       const button = node("button");
       const content = node("div");
@@ -1942,6 +1944,8 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
     "[data-memory-panel]",
     "[data-notes-panel]",
     "[data-chats-list]",
+    "[data-agents-panel]",
+    "[data-agents-summary]",
   ]) {
     if (!elements.has(selector)) {
       elements.set(selector, node());
@@ -1953,7 +1957,7 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
   const drawerButtons = [node("button"), node("button")];
   drawerButtons[0].setAttribute("data-drawer-toggle", "left");
   drawerButtons[1].setAttribute("data-drawer-toggle", "right");
-  const sectionButtons = ["workspace", "work", "notes", "memory", "chats"]
+  const sectionButtons = ["workspace", "work", "notes", "memory", "chats", "agents"]
     .map((section) => {
       const button = node("button");
       const content = node("div");
@@ -2194,6 +2198,8 @@ test("memory sub-card revoke and delete do not depend on chat submit readiness",
     "[data-memory-panel]",
     "[data-notes-panel]",
     "[data-chats-list]",
+    "[data-agents-panel]",
+    "[data-agents-summary]",
   ]) {
     if (!elements.has(selector)) {
       elements.set(selector, node());
@@ -2204,7 +2210,7 @@ test("memory sub-card revoke and delete do not depend on chat submit readiness",
   const drawerButtons = [node("button"), node("button")];
   drawerButtons[0].setAttribute("data-drawer-toggle", "left");
   drawerButtons[1].setAttribute("data-drawer-toggle", "right");
-  const sectionButtons = ["workspace", "work", "notes", "memory", "chats"]
+  const sectionButtons = ["workspace", "work", "notes", "memory", "chats", "agents"]
     .map((section) => {
       const button = node("button");
       const content = node("div");

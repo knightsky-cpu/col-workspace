@@ -96,7 +96,7 @@ test("workspace provides a separate notes drawer and continuity choice region", 
 });
 
 test("workspace shell provides persistent non-emoji icon hooks for primary navigation", () => {
-  for (const section of ["workspace", "work", "notes", "memory", "chats"]) {
+  for (const section of ["workspace", "work", "notes", "memory", "chats", "agents"]) {
     assert.match(
       html,
       new RegExp(`data-section-toggle="${section}"[\\s\\S]*class="title-icon[^"]*"[\\s\\S]*aria-hidden="true"`),
@@ -124,7 +124,7 @@ test("drawer parent cards are full header disclosure controls without selected s
   assert.doesNotMatch(app, /data-drawer-highlighted/);
   assert.doesNotMatch(styles, /data-drawer-highlighted/);
 
-  for (const section of ["workspace", "work", "notes", "memory", "chats"]) {
+  for (const section of ["workspace", "work", "notes", "memory", "chats", "agents"]) {
     assert.match(
       html,
       new RegExp(`<button[^>]+class="section-heading"[^>]+data-section-toggle="${section}"[\\s\\S]*<span class="section-heading__label"[\\s\\S]*</button>`),
@@ -132,6 +132,22 @@ test("drawer parent cards are full header disclosure controls without selected s
   }
 
   assert.doesNotMatch(html, /<button type="button" class="drawer-toggle" data-section-toggle/);
+});
+
+test("workspace provides a collapsed backend-driven agents projection panel", () => {
+  assert.match(html, /data-section="agents"/);
+  assert.match(html, /data-section-toggle="agents" aria-expanded="false"/);
+  assert.match(html, /data-section-content="agents" hidden/);
+  assert.match(html, /data-agents-summary/);
+  assert.match(html, /data-agents-panel/);
+  assert.match(html, /section-heading__caret/);
+  assert.match(app, /createAgentsView/);
+  assert.match(app, /listAgentJobs/);
+  assert.match(app, /session_id: state\.context\.session_id/);
+  assert.match(styles, /\.drawer-section\[data-section="agents"\]/);
+  assert.match(styles, /\.agent-row__status--running/);
+  assert.match(styles, /\.agent-row__status--queued/);
+  assert.match(styles, /\.agent-row__status--failed/);
 });
 
 test("drawer selected child subcards use amber current styling and standard compact controls", () => {
