@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -84,6 +85,21 @@ from generic_artifact_generation import (
     GenericArtifactGenerationRequest,
     GenericArtifactGenerationTimeoutError,
     generate_generic_artifact,
+)
+from agent_col_agent_jobs import (
+    AgentJob,
+    AgentJobEvent,
+    AgentJobEventType,
+    AgentJobFailure,
+    AgentJobKind,
+    AgentJobStatus,
+)
+from agent_job_repository import (
+    AgentJobConflictError,
+    AgentJobLeaseError,
+    AgentJobNotFoundError,
+    AgentJobRepositoryError,
+    AgentJobStateError,
 )
 from artifact_feedback_service import (
     ArtifactFeedbackSchemaConflictError,
@@ -183,6 +199,7 @@ from schemas import (
     CollaborativeNoteMutationRequest,
     CollaborativeNoteProposalRequest,
     CollaborativeNoteProposalResponse,
+    DisplayLabelStr,
     IdentifierStr,
     MemoryClarificationReceipt,
     MemoryInspectionResponse,
@@ -327,6 +344,72 @@ class SpeechSynthesizeRequest(BaseModel):
     message_id: IdentifierStr
     chunk_index: int = Field(default=0, ge=0)
     voice_id: Literal["female", "male"] = "female"
+
+
+class AgentJobFailurePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: IdentifierStr
+    summary: DisplayLabelStr
+    retryable: bool = False
+
+
+class AgentJobPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: IdentifierStr
+    user_id: IdentifierStr
+    project_id: IdentifierStr
+    workspace_id: IdentifierStr
+    session_id: IdentifierStr
+    source_turn_id: IdentifierStr
+    action_kind: AgentJobKind
+    status: AgentJobStatus
+    display_label: DisplayLabelStr
+    agent_label: DisplayLabelStr
+    created_at: datetime
+    updated_at: datetime
+    attempt_count: int = Field(ge=1)
+    lease_expires_at: datetime | None = None
+    result_refs: dict[str, IdentifierStr] = Field(default_factory=dict)
+    failure_summary: AgentJobFailurePublic | None = None
+    retry_of_job_id: IdentifierStr | None = None
+
+
+class AgentJobListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_job_contract_version: Literal["1.0"] = "1.0"
+    jobs: list[AgentJobPublic] = Field(max_length=100)
+
+
+class AgentJobDetailResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_job_contract_version: Literal["1.0"] = "1.0"
+    job: AgentJobPublic
+
+
+class AgentJobEventPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: IdentifierStr
+    job_id: IdentifierStr
+    event_type: AgentJobEventType
+    message: DisplayLabelStr
+    created_at: datetime
+    status: AgentJobStatus
+    metadata: dict[str, str | int | float | bool | None] = Field(
+        default_factory=dict
+    )
+
+
+class AgentJobEventListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_job_contract_version: Literal["1.0"] = "1.0"
+    job_id: IdentifierStr
+    events: list[AgentJobEventPublic] = Field(max_length=100)
 
 
 class InMemoryRateLimiter:
@@ -708,6 +791,148 @@ def _public_chat_session_detail_response(
             )
         }
     )
+
+
+def _public_agent_job_failure(
+    failure: AgentJobFailure | None,
+) -> AgentJobFailurePublic | None:
+    if failure is None:
+        return None
+    return AgentJobFailurePublic(
+        code=failure.code,
+        summary=failure.summary,
+        retryable=failure.retryable,
+    )
+
+
+def _public_agent_job(
+    *,
+    job: AgentJob,
+    effective_user_id: str,
+    public_user_id: str,
+    effective_project_id: str,
+) -> AgentJobPublic:
+    if job.project_id != effective_project_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user does not own this response.",
+        )
+    if job.workspace_id != effective_project_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user does not own this response.",
+        )
+    return AgentJobPublic(
+        job_id=job.job_id,
+        user_id=_public_user_id_for_response(
+            internal_user_id=job.user_id,
+            effective_user_id=effective_user_id,
+            public_user_id=public_user_id,
+        ),
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        action_kind=job.action_kind,
+        status=job.status,
+        display_label=job.display_label,
+        agent_label=job.agent_label,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        attempt_count=job.attempt_count,
+        lease_expires_at=job.lease_expires_at,
+        result_refs=job.result_refs,
+        failure_summary=_public_agent_job_failure(job.failure_summary),
+        retry_of_job_id=job.retry_of_job_id,
+    )
+
+
+def _public_agent_job_event(event: AgentJobEvent) -> AgentJobEventPublic:
+    return AgentJobEventPublic(
+        event_id=event.event_id,
+        job_id=event.job_id,
+        event_type=event.event_type,
+        message=event.message,
+        created_at=event.created_at,
+        status=event.status,
+        metadata=event.metadata,
+    )
+
+
+def _raise_agent_job_http_error(exc: Exception) -> NoReturn:
+    if isinstance(exc, AgentJobNotFoundError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent job was not found.",
+        ) from exc
+    if isinstance(exc, AgentJobConflictError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Agent job request conflicts with existing state.",
+        ) from exc
+    if isinstance(exc, AgentJobLeaseError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Agent job lease is not active.",
+        ) from exc
+    if isinstance(exc, AgentJobStateError):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Agent job is not in a valid state for this action.",
+        ) from exc
+    if isinstance(exc, AgentJobRepositoryError):
+        logger.error(
+            "Agent job repository operation failed (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Agent job storage operation failed.",
+        ) from exc
+    if isinstance(exc, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Agent job request is invalid.",
+        ) from exc
+    raise exc
+
+
+def _validated_required_idempotency_key(
+    idempotency_key: str | None,
+) -> str:
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+    try:
+        return validate_idempotency_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Idempotency-Key header is invalid.",
+        ) from exc
+
+
+def _agent_job_retry_id(
+    *,
+    user_id: str,
+    workspace_id: str,
+    source_job_id: str,
+    idempotency_key: str,
+) -> str:
+    digest = hashlib.sha256(
+        "\n".join(
+            (
+                "agent-job-retry",
+                user_id,
+                workspace_id,
+                source_job_id,
+                idempotency_key,
+            )
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"agent-job-retry-{digest}"
 
 
 def _public_collaborative_note(
@@ -2541,6 +2766,275 @@ async def get_chat_session(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Chat session request is invalid.",
         ) from exc
+
+
+@app.get(
+    "/api/users/{user_id}/projects/{project_id}/agent/jobs",
+    response_model=AgentJobListResponse,
+)
+async def list_agent_jobs(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    session_id: Annotated[IdentifierStr | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> AgentJobListResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        repository = request.app.state.db.agent_jobs()
+        jobs = [
+            _public_agent_job(
+                job=job,
+                effective_user_id=effective_user_id,
+                public_user_id=user_id,
+                effective_project_id=effective_project_id,
+            )
+            async for job in repository.list_jobs(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                project_id=effective_project_id,
+                session_id=session_id,
+                limit=limit,
+            )
+        ]
+        return AgentJobListResponse(jobs=jobs)
+    except (
+        AgentJobConflictError,
+        AgentJobLeaseError,
+        AgentJobNotFoundError,
+        AgentJobRepositoryError,
+        AgentJobStateError,
+        ValueError,
+    ) as exc:
+        _raise_agent_job_http_error(exc)
+
+
+@app.get(
+    "/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}",
+    response_model=AgentJobDetailResponse,
+)
+async def get_agent_job(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    job_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> AgentJobDetailResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        repository = request.app.state.db.agent_jobs()
+        job = await repository.get_job(
+            user_id=effective_user_id,
+            workspace_id=effective_project_id,
+            job_id=job_id,
+        )
+        return AgentJobDetailResponse(
+            job=_public_agent_job(
+                job=job,
+                effective_user_id=effective_user_id,
+                public_user_id=user_id,
+                effective_project_id=effective_project_id,
+            )
+        )
+    except (
+        AgentJobConflictError,
+        AgentJobLeaseError,
+        AgentJobNotFoundError,
+        AgentJobRepositoryError,
+        AgentJobStateError,
+        ValueError,
+    ) as exc:
+        _raise_agent_job_http_error(exc)
+
+
+@app.get(
+    "/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}/events",
+    response_model=AgentJobEventListResponse,
+)
+async def list_agent_job_events(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    job_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> AgentJobEventListResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        repository = request.app.state.db.agent_jobs()
+        events = [
+            _public_agent_job_event(event)
+            async for event in repository.list_events(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                job_id=job_id,
+                limit=limit,
+            )
+            if event.public_visibility
+        ]
+        return AgentJobEventListResponse(job_id=job_id, events=events)
+    except (
+        AgentJobConflictError,
+        AgentJobLeaseError,
+        AgentJobNotFoundError,
+        AgentJobRepositoryError,
+        AgentJobStateError,
+        ValueError,
+    ) as exc:
+        _raise_agent_job_http_error(exc)
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}/cancel",
+    response_model=AgentJobDetailResponse,
+)
+async def cancel_agent_job(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    job_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> AgentJobDetailResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        repository = request.app.state.db.agent_jobs()
+        job = await repository.cancel_job(
+            user_id=effective_user_id,
+            workspace_id=effective_project_id,
+            job_id=job_id,
+            observed_at=datetime.now(UTC),
+        )
+        return AgentJobDetailResponse(
+            job=_public_agent_job(
+                job=job,
+                effective_user_id=effective_user_id,
+                public_user_id=user_id,
+                effective_project_id=effective_project_id,
+            )
+        )
+    except (
+        AgentJobConflictError,
+        AgentJobLeaseError,
+        AgentJobNotFoundError,
+        AgentJobRepositoryError,
+        AgentJobStateError,
+        ValueError,
+    ) as exc:
+        _raise_agent_job_http_error(exc)
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}/retry",
+    response_model=AgentJobDetailResponse,
+)
+async def retry_agent_job(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    job_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+) -> AgentJobDetailResponse:
+    validated_idempotency_key = _validated_required_idempotency_key(
+        idempotency_key
+    )
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        repository = request.app.state.db.agent_jobs()
+        job = await repository.retry_job(
+            user_id=effective_user_id,
+            workspace_id=effective_project_id,
+            source_job_id=job_id,
+            retry_job_id=_agent_job_retry_id(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                source_job_id=job_id,
+                idempotency_key=validated_idempotency_key,
+            ),
+            idempotency_key=validated_idempotency_key,
+            observed_at=datetime.now(UTC),
+        )
+        return AgentJobDetailResponse(
+            job=_public_agent_job(
+                job=job,
+                effective_user_id=effective_user_id,
+                public_user_id=user_id,
+                effective_project_id=effective_project_id,
+            )
+        )
+    except (
+        AgentJobConflictError,
+        AgentJobLeaseError,
+        AgentJobNotFoundError,
+        AgentJobRepositoryError,
+        AgentJobStateError,
+        ValueError,
+    ) as exc:
+        _raise_agent_job_http_error(exc)
 
 
 @app.post(

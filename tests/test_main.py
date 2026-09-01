@@ -46,6 +46,17 @@ from generic_artifact_generation import (
     GenericArtifactGenerationTimeoutError,
     generate_generic_artifact,
 )
+from agent_col_agent_jobs import (
+    AgentJob,
+    AgentJobEvent,
+    AgentJobFailure,
+)
+from agent_job_repository import (
+    AgentJobConflictError,
+    AgentJobNotFoundError,
+    AgentJobRepositoryError,
+    AgentJobStateError,
+)
 from agent_col_turn_service import (
     AgentColTextDelta,
     AgentColTurnCommand,
@@ -346,6 +357,48 @@ def make_continuity_receipt() -> ContinuitySourceReceipt:
     )
 
 
+def make_agent_job(**overrides: object) -> AgentJob:
+    values: dict[str, object] = {
+        "job_id": "agent-job-1",
+        "user_id": "user-1",
+        "project_id": "project-1",
+        "workspace_id": "project-1",
+        "session_id": "session-1",
+        "source_turn_id": "turn-1",
+        "source_message_id": "message-1",
+        "action_kind": "create_artifact",
+        "status": "queued",
+        "display_label": "Create deployment artifact",
+        "agent_label": "Artifact Builder",
+        "created_at": MEMORY_NOW,
+        "updated_at": MEMORY_NOW,
+        "idempotency_key": "private-idempotency-key",
+        "attempt_count": 1,
+        "lease_owner": None,
+        "lease_expires_at": None,
+        "result_refs": {},
+        "failure_summary": None,
+        "retry_of_job_id": None,
+    }
+    values.update(overrides)
+    return AgentJob.model_validate(values)
+
+
+def make_agent_job_event(**overrides: object) -> AgentJobEvent:
+    values: dict[str, object] = {
+        "event_id": "agent-job-event-1",
+        "job_id": "agent-job-1",
+        "event_type": "queued",
+        "message": "Queued artifact creation.",
+        "created_at": MEMORY_NOW,
+        "status": "queued",
+        "public_visibility": True,
+        "metadata": {"step": "queue"},
+    }
+    values.update(overrides)
+    return AgentJobEvent.model_validate(values)
+
+
 def make_working_state_snapshot(**overrides) -> WorkingStateSnapshot:
     values = {
         "user_id": "user-1",
@@ -508,6 +561,7 @@ class FakeMemoryEngine:
         tuple[WorkingStateSnapshot, datetime]
     ] = field(default_factory=list)
     closed: bool = False
+    agent_job_repository: object | None = None
 
     async def get_collaboration_profile(
         self,
@@ -810,6 +864,168 @@ class FakeMemoryEngine:
 
     def close(self) -> None:
         self.closed = True
+
+    def agent_jobs(self) -> object:
+        if self.agent_job_repository is None:
+            raise AssertionError("Missing fake agent job repository.")
+        return self.agent_job_repository
+
+
+@dataclass
+class FakeAgentJobRepository:
+    jobs: list[AgentJob] = field(
+        default_factory=lambda: [make_agent_job()]
+    )
+    events: list[AgentJobEvent] = field(
+        default_factory=lambda: [make_agent_job_event()]
+    )
+    error: Exception | None = None
+    list_calls: list[dict[str, object]] = field(default_factory=list)
+    get_calls: list[dict[str, object]] = field(default_factory=list)
+    event_calls: list[dict[str, object]] = field(default_factory=list)
+    cancel_calls: list[dict[str, object]] = field(default_factory=list)
+    retry_calls: list[dict[str, object]] = field(default_factory=list)
+
+    async def list_jobs(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 20,
+    ):
+        self.list_calls.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "project_id": project_id,
+                "session_id": session_id,
+                "limit": limit,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        yielded = 0
+        for job in self.jobs:
+            if project_id is not None and job.project_id != project_id:
+                continue
+            if session_id is not None and job.session_id != session_id:
+                continue
+            yielded += 1
+            if yielded > limit:
+                return
+            yield job
+
+    async def get_job(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+    ) -> AgentJob:
+        self.get_calls.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        for job in self.jobs:
+            if job.job_id == job_id:
+                return job
+        raise AgentJobNotFoundError("missing fake job")
+
+    async def list_events(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+        limit: int = 50,
+    ):
+        self.event_calls.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "limit": limit,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        yielded = 0
+        for event in self.events:
+            if event.job_id != job_id:
+                continue
+            yielded += 1
+            if yielded > limit:
+                return
+            yield event
+
+    async def cancel_job(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+        observed_at: datetime,
+    ) -> AgentJob:
+        self.cancel_calls.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "observed_at": observed_at,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return make_agent_job(
+            job_id=job_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            project_id=workspace_id,
+            status="cancelled",
+            updated_at=observed_at,
+        )
+
+    async def retry_job(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        source_job_id: str,
+        retry_job_id: str,
+        idempotency_key: str,
+        observed_at: datetime,
+    ) -> AgentJob:
+        self.retry_calls.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "source_job_id": source_job_id,
+                "retry_job_id": retry_job_id,
+                "idempotency_key": idempotency_key,
+                "observed_at": observed_at,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return make_agent_job(
+            job_id=retry_job_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            project_id=workspace_id,
+            status="queued",
+            created_at=observed_at,
+            updated_at=observed_at,
+            idempotency_key=idempotency_key,
+            attempt_count=2,
+            retry_of_job_id=source_job_id,
+        )
 
 
 @dataclass
@@ -1560,6 +1776,7 @@ class ServiceState:
     artifact_executor: object
     artifact_feedback_service: FakeArtifactFeedbackService
     artifact_feedback_executor: object
+    agent_job_repository: FakeAgentJobRepository
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
     research_vertex_settings: list[VertexAISettings]
@@ -1587,6 +1804,8 @@ class ServiceState:
 def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     events: list[tuple[Any, ...]] = []
     database = FakeMemoryEngine(events)
+    agent_job_repository = FakeAgentJobRepository()
+    database.agent_job_repository = agent_job_repository
     genai_client = FakeGenAIClient(FakeAsyncGenAI())
     blueprint = SynthesisBlueprint.model_validate(VALID_BLUEPRINT_PAYLOAD)
     synthesis_service = FakeSynthesisApplicationService(events, blueprint)
@@ -1857,6 +2076,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         artifact_executor=artifact_executor,
         artifact_feedback_service=artifact_feedback_service,
         artifact_feedback_executor=artifact_feedback_executor,
+        agent_job_repository=agent_job_repository,
         genai_client_kwargs=genai_client_kwargs,
         responder_vertex_settings=responder_vertex_settings,
         research_vertex_settings=research_vertex_settings,
@@ -4624,6 +4844,256 @@ async def test_chat_session_routes_validate_limit(
 
     assert response.status_code == 422
     assert service_state.database.chat_session_list_calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_job_list_returns_public_owned_projection(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_repository.jobs = [
+        make_agent_job(
+            status="running",
+            lease_owner="worker-private",
+            lease_expires_at=MEMORY_NOW + timedelta(minutes=5),
+            result_refs={"artifact_id": "artifact-1"},
+        )
+    ]
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/agent/jobs",
+        params={"session_id": "session-1", "limit": 10},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agent_job_contract_version"] == "1.0"
+    assert payload["jobs"] == [
+        {
+            "job_id": "agent-job-1",
+            "user_id": "user-1",
+            "project_id": "project-1",
+            "workspace_id": "project-1",
+            "session_id": "session-1",
+            "source_turn_id": "turn-1",
+            "action_kind": "create_artifact",
+            "status": "running",
+            "display_label": "Create deployment artifact",
+            "agent_label": "Artifact Builder",
+            "created_at": "2026-08-20T23:00:00Z",
+            "updated_at": "2026-08-20T23:00:00Z",
+            "attempt_count": 1,
+            "lease_expires_at": "2026-08-20T23:05:00Z",
+            "result_refs": {"artifact_id": "artifact-1"},
+            "failure_summary": None,
+            "retry_of_job_id": None,
+        }
+    ]
+    assert "worker-private" not in str(payload)
+    assert "private-idempotency-key" not in str(payload)
+    assert service_state.agent_job_repository.list_calls == [
+        {
+            "user_id": "user-1",
+            "workspace_id": "project-1",
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "limit": 10,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_google_agent_job_list_hides_internal_owner(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    subject = "109876543210"
+    internal_user_id = f"google--{subject}"
+    public_user_id = public_user_locator(subject)
+    project_id = google_subject_to_workspace_project_id(subject)
+    main.app.state.authenticator = Authenticator(
+        AuthSettings(mode="google_oidc", google_client_id="client-123"),
+        token_verifier=lambda token, client_id: {"sub": subject},
+    )
+    service_state.agent_job_repository.jobs = [
+        make_agent_job(
+            user_id=internal_user_id,
+            project_id=project_id,
+            workspace_id=project_id,
+        )
+    ]
+
+    response = await client.get(
+        f"/api/users/{public_user_id}/projects/{project_id}/agent/jobs",
+        headers={"Authorization": "Bearer token-abc"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["jobs"][0]["user_id"] == public_user_id
+    assert internal_user_id not in str(payload)
+    assert service_state.agent_job_repository.list_calls[0]["user_id"] == (
+        internal_user_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_job_detail_maps_missing_job_to_sanitized_not_found(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_repository.error = AgentJobNotFoundError(
+        "private missing marker"
+    )
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/agent/jobs/missing-job",
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Agent job was not found."}
+    assert "private missing marker" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_job_events_return_only_public_projection(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_repository.events = [
+        make_agent_job_event(
+            event_id="event-public",
+            metadata={"step": "start"},
+        ),
+        make_agent_job_event(
+            event_id="event-private",
+            message="Internal prompt prepared.",
+            public_visibility=False,
+            metadata={},
+        ),
+    ]
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/events",
+        params={"limit": 10},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "agent_job_contract_version": "1.0",
+        "job_id": "agent-job-1",
+        "events": [
+            {
+                "event_id": "event-public",
+                "job_id": "agent-job-1",
+                "event_type": "queued",
+                "message": "Queued artifact creation.",
+                "created_at": "2026-08-20T23:00:00Z",
+                "status": "queued",
+                "metadata": {"step": "start"},
+            }
+        ],
+    }
+    assert "event-private" not in response.text
+    assert "Internal prompt" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_job_cancel_returns_cancelled_job_projection(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/cancel",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job"]["status"] == "cancelled"
+    assert payload["job"]["job_id"] == "agent-job-1"
+    assert service_state.agent_job_repository.cancel_calls[0]["user_id"] == (
+        "user-1"
+    )
+    assert service_state.agent_job_repository.cancel_calls[0][
+        "observed_at"
+    ].tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_agent_job_retry_requires_idempotency_key(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/retry",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "Idempotency-Key header is required."
+    }
+    assert service_state.agent_job_repository.retry_calls == []
+
+
+@pytest.mark.asyncio
+async def test_agent_job_retry_uses_deterministic_retry_job_id(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/retry",
+        headers={"Idempotency-Key": "retry-idempotency-key"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job"]["status"] == "queued"
+    assert payload["job"]["retry_of_job_id"] == "agent-job-1"
+    retry_call = service_state.agent_job_repository.retry_calls[0]
+    assert retry_call["source_job_id"] == "agent-job-1"
+    assert retry_call["idempotency_key"] == "retry-idempotency-key"
+    assert retry_call["retry_job_id"].startswith("agent-job-retry-")
+    assert "retry-idempotency-key" not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    (
+        (
+            AgentJobConflictError("private conflict marker"),
+            409,
+            "Agent job request conflicts with existing state.",
+        ),
+        (
+            AgentJobStateError("private state marker"),
+            409,
+            "Agent job is not in a valid state for this action.",
+        ),
+        (
+            AgentJobRepositoryError("private storage marker"),
+            500,
+            "Agent job storage operation failed.",
+        ),
+    ),
+)
+async def test_agent_job_routes_map_repository_errors_safely(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    service_state.agent_job_repository.error = error
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/cancel",
+    )
+
+    assert response.status_code == expected_status
+    assert response.json() == {"detail": expected_detail}
+    assert "private" not in response.text
 
 
 @pytest.mark.asyncio
