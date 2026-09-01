@@ -341,6 +341,11 @@ class MemoryEngine:
     def __init__(self, client: AsyncClient | None = None) -> None:
         self._client = client if client is not None else AsyncClient()
 
+    def agent_jobs(self) -> "AgentJobRepository":
+        from agent_job_repository import AgentJobRepository
+
+        return AgentJobRepository(self._client)
+
     async def save_message(
         self,
         session_id: str,
