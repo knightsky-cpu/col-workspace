@@ -127,6 +127,28 @@ function jsonResponse(status, body) {
   });
 }
 
+function blueprintDetailResponse(metadata, summary = "Loaded blueprint detail.") {
+  const label = metadata.reference.display_label ?? "Blueprint";
+  return {
+    artifact_contract_version: "1.0",
+    metadata,
+    blueprint: {
+      synthesized_conceptual_model: {
+        project_name: label,
+        core_value_proposition: summary,
+        in_scope: [],
+        out_of_scope: [],
+        assumptions: [],
+      },
+      architectural_decisions: [],
+      socratic_clarifying_questions: [],
+      step_by_step_execution_roadmap: [],
+      diagnostic_warnings: [],
+    },
+    feedback_targets: [],
+  };
+}
+
 function waitFor(predicate, describe = () => "") {
   return new Promise((resolve, reject) => {
     let attempts = 0;
@@ -2613,6 +2635,20 @@ test("completed background jobs refresh work and notes while chat remains pendin
         }],
       });
     }
+    if (path === "/api/projects/agent-col/blueprints/blueprint-1") {
+      return jsonResponse(200, blueprintDetailResponse({
+        reference: {
+          artifact_type: "synthesis_blueprint",
+          project_id: "agent-col",
+          artifact_id: "blueprint-1",
+          schema_version: "2.0",
+          display_label: "Async Work Smoke Test",
+        },
+      }));
+    }
+    if (path.startsWith("/api/projects/agent-col/blueprints/blueprint-1/feedback")) {
+      return jsonResponse(200, { events: [], next_before: null });
+    }
     if (path.startsWith("/api/projects/agent-col/blueprints")) {
       blueprintCalls += 1;
       return jsonResponse(200, {
@@ -2798,6 +2834,386 @@ test("completed background jobs refresh work and notes while chat remains pendin
   await submitPromise;
 });
 
+test("completed artifact job auto-selects exactly one new artifact unless user selected later", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const chatStream = createControlledSseResponse();
+  const agentStream = createControlledSseResponse();
+  const calls = [];
+  let blueprintListCalls = 0;
+  let blueprintDetailCalls = 0;
+  const artifactsByCall = [
+    [],
+    [{
+      reference: {
+        artifact_type: "synthesis_blueprint",
+        project_id: "agent-col",
+        artifact_id: "blueprint-new",
+        schema_version: "2.0",
+        display_label: "Refresh Verification Artifact",
+      },
+      created_at: "2026-09-01T12:00:01Z",
+      originating_session_id: "session-1",
+      originating_turn_id: null,
+      parent_artifact_id: null,
+      feedback_counts: { accepted: 0, rejected: 0, edited: 0 },
+      adaptation_categories: [],
+    }],
+  ];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_required: false,
+        mode: "local_dev",
+        user: { user_id: "wifiknight" },
+      });
+    }
+    if (path === "/api/auth/session") {
+      return jsonResponse(200, { authenticated: true, user_id: "wifiknight" });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path === "/api/projects/agent-col/blueprints/blueprint-new") {
+      blueprintDetailCalls += 1;
+      return jsonResponse(
+        200,
+        blueprintDetailResponse(
+          {
+            reference: {
+              artifact_type: "synthesis_blueprint",
+              project_id: "agent-col",
+            artifact_id: "blueprint-new",
+            schema_version: "2.0",
+            display_label: "Refresh Verification Artifact",
+          },
+          created_at: "2026-09-01T12:00:01Z",
+          originating_session_id: "session-1",
+          originating_turn_id: null,
+          parent_artifact_id: null,
+            feedback_counts: { accepted: 0, rejected: 0, edited: 0 },
+            adaptation_categories: [],
+          },
+          "Completed resources become visible without manual refresh.",
+        ),
+      );
+    }
+    if (path.startsWith("/api/projects/agent-col/blueprints/blueprint-new/feedback")) {
+      return jsonResponse(200, { events: [], next_before: null });
+    }
+    if (path.startsWith("/api/projects/agent-col/blueprints")) {
+      const artifacts = artifactsByCall[Math.min(blueprintListCalls, artifactsByCall.length - 1)];
+      blueprintListCalls += 1;
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts,
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_note_id: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs/stream")) {
+      return agentStream.response;
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return chatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-auto-select-artifact-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  const input = elements.get("[data-chat-input]");
+  input.value = "Create an artifact";
+  input.oninput();
+  const submitPromise = elements.get("[data-chat-form]").onsubmit({
+    preventDefault() {},
+  });
+  await waitFor(
+    () => calls.some(([path]) => path.includes("/agent/jobs/stream")),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  agentStream.event("snapshot", {
+    agent_job_contract_version: "1.0",
+    jobs: [{
+      job_ref: "jobref_artifact",
+      job_number: "001",
+      status: "completed",
+      action_kind: "create_artifact",
+      agent_label: "Artifact Builder",
+      display_label: "Artifact: Refresh Verification Artifact",
+      created_at: "2026-09-01T12:00:00Z",
+      updated_at: "2026-09-01T12:00:01Z",
+    }],
+  });
+
+  await waitFor(
+    () => blueprintDetailCalls === 1,
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  assert.match(textTree(elements.get("[data-work-list]")), /Refresh Verification Artifact/);
+  assert.match(textTree(elements.get("[data-work-detail]")), /Refresh Verification Artifact/);
+
+  agentStream.close();
+  chatStream.complete({
+    response: "Queued.",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+  await submitPromise;
+});
+
+test("completed artifact refresh does not overwrite a newer user artifact selection", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const chatStream = createControlledSseResponse();
+  const agentStream = createControlledSseResponse();
+  const calls = [];
+  let completedJobObserved = false;
+  let newArtifactDetailCalls = 0;
+  let existingArtifactDetailCalls = 0;
+  const initialArtifact = {
+    reference: {
+      artifact_type: "synthesis_blueprint",
+      project_id: "agent-col",
+      artifact_id: "blueprint-existing",
+      schema_version: "2.0",
+      display_label: "Existing Artifact",
+    },
+    created_at: "2026-09-01T11:00:00Z",
+    originating_session_id: "session-1",
+    originating_turn_id: null,
+    parent_artifact_id: null,
+    feedback_counts: { accepted: 0, rejected: 0, edited: 0 },
+    adaptation_categories: [],
+  };
+  const newArtifact = {
+    reference: {
+      artifact_type: "synthesis_blueprint",
+      project_id: "agent-col",
+      artifact_id: "blueprint-new",
+      schema_version: "2.0",
+      display_label: "New Background Artifact",
+    },
+    created_at: "2026-09-01T12:00:01Z",
+    originating_session_id: "session-1",
+    originating_turn_id: null,
+    parent_artifact_id: null,
+    feedback_counts: { accepted: 0, rejected: 0, edited: 0 },
+    adaptation_categories: [],
+  };
+  const blueprintDetail = (artifact) => blueprintDetailResponse(
+    artifact,
+    `${artifact.reference.display_label} detail`,
+  );
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_required: false,
+        mode: "local_dev",
+        user: { user_id: "wifiknight" },
+      });
+    }
+    if (path === "/api/auth/session") {
+      return jsonResponse(200, { authenticated: true, user_id: "wifiknight" });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path === "/api/projects/agent-col/blueprints/blueprint-existing") {
+      existingArtifactDetailCalls += 1;
+      return jsonResponse(200, blueprintDetail(initialArtifact));
+    }
+    if (path === "/api/projects/agent-col/blueprints/blueprint-new") {
+      newArtifactDetailCalls += 1;
+      return jsonResponse(200, blueprintDetail(newArtifact));
+    }
+    if (path.includes("/feedback")) {
+      return jsonResponse(200, { events: [], next_before: null });
+    }
+    if (path.startsWith("/api/projects/agent-col/blueprints")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: completedJobObserved
+          ? [newArtifact, initialArtifact]
+          : [initialArtifact],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_note_id: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs/stream")) {
+      return agentStream.response;
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return chatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-auto-select-guard-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  await waitFor(
+    () => textTree(elements.get("[data-work-list]")).includes("Existing Artifact"),
+    () => textTree(elements.get("[data-work-list]")),
+  );
+  const existingButton = findTree(
+    elements.get("[data-work-list]"),
+    (item) => typeof item.onclick === "function"
+      && item.textContent.includes("Existing Artifact"),
+  );
+  assert.ok(existingButton, textTree(elements.get("[data-work-list]")));
+  existingButton.onclick();
+  await waitFor(
+    () => existingArtifactDetailCalls === 1,
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  const input = elements.get("[data-chat-input]");
+  input.value = "Create an artifact";
+  input.oninput();
+  const submitPromise = elements.get("[data-chat-form]").onsubmit({
+    preventDefault() {},
+  });
+  await waitFor(
+    () => calls.some(([path]) => path.includes("/agent/jobs/stream")),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  completedJobObserved = true;
+  agentStream.event("snapshot", {
+    agent_job_contract_version: "1.0",
+    jobs: [{
+      job_ref: "jobref_artifact",
+      job_number: "001",
+      status: "completed",
+      action_kind: "create_artifact",
+      agent_label: "Artifact Builder",
+      display_label: "Artifact: New Background Artifact",
+      created_at: "2026-09-01T12:00:00Z",
+      updated_at: "2026-09-01T12:00:01Z",
+    }],
+  });
+
+  await waitFor(
+    () => textTree(elements.get("[data-work-list]")).includes("New Background Artifact"),
+    () => textTree(elements.get("[data-work-list]")),
+  );
+  assert.equal(newArtifactDetailCalls, 0);
+  assert.match(textTree(elements.get("[data-work-detail]")), /Existing Artifact/);
+
+  agentStream.close();
+  chatStream.complete({
+    response: "Queued.",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+  await submitPromise;
+});
+
 test("queued background work keeps polling after chat final until resource refresh", async (t) => {
   const { contextForm, elements } = installOrdinaryChatRuntimeDom();
   globalThis.sessionStorage = memoryStorage();
@@ -2827,6 +3243,20 @@ test("queued background work keeps polling after chat final until resource refre
           is_default: true,
         }],
       });
+    }
+    if (path === "/api/projects/agent-col/blueprints/blueprint-1") {
+      return jsonResponse(200, blueprintDetailResponse({
+        reference: {
+          artifact_type: "synthesis_blueprint",
+          project_id: "agent-col",
+          artifact_id: "blueprint-1",
+          schema_version: "2.0",
+          display_label: "Async Work Smoke Test",
+        },
+      }));
+    }
+    if (path.startsWith("/api/projects/agent-col/blueprints/blueprint-1/feedback")) {
+      return jsonResponse(200, { events: [], next_before: null });
     }
     if (path.startsWith("/api/projects/agent-col/blueprints")) {
       blueprintCalls += 1;

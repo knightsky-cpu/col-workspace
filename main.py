@@ -2220,6 +2220,23 @@ async def workspace() -> FileResponse:
     )
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    return Response(
+        content=(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+            '<rect width="32" height="32" rx="6" fill="#081316"/>'
+            '<path d="M9 20v-8l7-4 7 4v8l-7 4-7-4z" fill="none" '
+            'stroke="#30d5c8" stroke-width="2" stroke-linejoin="round"/>'
+            '<path d="M16 8v16M9 12l7 4 7-4" fill="none" '
+            'stroke="#f5b83d" stroke-width="1.5" stroke-linecap="round"/>'
+            "</svg>"
+        ),
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get("/")
 async def health_check() -> dict[str, str]:
     return {"status": "online"}

@@ -2572,6 +2572,15 @@ async def test_health_check(client: httpx.AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_favicon_route_returns_icon(client: httpx.AsyncClient) -> None:
+    response = await client.get("/favicon.ico")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/")
+    assert response.content
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_emits_deltas_then_canonical_final(
     client: httpx.AsyncClient,
     service_state: ServiceState,

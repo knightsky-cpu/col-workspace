@@ -247,6 +247,14 @@ function selectedArtifactMetadata(artifactId) {
   )) ?? null;
 }
 
+function artifactIdSet(items) {
+  return new Set(
+    items
+      .map((item) => item.reference?.artifact_id)
+      .filter((artifactId) => typeof artifactId === "string" && artifactId),
+  );
+}
+
 function showMemoryError(message) {
   const error = document.querySelector("[data-memory-error]");
   setText(error, message);
@@ -985,12 +993,14 @@ async function loadWorkspaces() {
   ensureWorkspaceView().render(state);
 }
 
-async function loadWorkList() {
+async function loadWorkList(options = {}) {
   if (!state.context) {
     return;
   }
   clearWorkError();
   const lifecycleStatus = state.work.list.lifecycleStatus ?? "active";
+  const selectedArtifactIdAtStart = state.work.selectedArtifactId;
+  const artifactIdsAtStart = artifactIdSet(state.work.list.items);
   state = beginWorkListLoad(state);
   ensureWorkView().render(state);
   try {
@@ -1020,6 +1030,22 @@ async function loadWorkList() {
       ].sort(newestFirst),
       next_before: null,
     });
+    if (
+      options.selectSingleNewArtifact
+      && selectedArtifactIdAtStart === null
+      && state.work.selectedArtifactId === selectedArtifactIdAtStart
+    ) {
+      const newArtifacts = state.work.list.items.filter((item) => {
+        const artifactId = item.reference?.artifact_id;
+        return typeof artifactId === "string"
+          && artifactId
+          && !artifactIdsAtStart.has(artifactId);
+      });
+      if (newArtifacts.length === 1) {
+        await loadWorkDetail(newArtifacts[0].reference.artifact_id);
+        return;
+      }
+    }
   } catch (error) {
     state = failWorkListLoad(state, error);
     showWorkError(error.message);
@@ -1199,7 +1225,7 @@ function refreshAuthoritativeResourcesForCompletedJobs(jobs) {
     }
   }
   if (shouldRefreshWork) {
-    loadWorkList();
+    loadWorkList({ selectSingleNewArtifact: true });
   }
   if (shouldRefreshNotes) {
     loadNotes(state.notes.statusFilter);
