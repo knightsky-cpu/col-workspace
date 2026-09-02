@@ -50,6 +50,7 @@ from agent_col_agent_jobs import (
     AgentJob,
     AgentJobEvent,
     AgentJobFailure,
+    AgentJobReport,
 )
 from agent_job_repository import (
     AgentJobConflictError,
@@ -397,6 +398,26 @@ def make_agent_job_event(**overrides: object) -> AgentJobEvent:
     }
     values.update(overrides)
     return AgentJobEvent.model_validate(values)
+
+
+def make_agent_job_report(**overrides: object) -> AgentJobReport:
+    values: dict[str, object] = {
+        "report_id": "agent-job-report-1",
+        "job_id": "agent-job-1",
+        "user_id": "user-1",
+        "project_id": "project-1",
+        "workspace_id": "project-1",
+        "session_id": "session-1",
+        "action_kind": "propose_memory_signal",
+        "agent_label": "Memory Analyst",
+        "status": "completed",
+        "title": "Memory proposal pending review",
+        "summary": "A memory proposal was created and is pending your review.",
+        "public_resource_label": "Prefers C over Python",
+        "created_at": MEMORY_NOW,
+    }
+    values.update(overrides)
+    return AgentJobReport.model_validate(values)
 
 
 def make_working_state_snapshot(**overrides) -> WorkingStateSnapshot:
@@ -880,6 +901,9 @@ class FakeAgentJobRepository:
     events: list[AgentJobEvent] = field(
         default_factory=lambda: [make_agent_job_event()]
     )
+    reports: list[AgentJobReport] = field(
+        default_factory=lambda: [make_agent_job_report()]
+    )
     error: Exception | None = None
     list_calls: list[dict[str, object]] = field(default_factory=list)
     get_calls: list[dict[str, object]] = field(default_factory=list)
@@ -920,6 +944,38 @@ class FakeAgentJobRepository:
             if yielded > limit:
                 return
             yield job
+
+    async def list_reports(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 20,
+    ):
+        self.list_calls.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "project_id": project_id,
+                "session_id": session_id,
+                "limit": limit,
+                "kind": "reports",
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        yielded = 0
+        for report in self.reports:
+            if project_id is not None and report.project_id != project_id:
+                continue
+            if session_id is not None and report.session_id != session_id:
+                continue
+            yielded += 1
+            if yielded > limit:
+                return
+            yield report
 
     async def get_job(
         self,
@@ -2206,6 +2262,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         memory_service: object | None = None,
         collaborative_note_service: object | None = None,
         agent_job_repository: object | None = None,
+        memory_job_dispatcher: object | None = None,
     ) -> object:
         responder_vertex_settings.append(vertex_settings)
         responder_memory_services.append(memory_service)
@@ -4879,29 +4936,24 @@ async def test_agent_job_list_returns_public_owned_projection(
     assert response.status_code == 200
     payload = response.json()
     assert payload["agent_job_contract_version"] == "1.0"
-    assert payload["jobs"] == [
-        {
-            "job_id": "agent-job-1",
-            "user_id": "user-1",
-            "project_id": "project-1",
-            "workspace_id": "project-1",
-            "session_id": "session-1",
-            "source_turn_id": "turn-1",
-            "action_kind": "create_artifact",
-            "status": "running",
-            "display_label": "Create deployment artifact",
-            "agent_label": "Artifact Builder",
-            "created_at": "2026-08-20T23:00:00Z",
-            "updated_at": "2026-08-20T23:00:00Z",
-            "attempt_count": 1,
-            "lease_expires_at": "2026-08-20T23:05:00Z",
-            "result_refs": {"artifact_id": "artifact-1"},
-            "failure_summary": None,
-            "retry_of_job_id": None,
-        }
-    ]
+    assert payload["jobs"][0]["job_number"] == "001"
+    assert payload["jobs"][0]["action_kind"] == "create_artifact"
+    assert payload["jobs"][0]["status"] == "running"
+    assert payload["jobs"][0]["display_label"] == "Create deployment artifact"
+    assert payload["jobs"][0]["agent_label"] == "Artifact Builder"
+    forbidden_keys = {
+        "job_id",
+        "session_id",
+        "source_turn_id",
+        "source_message_id",
+        "workspace_id",
+        "result_refs",
+        "retry_of_job_id",
+    }
+    assert forbidden_keys.isdisjoint(payload["jobs"][0])
     assert "worker-private" not in str(payload)
     assert "private-idempotency-key" not in str(payload)
+    assert "artifact-1" not in str(payload)
     assert service_state.agent_job_repository.list_calls == [
         {
             "user_id": "user-1",
@@ -4937,7 +4989,11 @@ async def test_agent_job_stream_emits_public_snapshot(
     assert "event: snapshot" in response.text
     assert '"agent_job_contract_version":"1.0"' in response.text
     assert '"status":"running"' in response.text
-    assert '"result_refs":{"artifact_id":"artifact-1"}' in response.text
+    assert '"job_number":"001"' in response.text
+    assert "agent-job-1" not in response.text
+    assert "session-1" not in response.text
+    assert "turn-1" not in response.text
+    assert "artifact-1" not in response.text
     assert "worker-private" not in response.text
     assert "private-idempotency-key" not in response.text
 
@@ -5043,11 +5099,9 @@ async def test_agent_job_events_return_only_public_projection(
     payload = response.json()
     assert payload == {
         "agent_job_contract_version": "1.0",
-        "job_id": "agent-job-1",
         "events": [
             {
-                "event_id": "event-public",
-                "job_id": "agent-job-1",
+                "event_number": "001",
                 "event_type": "queued",
                 "message": "Queued artifact creation.",
                 "created_at": "2026-08-20T23:00:00Z",
@@ -5056,8 +5110,89 @@ async def test_agent_job_events_return_only_public_projection(
             }
         ],
     }
+    assert "agent-job-1" not in response.text
+    assert "event-public" not in response.text
     assert "event-private" not in response.text
     assert "Internal prompt" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_job_reports_return_public_safe_projection(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_repository.jobs = [
+        make_agent_job(job_id="agent-job-1", created_at=MEMORY_NOW),
+        make_agent_job(
+            job_id="agent-job-2",
+            idempotency_key="private-idempotency-key-2",
+            created_at=MEMORY_NOW + timedelta(seconds=5),
+            updated_at=MEMORY_NOW + timedelta(seconds=5),
+        ),
+    ]
+    service_state.agent_job_repository.reports = [
+        make_agent_job_report(
+            report_id="agent-job-report-2",
+            job_id="agent-job-2",
+            title="Memory proposal not created",
+            summary="A pending memory proposal already exists for this category.",
+            public_resource_label=None,
+            status="failed",
+            created_at=MEMORY_NOW + timedelta(seconds=20),
+        ),
+        make_agent_job_report(created_at=MEMORY_NOW + timedelta(seconds=30)),
+    ]
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/agent/reports",
+        params={"session_id": "session-1", "limit": 10},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["agent_job_report_contract_version"] == "1.0"
+    assert [report["report_number"] for report in payload["reports"]] == [
+        "001",
+        "002",
+    ]
+    assert [report["job_number"] for report in payload["reports"]] == [
+        "002",
+        "001",
+    ]
+    assert payload["reports"][1]["summary"] == (
+        "A memory proposal was created and is pending your review."
+    )
+    forbidden_keys = {
+        "report_id",
+        "job_id",
+        "session_id",
+        "source_turn_id",
+        "source_message_id",
+        "workspace_id",
+    }
+    for report in payload["reports"]:
+        assert forbidden_keys.isdisjoint(report)
+    assert "agent-job-report" not in str(payload)
+    assert "agent-job-" not in str(payload)
+    assert "session-1" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_agent_job_reports_map_repository_errors_safely(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_repository.error = AgentJobRepositoryError(
+        "private report marker"
+    )
+
+    response = await client.get(
+        "/api/users/user-1/projects/project-1/agent/reports",
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Agent job storage operation failed."}
+    assert "private report marker" not in response.text
 
 
 @pytest.mark.asyncio
@@ -5072,7 +5207,15 @@ async def test_agent_job_cancel_returns_cancelled_job_projection(
     assert response.status_code == 200
     payload = response.json()
     assert payload["job"]["status"] == "cancelled"
-    assert payload["job"]["job_id"] == "agent-job-1"
+    assert payload["job"]["job_number"] == "001"
+    forbidden_keys = {
+        "job_id",
+        "session_id",
+        "source_turn_id",
+        "source_message_id",
+        "retry_of_job_id",
+    }
+    assert forbidden_keys.isdisjoint(payload["job"])
     assert service_state.agent_job_repository.cancel_calls[0]["user_id"] == (
         "user-1"
     )
@@ -5110,7 +5253,9 @@ async def test_agent_job_retry_uses_deterministic_retry_job_id(
     assert response.status_code == 200
     payload = response.json()
     assert payload["job"]["status"] == "queued"
-    assert payload["job"]["retry_of_job_id"] == "agent-job-1"
+    assert payload["job"]["job_number"] == "001"
+    assert "retry_of_job_id" not in payload["job"]
+    assert "agent-job-1" not in response.text
     retry_call = service_state.agent_job_repository.retry_calls[0]
     assert retry_call["source_job_id"] == "agent-job-1"
     assert retry_call["idempotency_key"] == "retry-idempotency-key"

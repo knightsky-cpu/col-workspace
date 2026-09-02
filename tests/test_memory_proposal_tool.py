@@ -50,6 +50,7 @@ class RecordingMemoryService:
 class RecordingAgentJobRepository:
     def __init__(self) -> None:
         self.enqueued = []
+        self.payloads = []
         self.events = []
         self.leased = []
         self.completed = []
@@ -57,6 +58,11 @@ class RecordingAgentJobRepository:
 
     async def enqueue_job(self, job):
         self.enqueued.append(job)
+        return job
+
+    async def enqueue_job_with_payload(self, job, payload):
+        self.enqueued.append(job)
+        self.payloads.append(payload)
         return job
 
     async def append_event(self, *, user_id, workspace_id, event):
@@ -160,6 +166,15 @@ class RecordingAgentJobRepository:
         )
 
 
+class FailingAgentJobRepository(RecordingAgentJobRepository):
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    async def enqueue_job_with_payload(self, job, payload):
+        raise self.error
+
+
 def tool_context_state() -> dict[str, object]:
     return {
         "memory_user_id": "user-1",
@@ -211,7 +226,7 @@ def test_proposal_tool_exposes_only_natural_decision_fields_to_model() -> None:
 @pytest.mark.filterwarnings(
     "ignore:\\[EXPERIMENTAL\\].*JSON_SCHEMA_FOR_FUNC_DECL.*:UserWarning"
 )
-def test_proposal_tool_declares_development_environments_as_an_array() -> None:
+def test_proposal_tool_declares_decision_as_raw_public_intent() -> None:
     from memory_proposal_tool import create_propose_memory_signal_tool
 
     tool = create_propose_memory_signal_tool(NoopMemoryService())
@@ -220,26 +235,16 @@ def test_proposal_tool_declares_development_environments_as_an_array() -> None:
     assert declaration is not None
     schema = declaration.parameters_json_schema
     assert schema is not None
-    candidate_schema = schema["$defs"][
-        "DevelopmentEnvironmentsProviderCandidate"
-    ]
-    assert candidate_schema["properties"]["category"]["const"] == (
-        "development_environments"
-    )
-    canonical_schema = candidate_schema["properties"]["canonical_value"]
-    assert canonical_schema["type"] == "array"
-    assert canonical_schema["minItems"] == 1
-    assert canonical_schema["maxItems"] == 3
-    assert canonical_schema["items"] == {
-        "enum": ["macos", "linux", "windows"],
-        "type": "string",
-    }
+    decision_schema = schema["properties"]["decision"]
+    assert decision_schema["type"] == "object"
+    assert decision_schema["additionalProperties"] is True
+    assert "$defs" not in schema
 
 
 @pytest.mark.filterwarnings(
     "ignore:\\[EXPERIMENTAL\\].*JSON_SCHEMA_FOR_FUNC_DECL.*:UserWarning"
 )
-def test_proposal_tool_declares_user_requested_memory_as_bounded_text() -> None:
+def test_proposal_tool_does_not_expose_category_enums_to_chat_path() -> None:
     from memory_proposal_tool import create_propose_memory_signal_tool
 
     tool = create_propose_memory_signal_tool(NoopMemoryService())
@@ -248,16 +253,10 @@ def test_proposal_tool_declares_user_requested_memory_as_bounded_text() -> None:
     assert declaration is not None
     schema = declaration.parameters_json_schema
     assert schema is not None
-    candidate_schema = schema["$defs"][
-        "UserRequestedMemoryProviderCandidate"
-    ]
-    assert candidate_schema["properties"]["category"]["const"] == (
-        "user_requested_memory"
-    )
-    canonical_schema = candidate_schema["properties"]["canonical_value"]
-    assert canonical_schema["type"] == "string"
-    assert canonical_schema["minLength"] == 1
-    assert canonical_schema["maxLength"] == 240
+    rendered = declaration.model_dump_json(exclude_none=True)
+    assert "DevelopmentEnvironmentsProviderCandidate" not in rendered
+    assert "UserRequestedMemoryProviderCandidate" not in rendered
+    assert "collaboration_preferences" not in rendered
 
 
 @pytest.mark.asyncio
@@ -353,7 +352,7 @@ async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_proposal_tool_records_memory_agent_job_lifecycle() -> None:
+async def test_proposal_tool_records_memory_agent_job_queue_receipt() -> None:
     from memory_proposal_tool import create_propose_memory_signal_tool
 
     service = RecordingMemoryService()
@@ -377,7 +376,9 @@ async def test_proposal_tool_records_memory_agent_job_lifecycle() -> None:
         ),
     )
 
-    assert result["status"] == "pending"
+    assert result["status"] == "queued"
+    assert result["queued_action"]["action_kind"] == "propose_memory_signal"
+    assert result["queued_action"]["status"] == "queued"
     assert len(repository.enqueued) == 1
     job = repository.enqueued[0]
     assert job.action_kind == "propose_memory_signal"
@@ -393,24 +394,127 @@ async def test_proposal_tool_records_memory_agent_job_lifecycle() -> None:
     assert job.idempotency_key.startswith("memory-proposal-")
     assert [entry["event"].event_type for entry in repository.events] == [
         "queued",
-        "started",
-        "completed",
     ]
-    assert repository.completed[0]["result_refs"] == {
-        "proposal_id": "response_length--e82366f7699ee2e39bff6a68154e09b7"
-    }
+    assert repository.payloads[0].job_id == job.job_id
+    assert "turn_lease" not in repository.payloads[0].payload
+    assert "owner_token" not in str(repository.payloads[0].payload)
+    assert service.commands == []
+    assert repository.leased == []
+    assert repository.completed == []
+    assert repository.failed == []
 
 
 @pytest.mark.asyncio
-async def test_proposal_tool_records_failed_memory_agent_job_for_conflicts(
+async def test_proposal_tool_queues_memory_work_without_calling_service(
 ) -> None:
-    from database import MemoryProposalConflictError
     from memory_proposal_tool import create_propose_memory_signal_tool
 
-    service = RecordingMemoryService(
-        error=MemoryProposalConflictError("private conflict detail")
-    )
+    service = RecordingMemoryService()
     repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "response_length",
+                "canonical_value": "concise",
+                "evidence_text": "I prefer concise responses.",
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=tool_context_state(), delta={})
+        ),
+    )
+
+    assert result["status"] == "queued"
+    assert result["queued_action"]["action_kind"] == "propose_memory_signal"
+    assert result["queued_action"]["status"] == "queued"
+    assert result["queued_action"]["display_label"] == (
+        "Memory proposal: response_length"
+    )
+    assert service.commands == []
+    assert len(repository.enqueued) == 1
+    assert len(repository.payloads) == 1
+    payload = repository.payloads[0]
+    assert payload.job_id == repository.enqueued[0].job_id
+    assert payload.action_kind == "propose_memory_signal"
+    assert payload.payload["decision"]["kind"] == "profile_candidate"
+    assert payload.payload["decision"]["category"] == "response_length"
+    assert payload.payload["clarification_selection"] is None
+    assert payload.payload["source_message_text"] == (
+        "I prefer concise responses."
+    )
+    assert "turn_lease" not in payload.payload
+    assert "owner_token" not in str(payload.payload)
+    assert [entry["event"].event_type for entry in repository.events] == [
+        "queued",
+    ]
+    assert repository.leased == []
+    assert repository.completed == []
+    assert repository.failed == []
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_queues_loose_profile_candidate_without_validation(
+) -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    state = tool_context_state()
+    state["memory_source_message_text"] = (
+        "remember that I prefer assembly over C"
+    )
+    service = RecordingMemoryService()
+    repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "collaboration_preferences",
+                "canonical_value": "Prefers assembly over C",
+                "evidence_text": "remember that I prefer assembly over C",
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=state, delta={})
+        ),
+    )
+
+    assert result["status"] == "queued"
+    assert result["queued_action"]["action_kind"] == "propose_memory_signal"
+    assert service.commands == []
+    assert len(repository.enqueued) == 1
+    assert len(repository.payloads) == 1
+    payload = repository.payloads[0]
+    assert payload.payload["decision"] == {
+        "kind": "profile_candidate",
+        "category": "collaboration_preferences",
+        "canonical_value": "Prefers assembly over C",
+        "evidence_text": "remember that I prefer assembly over C",
+    }
+    assert payload.payload["source_message_text"] == (
+        "remember that I prefer assembly over C"
+    )
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_does_not_execute_directly_when_queue_fails(
+) -> None:
+    from agent_job_repository import AgentJobRepositoryError
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    service = RecordingMemoryService()
+    repository = FailingAgentJobRepository(
+        AgentJobRepositoryError("private storage detail")
+    )
     tool = create_propose_memory_signal_tool(
         service,
         agent_job_repository=repository,
@@ -432,19 +536,43 @@ async def test_proposal_tool_records_failed_memory_agent_job_for_conflicts(
 
     assert result == {
         "status": "rejected",
+        "error_code": "memory_job_unavailable",
+    }
+    assert service.commands == []
+    assert repository.events == []
+    assert repository.leased == []
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_reports_conflict_without_agent_job_repository(
+) -> None:
+    from database import MemoryProposalConflictError
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    service = RecordingMemoryService(
+        error=MemoryProposalConflictError("private conflict detail")
+    )
+    tool = create_propose_memory_signal_tool(service)
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "response_length",
+                "canonical_value": "concise",
+                "evidence_text": "I prefer concise responses.",
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=tool_context_state(), delta={})
+        ),
+    )
+
+    assert result == {
+        "status": "rejected",
         "error_code": "memory_proposal_conflict",
     }
-    assert len(repository.enqueued) == 1
-    assert [entry["event"].event_type for entry in repository.events] == [
-        "queued",
-        "started",
-        "failed",
-    ]
-    assert repository.failed[0]["failure"].code == "memory_proposal_conflict"
-    assert repository.failed[0]["failure"].summary == (
-        "Memory proposal could not be created."
-    )
-    assert "private" not in str(repository.failed[0]["failure"])
+    assert len(service.commands) == 1
 
 
 @pytest.mark.asyncio
@@ -725,6 +853,71 @@ async def test_proposal_tool_returns_application_owned_clarification() -> None:
         "category_label": "Development environments",
         "value_label": "macOS and Linux",
     }
+
+
+@pytest.mark.asyncio
+async def test_proposal_tool_keeps_clarification_direct_when_job_repository_exists(
+) -> None:
+    from memory_clarifications import MemoryClarificationReceipt
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    service = RecordingMemoryService()
+    service.handle_natural_memory_decision = AsyncMock(
+        return_value=NaturalMemoryClarificationResult(
+            status="clarification_required",
+            clarification=MemoryClarificationReceipt(
+                clarification_id="memory-clarification--abc",
+                choices=[
+                    {
+                        "candidate_index": 0,
+                        "category_label": "Preferred name",
+                        "value_label": "wifiknight",
+                    },
+                    {
+                        "candidate_index": 1,
+                        "category_label": "Development environments",
+                        "value_label": "macOS and Linux",
+                    },
+                ],
+                expires_at=NOW,
+            ),
+        )
+    )
+    repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "clarify",
+                "candidates": [
+                    {
+                        "kind": "profile_candidate",
+                        "category": "preferred_name",
+                        "canonical_value": "wifiknight",
+                        "evidence_text": "called wifiknight",
+                    },
+                    {
+                        "kind": "profile_candidate",
+                        "category": "development_environments",
+                        "canonical_value": ["macos", "linux"],
+                        "evidence_text": "macOS and Linux",
+                    },
+                ],
+            }
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=tool_context_state(), delta={})
+        ),
+    )
+
+    assert result["status"] == "clarification_required"
+    service.handle_natural_memory_decision.assert_awaited_once()
+    assert repository.enqueued == []
+    assert repository.payloads == []
 
 
 @pytest.mark.parametrize(

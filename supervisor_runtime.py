@@ -23,6 +23,7 @@ from memory_proposals import ProposalTurnLease
 from memory_proposal_tool import (
     ClarificationMemoryProposalToolResponse,
     PendingMemoryProposalToolResponse,
+    QueuedMemoryProposalToolResponse,
     parse_memory_proposal_tool_response,
 )
 from research_expert_runtime import ResearchExpertTurnTracker
@@ -33,6 +34,7 @@ from schemas import (
     CollaborativeNoteEvent,
     CollaborativeNoteProposal,
     MemoryClarificationReceipt,
+    QueuedActionReceipt,
     VersionedMemoryProposalReceipt,
 )
 from supervisor import SUPERVISOR_APP_NAME
@@ -65,6 +67,7 @@ class SupervisorRuntimeError(RuntimeError):
             CollaborativeNoteProposal, ...
         ] = (),
         collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = (),
+        queued_actions: tuple[QueuedActionReceipt, ...] = (),
     ) -> None:
         super().__init__(message)
         self.actions = actions
@@ -72,6 +75,7 @@ class SupervisorRuntimeError(RuntimeError):
         self.memory_clarifications = memory_clarifications
         self.collaborative_note_proposals = collaborative_note_proposals
         self.collaborative_note_events = collaborative_note_events
+        self.queued_actions = queued_actions
 
 
 class SupervisorTimeoutError(SupervisorRuntimeError):
@@ -115,6 +119,7 @@ class SupervisorTurnResult:
     memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
     collaborative_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
     collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = ()
+    queued_actions: tuple[QueuedActionReceipt, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -245,6 +250,7 @@ class SupervisorRuntime:
         collaborative_note_events = list(
             context.precompleted_collaborative_note_events
         )
+        queued_actions: list[QueuedActionReceipt] = []
         text_normalizer = _AppendOnlyTextNormalizer()
         delegation_budget = ExpertDelegationBudget()
         delegation_token = self._delegation_registry.register_turn(
@@ -501,6 +507,12 @@ class SupervisorRuntime:
                                         collaborative_note_events
                                     ),
                                 )
+                        elif isinstance(
+                            parsed,
+                            QueuedMemoryProposalToolResponse,
+                        ):
+                            if parsed.queued_action not in queued_actions:
+                                queued_actions.append(parsed.queued_action)
                         if collaborative_note_proposals:
                             raise SupervisorRuntimeError(
                                 "Agent_Col produced conflicting memory and "
@@ -516,6 +528,7 @@ class SupervisorRuntime:
                                 collaborative_note_events=tuple(
                                     collaborative_note_events
                                 ),
+                                queued_actions=tuple(queued_actions),
                             )
                     if (
                         getattr(event, "author", "Agent_Col") == "Agent_Col"
@@ -558,6 +571,7 @@ class SupervisorRuntime:
                         collaborative_note_events=tuple(
                             collaborative_note_events
                         ),
+                        queued_actions=tuple(queued_actions),
                     )
                 yield SupervisorTurnCompleted(
                     result=SupervisorTurnResult(
@@ -572,6 +586,7 @@ class SupervisorRuntime:
                         collaborative_note_events=tuple(
                             collaborative_note_events
                         ),
+                        queued_actions=tuple(queued_actions),
                     )
                 )
         except TimeoutError as exc:
@@ -588,6 +603,7 @@ class SupervisorRuntime:
                     collaborative_note_proposals
                 ),
                 collaborative_note_events=tuple(collaborative_note_events),
+                queued_actions=tuple(queued_actions),
             ) from exc
         except SupervisorRuntimeError:
             raise
@@ -601,6 +617,7 @@ class SupervisorRuntime:
                 actions=tuple(actions),
                 memory_proposals=tuple(memory_proposals),
                 memory_clarifications=tuple(memory_clarifications),
+                queued_actions=tuple(queued_actions),
             ) from exc
         finally:
             try:

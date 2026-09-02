@@ -924,6 +924,56 @@ async def test_run_turn_collects_proposal_receipt_only_from_function_response(
 
 
 @pytest.mark.asyncio
+async def test_run_turn_collects_queued_memory_receipt_from_function_response(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    queued_response = types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "memory-job-1",
+                "action_kind": "propose_memory_signal",
+                "status": "queued",
+                "display_label": "Memory proposal: response_length",
+                "created_at": "2026-08-22T16:00:00Z",
+                "agent_label": "Memory Analyst",
+            },
+        },
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    text=None,
+                    final=False,
+                    function_responses=[queued_response],
+                ),
+                FakeEvent(text="Memory work is queued.", final=True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember that I prefer concise responses.",
+        )
+    )
+
+    assert result.response == "Memory work is queued."
+    assert result.actions == ()
+    assert result.memory_proposals == ()
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].job_id == "memory-job-1"
+    assert result.queued_actions[0].action_kind == "propose_memory_signal"
+
+
+@pytest.mark.asyncio
 async def test_run_turn_deduplicates_identical_proposal_responses() -> None:
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
 

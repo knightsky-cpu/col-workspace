@@ -1,8 +1,9 @@
 import hashlib
 import logging
 import re
-from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal, Self
 
 from google.adk.tools import FunctionTool, ToolContext
@@ -14,8 +15,13 @@ from pydantic import (
     model_validator,
 )
 
-from agent_col_agent_jobs import AgentJob, AgentJobEvent, AgentJobFailure
-from agent_job_repository import AgentJobRepository
+from agent_col_agent_jobs import AgentJob, AgentJobEvent
+from agent_job_repository import (
+    AgentJobConflictError,
+    AgentJobRepository,
+    AgentJobRepositoryError,
+    AgentJobStateError,
+)
 from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
 from database import (
     MemoryProposalConflictError,
@@ -24,7 +30,6 @@ from database import (
 )
 from memory_candidate_decisions import (
     NaturalMemoryDecision,
-    ProviderNaturalMemoryDecision,
     validate_provider_natural_memory_decision,
 )
 from memory_clarifications import (
@@ -32,7 +37,13 @@ from memory_clarifications import (
     MemoryClarificationSelection,
 )
 from memory_proposals import ProposalTurnLease
-from schemas import AgentActionReceipt, MemoryProposalReceiptV2
+from memory_proposal_job_worker import memory_job_payload
+from memory_proposal_job_worker import raw_memory_job_payload
+from schemas import (
+    AgentActionReceipt,
+    MemoryProposalReceiptV2,
+    QueuedActionReceipt,
+)
 from trusted_memory_service import (
     NaturalMemoryClarificationResult,
     NaturalMemoryCommand,
@@ -45,7 +56,6 @@ from trusted_memory_service import (
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _CLARIFICATION_SELECTION_ADAPTER = TypeAdapter(MemoryClarificationSelection)
 _MEMORY_AGENT_LABEL = "Memory Analyst"
-_MEMORY_JOB_LEASE_SECONDS = 120
 logger = logging.getLogger(__name__)
 
 
@@ -55,6 +65,17 @@ class MemoryProposalToolConfigurationError(RuntimeError):
 
 class MemoryProposalToolResponseError(RuntimeError):
     """Raised when an ADK proposal-tool response violates its contract."""
+
+
+@dataclass(frozen=True)
+class _MemoryToolServerContext:
+    user_id: str
+    workspace_id: str
+    session_id: str
+    source_message_id: str
+    source_message_text: str
+    memory_decision_present: bool
+    turn_lease: ProposalTurnLease | None
 
 
 class _StrictToolResponse(BaseModel):
@@ -79,6 +100,7 @@ class RejectedMemoryProposalToolResponse(_StrictToolResponse):
         "invalid_memory_candidate",
         "memory_proposal_conflict",
         "memory_signal_already_active",
+        "memory_job_unavailable",
         "memory_turn_conflict",
     ]
 
@@ -86,6 +108,17 @@ class RejectedMemoryProposalToolResponse(_StrictToolResponse):
 class ClarificationMemoryProposalToolResponse(_StrictToolResponse):
     status: Literal["clarification_required"]
     memory_clarification: MemoryClarificationReceipt
+
+
+class QueuedMemoryProposalToolResponse(_StrictToolResponse):
+    status: Literal["queued"]
+    queued_action: QueuedActionReceipt
+
+    @model_validator(mode="after")
+    def require_memory_queued_action(self) -> Self:
+        if self.queued_action.action_kind != "propose_memory_signal":
+            raise ValueError("Queued response has the wrong action kind.")
+        return self
 
 
 class NoEffectMemoryProposalToolResponse(_StrictToolResponse):
@@ -100,6 +133,7 @@ class NoEffectMemoryProposalToolResponse(_StrictToolResponse):
 
 MemoryProposalToolResponse = (
     PendingMemoryProposalToolResponse
+    | QueuedMemoryProposalToolResponse
     | ClarificationMemoryProposalToolResponse
     | NoEffectMemoryProposalToolResponse
     | RejectedMemoryProposalToolResponse
@@ -115,6 +149,8 @@ def parse_memory_proposal_tool_response(
             raise ValueError("Response must be a mapping.")
         if value.get("status") == "pending":
             return PendingMemoryProposalToolResponse.model_validate(value)
+        if value.get("status") == "queued":
+            return QueuedMemoryProposalToolResponse.model_validate(value)
         if value.get("status") == "clarification_required":
             return ClarificationMemoryProposalToolResponse.model_validate(
                 value
@@ -136,12 +172,7 @@ def parse_memory_proposal_tool_response(
         ) from exc
 
 
-def _server_command(
-    *,
-    decision: NaturalMemoryDecision,
-    clarification_selection: MemoryClarificationSelection | None,
-    tool_context: ToolContext,
-) -> NaturalMemoryCommand:
+def _server_context(tool_context: ToolContext) -> _MemoryToolServerContext:
     state = getattr(tool_context, "state", None)
     if not callable(getattr(state, "get", None)):
         raise MemoryProposalToolConfigurationError(
@@ -198,16 +229,34 @@ def _server_command(
         raise MemoryProposalToolConfigurationError(
             "Memory proposal tool context is invalid."
         ) from exc
-    return NaturalMemoryCommand(
+    return _MemoryToolServerContext(
         user_id=user_id,
         workspace_id=workspace_id,
         session_id=session_id,
         source_message_id=source_message_id,
         source_message_text=source_message_text,
         memory_decision_present=memory_decision_present,
+        turn_lease=turn_lease,
+    )
+
+
+def _server_command(
+    *,
+    decision: NaturalMemoryDecision,
+    clarification_selection: MemoryClarificationSelection | None,
+    tool_context: ToolContext,
+) -> NaturalMemoryCommand:
+    context = _server_context(tool_context)
+    return NaturalMemoryCommand(
+        user_id=context.user_id,
+        workspace_id=context.workspace_id,
+        session_id=context.session_id,
+        source_message_id=context.source_message_id,
+        source_message_text=context.source_message_text,
+        memory_decision_present=context.memory_decision_present,
         decision=decision,
         clarification_selection=clarification_selection,
-        turn_lease=turn_lease,
+        turn_lease=context.turn_lease,
     )
 
 
@@ -250,6 +299,73 @@ def _memory_job_display_label(command: NaturalMemoryCommand) -> str:
     if command.decision.kind == "clarify":
         return "Memory clarification"[:160]
     return "Memory proposal"[:160]
+
+
+def _raw_memory_job_digest(
+    *,
+    context: _MemoryToolServerContext,
+    decision: dict[str, object],
+    clarification_selection: dict[str, object] | None,
+) -> str:
+    material = json_dumps_compact(
+        {
+            "user_id": context.user_id,
+            "workspace_id": context.workspace_id,
+            "session_id": context.session_id,
+            "source_message_id": context.source_message_id,
+            "turn_id": (
+                context.turn_lease.turn_id
+                if context.turn_lease is not None
+                else ""
+            ),
+            "decision": decision,
+            "clarification_selection": clarification_selection,
+        }
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def _raw_memory_job_display_label(decision: dict[str, object]) -> str:
+    category = decision.get("category")
+    if isinstance(category, str) and category:
+        return f"Memory proposal: {category}"[:160]
+    if decision.get("kind") == "clarify":
+        return "Memory clarification"[:160]
+    return "Memory proposal"[:160]
+
+
+def _raw_memory_job(
+    *,
+    context: _MemoryToolServerContext,
+    decision: dict[str, object],
+    clarification_selection: dict[str, object] | None,
+) -> AgentJob:
+    digest = _raw_memory_job_digest(
+        context=context,
+        decision=decision,
+        clarification_selection=clarification_selection,
+    )
+    observed_at = datetime.now(UTC)
+    return AgentJob(
+        job_id=f"memory-job-{digest}",
+        user_id=context.user_id,
+        project_id=context.workspace_id,
+        workspace_id=context.workspace_id,
+        session_id=context.session_id,
+        source_turn_id=(
+            context.turn_lease.turn_id
+            if context.turn_lease
+            else context.source_message_id
+        ),
+        source_message_id=context.source_message_id,
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label=_raw_memory_job_display_label(decision),
+        agent_label=_MEMORY_AGENT_LABEL,
+        created_at=observed_at,
+        updated_at=observed_at,
+        idempotency_key=f"memory-proposal-{digest}",
+    )
 
 
 def _memory_job(command: NaturalMemoryCommand) -> AgentJob:
@@ -309,15 +425,19 @@ async def _append_memory_job_event(
 
 
 def _should_record_memory_job(command: NaturalMemoryCommand) -> bool:
-    return command.decision.kind in {"profile_candidate", "clarify"}
+    return command.decision.kind == "profile_candidate"
 
 
-async def _start_memory_agent_job(
+async def _queue_memory_agent_job(
     *,
     agent_job_repository: AgentJobRepository,
     command: NaturalMemoryCommand,
-) -> tuple[AgentJob, str]:
-    queued = await agent_job_repository.enqueue_job(_memory_job(command))
+) -> AgentJob:
+    job = _memory_job(command)
+    queued = await agent_job_repository.enqueue_job_with_payload(
+        job,
+        memory_job_payload(command, job),
+    )
     await _append_memory_job_event(
         agent_job_repository=agent_job_repository,
         user_id=queued.user_id,
@@ -329,184 +449,123 @@ async def _start_memory_agent_job(
             observed_at=queued.created_at,
         ),
     )
-    lease_owner = f"memory-tool-{_memory_job_digest(command)}"[:128]
-    running_at = datetime.now(UTC)
-    running = await agent_job_repository.lease_queued_job(
-        user_id=queued.user_id,
-        workspace_id=queued.workspace_id,
-        job_id=queued.job_id,
-        lease_owner=lease_owner,
-        lease_expires_at=running_at + timedelta(
-            seconds=_MEMORY_JOB_LEASE_SECONDS
-        ),
-        observed_at=running_at,
-    )
-    await _append_memory_job_event(
-        agent_job_repository=agent_job_repository,
-        user_id=running.user_id,
-        workspace_id=running.workspace_id,
-        event=_memory_job_event(
-            job=running,
-            event_type="started",
-            message="Memory proposal started.",
-            observed_at=running_at,
-        ),
-    )
-    return running, lease_owner
+    return queued
 
 
-async def _complete_memory_agent_job(
-    *,
-    agent_job_repository: AgentJobRepository,
-    job: AgentJob,
-    lease_owner: str,
-    result_refs: dict[str, str],
-    message: str,
-) -> None:
-    observed_at = datetime.now(UTC)
-    completed = await agent_job_repository.complete_job(
-        user_id=job.user_id,
-        workspace_id=job.workspace_id,
-        job_id=job.job_id,
-        lease_owner=lease_owner,
-        observed_at=observed_at,
-        result_refs=result_refs,
-    )
-    await _append_memory_job_event(
-        agent_job_repository=agent_job_repository,
-        user_id=completed.user_id,
-        workspace_id=completed.workspace_id,
-        event=_memory_job_event(
-            job=completed,
-            event_type="completed",
-            message=message,
-            observed_at=observed_at,
-        ),
-    )
-
-
-async def _fail_memory_agent_job(
-    *,
-    agent_job_repository: AgentJobRepository,
-    job: AgentJob,
-    lease_owner: str,
-    error_code: str,
-) -> None:
-    observed_at = datetime.now(UTC)
-    failed = await agent_job_repository.fail_job(
-        user_id=job.user_id,
-        workspace_id=job.workspace_id,
-        job_id=job.job_id,
-        lease_owner=lease_owner,
-        observed_at=observed_at,
-        failure=AgentJobFailure(
-            code=error_code,
-            summary="Memory proposal could not be created.",
-            retryable=False,
-        ),
-    )
-    await _append_memory_job_event(
-        agent_job_repository=agent_job_repository,
-        user_id=failed.user_id,
-        workspace_id=failed.workspace_id,
-        event=_memory_job_event(
-            job=failed,
-            event_type="failed",
-            message="Memory proposal failed.",
-            observed_at=observed_at,
-        ),
-    )
-
-
-async def _try_start_memory_agent_job(
+async def _try_queue_memory_agent_job(
     *,
     agent_job_repository: AgentJobRepository | None,
     command: NaturalMemoryCommand,
-) -> tuple[AgentJob | None, str | None]:
+) -> AgentJob | None:
     if agent_job_repository is None or not _should_record_memory_job(command):
-        return None, None
-    try:
-        return await _start_memory_agent_job(
-            agent_job_repository=agent_job_repository,
-            command=command,
-        )
-    except Exception:
-        logger.exception(
-            "Agent Col memory job lifecycle could not start for source message."
-        )
-        return None, None
+        return None
+    return await _queue_memory_agent_job(
+        agent_job_repository=agent_job_repository,
+        command=command,
+    )
 
 
-async def _try_complete_memory_agent_job(
+def _raw_tool_mapping(value: object) -> dict[str, object]:
+    if isinstance(value, BaseModel):
+        raw = value.model_dump(mode="python")
+    elif isinstance(value, Mapping):
+        raw = dict(value)
+    else:
+        raise ValueError("Memory decision must be an object.")
+    return raw
+
+
+def _raw_optional_mapping(value: object | None) -> dict[str, object] | None:
+    if value is None:
+        return None
+    return _raw_tool_mapping(value)
+
+
+def _should_queue_raw_memory_job(decision: dict[str, object]) -> bool:
+    return decision.get("kind") == "profile_candidate"
+
+
+async def _queue_raw_memory_agent_job(
     *,
-    agent_job_repository: AgentJobRepository | None,
-    job: AgentJob | None,
-    lease_owner: str | None,
-    result_refs: dict[str, str],
-    message: str,
-) -> None:
-    if agent_job_repository is None or job is None or lease_owner is None:
-        return
-    try:
-        await _complete_memory_agent_job(
-            agent_job_repository=agent_job_repository,
+    agent_job_repository: AgentJobRepository,
+    context: _MemoryToolServerContext,
+    decision: dict[str, object],
+    clarification_selection: dict[str, object] | None,
+) -> AgentJob:
+    job = _raw_memory_job(
+        context=context,
+        decision=decision,
+        clarification_selection=clarification_selection,
+    )
+    queued = await agent_job_repository.enqueue_job_with_payload(
+        job,
+        raw_memory_job_payload(
             job=job,
-            lease_owner=lease_owner,
-            result_refs=result_refs,
-            message=message,
-        )
-    except Exception:
-        logger.exception(
-            "Agent Col memory job lifecycle could not complete for source message."
-        )
-
-
-async def _try_fail_memory_agent_job(
-    *,
-    agent_job_repository: AgentJobRepository | None,
-    job: AgentJob | None,
-    lease_owner: str | None,
-    error_code: str,
-) -> None:
-    if agent_job_repository is None or job is None or lease_owner is None:
-        return
-    try:
-        await _fail_memory_agent_job(
-            agent_job_repository=agent_job_repository,
-            job=job,
-            lease_owner=lease_owner,
-            error_code=error_code,
-        )
-    except Exception:
-        logger.exception(
-            "Agent Col memory job lifecycle could not fail for source message."
-        )
+            decision=decision,
+            clarification_selection=clarification_selection,
+            source_message_text=context.source_message_text,
+            memory_decision_present=context.memory_decision_present,
+        ),
+    )
+    await _append_memory_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        event=_memory_job_event(
+            job=queued,
+            event_type="queued",
+            message="Memory proposal queued.",
+            observed_at=queued.created_at,
+        ),
+    )
+    return queued
 
 
 def create_propose_memory_signal_tool(
     memory_service: TrustedMemoryService,
     *,
     agent_job_repository: AgentJobRepository | None = None,
+    memory_job_dispatcher: Callable[[AgentJob], None] | None = None,
 ) -> FunctionTool:
     """Create the governed pending-memory proposal tool."""
 
     async def propose_memory_signal(
-        decision: ProviderNaturalMemoryDecision,
+        decision: dict[str, object],
         tool_context: ToolContext,
-        clarification_selection: MemoryClarificationSelection | None = None,
+        clarification_selection: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Create a pending user-reviewable proposal; never activate memory."""
-        job: AgentJob | None = None
-        lease_owner: str | None = None
         try:
+            raw_decision = _raw_tool_mapping(decision)
+            raw_selection = _raw_optional_mapping(clarification_selection)
+            if (
+                agent_job_repository is not None
+                and _should_queue_raw_memory_job(raw_decision)
+            ):
+                queued_job = await _queue_raw_memory_agent_job(
+                    agent_job_repository=agent_job_repository,
+                    context=_server_context(tool_context),
+                    decision=raw_decision,
+                    clarification_selection=raw_selection,
+                )
+                if memory_job_dispatcher is not None:
+                    memory_job_dispatcher(queued_job)
+                return {
+                    "status": "queued",
+                    "queued_action": (
+                        queued_job.to_queued_action_receipt().model_dump(
+                            mode="json"
+                        )
+                    ),
+                }
             validated_decision = validate_provider_natural_memory_decision(
-                decision
+                raw_decision
             )
             validated_selection = (
                 None
-                if clarification_selection is None
+                if raw_selection is None
                 else _CLARIFICATION_SELECTION_ADAPTER.validate_python(
-                    clarification_selection
+                    raw_selection
                 )
             )
             command = _server_command(
@@ -514,20 +573,41 @@ def create_propose_memory_signal_tool(
                 clarification_selection=validated_selection,
                 tool_context=tool_context,
             )
-            job, lease_owner = await _try_start_memory_agent_job(
+            queued_job = await _try_queue_memory_agent_job(
                 agent_job_repository=agent_job_repository,
                 command=command,
             )
+            if queued_job is not None:
+                if memory_job_dispatcher is not None:
+                    memory_job_dispatcher(queued_job)
+                return {
+                    "status": "queued",
+                    "queued_action": (
+                        queued_job.to_queued_action_receipt().model_dump(
+                            mode="json"
+                        )
+                    ),
+                }
             result = await memory_service.handle_natural_memory_decision(
                 command
             )
-        except ValueError:
-            await _try_fail_memory_agent_job(
-                agent_job_repository=agent_job_repository,
-                job=job,
-                lease_owner=lease_owner,
-                error_code="invalid_memory_candidate",
+        except AgentJobConflictError:
+            logger.exception(
+                "Agent Col memory job queue conflicted for source message."
             )
+            return {
+                "status": "rejected",
+                "error_code": "memory_proposal_conflict",
+            }
+        except (AgentJobRepositoryError, AgentJobStateError):
+            logger.exception(
+                "Agent Col memory job queue failed for source message."
+            )
+            return {
+                "status": "rejected",
+                "error_code": "memory_job_unavailable",
+            }
+        except ValueError:
             return {
                 "status": "rejected",
                 "error_code": "invalid_memory_candidate",
@@ -536,61 +616,27 @@ def create_propose_memory_signal_tool(
             MemoryProposalConflictError,
             MemoryProposalOriginConflictError,
         ):
-            await _try_fail_memory_agent_job(
-                agent_job_repository=agent_job_repository,
-                job=job,
-                lease_owner=lease_owner,
-                error_code="memory_proposal_conflict",
-            )
             return {
                 "status": "rejected",
                 "error_code": "memory_proposal_conflict",
             }
         except MemorySignalAlreadyActiveError:
-            await _try_fail_memory_agent_job(
-                agent_job_repository=agent_job_repository,
-                job=job,
-                lease_owner=lease_owner,
-                error_code="memory_signal_already_active",
-            )
             return {
                 "status": "rejected",
                 "error_code": "memory_signal_already_active",
             }
         except (ChatTurnOwnershipError, ChatTurnStateError):
-            await _try_fail_memory_agent_job(
-                agent_job_repository=agent_job_repository,
-                job=job,
-                lease_owner=lease_owner,
-                error_code="memory_turn_conflict",
-            )
             return {
                 "status": "rejected",
                 "error_code": "memory_turn_conflict",
             }
         if isinstance(result, NaturalMemoryProposalResult):
-            await _try_complete_memory_agent_job(
-                agent_job_repository=agent_job_repository,
-                job=job,
-                lease_owner=lease_owner,
-                result_refs={"proposal_id": result.proposal.proposal_id},
-                message="Memory proposal created.",
-            )
             return {
                 "status": "pending",
                 "action": result.action.model_dump(mode="json"),
                 "memory_proposal": result.proposal.model_dump(mode="json"),
             }
         if isinstance(result, NaturalMemoryClarificationResult):
-            await _try_complete_memory_agent_job(
-                agent_job_repository=agent_job_repository,
-                job=job,
-                lease_owner=lease_owner,
-                result_refs={
-                    "clarification_id": result.clarification.clarification_id
-                },
-                message="Memory clarification created.",
-            )
             return {
                 "status": "clarification_required",
                 "memory_clarification": result.clarification.model_dump(

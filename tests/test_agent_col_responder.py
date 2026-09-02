@@ -49,9 +49,11 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool(
         memory_service,
         *,
         agent_job_repository=None,
+        memory_job_dispatcher=None,
     ):
         captured["memory_service"] = memory_service
         captured["agent_job_repository"] = agent_job_repository
+        captured["memory_job_dispatcher"] = memory_job_dispatcher
         return FunctionTool(memory_tool)
 
     monkeypatch.setattr(
@@ -62,10 +64,12 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool(
 
     service = object()
     repository = object()
+    dispatcher = object()
     app = agent_col_responder.create_responder_app(
         vertex_settings=VERTEX_SETTINGS,
         memory_service=service,
         agent_job_repository=repository,
+        memory_job_dispatcher=dispatcher,
     )
 
     assert tuple(tool.name for tool in app.root_agent.tools) == (
@@ -74,6 +78,7 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool(
     assert captured == {
         "memory_service": service,
         "agent_job_repository": repository,
+        "memory_job_dispatcher": dispatcher,
     }
     assert tuple(agent.name for agent in app.root_agent.sub_agents) == ()
     cognitive_names = {

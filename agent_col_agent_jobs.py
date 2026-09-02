@@ -35,6 +35,11 @@ AgentJobEventType: TypeAlias = Literal[
     "failed",
     "cancelled",
 ]
+AgentJobReportStatus: TypeAlias = Literal[
+    "completed",
+    "failed",
+    "cancelled",
+]
 
 TERMINAL_AGENT_JOB_STATUSES: frozenset[AgentJobStatus] = frozenset(
     {"completed", "failed", "cancelled"}
@@ -45,14 +50,21 @@ _RECEIPT_ACTION_KINDS = frozenset(
 _PRIVATE_METADATA_KEYS = frozenset(
     {
         "credentials",
+        "job_id",
         "internal_prompt",
         "model_reasoning",
+        "owner_token",
+        "payload",
         "private_context",
+        "private_payload",
         "prompt",
         "prompt_body",
         "raw_agent_id",
         "raw_prompt",
         "service_account",
+        "session_id",
+        "source_message_id",
+        "source_turn_id",
         "tool_payload",
     }
 )
@@ -148,6 +160,37 @@ class AgentJobEvent(StrictModel):
             exclude={"public_visibility"},
             exclude_none=True,
         )
+
+
+class AgentJobReport(StrictModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    report_id: IdentifierStr
+    job_id: IdentifierStr
+    user_id: IdentifierStr
+    project_id: IdentifierStr
+    workspace_id: IdentifierStr
+    session_id: IdentifierStr
+    action_kind: AgentJobKind
+    agent_label: DisplayLabelStr
+    status: AgentJobReportStatus
+    title: DisplayLabelStr
+    summary: DisplayLabelStr
+    public_resource_label: DisplayLabelStr | None = None
+    public_metadata: dict[str, str | int | float | bool | None] = Field(
+        default_factory=dict
+    )
+    created_at: datetime
+
+    @field_validator("public_metadata", mode="before")
+    @classmethod
+    def validate_public_metadata(cls, value: object) -> object:
+        if value is None:
+            return {}
+        if not isinstance(value, Mapping):
+            raise ValueError("public_metadata must be an object.")
+        _reject_private_metadata_keys(value)
+        return value
 
 
 def transition_agent_job(

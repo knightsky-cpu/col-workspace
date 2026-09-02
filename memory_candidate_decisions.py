@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, TypeAdapter, field_validator, model_validator
@@ -281,13 +282,41 @@ _NATURAL_DECISION_TYPES = (
     UnsupportedDecision,
     ProhibitedDecision,
 )
+_PROVIDER_CATEGORY_ALIASES = {
+    "collaboration_preferences": "user_requested_memory",
+}
+
+
+def _normalize_provider_aliases(value: object) -> object:
+    if not isinstance(value, Mapping):
+        return value
+    normalized = dict(value)
+    if (
+        normalized.get("kind") == "profile_candidate"
+        and normalized.get("category") in _PROVIDER_CATEGORY_ALIASES
+    ):
+        normalized["category"] = _PROVIDER_CATEGORY_ALIASES[
+            normalized["category"]
+        ]
+        return normalized
+    if normalized.get("kind") == "clarify":
+        candidates = normalized.get("candidates")
+        if isinstance(candidates, list):
+            normalized["candidates"] = [
+                _normalize_provider_aliases(candidate)
+                for candidate in candidates
+            ]
+        return normalized
+    return value
 
 
 def validate_provider_natural_memory_decision(
     value: object,
 ) -> NaturalMemoryDecision:
     """Convert one untrusted provider decision to its canonical model."""
-    provider_decision = _PROVIDER_DECISION_ADAPTER.validate_python(value)
+    provider_decision = _PROVIDER_DECISION_ADAPTER.validate_python(
+        _normalize_provider_aliases(value)
+    )
     return _NATURAL_DECISION_ADAPTER.validate_python(
         provider_decision.model_dump(mode="python")
     )

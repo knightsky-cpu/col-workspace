@@ -735,6 +735,22 @@ export function listAgentJobs(
   );
 }
 
+export function listAgentJobReports(
+  userId,
+  projectId,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/agent/reports${buildAgentJobQuery(options)}`,
+    { method: "GET", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
 export function createWorkspace(
   userId,
   request,

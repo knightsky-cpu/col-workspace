@@ -6,7 +6,12 @@ from typing import Any
 import pytest
 
 import agent_job_repository
-from agent_col_agent_jobs import AgentJob, AgentJobEvent, AgentJobFailure
+from agent_col_agent_jobs import (
+    AgentJob,
+    AgentJobEvent,
+    AgentJobFailure,
+    AgentJobReport,
+)
 from agent_job_payloads import AgentJobPayload
 from agent_job_repository import (
     AgentJobConflictError,
@@ -274,6 +279,26 @@ def make_payload(**overrides: object) -> AgentJobPayload:
     return AgentJobPayload(**values)
 
 
+def make_report(**overrides: object) -> AgentJobReport:
+    values: dict[str, object] = {
+        "report_id": "report-1",
+        "job_id": "job-1",
+        "user_id": "user-1",
+        "project_id": "project-1",
+        "workspace_id": "workspace-1",
+        "session_id": "session-1",
+        "action_kind": "propose_memory_signal",
+        "agent_label": "Memory Analyst",
+        "status": "completed",
+        "title": "Memory proposal pending review",
+        "summary": "A memory proposal was created and is pending your review.",
+        "public_resource_label": "Prefers C over Python",
+        "created_at": NOW,
+    }
+    values.update(overrides)
+    return AgentJobReport(**values)
+
+
 async def collect(async_iterable: Any) -> list[Any]:
     return [item async for item in async_iterable]
 
@@ -478,6 +503,70 @@ async def test_list_jobs_filters_by_project_and_session(
 
 
 @pytest.mark.asyncio
+async def test_reports_are_idempotent_and_listed_chronologically(
+    repository: AgentJobRepository,
+) -> None:
+    first = make_report(report_id="report-1", created_at=NOW)
+    second = make_report(
+        report_id="report-2",
+        job_id="job-2",
+        title="Artifact created",
+        summary="The artifact was created.",
+        public_resource_label="check_server_status.sh",
+        created_at=NOW + timedelta(seconds=5),
+    )
+
+    assert await repository.create_report(first) == first
+    assert await repository.create_report(first) == first
+    assert await repository.create_report(second) == second
+
+    reports = await collect(
+        repository.list_reports(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            project_id="project-1",
+            session_id="session-1",
+        )
+    )
+
+    assert reports == [first, second]
+
+
+@pytest.mark.asyncio
+async def test_list_reports_filters_by_project_and_session(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.create_report(make_report(report_id="report-1"))
+    await repository.create_report(
+        make_report(
+            report_id="report-2",
+            job_id="job-2",
+            session_id="session-2",
+            created_at=NOW + timedelta(seconds=5),
+        )
+    )
+    await repository.create_report(
+        make_report(
+            report_id="report-3",
+            job_id="job-3",
+            project_id="project-2",
+            created_at=NOW + timedelta(seconds=10),
+        )
+    )
+
+    reports = await collect(
+        repository.list_reports(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            project_id="project-1",
+            session_id="session-1",
+        )
+    )
+
+    assert [report.report_id for report in reports] == ["report-1"]
+
+
+@pytest.mark.asyncio
 async def test_lease_next_queued_job_moves_oldest_job_to_running(
     repository: AgentJobRepository,
 ) -> None:
@@ -504,6 +593,49 @@ async def test_lease_next_queued_job_moves_oldest_job_to_running(
     assert leased.status == "running"
     assert leased.lease_owner == "worker-1"
     assert leased.updated_at == NOW + timedelta(seconds=10)
+
+
+@pytest.mark.asyncio
+async def test_lease_next_queued_job_filters_by_action_kind(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(
+        make_job(
+            job_id="artifact-job",
+            idempotency_key="artifact-idem",
+        )
+    )
+    await repository.enqueue_job(
+        make_job(
+            job_id="memory-job",
+            idempotency_key="memory-idem",
+            action_kind="propose_memory_signal",
+            display_label="Memory proposal: response_length",
+            agent_label="Memory Analyst",
+            created_at=NOW + timedelta(seconds=5),
+            updated_at=NOW + timedelta(seconds=5),
+        )
+    )
+
+    leased = await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="memory-worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW + timedelta(seconds=10),
+        action_kind="propose_memory_signal",
+    )
+
+    assert leased is not None
+    assert leased.job_id == "memory-job"
+    assert leased.action_kind == "propose_memory_signal"
+    assert leased.status == "running"
+    artifact_job = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="artifact-job",
+    )
+    assert artifact_job.status == "queued"
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ import {
   getChatSession,
   inspectMemory,
   listAgentJobs,
+  listAgentJobReports,
   listArtifacts,
   listChatSessions,
   listBlueprintFeedback,
@@ -241,14 +242,14 @@ test("streamAgentJobs reads public snapshot events", async () => {
       calls.push([path, init]);
       return sseResponse([
         "event: snapshot\n",
-        'data: {"agent_job_contract_version":"1.0","jobs":[{"job_id":"job-1","status":"running"}]}\n\n',
+        'data: {"agent_job_contract_version":"1.0","jobs":[{"job_number":"001","status":"running"}]}\n\n',
       ]);
     },
   );
 
   assert.deepEqual(snapshots, [{
     agent_job_contract_version: "1.0",
-    jobs: [{ job_id: "job-1", status: "running" }],
+    jobs: [{ job_number: "001", status: "running" }],
   }]);
   assert.equal(
     calls[0][0],
@@ -256,6 +257,56 @@ test("streamAgentJobs reads public snapshot events", async () => {
   );
   assert.equal(calls[0][1].method, "GET");
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+});
+
+test("listAgentJobReports fetches public report projection without internal identifiers", async () => {
+  const calls = [];
+  const response = await listAgentJobReports(
+    "user-1",
+    "project-1",
+    {
+      authToken: "google-id-token",
+      limit: 30,
+      session_id: "session-1",
+    },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        agent_job_report_contract_version: "1.0",
+        reports: [{
+          report_number: "001",
+          job_number: "001",
+          action_kind: "propose_memory_signal",
+          agent_label: "Memory Analyst",
+          status: "completed",
+          title: "Memory proposal pending review",
+          summary: "A memory proposal was created and is pending your review.",
+          public_resource_label: "Prefers C over Python",
+          created_at: "2026-09-02T10:00:00Z",
+        }],
+      });
+    },
+  );
+
+  assert.deepEqual(response.reports[0], {
+    report_number: "001",
+    job_number: "001",
+    action_kind: "propose_memory_signal",
+    agent_label: "Memory Analyst",
+    status: "completed",
+    title: "Memory proposal pending review",
+    summary: "A memory proposal was created and is pending your review.",
+    public_resource_label: "Prefers C over Python",
+    created_at: "2026-09-02T10:00:00Z",
+  });
+  assert.equal(
+    calls[0][0],
+    "/api/users/user-1/projects/project-1/agent/reports?limit=30&session_id=session-1",
+  );
+  assert.equal(calls[0][1].method, "GET");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+  assert.equal(JSON.stringify(response).includes("job-"), false);
+  assert.equal(JSON.stringify(response).includes("session-"), false);
 });
 
 test("transcribeSpeechAudio posts raw audio with the recording MIME type", async () => {

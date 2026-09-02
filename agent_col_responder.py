@@ -1,7 +1,10 @@
+from collections.abc import Callable
+
 from google.adk import Agent
 from google.adk.apps import App
 from google.adk.models import Gemini
 
+from agent_col_agent_jobs import AgentJob
 from collaborative_note_service import CollaborativeNoteService
 from collaborative_note_tool import create_propose_collaborative_note_tool
 from agent_job_repository import AgentJobRepository
@@ -306,6 +309,7 @@ def create_responder_app(
     memory_service: TrustedMemoryService | None = None,
     collaborative_note_service: CollaborativeNoteService | None = None,
     agent_job_repository: AgentJobRepository | None = None,
+    memory_job_dispatcher: Callable[[AgentJob], None] | None = None,
 ) -> App:
     """Return Agent_Col with no model-visible cognitive experts."""
     tools = []
@@ -314,6 +318,7 @@ def create_responder_app(
             create_propose_memory_signal_tool(
                 memory_service,
                 agent_job_repository=agent_job_repository,
+                memory_job_dispatcher=memory_job_dispatcher,
             )
         )
     if collaborative_note_service is not None:

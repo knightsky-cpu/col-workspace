@@ -49,24 +49,24 @@ test("renderAgentsPanel groups public jobs by lifecycle and hides private fields
   renderAgentsPanel(container, {
     status: "loaded",
     jobs: [
-      {
-        job_id: "agent-job--secret-1",
-        status: "running",
+	      {
+	        job_number: "001",
+	        status: "running",
         task_type: "create_artifact",
         display_label: "Artifact Builder",
         description: "Creating deployment artifact",
         started_at: "2026-09-01T12:00:00Z",
         internal_prompt: "do not show this",
       },
-      {
-        job_id: "agent-job--secret-2",
+	      {
+	        job_number: "002",
         status: "queued",
         task_type: "write_docs",
         display_label: "Doc Writer",
         description: "Updating architecture document",
       },
-      {
-        job_id: "agent-job--secret-3",
+	      {
+	        job_number: "003",
         status: "completed",
         task_type: "scan_workspace",
         display_label: "Repo Scanner",
@@ -90,9 +90,10 @@ test("renderAgentsPanel groups public jobs by lifecycle and hides private fields
   assert.match(container.textContent, /Repo Scanner/);
   assert.match(container.textContent, /Scanned workspace structure/);
   assert.equal(summary.textContent, "1 active · 1 queued");
-  assert.doesNotMatch(container.textContent, /agent-job--secret/);
-  assert.doesNotMatch(container.textContent, /do not show this/);
-});
+	  assert.doesNotMatch(container.textContent, /agent-job--secret/);
+	  assert.doesNotMatch(container.textContent, /session--/);
+	  assert.doesNotMatch(container.textContent, /do not show this/);
+	});
 
 test("renderAgentsPanel shows a compact empty state from backend-authoritative data", () => {
   const container = node();

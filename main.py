@@ -92,6 +92,8 @@ from agent_col_agent_jobs import (
     AgentJobEventType,
     AgentJobFailure,
     AgentJobKind,
+    AgentJobReport,
+    AgentJobReportStatus,
     AgentJobStatus,
 )
 from agent_job_repository import (
@@ -175,6 +177,7 @@ from database import (
 )
 from memory_context import MemoryContextRenderer
 from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
+from memory_proposal_job_worker import MemoryProposalJobWorker
 from memory_proposals import ProposalTurnLease
 from preference_learning_service import (
     PreferenceLearningCommand,
@@ -357,12 +360,9 @@ class AgentJobFailurePublic(BaseModel):
 class AgentJobPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    job_id: IdentifierStr
+    job_number: str = Field(pattern=r"^\d{3}$")
     user_id: IdentifierStr
     project_id: IdentifierStr
-    workspace_id: IdentifierStr
-    session_id: IdentifierStr
-    source_turn_id: IdentifierStr
     action_kind: AgentJobKind
     status: AgentJobStatus
     display_label: DisplayLabelStr
@@ -371,9 +371,7 @@ class AgentJobPublic(BaseModel):
     updated_at: datetime
     attempt_count: int = Field(ge=1)
     lease_expires_at: datetime | None = None
-    result_refs: dict[str, IdentifierStr] = Field(default_factory=dict)
     failure_summary: AgentJobFailurePublic | None = None
-    retry_of_job_id: IdentifierStr | None = None
 
 
 class AgentJobListResponse(BaseModel):
@@ -393,8 +391,7 @@ class AgentJobDetailResponse(BaseModel):
 class AgentJobEventPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    event_id: IdentifierStr
-    job_id: IdentifierStr
+    event_number: str = Field(pattern=r"^\d{3}$")
     event_type: AgentJobEventType
     message: DisplayLabelStr
     created_at: datetime
@@ -408,8 +405,28 @@ class AgentJobEventListResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_job_contract_version: Literal["1.0"] = "1.0"
-    job_id: IdentifierStr
     events: list[AgentJobEventPublic] = Field(max_length=100)
+
+
+class AgentJobReportPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_number: str = Field(pattern=r"^\d{3}$")
+    job_number: str = Field(pattern=r"^\d{3}$")
+    action_kind: AgentJobKind
+    agent_label: DisplayLabelStr
+    status: AgentJobReportStatus
+    title: DisplayLabelStr
+    summary: DisplayLabelStr
+    public_resource_label: DisplayLabelStr | None = None
+    created_at: datetime
+
+
+class AgentJobReportListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    agent_job_report_contract_version: Literal["1.0"] = "1.0"
+    reports: list[AgentJobReportPublic] = Field(max_length=100)
 
 
 class InMemoryRateLimiter:
@@ -808,6 +825,7 @@ def _public_agent_job_failure(
 def _public_agent_job(
     *,
     job: AgentJob,
+    job_number: str,
     effective_user_id: str,
     public_user_id: str,
     effective_project_id: str,
@@ -823,16 +841,13 @@ def _public_agent_job(
             detail="Authenticated user does not own this response.",
         )
     return AgentJobPublic(
-        job_id=job.job_id,
+        job_number=job_number,
         user_id=_public_user_id_for_response(
             internal_user_id=job.user_id,
             effective_user_id=effective_user_id,
             public_user_id=public_user_id,
         ),
         project_id=job.project_id,
-        workspace_id=job.workspace_id,
-        session_id=job.session_id,
-        source_turn_id=job.source_turn_id,
         action_kind=job.action_kind,
         status=job.status,
         display_label=job.display_label,
@@ -841,22 +856,57 @@ def _public_agent_job(
         updated_at=job.updated_at,
         attempt_count=job.attempt_count,
         lease_expires_at=job.lease_expires_at,
-        result_refs=job.result_refs,
         failure_summary=_public_agent_job_failure(job.failure_summary),
-        retry_of_job_id=job.retry_of_job_id,
     )
 
 
-def _public_agent_job_event(event: AgentJobEvent) -> AgentJobEventPublic:
+def _public_agent_job_event(
+    event: AgentJobEvent,
+    *,
+    event_number: str,
+) -> AgentJobEventPublic:
     return AgentJobEventPublic(
-        event_id=event.event_id,
-        job_id=event.job_id,
+        event_number=event_number,
         event_type=event.event_type,
         message=event.message,
         created_at=event.created_at,
         status=event.status,
         metadata=event.metadata,
     )
+
+
+def _public_agent_job_report(
+    *,
+    report: AgentJobReport,
+    report_number: str,
+    job_number: str,
+    effective_project_id: str,
+) -> AgentJobReportPublic:
+    if report.project_id != effective_project_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user does not own this response.",
+        )
+    if report.workspace_id != effective_project_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authenticated user does not own this response.",
+        )
+    return AgentJobReportPublic(
+        report_number=report_number,
+        job_number=job_number,
+        action_kind=report.action_kind,
+        agent_label=report.agent_label,
+        status=report.status,
+        title=report.title,
+        summary=report.summary,
+        public_resource_label=report.public_resource_label,
+        created_at=report.created_at,
+    )
+
+
+def _public_ordinal(index: int) -> str:
+    return f"{index + 1:03d}"
 
 
 AGENT_JOB_STREAM_POLL_SECONDS = 0.25
@@ -873,22 +923,68 @@ async def _public_agent_job_list_response(
     session_id: str | None,
     limit: int,
 ) -> AgentJobListResponse:
-    jobs = [
-        _public_agent_job(
-            job=job,
-            effective_user_id=effective_user_id,
-            public_user_id=public_user_id,
-            effective_project_id=effective_project_id,
+    jobs = []
+    index = 0
+    async for job in repository.list_jobs(
+        user_id=effective_user_id,
+        workspace_id=effective_project_id,
+        project_id=effective_project_id,
+        session_id=session_id,
+        limit=limit,
+    ):
+        jobs.append(
+            _public_agent_job(
+                job=job,
+                job_number=_public_ordinal(index),
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+                effective_project_id=effective_project_id,
+            )
         )
-        async for job in repository.list_jobs(
-            user_id=effective_user_id,
-            workspace_id=effective_project_id,
-            project_id=effective_project_id,
-            session_id=session_id,
-            limit=limit,
-        )
-    ]
+        index += 1
     return AgentJobListResponse(jobs=jobs)
+
+
+async def _public_agent_job_report_list_response(
+    *,
+    repository: object,
+    effective_user_id: str,
+    effective_project_id: str,
+    session_id: str | None,
+    limit: int,
+) -> AgentJobReportListResponse:
+    job_numbers_by_id = {}
+    job_index = 0
+    async for job in repository.list_jobs(
+        user_id=effective_user_id,
+        workspace_id=effective_project_id,
+        project_id=effective_project_id,
+        session_id=session_id,
+        limit=100,
+    ):
+        job_numbers_by_id[job.job_id] = _public_ordinal(job_index)
+        job_index += 1
+
+    reports = []
+    index = 0
+    async for report in repository.list_reports(
+        user_id=effective_user_id,
+        workspace_id=effective_project_id,
+        project_id=effective_project_id,
+        session_id=session_id,
+        limit=limit,
+    ):
+        ordinal = _public_ordinal(index)
+        reports.append(
+            _public_agent_job_report(
+                report=report,
+                report_number=ordinal,
+                job_number=job_numbers_by_id.get(report.job_id, ordinal),
+                effective_project_id=effective_project_id,
+            )
+        )
+        index += 1
+    return AgentJobReportListResponse(reports=reports)
 
 
 def _agent_job_sse_event(event: str, payload: BaseModel | dict[str, object]) -> str:
@@ -1569,6 +1665,7 @@ def _partial_failure_response(
         memory_clarifications=list(clarifications),
         collaborative_note_proposals=list(note_proposals),
         collaborative_note_events=list(note_events),
+        queued_actions=list(runtime_error.queued_actions),
         adaptations=list(runtime_error.adaptations),
     )
     if response.collaborative_note_events:
@@ -1865,6 +1962,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             feedback_ledger=database,
         )
         memory_service = TrustedMemoryService(database=database)
+        memory_job_worker = MemoryProposalJobWorker(
+            agent_job_repository=agent_job_repository,
+            memory_service=memory_service,
+        )
+        memory_job_background_tasks: set[asyncio.Task[AgentJob | None]] = set()
+
+        def dispatch_memory_job(job: AgentJob) -> None:
+            memory_job_worker.dispatch(
+                job,
+                task_set=memory_job_background_tasks,
+            )
+
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
@@ -1903,6 +2012,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 memory_service=memory_service,
                 collaborative_note_service=collaborative_note_service,
                 agent_job_repository=agent_job_repository,
+                memory_job_dispatcher=dispatch_memory_job,
             )
         )
         turn_service = AgentColTurnService(
@@ -1934,6 +2044,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.generic_artifact_generator = generate_generic_artifact
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
+    app.state.memory_job_worker = memory_job_worker
+    app.state.memory_job_background_tasks = memory_job_background_tasks
     app.state.collaborative_note_service = collaborative_note_service
     app.state.continuity_service = continuity_service
     app.state.working_state_service = working_state_service
@@ -1954,11 +2066,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         working_state_background_tasks = tuple(
             getattr(app.state, "working_state_background_tasks", set())
         )
+        memory_job_background_tasks = tuple(
+            getattr(app.state, "memory_job_background_tasks", set())
+        )
         for task in working_state_background_tasks:
+            task.cancel()
+        for task in memory_job_background_tasks:
             task.cancel()
         if working_state_background_tasks:
             await asyncio.gather(
                 *working_state_background_tasks,
+                return_exceptions=True,
+            )
+        if memory_job_background_tasks:
+            await asyncio.gather(
+                *memory_job_background_tasks,
                 return_exceptions=True,
             )
         try:
@@ -2939,6 +3061,51 @@ async def stream_agent_jobs(
 
 
 @app.get(
+    "/api/users/{user_id}/projects/{project_id}/agent/reports",
+    response_model=AgentJobReportListResponse,
+)
+async def list_agent_job_reports(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    session_id: Annotated[IdentifierStr | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> AgentJobReportListResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        repository = request.app.state.db.agent_jobs()
+        return await _public_agent_job_report_list_response(
+            repository=repository,
+            effective_user_id=effective_user_id,
+            effective_project_id=effective_project_id,
+            session_id=session_id,
+            limit=limit,
+        )
+    except (
+        AgentJobConflictError,
+        AgentJobLeaseError,
+        AgentJobNotFoundError,
+        AgentJobRepositoryError,
+        AgentJobStateError,
+        ValueError,
+    ) as exc:
+        _raise_agent_job_http_error(exc)
+
+
+@app.get(
     "/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}",
     response_model=AgentJobDetailResponse,
 )
@@ -2972,6 +3139,7 @@ async def get_agent_job(
         return AgentJobDetailResponse(
             job=_public_agent_job(
                 job=job,
+                job_number="001",
                 effective_user_id=effective_user_id,
                 public_user_id=user_id,
                 effective_project_id=effective_project_id,
@@ -3015,17 +3183,23 @@ async def list_agent_job_events(
     )
     try:
         repository = request.app.state.db.agent_jobs()
-        events = [
-            _public_agent_job_event(event)
-            async for event in repository.list_events(
-                user_id=effective_user_id,
-                workspace_id=effective_project_id,
-                job_id=job_id,
-                limit=limit,
-            )
-            if event.public_visibility
-        ]
-        return AgentJobEventListResponse(job_id=job_id, events=events)
+        events = []
+        index = 0
+        async for event in repository.list_events(
+            user_id=effective_user_id,
+            workspace_id=effective_project_id,
+            job_id=job_id,
+            limit=limit,
+        ):
+            if event.public_visibility:
+                events.append(
+                    _public_agent_job_event(
+                        event,
+                        event_number=_public_ordinal(index),
+                    )
+                )
+                index += 1
+        return AgentJobEventListResponse(events=events)
     except (
         AgentJobConflictError,
         AgentJobLeaseError,
@@ -3072,6 +3246,7 @@ async def cancel_agent_job(
         return AgentJobDetailResponse(
             job=_public_agent_job(
                 job=job,
+                job_number="001",
                 effective_user_id=effective_user_id,
                 public_user_id=user_id,
                 effective_project_id=effective_project_id,
@@ -3137,6 +3312,7 @@ async def retry_agent_job(
         return AgentJobDetailResponse(
             job=_public_agent_job(
                 job=job,
+                job_number="001",
                 effective_user_id=effective_user_id,
                 public_user_id=user_id,
                 effective_project_id=effective_project_id,
@@ -4821,6 +4997,7 @@ async def _execute_chat(
         actions=list(_merge_receipts(decision_actions, result.actions)),
         artifacts=list(result.artifacts),
         artifact_feedback=list(result.artifact_feedback),
+        queued_actions=list(result.queued_actions),
         citations=list(result.citations),
         memory_proposals=list(
             _merge_receipts(

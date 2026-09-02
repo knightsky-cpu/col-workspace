@@ -15,6 +15,7 @@ from agent_col_agent_jobs import (
     AgentJob,
     AgentJobEvent,
     AgentJobFailure,
+    AgentJobReport,
     AgentJobStatus,
     transition_agent_job,
 )
@@ -277,6 +278,7 @@ class AgentJobRepository:
         lease_owner: str,
         lease_expires_at: datetime,
         observed_at: datetime,
+        action_kind: AgentJobKind | None = None,
     ) -> AgentJob | None:
         try:
             jobs_ref = self._jobs_collection(user_id, workspace_id)
@@ -303,7 +305,14 @@ class AgentJobRepository:
                         user_id=user_id,
                         workspace_id=workspace_id,
                     )
+                    if (
+                        action_kind is not None
+                        and job.action_kind != action_kind
+                    ):
+                        continue
                     candidates.append((job.created_at, snapshot, job))
+                if not candidates:
+                    return None
                 _, snapshot, job = min(candidates, key=lambda item: item[0])
                 leased = transition_agent_job(
                     job,
@@ -645,6 +654,78 @@ class AgentJobRepository:
         except GoogleAPIError as exc:
             self._raise_firestore_error("list_events", exc)
 
+    async def create_report(self, report: AgentJobReport) -> AgentJobReport:
+        try:
+            reports_ref = self._reports_collection(
+                report.user_id,
+                report.workspace_id,
+            )
+            report_ref = reports_ref.document(report.report_id)
+            transaction = self._client.transaction()
+
+            async def create_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> AgentJobReport:
+                snapshot = await report_ref.get(transaction=transaction)
+                if snapshot.exists:
+                    stored = self._report_from_snapshot(snapshot)
+                    if stored != report:
+                        raise AgentJobConflictError(
+                            "AgentJobReport conflicts with existing report_id."
+                        )
+                    return stored
+                transaction.set(report_ref, self._report_document(report))
+                return report
+
+            run_transaction = firestore.async_transactional(
+                create_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (AgentJobConflictError, AgentJobStateError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJobReport state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("create_report", exc)
+
+    async def list_reports(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        project_id: str | None = None,
+        session_id: str | None = None,
+        limit: int = 50,
+    ) -> AsyncIterator[AgentJobReport]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+        try:
+            query = self._reports_collection(user_id, workspace_id).order_by(
+                "created_at"
+            )
+            count = 0
+            async for snapshot in query.stream():
+                report = self._report_from_snapshot(snapshot)
+                self._validate_report_scope(
+                    report,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+                if project_id is not None and report.project_id != project_id:
+                    continue
+                if session_id is not None and report.session_id != session_id:
+                    continue
+                yield report
+                count += 1
+                if count >= limit:
+                    return
+        except (AgentJobStateError, ValueError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJobReport state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_reports", exc)
+
     async def _finish_leased_job(
         self,
         *,
@@ -723,6 +804,15 @@ class AgentJobRepository:
             .document("payload")
         )
 
+    def _reports_collection(self, user_id: str, workspace_id: str):
+        return (
+            self._client.collection("users")
+            .document(user_id)
+            .collection("workspaces")
+            .document(workspace_id)
+            .collection("agent_job_reports")
+        )
+
     @staticmethod
     def _available_scoped_job(
         snapshot: object,
@@ -768,6 +858,16 @@ class AgentJobRepository:
             raise AgentJobStateError("Stored AgentJob owner scope is invalid.")
 
     @staticmethod
+    def _validate_report_scope(
+        report: AgentJobReport,
+        *,
+        user_id: str,
+        workspace_id: str,
+    ) -> None:
+        if report.user_id != user_id or report.workspace_id != workspace_id:
+            raise AgentJobStateError("Stored AgentJobReport owner scope is invalid.")
+
+    @staticmethod
     def _job_document(job: AgentJob) -> dict[str, object]:
         return job.model_dump(mode="python")
 
@@ -778,6 +878,10 @@ class AgentJobRepository:
     @staticmethod
     def _event_document(event: AgentJobEvent) -> dict[str, object]:
         return event.model_dump(mode="python")
+
+    @staticmethod
+    def _report_document(report: AgentJobReport) -> dict[str, object]:
+        return report.model_dump(mode="python")
 
     @staticmethod
     def _job_from_snapshot(snapshot: object) -> AgentJob:
@@ -792,6 +896,13 @@ class AgentJobRepository:
         if document is None:
             raise AgentJobNotFoundError("AgentJobEvent is unavailable.")
         return AgentJobEvent.model_validate(document)
+
+    @staticmethod
+    def _report_from_snapshot(snapshot: object) -> AgentJobReport:
+        document = snapshot.to_dict()
+        if document is None:
+            raise AgentJobNotFoundError("AgentJobReport is unavailable.")
+        return AgentJobReport.model_validate(document)
 
     @staticmethod
     def _payload_from_snapshot(snapshot: object) -> AgentJobPayload:

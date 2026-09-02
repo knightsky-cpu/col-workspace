@@ -1909,8 +1909,8 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
   const agentJobResponses = [
     {
       agent_job_contract_version: "1.0",
-      jobs: [{
-        job_id: "job-queued",
+	      jobs: [{
+	        job_number: "001",
         status: "queued",
         agent_label: "Doc Writer",
         description: "Updating architecture document",
@@ -1919,8 +1919,8 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
     },
     {
       agent_job_contract_version: "1.0",
-      jobs: [{
-        job_id: "job-running",
+	      jobs: [{
+	        job_number: "001",
         status: "running",
         agent_label: "Doc Writer",
         description: "Updating architecture document",
@@ -1930,8 +1930,8 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
     },
     {
       agent_job_contract_version: "1.0",
-      jobs: [{
-        job_id: "job-completed",
+	      jobs: [{
+	        job_number: "001",
         status: "completed",
         agent_label: "Doc Writer",
         result_description: "Architecture document updated",

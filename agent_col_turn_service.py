@@ -83,6 +83,7 @@ from schemas import (
     ContinuitySourceReceipt,
     CitationReference,
     MemoryClarificationReceipt,
+    QueuedActionReceipt,
     VersionedAdaptationReceipt,
     VersionedMemoryProposalReceipt,
 )
@@ -210,6 +211,7 @@ class AgentColTurnResult:
     memory_clarifications: tuple[MemoryClarificationReceipt, ...] = ()
     collaborative_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
     collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = ()
+    queued_actions: tuple[QueuedActionReceipt, ...] = ()
     continuity_receipts: tuple[ContinuitySourceReceipt, ...] = ()
     continuity_choices: tuple[ContinuityChoice, ...] = ()
     adaptations: tuple[VersionedAdaptationReceipt, ...] = ()
@@ -254,6 +256,7 @@ class AgentColTurnServiceError(RuntimeError):
             CollaborativeNoteProposal, ...
         ] = (),
         collaborative_note_events: tuple[CollaborativeNoteEvent, ...] = (),
+        queued_actions: tuple[QueuedActionReceipt, ...] = (),
         continuity_receipts: tuple[ContinuitySourceReceipt, ...] = (),
         continuity_choices: tuple[ContinuityChoice, ...] = (),
         adaptations: tuple[VersionedAdaptationReceipt, ...] = (),
@@ -267,6 +270,7 @@ class AgentColTurnServiceError(RuntimeError):
         self.memory_clarifications = memory_clarifications
         self.collaborative_note_proposals = collaborative_note_proposals
         self.collaborative_note_events = collaborative_note_events
+        self.queued_actions = queued_actions
         self.continuity_receipts = continuity_receipts
         self.continuity_choices = continuity_choices
         self.adaptations = adaptations
@@ -334,6 +338,7 @@ def _log_turn_pipeline(
     memory_clarifications: tuple[object, ...] = (),
     collaborative_note_proposals: tuple[object, ...] = (),
     collaborative_note_events: tuple[object, ...] = (),
+    queued_actions: tuple[object, ...] = (),
     continuity_receipts: tuple[object, ...] = (),
     continuity_choices: tuple[object, ...] = (),
     adaptations: tuple[object, ...] = (),
@@ -344,7 +349,8 @@ def _log_turn_pipeline(
             "error=%s actions=%d artifacts=%d artifact_feedback=%d "
             "memory_proposals=%d memory_clarifications=%d "
             "collaborative_note_proposals=%d collaborative_note_events=%d "
-            "continuity_receipts=%d continuity_choices=%d adaptations=%d"
+            "queued_actions=%d continuity_receipts=%d continuity_choices=%d "
+            "adaptations=%d"
         ),
         stage,
         _route_label(route),
@@ -357,6 +363,7 @@ def _log_turn_pipeline(
         len(memory_clarifications),
         len(collaborative_note_proposals),
         len(collaborative_note_events),
+        len(queued_actions),
         len(continuity_receipts),
         len(continuity_choices),
         len(adaptations),
@@ -616,6 +623,7 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                queued_actions=exc.queued_actions,
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
                 chat_turn_claim=execution.claim,
@@ -641,6 +649,7 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                queued_actions=exc.queued_actions,
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
                 chat_turn_claim=execution.claim,
@@ -666,6 +675,7 @@ class AgentColTurnService:
                 command.precompleted_collaborative_note_events,
                 result.collaborative_note_events,
             ),
+            queued_actions=result.queued_actions,
             continuity_receipts=command.continuity_receipts,
             continuity_choices=command.continuity_choices,
             chat_turn_claim=execution.claim,
@@ -983,6 +993,7 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                queued_actions=exc.queued_actions,
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
                 adaptations=execution.adaptations,
@@ -1002,6 +1013,7 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                queued_actions=exc.queued_actions,
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
                 adaptations=execution.adaptations,
@@ -1063,6 +1075,7 @@ class AgentColTurnService:
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
             ),
+            queued_actions=result.queued_actions,
             continuity_receipts=command.continuity_receipts,
             continuity_choices=command.continuity_choices,
             adaptations=execution.adaptations,
@@ -1445,6 +1458,7 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                queued_actions=exc.queued_actions,
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
             )
@@ -1475,6 +1489,7 @@ class AgentColTurnService:
                     command.precompleted_collaborative_note_events,
                     exc.collaborative_note_events,
                 ),
+                queued_actions=exc.queued_actions,
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
             ) from exc
@@ -1566,6 +1581,7 @@ class AgentColTurnService:
                 command.precompleted_collaborative_note_events,
                 result.collaborative_note_events,
             ),
+            queued_actions=result.queued_actions,
             continuity_receipts=command.continuity_receipts,
             continuity_choices=command.continuity_choices,
         )
