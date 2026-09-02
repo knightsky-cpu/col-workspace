@@ -18,6 +18,7 @@ from agent_col_agent_jobs import (
     AgentJobStatus,
     transition_agent_job,
 )
+from agent_job_payloads import AgentJobPayload
 
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,76 @@ class AgentJobRepository:
         except GoogleAPIError as exc:
             self._raise_firestore_error("enqueue_job", exc)
 
+    async def enqueue_job_with_payload(
+        self,
+        job: AgentJob,
+        payload: AgentJobPayload,
+    ) -> AgentJob:
+        if job.status != "queued":
+            raise AgentJobStateError("Only queued AgentJobs can be enqueued.")
+        self._validate_payload_matches_job(payload, job)
+        try:
+            jobs_ref = self._jobs_collection(job.user_id, job.workspace_id)
+            job_ref = jobs_ref.document(job.job_id)
+            payload_ref = self._payload_ref(
+                job.user_id,
+                job.workspace_id,
+                job.job_id,
+            )
+            transaction = self._client.transaction()
+
+            async def enqueue_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> AgentJob:
+                snapshot = await job_ref.get(transaction=transaction)
+                payload_snapshot = await payload_ref.get(transaction=transaction)
+                if snapshot.exists:
+                    stored = self._job_from_snapshot(snapshot)
+                    if stored != job:
+                        raise AgentJobConflictError(
+                            "AgentJob conflicts with existing job_id."
+                        )
+                    if not payload_snapshot.exists:
+                        raise AgentJobConflictError(
+                            "AgentJob payload is missing for existing job."
+                        )
+                    stored_payload = self._payload_from_snapshot(
+                        payload_snapshot
+                    )
+                    if stored_payload != payload:
+                        raise AgentJobConflictError(
+                            "AgentJobPayload conflicts with existing job."
+                        )
+                    return stored
+                existing = [
+                    self._job_from_snapshot(match)
+                    async for match in jobs_ref.where(
+                        "idempotency_key",
+                        "==",
+                        job.idempotency_key,
+                    )
+                    .limit(1)
+                    .stream(transaction=transaction)
+                ]
+                if existing:
+                    raise AgentJobConflictError(
+                        "AgentJob conflicts with existing idempotency key."
+                    )
+                transaction.set(job_ref, self._job_document(job))
+                transaction.set(payload_ref, self._payload_document(payload))
+                return job
+
+            run_transaction = firestore.async_transactional(
+                enqueue_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (AgentJobConflictError, AgentJobStateError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("enqueue_job_with_payload", exc)
+
     async def get_job(
         self,
         *,
@@ -124,6 +195,41 @@ class AgentJobRepository:
             raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
         except GoogleAPIError as exc:
             self._raise_firestore_error("get_job", exc)
+
+    async def get_job_payload(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+    ) -> AgentJobPayload:
+        try:
+            job_snapshot = await self._job_ref(
+                user_id,
+                workspace_id,
+                job_id,
+            ).get()
+            job = self._available_scoped_job(
+                job_snapshot,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            payload_snapshot = await self._payload_ref(
+                user_id,
+                workspace_id,
+                job_id,
+            ).get()
+            payload = self._payload_from_snapshot(payload_snapshot)
+            self._validate_payload_matches_job(payload, job)
+            return payload
+        except (AgentJobNotFoundError, AgentJobStateError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError(
+                "Stored AgentJobPayload state is invalid."
+            ) from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("get_job_payload", exc)
 
     async def list_jobs(
         self,
@@ -610,6 +716,13 @@ class AgentJobRepository:
     def _job_ref(self, user_id: str, workspace_id: str, job_id: str):
         return self._jobs_collection(user_id, workspace_id).document(job_id)
 
+    def _payload_ref(self, user_id: str, workspace_id: str, job_id: str):
+        return (
+            self._job_ref(user_id, workspace_id, job_id)
+            .collection("private_payloads")
+            .document("payload")
+        )
+
     @staticmethod
     def _available_scoped_job(
         snapshot: object,
@@ -659,6 +772,10 @@ class AgentJobRepository:
         return job.model_dump(mode="python")
 
     @staticmethod
+    def _payload_document(payload: AgentJobPayload) -> dict[str, object]:
+        return payload.model_dump(mode="python")
+
+    @staticmethod
     def _event_document(event: AgentJobEvent) -> dict[str, object]:
         return event.model_dump(mode="python")
 
@@ -675,6 +792,32 @@ class AgentJobRepository:
         if document is None:
             raise AgentJobNotFoundError("AgentJobEvent is unavailable.")
         return AgentJobEvent.model_validate(document)
+
+    @staticmethod
+    def _payload_from_snapshot(snapshot: object) -> AgentJobPayload:
+        document = snapshot.to_dict()
+        if document is None:
+            raise AgentJobNotFoundError("AgentJobPayload is unavailable.")
+        return AgentJobPayload.model_validate(document)
+
+    @staticmethod
+    def _validate_payload_matches_job(
+        payload: AgentJobPayload,
+        job: AgentJob,
+    ) -> None:
+        if (
+            payload.job_id != job.job_id
+            or payload.user_id != job.user_id
+            or payload.project_id != job.project_id
+            or payload.workspace_id != job.workspace_id
+            or payload.session_id != job.session_id
+            or payload.source_turn_id != job.source_turn_id
+            or payload.source_message_id != job.source_message_id
+            or payload.action_kind != job.action_kind
+        ):
+            raise AgentJobStateError(
+                "AgentJobPayload owner scope does not match AgentJob."
+            )
 
     @staticmethod
     def _raise_firestore_error(

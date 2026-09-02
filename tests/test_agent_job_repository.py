@@ -7,6 +7,7 @@ import pytest
 
 import agent_job_repository
 from agent_col_agent_jobs import AgentJob, AgentJobEvent, AgentJobFailure
+from agent_job_payloads import AgentJobPayload
 from agent_job_repository import (
     AgentJobConflictError,
     AgentJobLeaseError,
@@ -252,6 +253,27 @@ def make_event(**overrides: object) -> AgentJobEvent:
     return AgentJobEvent(**values)
 
 
+def make_payload(**overrides: object) -> AgentJobPayload:
+    values: dict[str, object] = {
+        "job_id": "job-1",
+        "user_id": "user-1",
+        "project_id": "project-1",
+        "workspace_id": "workspace-1",
+        "session_id": "session-1",
+        "source_turn_id": "turn-1",
+        "source_message_id": "message-1",
+        "action_kind": "create_artifact",
+        "created_at": NOW,
+        "payload": {
+            "artifact_family": "script",
+            "filename": "repo_helper.sh",
+            "source_text": "Build a Bash repository helper.",
+        },
+    }
+    values.update(overrides)
+    return AgentJobPayload(**values)
+
+
 async def collect(async_iterable: Any) -> list[Any]:
     return [item async for item in async_iterable]
 
@@ -294,6 +316,107 @@ async def test_enqueue_job_rejects_idempotency_conflict(
                 job_id="job-2",
                 display_label="Create different artifact",
             )
+        )
+
+
+@pytest.mark.asyncio
+async def test_enqueue_job_with_payload_persists_private_payload_without_public_projection(
+    repository: AgentJobRepository,
+) -> None:
+    job = make_job()
+    payload = make_payload()
+
+    created = await repository.enqueue_job_with_payload(job, payload)
+
+    assert created == job
+    assert await repository.get_job_payload(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    ) == payload
+    public_job = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    )
+    public_document = public_job.model_dump(mode="python")
+    assert "payload" not in public_document
+    assert "private_payload" not in public_document
+    assert "tool_payload" not in public_document
+
+
+@pytest.mark.asyncio
+async def test_enqueue_job_with_payload_replays_same_job_and_payload(
+    repository: AgentJobRepository,
+) -> None:
+    job = make_job()
+    payload = make_payload()
+
+    created = await repository.enqueue_job_with_payload(job, payload)
+    replayed = await repository.enqueue_job_with_payload(job, payload)
+
+    assert created == job
+    assert replayed == job
+    assert await repository.get_job_payload(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    ) == payload
+
+
+@pytest.mark.asyncio
+async def test_enqueue_job_with_payload_rejects_private_payload_conflict(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job_with_payload(make_job(), make_payload())
+
+    with pytest.raises(AgentJobConflictError):
+        await repository.enqueue_job_with_payload(
+            make_job(
+                job_id="job-2",
+                display_label="Create different artifact",
+            ),
+            make_payload(
+                job_id="job-2",
+                payload={
+                    "artifact_family": "script",
+                    "filename": "different.sh",
+                    "source_text": "Build a different script.",
+                },
+            ),
+        )
+
+    with pytest.raises(AgentJobConflictError):
+        await repository.enqueue_job_with_payload(
+            make_job(),
+            make_payload(
+                payload={
+                    "artifact_family": "script",
+                    "filename": "different.sh",
+                    "source_text": "Build a different script.",
+                },
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_job_payload_rejects_missing_or_mismatched_owner(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job_with_payload(make_job(), make_payload())
+
+    with pytest.raises(AgentJobNotFoundError):
+        await repository.get_job_payload(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="missing",
+        )
+
+    with pytest.raises(AgentJobNotFoundError):
+        await repository.get_job_payload(
+            user_id="user-2",
+            workspace_id="workspace-1",
+            job_id="job-1",
         )
 
 
