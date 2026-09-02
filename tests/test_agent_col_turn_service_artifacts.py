@@ -11,6 +11,7 @@ from agent_col_artifact_executor import (
 )
 from agent_col_responder_context_v3 import AgentColResponderContextV3
 from agent_col_routing_v4 import AgentColRoutingDirective
+from agent_col_routing_provider_v4 import AgentColRoutingV4ProviderTimeoutError
 from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
 from schemas import (
     AdaptationReceipt,
@@ -180,6 +181,33 @@ class QueueOnlyArtifactExecutor:
         raise AssertionError("artifact generation must not run in chat path")
 
 
+class RecordingNoteQueue:
+    def __init__(self, queued_action: QueuedActionReceipt) -> None:
+        self.queued_action = queued_action
+        self.commands: list[object] = []
+
+    async def queue(self, command):
+        self.commands.append(command)
+        return self.queued_action
+
+
+class TimingOutV4RoutingRequest:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, object, float]] = []
+
+    async def __call__(
+        self,
+        client: object,
+        routing_input: object,
+        *,
+        timeout_seconds: float,
+    ) -> AgentColRoutingDirective:
+        self.calls.append((client, routing_input, timeout_seconds))
+        raise AgentColRoutingV4ProviderTimeoutError(
+            "Routing v4 provider request timed out."
+        )
+
+
 class ValidationFailingArtifactModel(BaseModel):
     required_value: int
 
@@ -347,6 +375,137 @@ async def test_turn_service_queues_artifact_before_responder_without_generation(
     assert responder_context.precompleted_actions == ()
     assert responder_context.precompleted_memory_proposals == ()
     assert responder_context.model_input_context == ()
+
+
+@pytest.mark.asyncio
+async def test_explicit_artifact_and_note_request_queues_before_router_timeout(
+) -> None:
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnRoutingTimeoutError,
+        AgentColTurnService,
+    )
+
+    claim = initial_claim()
+    claim = replace(
+        claim,
+        request=replace(
+            claim.request,
+            message=(
+                "Create a blueprint artifact called Refresh Verification "
+                "Artifact with three short sections explaining queued, running, "
+                "and completed background-job states. Also propose a workspace "
+                "note stating: completed background resources must become "
+                "visible without manual refresh."
+            ),
+        ),
+    )
+    artifact_action = QueuedActionReceipt(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+        display_label="Artifact: structured blueprint",
+        created_at=NOW,
+        agent_label="Artifact Builder",
+    )
+    note_action = QueuedActionReceipt(
+        job_id="note-job-1",
+        action_kind="propose_collaborative_note",
+        status="queued",
+        display_label="Workspace note: completed background resources",
+        created_at=NOW,
+        agent_label="Note Curator",
+    )
+    artifact_executor = QueueOnlyArtifactExecutor(artifact_action)
+    note_queue = RecordingNoteQueue(note_action)
+    routing = TimingOutV4RoutingRequest()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=RecordingResponder(),
+        artifact_executor=artifact_executor,
+        note_queue=note_queue,
+        artifact_routing_request=routing,
+        wall_clock=lambda: NOW,
+    )
+
+    with pytest.raises(AgentColTurnRoutingTimeoutError) as exc_info:
+        await service.run_turn(
+            AgentColTurnCommand(
+                project_id=claim.request.project_id,
+                session_id=claim.request.session_id,
+                user_id=claim.request.user_id,
+                message=claim.request.message,
+                chat_turn_claim=claim,
+            )
+        )
+
+    assert len(artifact_executor.queue_commands) == 1
+    assert len(note_queue.commands) == 1
+    assert len(routing.calls) == 1
+    assert exc_info.value.queued_actions == (artifact_action, note_action)
+    assert artifact_executor.queue_commands[0].routing_directive.route == "artifact"
+    assert artifact_executor.queue_commands[0].accepted_action_index == 0
+    assert (
+        artifact_executor.queue_commands[0].routing_directive.artifact_intent.operation
+        == "create_blueprint"
+    )
+    assert note_queue.commands[0].accepted_action_index == 1
+    assert note_queue.commands[0].decision.body == (
+        "completed background resources must become visible without manual refresh."
+    )
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_artifact_discussion_still_uses_router_without_prequeue(
+) -> None:
+    from agent_col_turn_service import (
+        AgentColTurnCommand,
+        AgentColTurnRoutingTimeoutError,
+        AgentColTurnService,
+    )
+
+    claim = initial_claim()
+    claim = replace(
+        claim,
+        request=replace(
+            claim.request,
+            message="Could we talk about whether an artifact would help here?",
+        ),
+    )
+    artifact_action = QueuedActionReceipt(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+        display_label="Artifact: structured blueprint",
+        created_at=NOW,
+        agent_label="Artifact Builder",
+    )
+    artifact_executor = QueueOnlyArtifactExecutor(artifact_action)
+    routing = TimingOutV4RoutingRequest()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=RecordingResponder(),
+        artifact_executor=artifact_executor,
+        artifact_routing_request=routing,
+        wall_clock=lambda: NOW,
+    )
+
+    with pytest.raises(AgentColTurnRoutingTimeoutError) as exc_info:
+        await service.run_turn(
+            AgentColTurnCommand(
+                project_id=claim.request.project_id,
+                session_id=claim.request.session_id,
+                user_id=claim.request.user_id,
+                message=claim.request.message,
+                chat_turn_claim=claim,
+            )
+        )
+
+    assert len(routing.calls) == 1
+    assert artifact_executor.queue_commands == []
+    assert exc_info.value.queued_actions == ()
 
 
 @pytest.mark.asyncio

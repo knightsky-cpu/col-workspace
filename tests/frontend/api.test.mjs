@@ -23,6 +23,7 @@ import {
   listChatSessions,
   listBlueprintFeedback,
   listBlueprints,
+  recordBlueprintFeedback,
   createWorkspace,
   archiveNote,
   createNoteCorrection,
@@ -244,14 +245,14 @@ test("streamAgentJobs reads public snapshot events", async () => {
       calls.push([path, init]);
       return sseResponse([
         "event: snapshot\n",
-        'data: {"agent_job_contract_version":"1.0","jobs":[{"job_number":"001","status":"running"}]}\n\n',
+        'data: {"agent_job_contract_version":"1.0","jobs":[{"job_ref":"jobref_abc123","job_number":"001","status":"running"}]}\n\n',
       ]);
     },
   );
 
   assert.deepEqual(snapshots, [{
     agent_job_contract_version: "1.0",
-    jobs: [{ job_number: "001", status: "running" }],
+    jobs: [{ job_ref: "jobref_abc123", job_number: "001", status: "running" }],
   }]);
   assert.equal(
     calls[0][0],
@@ -277,6 +278,7 @@ test("listAgentJobReports fetches public report projection without internal iden
         agent_job_report_contract_version: "1.0",
         reports: [{
           report_number: "001",
+          job_ref: "jobref_abc123",
           job_number: "001",
           action_kind: "propose_memory_signal",
           agent_label: "Memory Analyst",
@@ -292,6 +294,7 @@ test("listAgentJobReports fetches public report projection without internal iden
 
   assert.deepEqual(response.reports[0], {
     report_number: "001",
+    job_ref: "jobref_abc123",
     job_number: "001",
     action_kind: "propose_memory_signal",
     agent_label: "Memory Analyst",
@@ -550,6 +553,60 @@ test("listBlueprintFeedback calls the canonical feedback history path", async ()
     "/api/projects/agent-col/blueprints/blueprint--abc/feedback?limit=20",
   );
   assert.equal(calls[0][1].method, "GET");
+});
+
+test("recordBlueprintFeedback posts direct feedback with idempotency", async () => {
+  const calls = [];
+  await recordBlueprintFeedback(
+    "agent-col",
+    "blueprint--abc",
+    {
+      session_id: "session--1",
+      user_id: "wifiknight",
+      artifact_id: "blueprint--abc",
+      target_id: "target--whole",
+      decision: "accepted",
+      feedback_text: "This boundary is correct.",
+      expected_schema_version: "2.0",
+    },
+    { idempotencyKey: "artifact-feedback--1", authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        feedback_contract_version: "1.0",
+        action: {
+          action_name: "record_blueprint_feedback",
+          status: "completed",
+        },
+        feedback: {
+          feedback_id: "feedback--artifact-feedback--1",
+          artifact_id: "blueprint--abc",
+          target_id: "target--whole",
+          target_kind: "whole_blueprint",
+          decision: "accepted",
+          schema_version: "2.0",
+          created_at: "2026-09-02T12:00:00Z",
+        },
+      });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/projects/agent-col/blueprints/blueprint--abc/feedback",
+  );
+  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer token-1");
+  assert.equal(calls[0][1].headers["Idempotency-Key"], "artifact-feedback--1");
+  assert.equal(calls[0][1].body, JSON.stringify({
+    session_id: "session--1",
+    user_id: "wifiknight",
+    artifact_id: "blueprint--abc",
+    target_id: "target--whole",
+    decision: "accepted",
+    feedback_text: "This boundary is correct.",
+    expected_schema_version: "2.0",
+  }));
 });
 
 test("generic artifact API wrappers use the canonical artifact paths", async () => {

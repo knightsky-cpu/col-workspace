@@ -1153,6 +1153,54 @@ class MemoryEngine:
         except GoogleAPIError as exc:
             self._raise_firestore_error("approve_collaborative_note_proposal", exc)
 
+    async def list_collaborative_note_proposals(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        limit: int,
+    ) -> tuple[CollaborativeNoteProposal, ...]:
+        self._validate_memory_identifier(user_id, "user_id")
+        self._validate_memory_identifier(workspace_id, "workspace_id")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 50
+        ):
+            raise ValueError("limit must be an integer between 1 and 50.")
+        try:
+            proposals_ref = (
+                self._client.collection("users")
+                .document(user_id)
+                .collection("workspaces")
+                .document(workspace_id)
+                .collection("note_proposals")
+            )
+            query = proposals_ref.where("status", "==", "pending").limit(limit)
+            proposals = []
+            async for snapshot in query.stream():
+                proposals.append(
+                    CollaborativeNoteProposal.model_validate(
+                        snapshot.to_dict()
+                    )
+                )
+            return tuple(
+                sorted(
+                    proposals,
+                    key=lambda proposal: (
+                        proposal.created_at,
+                        proposal.proposal_id,
+                    ),
+                    reverse=True,
+                )
+            )
+        except ValidationError as exc:
+            raise ValueError(
+                "Stored collaborative note proposal state is invalid."
+            ) from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_collaborative_note_proposals", exc)
+
     async def reject_collaborative_note_proposal(
         self,
         *,

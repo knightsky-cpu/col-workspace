@@ -28,6 +28,7 @@ import {
   listWorkspaces,
   listBlueprintFeedback,
   listBlueprints,
+  recordBlueprintFeedback,
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
@@ -58,7 +59,6 @@ import { createWorkView } from "./work-view.mjs";
 import { createWorkspaceView } from "./workspace-view.mjs";
 import { renderWorkspaceIndicator } from "./workspace-indicator.mjs";
 import {
-  buildArtifactFeedbackChatRequest,
   buildContinuitySelectionChatRequest,
   buildExactRetryRequest,
   buildMemoryClarificationSelectionChatRequest,
@@ -166,6 +166,7 @@ let agentJobsRefreshToken = 0;
 let agentJobsConsecutiveFailures = 0;
 let agentJobsStreamAbortController = null;
 let agentJobsStreamUnavailable = false;
+const refreshedCompletedAgentJobs = new Set();
 
 const SPEECH_RECORDING_MIME_TYPES = Object.freeze([
   "audio/webm;codecs=opus",
@@ -1169,6 +1170,42 @@ function shouldRefreshAgentJobs() {
   );
 }
 
+function refreshAuthoritativeResourcesForCompletedJobs(jobs) {
+  if (!state.context || !Array.isArray(jobs)) {
+    return;
+  }
+  let shouldRefreshWork = false;
+  let shouldRefreshNotes = false;
+  for (const job of jobs) {
+    const status = String(job?.status ?? "").toLowerCase();
+    const actionKind = job?.action_kind;
+    const jobRef = job?.job_ref;
+    if (
+      status !== "completed"
+      || typeof jobRef !== "string"
+      || !jobRef
+    ) {
+      continue;
+    }
+    const refreshKey = `${actionKind}:${jobRef}`;
+    if (refreshedCompletedAgentJobs.has(refreshKey)) {
+      continue;
+    }
+    refreshedCompletedAgentJobs.add(refreshKey);
+    if (actionKind === "create_artifact") {
+      shouldRefreshWork = true;
+    } else if (actionKind === "propose_collaborative_note") {
+      shouldRefreshNotes = true;
+    }
+  }
+  if (shouldRefreshWork) {
+    loadWorkList();
+  }
+  if (shouldRefreshNotes) {
+    loadNotes(state.notes.statusFilter);
+  }
+}
+
 function clearAgentJobsRefreshTimer() {
   if (agentJobsRefreshTimer !== null) {
     globalThis.clearTimeout(agentJobsRefreshTimer);
@@ -1242,6 +1279,7 @@ function startAgentJobsStream() {
         state = completeAgentJobsLoad(state, payload);
         agentJobsConsecutiveFailures = 0;
         ensureAgentsView().render(state);
+        refreshAuthoritativeResourcesForCompletedJobs(state.agents.jobs);
       },
     },
   ).catch((error) => {
@@ -1335,6 +1373,7 @@ async function loadAgentJobs() {
     }
     state = completeAgentJobsLoad(state, response);
     agentJobsConsecutiveFailures = 0;
+    refreshAuthoritativeResourcesForCompletedJobs(state.agents.jobs);
   } catch (error) {
     if (
       refreshToken !== agentJobsRefreshToken
@@ -1893,15 +1932,47 @@ function ensureAgentsView() {
 }
 
 async function submitArtifactFeedback(decision) {
-  if (!selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
-  const request = buildArtifactFeedbackChatRequest(
-    state.context,
-    "Record artifact feedback.",
-    decision,
-  );
-  await submitRequest(request);
+  const artifactId = String(decision.artifact_id ?? "").trim();
+  const feedbackRequest = {
+    session_id: state.context.session_id,
+    user_id: state.context.user_id,
+    artifact_id: artifactId,
+    target_id: String(decision.target_id ?? "").trim(),
+    decision: String(decision.decision ?? "").trim(),
+    feedback_text: String(decision.feedback_text ?? "").trim(),
+    expected_schema_version: String(
+      decision.expected_schema_version ?? "2.0",
+    ).trim(),
+  };
+  const correctionText = String(decision.correction_text ?? "").trim();
+  if (correctionText) {
+    feedbackRequest.correction_text = correctionText;
+  }
+  const supersedesFeedbackId = String(
+    decision.supersedes_feedback_id ?? "",
+  ).trim();
+  if (supersedesFeedbackId) {
+    feedbackRequest.supersedes_feedback_id = supersedesFeedbackId;
+  }
+  clearWorkError();
+  try {
+    await recordBlueprintFeedback(
+      state.context.project_id,
+      artifactId,
+      feedbackRequest,
+      {
+        ...authOptions(),
+        idempotencyKey: `artifact-feedback--${crypto.randomUUID()}`,
+      },
+    );
+    await loadWorkDetail(artifactId);
+    await loadWorkList();
+  } catch (error) {
+    showWorkError(error.message);
+  }
 }
 
 async function submitMemoryDecision(decision) {

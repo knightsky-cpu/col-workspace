@@ -1869,11 +1869,12 @@ class ServiceState:
     artifact_feedback_executor_dependencies: list[tuple[object, object]]
     responder_note_services: list[object]
     responder_agent_job_repositories: list[object]
+    responder_note_job_dispatchers: list[object]
     continuity_service_dependencies: list[object]
     working_state_service_dependencies: list[object]
     preference_learning_service_dependencies: list[object]
     turn_service_dependencies: list[
-        tuple[object, object, object, object, object]
+        tuple[object, object, object, object, object, object]
     ]
 
 
@@ -2123,11 +2124,12 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
     responder_note_services: list[object] = []
     responder_agent_job_repositories: list[object] = []
+    responder_note_job_dispatchers: list[object] = []
     continuity_service_dependencies: list[object] = []
     working_state_service_dependencies: list[object] = []
     preference_learning_service_dependencies: list[object] = []
     turn_service_dependencies: list[
-        tuple[object, object, object, object, object]
+        tuple[object, object, object, object, object, object]
     ] = []
     state = ServiceState(
         events=events,
@@ -2174,6 +2176,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         ),
         responder_note_services=responder_note_services,
         responder_agent_job_repositories=responder_agent_job_repositories,
+        responder_note_job_dispatchers=responder_note_job_dispatchers,
         continuity_service_dependencies=continuity_service_dependencies,
         working_state_service_dependencies=(
             working_state_service_dependencies
@@ -2280,11 +2283,13 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         collaborative_note_service: object | None = None,
         agent_job_repository: object | None = None,
         memory_job_dispatcher: object | None = None,
+        note_job_dispatcher: object | None = None,
     ) -> object:
         responder_vertex_settings.append(vertex_settings)
         responder_memory_services.append(memory_service)
         responder_note_services.append(collaborative_note_service)
         responder_agent_job_repositories.append(agent_job_repository)
+        responder_note_job_dispatchers.append(note_job_dispatcher)
         return responder_app
 
     monkeypatch.setattr(
@@ -2325,6 +2330,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         responder_runtime: object,
         artifact_executor: object,
         artifact_feedback_executor: object,
+        note_queue: object,
     ) -> object:
         turn_service_dependencies.append(
             (
@@ -2333,6 +2339,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 responder_runtime,
                 artifact_executor,
                 artifact_feedback_executor,
+                note_queue,
             )
         )
         return turn_service
@@ -5001,6 +5008,7 @@ async def test_agent_job_list_returns_public_owned_projection(
     payload = response.json()
     assert payload["agent_job_contract_version"] == "1.0"
     assert payload["jobs"][0]["job_number"] == "001"
+    assert payload["jobs"][0]["job_ref"].startswith("jobref_")
     assert payload["jobs"][0]["action_kind"] == "create_artifact"
     assert payload["jobs"][0]["status"] == "running"
     assert payload["jobs"][0]["display_label"] == "Create deployment artifact"
@@ -5054,6 +5062,7 @@ async def test_agent_job_stream_emits_public_snapshot(
     assert '"agent_job_contract_version":"1.0"' in response.text
     assert '"status":"running"' in response.text
     assert '"job_number":"001"' in response.text
+    assert '"job_ref":"jobref_' in response.text
     assert "agent-job-1" not in response.text
     assert "session-1" not in response.text
     assert "turn-1" not in response.text
@@ -5223,6 +5232,7 @@ async def test_agent_job_reports_return_public_safe_projection(
         "002",
         "001",
     ]
+    assert all(report["job_ref"].startswith("jobref_") for report in payload["reports"])
     assert payload["reports"][1]["summary"] == (
         "A memory proposal was created and is pending your review."
     )
@@ -5772,6 +5782,8 @@ async def test_lifespan_injects_memory_and_notes_into_responder_app(
         assert service_state.responder_agent_job_repositories == [
             service_state.agent_job_repository
         ]
+        assert len(service_state.responder_note_job_dispatchers) == 1
+        assert callable(service_state.responder_note_job_dispatchers[0])
 
 
 @pytest.mark.asyncio
@@ -5832,8 +5844,12 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 service_state.supervisor,
                 service_state.artifact_executor,
                 service_state.artifact_feedback_executor,
+                service_state.turn_service_dependencies[0][-1],
             )
         ]
+        assert callable(
+            getattr(service_state.turn_service_dependencies[0][-1], "queue")
+        )
 
 
 @pytest.mark.asyncio

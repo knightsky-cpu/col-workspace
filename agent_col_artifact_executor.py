@@ -168,6 +168,7 @@ class AgentColArtifactExecutionCommand:
     routing_directive: AgentColRoutingDirective
     observed_at: datetime
     source_text: str | None = None
+    accepted_action_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +198,7 @@ def _artifact_job_digest(command: AgentColArtifactExecutionCommand) -> str:
             "user_id": command.claim.request.user_id,
             "turn_id": command.claim.ids.turn_id,
             "source_message_id": command.claim.ids.user_message_id,
+            "accepted_action_index": command.accepted_action_index,
             "operation": intent.operation,
             "artifact_family": intent.artifact_family,
             "format": intent.format,

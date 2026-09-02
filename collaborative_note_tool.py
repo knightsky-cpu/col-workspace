@@ -1,7 +1,7 @@
 import hashlib
 import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Self
 
@@ -9,6 +9,7 @@ from google.adk.tools import FunctionTool, ToolContext
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from agent_col_agent_jobs import AgentJob, AgentJobEvent, AgentJobFailure
+from agent_job_payloads import AgentJobPayload
 from agent_job_repository import AgentJobRepository
 from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
 from collaborative_note_candidates import (
@@ -28,7 +29,11 @@ from database import (
     MemoryProposalOriginConflictError,
 )
 from memory_proposals import ProposalTurnLease
-from schemas import AgentActionReceipt, CollaborativeNoteProposal
+from schemas import (
+    AgentActionReceipt,
+    CollaborativeNoteProposal,
+    QueuedActionReceipt,
+)
 
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -77,10 +82,16 @@ class NoEffectCollaborativeNoteToolResponse(_StrictToolResponse):
     status: Literal["no_note", "prohibited"]
 
 
+class QueuedCollaborativeNoteToolResponse(_StrictToolResponse):
+    status: Literal["queued"]
+    queued_action: QueuedActionReceipt
+
+
 CollaborativeNoteToolResponse = (
     PendingCollaborativeNoteToolResponse
     | NoEffectCollaborativeNoteToolResponse
     | RejectedCollaborativeNoteToolResponse
+    | QueuedCollaborativeNoteToolResponse
 )
 
 
@@ -92,6 +103,8 @@ def parse_collaborative_note_tool_response(
             raise ValueError("Response must be a mapping.")
         if value.get("status") == "pending":
             return PendingCollaborativeNoteToolResponse.model_validate(value)
+        if value.get("status") == "queued":
+            return QueuedCollaborativeNoteToolResponse.model_validate(value)
         if value.get("status") in {"no_note", "prohibited"}:
             return NoEffectCollaborativeNoteToolResponse.model_validate(value)
         if value.get("status") == "rejected":
@@ -202,6 +215,9 @@ def _note_job_digest(command: NaturalCollaborativeNoteCommand) -> str:
             command.session_id,
             command.source_message_id,
             turn_id,
+            str(command.accepted_action_index)
+            if command.accepted_action_index is not None
+            else "",
             command.decision.note_kind,
             command.decision.title,
             command.decision.body,
@@ -236,6 +252,34 @@ def _note_job(command: NaturalCollaborativeNoteCommand) -> AgentJob:
     )
 
 
+def note_job_payload(
+    command: NaturalCollaborativeNoteCommand,
+    job: AgentJob,
+) -> AgentJobPayload:
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "decision": command.decision.model_dump(mode="json"),
+            "source_message_text": command.source_message_text,
+            "memory_decision_present": command.memory_decision_present,
+            "collaborative_note_decision_present": (
+                command.collaborative_note_decision_present
+            ),
+            "artifact_feedback_decision_present": (
+                command.artifact_feedback_decision_present
+            ),
+        },
+    )
+
+
 def _note_job_event(
     *,
     job: AgentJob,
@@ -265,6 +309,42 @@ async def _append_note_job_event(
         workspace_id=workspace_id,
         event=event,
     )
+
+
+async def _queue_note_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    command: NaturalCollaborativeNoteCommand,
+) -> AgentJob:
+    job = _note_job(command)
+    queued = await agent_job_repository.enqueue_job_with_payload(
+        job,
+        note_job_payload(command, job),
+    )
+    await _append_note_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        event=_note_job_event(
+            job=queued,
+            event_type="queued",
+            message="Workspace note proposal queued.",
+            observed_at=command.observed_at,
+        ),
+    )
+    return queued
+
+
+async def queue_collaborative_note_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    command: NaturalCollaborativeNoteCommand,
+) -> QueuedActionReceipt:
+    queued = await _queue_note_agent_job(
+        agent_job_repository=agent_job_repository,
+        command=command,
+    )
+    return queued.to_queued_action_receipt()
 
 
 async def _start_note_agent_job(
@@ -437,6 +517,7 @@ def create_propose_collaborative_note_tool(
     note_service: CollaborativeNoteService,
     *,
     agent_job_repository: AgentJobRepository | None = None,
+    note_job_dispatcher: Callable[[AgentJob], None] | None = None,
 ) -> FunctionTool:
     async def propose_collaborative_note(
         decision: NaturalCollaborativeNoteDecision,
@@ -463,6 +544,23 @@ def create_propose_collaborative_note_tool(
                 validated_decision,
                 command.source_message_text,
             )
+            if (
+                agent_job_repository is not None
+                and note_job_dispatcher is not None
+            ):
+                queued_job = await _queue_note_agent_job(
+                    agent_job_repository=agent_job_repository,
+                    command=command,
+                )
+                note_job_dispatcher(queued_job)
+                return {
+                    "status": "queued",
+                    "queued_action": (
+                        queued_job.to_queued_action_receipt().model_dump(
+                            mode="json"
+                        )
+                    ),
+                }
             job, lease_owner = await _try_start_note_agent_job(
                 agent_job_repository=agent_job_repository,
                 command=command,

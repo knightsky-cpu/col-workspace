@@ -150,6 +150,34 @@ def pending_note_function_response() -> types.FunctionResponse:
     )
 
 
+def queued_note_function_response() -> types.FunctionResponse:
+    return types.FunctionResponse(
+        name="propose_collaborative_note",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "note-job-1",
+                "action_kind": "propose_collaborative_note",
+                "status": "queued",
+                "display_label": "Workspace note: API version",
+                "created_at": "2026-08-26T16:00:00Z",
+                "agent_label": "Note Curator",
+            },
+        },
+    )
+
+
+def queued_artifact_receipt_payload() -> dict[str, object]:
+    return {
+        "job_id": "artifact-job-1",
+        "action_kind": "create_artifact",
+        "status": "queued",
+        "display_label": "Artifact: Async Work Smoke Test",
+        "created_at": "2026-08-26T16:00:00Z",
+        "agent_label": "Artifact Builder",
+    }
+
+
 @dataclass
 class FakeRunner:
     events: list[object]
@@ -655,6 +683,94 @@ async def test_run_turn_marks_precompleted_artifact_as_durable_tool_state(
 
     state = dict(sessions.created[0]["state"])
     assert state["governed_turn_has_precompleted_durable_effect"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_turn_rewrites_queued_artifact_and_note_completion_claims() -> None:
+    from schemas import QueuedActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [queued_note_function_response()]),
+                FakeEvent(
+                    (
+                        "This blueprint outlines how Agent Col separates chat "
+                        "from background work.\n\n"
+                        "I have submitted a workspace note proposal for review."
+                        "\n\n"
+                        "The proposal has been submitted and queued for "
+                        "background processing (Job ID: "
+                        "note-job-086fb9948e93ae1f951e0f372ed4274f). "
+                        "Once processed, it will be pending review in the "
+                        "Notes UI where you can approve or reject it."
+                    ),
+                    True,
+                ),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create a blueprint and a note.",
+            prequeued_actions=(
+                QueuedActionReceipt.model_validate(
+                    queued_artifact_receipt_payload()
+                ),
+            ),
+        )
+    )
+
+    assert "This blueprint outlines" not in result.response
+    assert "submitted a workspace note proposal" not in result.response
+    assert "note-job-" not in result.response
+    assert "Job ID" not in result.response
+    assert "pending review" not in result.response
+    assert "Artifact work has been queued for background processing." in result.response
+    assert "Workspace note work has been queued for background processing." in (
+        result.response
+    )
+    assert result.actions == ()
+    assert result.collaborative_note_proposals == ()
+    assert len(result.queued_actions) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_turn_collects_queued_note_proposal_receipt_as_work(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [queued_note_function_response()]),
+                FakeEvent("I queued workspace note review.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Agent Col, note that this workspace must use API v2.",
+        )
+    )
+
+    assert result.response == "I queued workspace note review."
+    assert result.actions == ()
+    assert result.collaborative_note_proposals == ()
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].job_id == "note-job-1"
+    assert result.queued_actions[0].action_kind == "propose_collaborative_note"
 
 
 @pytest.mark.asyncio

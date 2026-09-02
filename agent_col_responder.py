@@ -318,6 +318,7 @@ def create_responder_app(
     collaborative_note_service: CollaborativeNoteService | None = None,
     agent_job_repository: AgentJobRepository | None = None,
     memory_job_dispatcher: Callable[[AgentJob], None] | None = None,
+    note_job_dispatcher: Callable[[AgentJob], None] | None = None,
 ) -> App:
     """Return Agent_Col with no model-visible cognitive experts."""
     tools = []
@@ -334,6 +335,7 @@ def create_responder_app(
             create_propose_collaborative_note_tool(
                 collaborative_note_service,
                 agent_job_repository=agent_job_repository,
+                note_job_dispatcher=note_job_dispatcher,
             )
         )
     root_agent = Agent(

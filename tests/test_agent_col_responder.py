@@ -92,17 +92,54 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool(
     )
 
 
-def test_responder_app_catalog_exposes_governed_note_tool_separately() -> None:
-    from agent_col_responder import RESPONDER_INSTRUCTION, create_responder_app
+def test_responder_app_catalog_exposes_governed_note_tool_separately(
+    monkeypatch,
+) -> None:
+    from google.adk.tools import FunctionTool
+    import agent_col_responder
 
-    app = create_responder_app(
+    captured = {}
+
+    async def note_tool() -> dict[str, object]:
+        return {"status": "no_note"}
+
+    def fake_create_propose_collaborative_note_tool(
+        note_service,
+        *,
+        agent_job_repository=None,
+        note_job_dispatcher=None,
+    ):
+        captured["note_service"] = note_service
+        captured["agent_job_repository"] = agent_job_repository
+        captured["note_job_dispatcher"] = note_job_dispatcher
+        return FunctionTool(note_tool)
+
+    monkeypatch.setattr(
+        agent_col_responder,
+        "create_propose_collaborative_note_tool",
+        fake_create_propose_collaborative_note_tool,
+    )
+
+    service = object()
+    repository = object()
+    dispatcher = object()
+    app = agent_col_responder.create_responder_app(
         vertex_settings=VERTEX_SETTINGS,
-        collaborative_note_service=object(),
+        collaborative_note_service=service,
+        agent_job_repository=repository,
+        note_job_dispatcher=dispatcher,
     )
 
     assert tuple(tool.name for tool in app.root_agent.tools) == (
-        "propose_collaborative_note",
+        "note_tool",
     )
+    assert captured == {
+        "note_service": service,
+        "agent_job_repository": repository,
+        "note_job_dispatcher": dispatcher,
+    }
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
     normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
     assert "use propose_collaborative_note only" in normalized
     assert "notes are workspace scoped" in normalized

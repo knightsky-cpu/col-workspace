@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -78,6 +78,7 @@ class NaturalCollaborativeNoteCommand:
     decision: NaturalCollaborativeNoteDecision
     observed_at: datetime
     turn_lease: ProposalTurnLease | None = None
+    accepted_action_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,9 @@ class CollaborativeNoteLifecycleCommand:
 class CollaborativeNoteListResult:
     notes: list[CollaborativeNote]
     next_note_id: str | None
+    pending_proposals: list[CollaborativeNoteProposal] = field(
+        default_factory=list
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,8 +153,14 @@ class CollaborativeNoteService:
             limit=command.limit,
             cursor=command.cursor,
         )
+        proposals = await self._database.list_collaborative_note_proposals(
+            user_id=command.user_id,
+            workspace_id=command.workspace_id,
+            limit=command.limit,
+        )
         return CollaborativeNoteListResult(
             notes=list(notes),
+            pending_proposals=list(proposals),
             next_note_id=next_note_id,
         )
 

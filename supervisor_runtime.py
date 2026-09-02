@@ -18,6 +18,7 @@ from expert_delegation import (
 )
 from collaborative_note_tool import (
     PendingCollaborativeNoteToolResponse,
+    QueuedCollaborativeNoteToolResponse,
     parse_collaborative_note_tool_response,
 )
 from memory_proposals import ProposalTurnLease
@@ -48,6 +49,14 @@ _QUEUED_MEMORY_REPLACEMENT_TEXT = (
     "Memory work has been queued for background processing. Check the Memory "
     "UI or job reports for the final result."
 )
+_QUEUED_ARTIFACT_REPLACEMENT_TEXT = (
+    "Artifact work has been queued for background processing. Check the Work "
+    "UI or job reports for the final result."
+)
+_QUEUED_NOTE_REPLACEMENT_TEXT = (
+    "Workspace note work has been queued for background processing. Check the "
+    "Notes UI or job reports for the final result."
+)
 _MEMORY_STATUS_HEADINGS = frozenset(
     {
         "memory request status",
@@ -67,6 +76,26 @@ _QUEUED_MEMORY_COMPLETION_CLAIM_PATTERN = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_QUEUED_ARTIFACT_COMPLETION_CLAIM_PATTERN = re.compile(
+    r"\b("
+    r"artifact (?:has been |was )?(?:created|generated|submitted)|"
+    r"blueprint (?:has been |was )?(?:created|generated|submitted)|"
+    r"this blueprint outlines|"
+    r"created (?:a|the) blueprint|"
+    r"generated (?:a|the) blueprint"
+    r")\b",
+    re.IGNORECASE,
+)
+_QUEUED_NOTE_COMPLETION_CLAIM_PATTERN = re.compile(
+    r"\b("
+    r"submitted a workspace note proposal|"
+    r"workspace note proposal (?:has been |was )?(?:created|submitted)|"
+    r"pending workspace note|"
+    r"pending note proposal|"
+    r"approve or reject (?:this|the) proposal in the Notes UI"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def _has_queued_memory_work(
@@ -76,6 +105,13 @@ def _has_queued_memory_work(
         action.action_kind == "propose_memory_signal"
         for action in queued_actions
     )
+
+
+def _has_queued_work_kind(
+    queued_actions: list[QueuedActionReceipt] | tuple[QueuedActionReceipt, ...],
+    action_kind: str,
+) -> bool:
+    return any(action.action_kind == action_kind for action in queued_actions)
 
 
 def _is_memory_status_heading(paragraph: str) -> bool:
@@ -92,32 +128,80 @@ def _contains_queued_memory_completion_claim(paragraph: str) -> bool:
     return _QUEUED_MEMORY_COMPLETION_CLAIM_PATTERN.search(paragraph) is not None
 
 
-def _sanitize_queued_memory_response_text(
+def _contains_queued_artifact_completion_claim(paragraph: str) -> bool:
+    normalized = paragraph.lower()
+    if "artifact" not in normalized and "blueprint" not in normalized:
+        return False
+    return _QUEUED_ARTIFACT_COMPLETION_CLAIM_PATTERN.search(paragraph) is not None
+
+
+def _contains_queued_note_completion_claim(paragraph: str) -> bool:
+    normalized = paragraph.lower()
+    if "note" not in normalized and "proposal" not in normalized:
+        return False
+    return (
+        _QUEUED_NOTE_COMPLETION_CLAIM_PATTERN.search(paragraph) is not None
+        or "job id" in normalized
+        or "note-job-" in normalized
+    )
+
+
+def _sanitize_queued_work_response_text(
     text: str,
     *,
     queued_actions: list[QueuedActionReceipt],
     memory_proposals: list[VersionedMemoryProposalReceipt],
+    collaborative_note_proposals: list[CollaborativeNoteProposal],
 ) -> str:
-    if (
-        not _has_queued_memory_work(queued_actions)
-        or memory_proposals
-        or not _contains_queued_memory_completion_claim(text)
-    ):
+    has_memory_work = _has_queued_memory_work(queued_actions)
+    has_artifact_work = _has_queued_work_kind(queued_actions, "create_artifact")
+    has_note_work = _has_queued_work_kind(
+        queued_actions,
+        "propose_collaborative_note",
+    )
+    if not (has_memory_work or has_artifact_work or has_note_work):
         return text
 
     retained_paragraphs = []
-    removed_claim = False
+    removed_memory_claim = False
+    removed_artifact_claim = False
+    removed_note_claim = False
     for paragraph in re.split(r"\n\s*\n", text):
-        if _is_memory_status_heading(paragraph):
-            removed_claim = True
+        if (
+            has_memory_work
+            and not memory_proposals
+            and _is_memory_status_heading(paragraph)
+        ):
+            removed_memory_claim = True
             continue
-        if _contains_queued_memory_completion_claim(paragraph):
-            removed_claim = True
+        if (
+            has_memory_work
+            and not memory_proposals
+            and _contains_queued_memory_completion_claim(paragraph)
+        ):
+            removed_memory_claim = True
+            continue
+        if (
+            has_artifact_work
+            and _contains_queued_artifact_completion_claim(paragraph)
+        ):
+            removed_artifact_claim = True
+            continue
+        if (
+            has_note_work
+            and not collaborative_note_proposals
+            and _contains_queued_note_completion_claim(paragraph)
+        ):
+            removed_note_claim = True
             continue
         retained_paragraphs.append(paragraph)
 
-    if removed_claim and _QUEUED_MEMORY_REPLACEMENT_TEXT not in text:
+    if removed_memory_claim and _QUEUED_MEMORY_REPLACEMENT_TEXT not in text:
         retained_paragraphs.append(_QUEUED_MEMORY_REPLACEMENT_TEXT)
+    if removed_artifact_claim and _QUEUED_ARTIFACT_REPLACEMENT_TEXT not in text:
+        retained_paragraphs.append(_QUEUED_ARTIFACT_REPLACEMENT_TEXT)
+    if removed_note_claim and _QUEUED_NOTE_REPLACEMENT_TEXT not in text:
+        retained_paragraphs.append(_QUEUED_NOTE_REPLACEMENT_TEXT)
     return "\n\n".join(
         paragraph for paragraph in retained_paragraphs if paragraph.strip()
     ).strip()
@@ -490,6 +574,12 @@ class SupervisorRuntime:
                                             collaborative_note_events
                                         ),
                                     )
+                            elif isinstance(
+                                parsed_note,
+                                QueuedCollaborativeNoteToolResponse,
+                            ):
+                                if parsed_note.queued_action not in queued_actions:
+                                    queued_actions.append(parsed_note.queued_action)
                             if memory_proposals or memory_clarifications:
                                 raise SupervisorRuntimeError(
                                     "Agent_Col produced conflicting memory "
@@ -622,10 +712,13 @@ class SupervisorRuntime:
                     ):
                         text = self._extract_text(event)
                         if text:
-                            text = _sanitize_queued_memory_response_text(
+                            text = _sanitize_queued_work_response_text(
                                 text,
                                 queued_actions=queued_actions,
                                 memory_proposals=memory_proposals,
+                                collaborative_note_proposals=(
+                                    collaborative_note_proposals
+                                ),
                             )
                             final_responses.append(text)
                             if streaming_mode is StreamingMode.SSE:

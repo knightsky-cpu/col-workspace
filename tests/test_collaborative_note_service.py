@@ -88,6 +88,7 @@ class FakeNoteDatabase:
     detail_calls: list[dict[str, object]] = field(default_factory=list)
     save_message_calls: list[dict[str, object]] = field(default_factory=list)
     proposal_calls: list[dict[str, object]] = field(default_factory=list)
+    proposal_list_calls: list[dict[str, object]] = field(default_factory=list)
     approve_calls: list[dict[str, object]] = field(default_factory=list)
     reject_calls: list[dict[str, object]] = field(default_factory=list)
     archive_calls: list[dict[str, object]] = field(default_factory=list)
@@ -125,6 +126,10 @@ class FakeNoteDatabase:
     async def create_collaborative_note_proposal(self, **kwargs: object):
         self.proposal_calls.append(kwargs)
         return self.proposal
+
+    async def list_collaborative_note_proposals(self, **kwargs: object):
+        self.proposal_list_calls.append(kwargs)
+        return (self.proposal,)
 
     async def archive_collaborative_note(self, **kwargs: object):
         self.archive_calls.append(kwargs)
@@ -170,6 +175,37 @@ class FakeNoteDatabase:
                 "source_message_ids": [],
             }
         )
+
+
+@pytest.mark.asyncio
+async def test_note_service_lists_pending_proposals_with_notes() -> None:
+    from collaborative_note_service import (
+        CollaborativeNoteService,
+        ListCollaborativeNotesCommand,
+    )
+
+    database = FakeNoteDatabase()
+    service = CollaborativeNoteService(database=database)
+
+    result = await service.list_notes(
+        ListCollaborativeNotesCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            status_filter="active",
+            limit=20,
+            cursor=None,
+        )
+    )
+
+    assert result.notes == list(database.notes)
+    assert result.pending_proposals == [database.proposal]
+    assert database.proposal_list_calls == [
+        {
+            "user_id": "user-1",
+            "workspace_id": "workspace-1",
+            "limit": 20,
+        }
+    ]
 
 
 @pytest.mark.asyncio

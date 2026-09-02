@@ -528,6 +528,54 @@ async def test_approve_collaborative_note_proposal_creates_active_note_and_event
 
 
 @pytest.mark.asyncio
+async def test_list_collaborative_note_proposals_returns_pending_proposals(
+) -> None:
+    store = NoteStore()
+    older = {
+        "proposal_id": "proposal-1",
+        "source_session_id": "session-1",
+        "source_message_ids": ["message-1"],
+        "note_kind": "constraint",
+        "title": "API version",
+        "body": "Use API version 2.",
+        "expected_note_id": None,
+        "expected_revision": None,
+        "policy_version": "1.0",
+        "status": "pending",
+        "created_at": NOW,
+        "expires_at": NOW + timedelta(hours=24),
+    }
+    newer = {
+        **older,
+        "proposal_id": "proposal-2",
+        "title": "Worker state",
+        "created_at": NOW + timedelta(minutes=1),
+        "expires_at": NOW + timedelta(hours=24, minutes=1),
+    }
+    query = MagicMock()
+    limited = MagicMock()
+    store.proposals.where.return_value = query
+    query.limit.return_value = limited
+    limited.stream.return_value = AsyncSnapshots([older, newer])
+    engine = MemoryEngine(store.client)
+
+    proposals = await engine.list_collaborative_note_proposals(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        limit=20,
+    )
+
+    assert [proposal.proposal_id for proposal in proposals] == [
+        "proposal-2",
+        "proposal-1",
+    ]
+    assert proposals[0].status == "pending"
+    store.proposals.where.assert_called_once_with("status", "==", "pending")
+    query.order_by.assert_not_called()
+    query.limit.assert_called_once_with(20)
+
+
+@pytest.mark.asyncio
 async def test_approve_new_collaborative_note_enforces_active_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

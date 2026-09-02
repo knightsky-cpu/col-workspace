@@ -721,6 +721,10 @@ class CollaborativeNoteEvent(StrictModel):
 class CollaborativeNoteListResponse(StrictModel):
     note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
     notes: list[CollaborativeNote] = Field(max_length=50)
+    pending_proposals: list[CollaborativeNoteProposal] = Field(
+        default_factory=list,
+        max_length=50,
+    )
     next_note_id: IdentifierStr | None = None
 
 

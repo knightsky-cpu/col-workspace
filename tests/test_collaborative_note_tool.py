@@ -61,6 +61,11 @@ class RecordingAgentJobRepository:
         self.enqueued.append(job)
         return job
 
+    async def enqueue_job_with_payload(self, job, payload):
+        self.enqueued.append(job)
+        self.payload = payload
+        return job
+
     async def lease_queued_job(self, **kwargs):
         self.leases.append(kwargs)
         job = self.enqueued[-1]
@@ -192,6 +197,50 @@ async def test_note_tool_builds_pending_result_from_adk_state() -> None:
     assert command.collaborative_note_decision_present is False
     assert isinstance(command.decision, NoteCandidateDecision)
     assert command.turn_lease.turn_id == "a" * 64
+
+
+@pytest.mark.asyncio
+async def test_note_tool_queues_background_job_when_dispatcher_is_available(
+) -> None:
+    from collaborative_note_tool import create_propose_collaborative_note_tool
+
+    dispatched = []
+    jobs = RecordingAgentJobRepository()
+    service = RecordingCollaborativeNoteService()
+    tool = create_propose_collaborative_note_tool(
+        service,
+        agent_job_repository=jobs,
+        note_job_dispatcher=dispatched.append,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "note_candidate",
+                "note_kind": "constraint",
+                "title": "API version",
+                "body": "Use API version 2.",
+                "evidence_text": "this workspace must use API version 2",
+            }
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=note_tool_state(), delta={})
+        ),
+    )
+
+    assert result["status"] == "queued"
+    assert len(service.commands) == 0
+    assert len(jobs.enqueued) == 1
+    job = jobs.enqueued[0]
+    assert result["queued_action"] == job.to_queued_action_receipt().model_dump(
+        mode="json"
+    )
+    assert jobs.payload.job_id == job.job_id
+    assert jobs.payload.action_kind == "propose_collaborative_note"
+    assert "turn_lease" not in jobs.payload.payload
+    assert "owner-1" not in str(jobs.payload.payload)
+    assert dispatched == [job]
+    assert [event.event_type for event in jobs.events] == ["queued"]
 
 
 @pytest.mark.asyncio

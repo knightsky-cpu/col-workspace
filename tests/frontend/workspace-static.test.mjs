@@ -63,8 +63,11 @@ test("structured action chat prose does not interpolate internal ids", () => {
   assert.doesNotMatch(app, /Record \$\{decision\.decision\} decision for memory proposal/);
   assert.doesNotMatch(app, /Record \$\{decision\.decision\} decision for note proposal/);
   assert.doesNotMatch(app, /Artifact \$\{decision\.artifact_id\}/);
-  assert.match(app, /Approve\"} this memory proposal/);
-  assert.match(app, /Approve\"} this workspace note/);
+  assert.match(app, /decideMemoryProposal/);
+  assert.match(app, /decideNoteProposal/);
+  assert.match(app, /recordBlueprintFeedback/);
+  assert.doesNotMatch(app, /buildArtifactFeedbackChatRequest/);
+  assert.doesNotMatch(app, /buildCollaborativeNoteDecisionChatRequest/);
 });
 
 test("workspace print stylesheet prints only the artifact detail surface", () => {

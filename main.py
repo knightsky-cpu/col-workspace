@@ -134,6 +134,8 @@ from collaborative_note_service import (
     GetCollaborativeNoteCommand,
     ListCollaborativeNotesCommand,
 )
+from collaborative_note_tool import queue_collaborative_note_agent_job
+from collaborative_note_job_worker import CollaborativeNoteProposalJobWorker
 from continuity import (
     ContinuityResolution,
     build_continuity_context,
@@ -191,6 +193,7 @@ from research_expert_service import ResearchExpertService
 from requirements_verification_service import RequirementsVerificationService
 from schemas import (
     AgentActionReceipt,
+    ArtifactFeedbackDecisionRequest,
     BlueprintArtifactDetailResponse,
     BlueprintArtifactFeedbackListResponse,
     BlueprintArtifactFeedbackRecordResponse,
@@ -214,6 +217,7 @@ from schemas import (
     MemoryClarificationReceipt,
     MemoryInspectionResponse,
     MemoryMutationResponse,
+    QueuedActionReceipt,
     SynthesisRequest,
     SynthesisResponse,
     SingleFileArtifactCreateRequest,
@@ -367,6 +371,7 @@ class AgentJobFailurePublic(BaseModel):
 class AgentJobPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    job_ref: IdentifierStr
     job_number: str = Field(pattern=r"^\d{3}$")
     user_id: IdentifierStr
     project_id: IdentifierStr
@@ -419,6 +424,7 @@ class AgentJobReportPublic(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     report_number: str = Field(pattern=r"^\d{3}$")
+    job_ref: IdentifierStr
     job_number: str = Field(pattern=r"^\d{3}$")
     action_kind: AgentJobKind
     agent_label: DisplayLabelStr
@@ -829,6 +835,11 @@ def _public_agent_job_failure(
     )
 
 
+def _public_agent_job_ref(job_id: str) -> str:
+    digest = hashlib.sha256(job_id.encode("utf-8")).hexdigest()[:32]
+    return f"jobref_{digest}"
+
+
 def _public_agent_job(
     *,
     job: AgentJob,
@@ -848,6 +859,7 @@ def _public_agent_job(
             detail="Authenticated user does not own this response.",
         )
     return AgentJobPublic(
+        job_ref=_public_agent_job_ref(job.job_id),
         job_number=job_number,
         user_id=_public_user_id_for_response(
             internal_user_id=job.user_id,
@@ -886,6 +898,7 @@ def _public_agent_job_report(
     *,
     report: AgentJobReport,
     report_number: str,
+    job_ref: str,
     job_number: str,
     effective_project_id: str,
 ) -> AgentJobReportPublic:
@@ -901,6 +914,7 @@ def _public_agent_job_report(
         )
     return AgentJobReportPublic(
         report_number=report_number,
+        job_ref=job_ref,
         job_number=job_number,
         action_kind=report.action_kind,
         agent_label=report.agent_label,
@@ -961,6 +975,7 @@ async def _public_agent_job_report_list_response(
     limit: int,
 ) -> AgentJobReportListResponse:
     job_numbers_by_id = {}
+    job_refs_by_id = {}
     job_index = 0
     async for job in repository.list_jobs(
         user_id=effective_user_id,
@@ -970,6 +985,7 @@ async def _public_agent_job_report_list_response(
         limit=100,
     ):
         job_numbers_by_id[job.job_id] = _public_ordinal(job_index)
+        job_refs_by_id[job.job_id] = _public_agent_job_ref(job.job_id)
         job_index += 1
 
     reports = []
@@ -986,6 +1002,10 @@ async def _public_agent_job_report_list_response(
             _public_agent_job_report(
                 report=report,
                 report_number=ordinal,
+                job_ref=job_refs_by_id.get(
+                    report.job_id,
+                    _public_agent_job_ref(report.job_id),
+                ),
                 job_number=job_numbers_by_id.get(report.job_id, ordinal),
                 effective_project_id=effective_project_id,
             )
@@ -2027,6 +2047,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
+        note_job_worker = CollaborativeNoteProposalJobWorker(
+            agent_job_repository=agent_job_repository,
+            note_service=collaborative_note_service,
+        )
+        note_job_background_tasks: set[asyncio.Task[AgentJob | None]] = set()
+
+        def dispatch_note_job(job: AgentJob) -> None:
+            note_job_worker.dispatch(
+                job,
+                task_set=note_job_background_tasks,
+            )
+
+        class CollaborativeNoteQueue:
+            async def queue(self, command: object) -> QueuedActionReceipt:
+                queued_action = await queue_collaborative_note_agent_job(
+                    agent_job_repository=agent_job_repository,
+                    command=command,
+                )
+                queued_job = await agent_job_repository.get_job(
+                    user_id=command.user_id,
+                    workspace_id=command.workspace_id,
+                    job_id=queued_action.job_id,
+                )
+                if queued_job is not None:
+                    dispatch_note_job(queued_job)
+                return queued_action
+
         continuity_service = ContinuityService(
             store=database,
             term_expander=GeminiContinuityTermExpander(client=client),
@@ -2063,6 +2110,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 collaborative_note_service=collaborative_note_service,
                 agent_job_repository=agent_job_repository,
                 memory_job_dispatcher=dispatch_memory_job,
+                note_job_dispatcher=dispatch_note_job,
             )
         )
         turn_service = AgentColTurnService(
@@ -2071,6 +2119,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             responder_runtime=responder,
             artifact_executor=artifact_executor,
             artifact_feedback_executor=artifact_feedback_executor,
+            note_queue=CollaborativeNoteQueue(),
         )
     except Exception:
         try:
@@ -2566,6 +2615,7 @@ async def list_collaborative_notes(
     return _public_collaborative_note_list_response(
         response=CollaborativeNoteListResponse(
             notes=result.notes,
+            pending_proposals=result.pending_proposals,
             next_note_id=result.next_note_id,
         ),
         effective_user_id=effective_user_id,
@@ -4233,13 +4283,19 @@ async def record_blueprint_feedback(
     )
     try:
         result = await request.app.state.artifact_feedback_service.record_feedback(
+            # The direct endpoint owns session/user authority, while the
+            # artifact feedback service consumes only the decision payload.
             RecordBlueprintFeedbackCommand(
                 project_id=effective_project_id,
                 session_id=payload.session_id,
                 user_id=effective_user_id,
                 source_message_id=validated_idempotency_key,
                 turn_id=validated_idempotency_key,
-                feedback=payload,
+                feedback=ArtifactFeedbackDecisionRequest.model_validate(
+                    payload.model_dump(
+                        exclude={"session_id", "user_id"},
+                    )
+                ),
                 observed_at=datetime.now(UTC),
             )
         )
