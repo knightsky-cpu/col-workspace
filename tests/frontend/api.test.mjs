@@ -15,6 +15,7 @@ import {
   getBlueprint,
   getChatSession,
   decideMemoryProposal,
+  decideNoteProposal,
   inspectMemory,
   listAgentJobs,
   listAgentJobReports,
@@ -955,6 +956,24 @@ test("note API wrappers use canonical user workspace note paths", async () => {
       return jsonResponse(200, { note_contract_version: "1.0" });
     },
   );
+  await decideNoteProposal(
+    "wifiknight",
+    "agent-col",
+    "note-proposal--1",
+    "approve",
+    { authToken: "token-1" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        action: {
+          action_name: "approve_collaborative_note",
+          status: "completed",
+        },
+        event: { event_id: "note-event--1" },
+      });
+    },
+  );
   await archiveNote(
     "wifiknight",
     "agent-col",
@@ -1029,20 +1048,27 @@ test("note API wrappers use canonical user workspace note paths", async () => {
   }));
   assert.equal(
     calls[4][0],
-    "/api/users/wifiknight/projects/agent-col/notes/note--1/archive",
+    "/api/users/wifiknight/projects/agent-col/notes/proposals/note-proposal--1/approve",
   );
-  assert.equal(calls[4][1].body, JSON.stringify({ expected_revision: 2 }));
+  assert.equal(calls[4][1].method, "POST");
+  assert.equal(calls[4][1].headers.Authorization, "Bearer token-1");
+  assert.equal(calls[4][1].body, undefined);
   assert.equal(
     calls[5][0],
-    "/api/users/wifiknight/projects/agent-col/notes/note--1/restore",
+    "/api/users/wifiknight/projects/agent-col/notes/note--1/archive",
   );
-  assert.equal(calls[5][1].body, JSON.stringify({ expected_revision: 3 }));
+  assert.equal(calls[5][1].body, JSON.stringify({ expected_revision: 2 }));
   assert.equal(
     calls[6][0],
+    "/api/users/wifiknight/projects/agent-col/notes/note--1/restore",
+  );
+  assert.equal(calls[6][1].body, JSON.stringify({ expected_revision: 3 }));
+  assert.equal(
+    calls[7][0],
     "/api/users/wifiknight/projects/agent-col/notes/note--1",
   );
-  assert.equal(calls[6][1].method, "DELETE");
-  assert.equal(calls[6][1].body, JSON.stringify({ expected_revision: 4 }));
+  assert.equal(calls[7][1].method, "DELETE");
+  assert.equal(calls[7][1].body, JSON.stringify({ expected_revision: 4 }));
 });
 
 test("note API wrappers reject invalid identifiers and filters", async () => {
@@ -1057,6 +1083,14 @@ test("note API wrappers reject invalid identifiers and filters", async () => {
   assert.throws(
     () => getNote("wifiknight", "agent-col", "bad/slash", {}, async () => jsonResponse(200, {})),
     /invalid/i,
+  );
+  assert.throws(
+    () => decideNoteProposal("wifiknight", "agent-col", "bad/slash", "approve", async () => jsonResponse(200, {})),
+    /invalid/i,
+  );
+  assert.throws(
+    () => decideNoteProposal("wifiknight", "agent-col", "note--1", "accepted", async () => jsonResponse(200, {})),
+    /decision must be approve or reject/i,
   );
 });
 

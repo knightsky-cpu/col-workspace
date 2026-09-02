@@ -1507,6 +1507,9 @@ export function beginNotesLoad(state, statusFilter = state.notes.statusFilter) {
 
 export function completeNotesLoad(state, response) {
   const notes = Array.isArray(response.notes) ? response.notes : [];
+  const pendingProposals = Array.isArray(response.pending_proposals)
+    ? response.pending_proposals
+    : state.notes.pendingProposals;
   const hasSelectedNote = Boolean(state.notes.selectedNoteId);
   const refreshedSelectedNote = notes.find((note) => (
     note?.note_id === state.notes.selectedNoteId
@@ -1518,6 +1521,7 @@ export function completeNotesLoad(state, response) {
       ...state.notes,
       status: "ready",
       notes,
+      pendingProposals,
       next_note_id: response.next_note_id ?? null,
       selectedNoteId: shouldClearSelectedNote ? null : state.notes.selectedNoteId,
       detail: refreshedSelectedNote

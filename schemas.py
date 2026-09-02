@@ -435,6 +435,11 @@ class ArtifactFeedbackDecisionRequest(StrictModel):
         return self
 
 
+class ArtifactFeedbackRecordRequest(ArtifactFeedbackDecisionRequest):
+    session_id: IdentifierStr
+    user_id: IdentifierStr
+
+
 class ArtifactFeedbackReference(StrictModel):
     feedback_id: IdentifierStr
     artifact_id: IdentifierStr
@@ -492,6 +497,12 @@ class BlueprintArtifactFeedbackListResponse(StrictModel):
     artifact_id: IdentifierStr
     events: list[ArtifactFeedbackEvent] = Field(max_length=50)
     next_before: IdentifierStr | None = None
+
+
+class BlueprintArtifactFeedbackRecordResponse(StrictModel):
+    feedback_contract_version: Literal["1.0"] = "1.0"
+    action: AgentActionReceipt
+    feedback: ArtifactFeedbackReference
 
 
 class BlueprintArtifactMetadata(StrictModel):
@@ -767,6 +778,13 @@ class CollaborativeNoteProposalResponse(StrictModel):
 class CollaborativeNoteLifecycleResponse(StrictModel):
     note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
     note: CollaborativeNote
+    event: CollaborativeNoteEvent
+
+
+class CollaborativeNoteDecisionResponse(StrictModel):
+    note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
+    action: AgentActionReceipt
+    note: CollaborativeNote | None = None
     event: CollaborativeNoteEvent
 
 

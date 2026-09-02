@@ -26,8 +26,33 @@ The next implementation passes should stay on that path:
 
 1. Finish the public job-report inspection surface so users can inspect terminal background outcomes without relying on chat.
 2. Move artifact creation behind the same queued job/report boundary so chat no longer waits on artifact generation.
-3. Move note proposal/reporting behavior behind the same boundary.
-4. Revisit memory policy expansion, including multiple pending proposals per category and richer memory categories, only after the async ownership boundary is stable.
+3. Separate unrelated resource surfaces from active chat busy state.
+4. Move remaining direct artifact feedback/reporting behavior out of chat-bound request builders.
+5. Revisit memory policy expansion, including multiple pending proposals per category and richer memory categories, only after the async ownership boundary is stable.
+
+### Recently Completed Chat/Background Split
+
+The artifact creation worker now owns generation and persistence behind the
+AgentJob/report boundary. Chat only delegates artifact creation and receives a
+queued action receipt; the responder no longer receives model-visible queued
+artifact context that could encourage completion claims.
+
+The Notes and Work drawer surfaces were also split from active chat submit
+readiness:
+
+- note proposal approval/rejection uses a direct notes API endpoint and no
+  longer routes through `/api/chat`;
+- direct note creation/correction/lifecycle actions and direct artifact
+  lifecycle/edit/version actions no longer check `pendingTurn`;
+- notes state hydrates `pending_proposals` from the notes API when present;
+- runtime tests cover memory approval, note approval, artifact lifecycle
+  actions, and Agents panel updates while a chat stream remains open.
+
+Remaining implementation gap before final manual end-to-end acceptance:
+
+- artifact feedback decisions still use the chat request builder and should be
+  moved to a direct artifact-feedback API so the Work surface is fully
+  independent while chat is active.
 
 ### Recently Completed Boundary Hardening
 

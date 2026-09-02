@@ -8,6 +8,7 @@ import {
   createNoteProposal,
   createWorkspace,
   decideMemoryProposal,
+  decideNoteProposal,
   deleteNote,
   deleteArtifact,
   deleteMemorySignal,
@@ -58,7 +59,6 @@ import { createWorkspaceView } from "./workspace-view.mjs";
 import { renderWorkspaceIndicator } from "./workspace-indicator.mjs";
 import {
   buildArtifactFeedbackChatRequest,
-  buildCollaborativeNoteDecisionChatRequest,
   buildContinuitySelectionChatRequest,
   buildExactRetryRequest,
   buildMemoryClarificationSelectionChatRequest,
@@ -1645,7 +1645,7 @@ function ensureWorkView() {
 }
 
 async function archiveGenericArtifact(artifactId) {
-  if (!state.context || state.pendingTurn !== null) {
+  if (!state.context) {
     return;
   }
   clearWorkError();
@@ -1664,7 +1664,7 @@ async function archiveGenericArtifact(artifactId) {
 }
 
 async function restoreGenericArtifact(artifactId) {
-  if (!state.context || state.pendingTurn !== null) {
+  if (!state.context) {
     return;
   }
   clearWorkError();
@@ -1683,7 +1683,7 @@ async function restoreGenericArtifact(artifactId) {
 }
 
 async function deleteGenericArtifact(artifactId) {
-  if (!state.context || state.pendingTurn !== null) {
+  if (!state.context) {
     return;
   }
   const confirmed = globalThis.confirm?.(
@@ -1708,7 +1708,7 @@ async function deleteGenericArtifact(artifactId) {
 }
 
 async function updateGenericArtifactMetadata(artifactId, metadata) {
-  if (!state.context || state.pendingTurn !== null) {
+  if (!state.context) {
     return;
   }
   clearWorkError();
@@ -1731,7 +1731,7 @@ async function updateGenericArtifactMetadata(artifactId, metadata) {
 }
 
 async function createGenericArtifactVersion(artifactId, versionRequest) {
-  if (!state.context || state.pendingTurn !== null) {
+  if (!state.context) {
     return;
   }
   clearWorkError();
@@ -1758,7 +1758,7 @@ async function createGenericArtifactVersion(artifactId, versionRequest) {
 }
 
 async function setArtifactLifecycleStatus(lifecycleStatus) {
-  if (!state.context || state.pendingTurn !== null) {
+  if (!state.context) {
     return;
   }
   state = setWorkLifecycleStatus(state, lifecycleStatus);
@@ -1925,19 +1925,33 @@ async function submitMemoryDecision(decision) {
 }
 
 async function submitCollaborativeNoteDecision(decision) {
-  if (!selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
-  const request = buildCollaborativeNoteDecisionChatRequest(
-    state.context,
-    `${decision.decision === "reject" ? "Reject" : "Approve"} this workspace note.`,
-    decision,
-  );
-  await submitRequest(request);
+  clearNotesError();
+  state = beginNoteRequest(state, `${decision.decision}:${decision.proposal_id}`);
+  ensureNotesView().render(state);
+  try {
+    await decideNoteProposal(
+      state.context.user_id,
+      state.context.project_id,
+      decision.proposal_id,
+      decision.decision,
+      authOptions(),
+    );
+    state = completeNoteRequest(state);
+    await loadNotes(state.notes.statusFilter);
+    loadAgentJobReports();
+    loadAgentJobs();
+  } catch (error) {
+    state = failNoteRequest(state, error);
+    showNotesError(error.message);
+  }
+  renderWorkspace();
 }
 
 async function createCollaborativeNoteCorrection(note, request) {
-  if (!state.context || !selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
   clearNotesError();
@@ -1964,7 +1978,7 @@ async function createCollaborativeNoteCorrection(note, request) {
 }
 
 async function createCollaborativeNoteProposal(request) {
-  if (!state.context || !selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
   clearNotesError();
@@ -1993,7 +2007,7 @@ async function createCollaborativeNoteProposal(request) {
 }
 
 async function changeCollaborativeNoteLifecycle(action, note) {
-  if (!state.context || !selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
   clearNotesError();

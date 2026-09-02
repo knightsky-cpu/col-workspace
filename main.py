@@ -112,6 +112,7 @@ from artifact_feedback_service import (
     ArtifactFeedbackStateError,
     ArtifactFeedbackTargetNotFoundError,
     ListArtifactFeedbackCommand,
+    RecordBlueprintFeedbackCommand,
 )
 from chat_turns import (
     ChatSessionOwnershipError,
@@ -192,13 +193,16 @@ from schemas import (
     AgentActionReceipt,
     BlueprintArtifactDetailResponse,
     BlueprintArtifactFeedbackListResponse,
+    BlueprintArtifactFeedbackRecordResponse,
     BlueprintArtifactListResponse,
     ChatPartialFailureResponse,
     ChatSessionDetailResponse,
     ChatSessionListResponse,
     ChatRequest,
     ChatResponse,
+    ArtifactFeedbackRecordRequest,
     CollaborativeNoteCorrectionRequest,
+    CollaborativeNoteDecisionResponse,
     CollaborativeNoteDetailResponse,
     CollaborativeNoteLifecycleResponse,
     CollaborativeNoteListResponse,
@@ -1168,6 +1172,32 @@ def _public_collaborative_note_lifecycle_response(
                 note=response.note,
                 effective_user_id=effective_user_id,
                 public_user_id=public_user_id,
+            ),
+            "event": _public_collaborative_note_event(
+                event=response.event,
+                effective_user_id=effective_user_id,
+                public_user_id=public_user_id,
+            ),
+        }
+    )
+
+
+def _public_collaborative_note_decision_response(
+    *,
+    response: CollaborativeNoteDecisionResponse,
+    effective_user_id: str,
+    public_user_id: str,
+) -> CollaborativeNoteDecisionResponse:
+    return response.model_copy(
+        update={
+            "note": (
+                _public_collaborative_note(
+                    note=response.note,
+                    effective_user_id=effective_user_id,
+                    public_user_id=public_user_id,
+                )
+                if response.note is not None
+                else None
             ),
             "event": _public_collaborative_note_event(
                 event=response.event,
@@ -2472,6 +2502,11 @@ def _raise_collaborative_note_http_error(exc: Exception) -> NoReturn:
             status_code=status.HTTP_409_CONFLICT,
             detail="Collaborative note state conflicts with this request.",
         ) from exc
+    if isinstance(exc, MemoryProposalExpiredError):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Collaborative note proposal has expired.",
+        ) from exc
     if isinstance(exc, MemoryEngineError):
         _raise_database_http_error(exc)
     if isinstance(exc, ValueError):
@@ -2650,6 +2685,61 @@ async def create_collaborative_note_proposal(
     ) as exc:
         _raise_collaborative_note_http_error(exc)
     return CollaborativeNoteProposalResponse(proposal=result.proposal)
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/notes/proposals/"
+    "{proposal_id}/{decision}",
+    response_model=CollaborativeNoteDecisionResponse,
+)
+async def decide_collaborative_note_proposal(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    proposal_id: IdentifierStr,
+    decision: Literal["approve", "reject"],
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> CollaborativeNoteDecisionResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = await request.app.state.collaborative_note_service.decide_proposal(
+            CollaborativeNoteDecisionCommand(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                proposal_id=proposal_id,
+                decision=decision,
+                observed_at=datetime.now(UTC),
+            )
+        )
+    except (
+        MemoryProposalNotFoundError,
+        MemoryProposalConflictError,
+        MemoryProposalExpiredError,
+        MemoryEngineError,
+        ValueError,
+    ) as exc:
+        _raise_collaborative_note_http_error(exc)
+    return _public_collaborative_note_decision_response(
+        response=CollaborativeNoteDecisionResponse(
+            action=result.action,
+            note=result.note,
+            event=result.event,
+        ),
+        effective_user_id=effective_user_id,
+        public_user_id=user_id,
+    )
 
 
 @app.post(
@@ -4094,6 +4184,98 @@ async def list_blueprint_feedback(
         ) from exc
     except MemoryEngineError as exc:
         _raise_database_http_error(exc)
+
+
+@app.post(
+    "/api/projects/{project_id}/blueprints/{blueprint_id}/feedback",
+    response_model=BlueprintArtifactFeedbackRecordResponse,
+)
+async def record_blueprint_feedback(
+    project_id: IdentifierStr,
+    blueprint_id: IdentifierStr,
+    payload: ArtifactFeedbackRecordRequest,
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+) -> BlueprintArtifactFeedbackRecordResponse:
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Idempotency-Key header is required.",
+        )
+    try:
+        validated_idempotency_key = validate_idempotency_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Idempotency key is invalid.",
+        ) from exc
+    if payload.artifact_id != blueprint_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Artifact feedback request is invalid.",
+        )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=payload.user_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = await request.app.state.artifact_feedback_service.record_feedback(
+            RecordBlueprintFeedbackCommand(
+                project_id=effective_project_id,
+                session_id=payload.session_id,
+                user_id=effective_user_id,
+                source_message_id=validated_idempotency_key,
+                turn_id=validated_idempotency_key,
+                feedback=payload,
+                observed_at=datetime.now(UTC),
+            )
+        )
+    except (
+        ArtifactFeedbackTargetNotFoundError,
+        BlueprintArtifactNotFoundError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blueprint artifact or feedback target was not found.",
+        ) from exc
+    except ArtifactFeedbackSchemaConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Artifact feedback conflicts with the current artifact state.",
+        ) from exc
+    except ArtifactFeedbackStateError as exc:
+        logger.error(
+            "Stored artifact feedback state is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored artifact feedback is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Artifact feedback request is invalid.",
+        ) from exc
+    return BlueprintArtifactFeedbackRecordResponse(
+        action=result.action,
+        feedback=result.feedback,
+    )
 
 
 async def _execute_chat(

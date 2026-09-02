@@ -1055,3 +1055,88 @@ Remaining limitations:
   refresh paths and requires manual verification;
 - workspace note proposal creation and approval are still later decoupling
   passes.
+
+## Chat And Background Surface Decoupling
+
+The next pass extended the artifact queue ownership work into the surrounding
+chat/background independence boundary.
+
+Behavioral change:
+
+- workspace note approval/rejection now has a direct notes API endpoint at
+  `/api/users/{user_id}/projects/{project_id}/notes/proposals/{proposal_id}/{decision}`;
+- that endpoint calls `CollaborativeNoteService.decide_proposal` directly and
+  does not claim, renew, complete, or release a chat turn;
+- the frontend Notes drawer uses the direct notes API for proposal
+  approval/rejection instead of building a chat request;
+- direct note proposal creation, note corrections, note lifecycle mutations,
+  artifact archive/restore/delete, artifact metadata edits, artifact version
+  creation, and artifact lifecycle filtering no longer check chat submit
+  readiness or `pendingTurn`;
+- note-list responses can hydrate `pending_proposals` into the Notes drawer so
+  the drawer is not dependent on chat receipts for proposal visibility;
+- artifact creation still queues through `AgentJob`, but the responder no
+  longer receives model-visible queued-artifact prompt context. The queued
+  receipt remains structured runtime state and background jobs/reports remain
+  authoritative for progress, completion, and failure.
+
+Why this matters:
+
+The previous artifact pass moved generation and persistence behind the job
+worker, but unrelated UI actions could still be blocked by the active chat
+turn, and note approvals still routed through `/api/chat`. This pass removes
+those coupling points. A running chat stream no longer prevents note proposal
+approval, memory proposal approval, artifact lifecycle actions, or Agents panel
+refreshes in the covered automated runtime scenarios.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_direct_collaborative_note_decision_does_not_use_chat_turn` failed
+  with `404` because no direct note decision route existed.
+- RED: `note API wrappers use canonical user workspace note paths` failed at
+  import because `decideNoteProposal` did not exist.
+- RED: `note proposal approval during a pending chat uses direct note API`
+  failed because note decisions still used chat submit readiness/chat request
+  routing.
+- RED: `artifact lifecycle actions during a pending chat use direct work API`
+  failed until direct work actions were no longer gated by active chat state and
+  the test fixture reflected the full work-list load path.
+- RED: artifact turn-service tests failed because queued-artifact text context
+  was still passed into the responder.
+- GREEN: direct backend/frontend note decisions, pending proposal hydration,
+  frontend busy-state separation for note/work surfaces, and artifact responder
+  context removal were implemented.
+
+Focused verification after implementation:
+
+```text
+node --test tests/frontend/api.test.mjs tests/frontend/state.test.mjs tests/frontend/app-runtime.test.mjs
+3 files passed
+```
+
+```text
+venv/bin/python -m pytest tests/test_main.py -k "collaborative_note" -q
+17 passed, 272 deselected, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_agent_col_turn_service_artifacts.py -k "artifact" -q
+10 passed, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_agent_col_artifact_executor.py tests/test_agent_job_repository.py tests/test_agent_job_reports.py -k "artifact or agent_job or report" -q
+49 passed, 1 warning
+```
+
+Remaining limitations:
+
+- chat routing still decides whether to enqueue artifact creation; execution,
+  persistence, job lifecycle, and reports are worker-owned;
+- public chat responses still carry queued action receipts using the existing
+  internal `QueuedActionReceipt.job_id` contract; public job/report list
+  surfaces remain sanitized;
+- direct artifact feedback still routes through the chat request builder and
+  should be moved to a direct artifact-feedback API in a follow-up pass;
+- manual end-to-end verification remains deferred until the remaining
+  direct-feedback and any uncovered drawer actions are decoupled.

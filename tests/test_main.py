@@ -18,6 +18,8 @@ from artifact_feedback_service import (
     ArtifactFeedbackStateError,
     ArtifactFeedbackTargetNotFoundError,
     ListArtifactFeedbackCommand,
+    RecordBlueprintFeedbackCommand,
+    RecordBlueprintFeedbackResult,
 )
 from artifact_read_service import (
     ArtifactReadService,
@@ -1457,8 +1459,10 @@ class FakeArtifactReadService:
 @dataclass
 class FakeArtifactFeedbackService:
     result: BlueprintArtifactFeedbackListResponse
+    record_result: RecordBlueprintFeedbackResult | None = None
     error: Exception | None = None
     calls: list[ListArtifactFeedbackCommand] = field(default_factory=list)
+    record_calls: list[RecordBlueprintFeedbackCommand] = field(default_factory=list)
 
     async def list_feedback(
         self,
@@ -1468,6 +1472,17 @@ class FakeArtifactFeedbackService:
         if self.error is not None:
             raise self.error
         return self.result
+
+    async def record_feedback(
+        self,
+        command: RecordBlueprintFeedbackCommand,
+    ) -> RecordBlueprintFeedbackResult:
+        self.record_calls.append(command)
+        if self.error is not None:
+            raise self.error
+        if self.record_result is None:
+            raise AssertionError("Missing fake artifact feedback result.")
+        return self.record_result
 
 
 @dataclass
@@ -9383,6 +9398,67 @@ async def test_chat_completes_structured_artifact_feedback_turn(
 
 
 @pytest.mark.asyncio
+async def test_direct_artifact_feedback_does_not_use_chat_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    action = AgentActionReceipt(
+        action_name="record_blueprint_feedback",
+        status="completed",
+    )
+    feedback = ArtifactFeedbackReference(
+        feedback_id="feedback--artifact-feedback-key-2",
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        target_kind="whole_blueprint",
+        decision="accepted",
+        schema_version="2.0",
+        created_at=MEMORY_NOW,
+    )
+    service_state.artifact_feedback_service.record_result = (
+        RecordBlueprintFeedbackResult(action=action, feedback=feedback)
+    )
+
+    response = await client.post(
+        "/api/projects/project-1/blueprints/blueprint-1/feedback",
+        headers={"Idempotency-Key": "artifact-feedback-key-2"},
+        json={
+            "session_id": "session-1",
+            "user_id": "user-1",
+            **decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["action"] == action.model_dump(mode="json")
+    assert response.json()["feedback"] == feedback.model_dump(mode="json")
+    assert service_state.artifact_feedback_service.record_calls == [
+        RecordBlueprintFeedbackCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            source_message_id="artifact-feedback-key-2",
+            turn_id="artifact-feedback-key-2",
+            feedback=decision,
+            observed_at=(
+                service_state.artifact_feedback_service.record_calls[0]
+                .observed_at
+            ),
+        )
+    ]
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.database.complete_calls == []
+
+
+@pytest.mark.asyncio
 async def test_feedback_responder_failure_returns_completed_receipt(
     client: httpx.AsyncClient,
     service_state: ServiceState,
@@ -9466,6 +9542,53 @@ async def test_chat_requires_idempotency_key_for_collaborative_note_decision(
         "detail": "Collaborative note decision requires an idempotency key."
     }
     assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_direct_collaborative_note_decision_does_not_use_chat_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    action = AgentActionReceipt(
+        action_name="approve_collaborative_note",
+        status="completed",
+    )
+    event = CollaborativeNoteEvent.model_validate(
+        collaborative_note_event_payload("approved")
+    )
+    service_state.collaborative_note_service.decision_result = (
+        CollaborativeNoteDecisionResult(
+            action=action,
+            note=CollaborativeNote.model_validate(
+                collaborative_note_payload()
+            ),
+            event=event,
+        )
+    )
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/notes/proposals/"
+        "note-proposal-1/approve"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["action"] == action.model_dump(mode="json")
+    assert response.json()["event"] == event.model_dump(mode="json")
+    assert service_state.collaborative_note_service.decision_calls == [
+        CollaborativeNoteDecisionCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            proposal_id="note-proposal-1",
+            decision="approve",
+            observed_at=(
+                service_state.collaborative_note_service.decision_calls[0]
+                .observed_at
+            ),
+        )
+    ]
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.database.complete_calls == []
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,6 @@ from agent_col_artifact_executor import (
     AgentColArtifactExecutionResult,
     AgentColArtifactExecutorConfigurationError,
     AgentColArtifactQueueResult,
-    build_agent_col_artifact_queued_model_context,
     build_artifact_source_text,
 )
 from agent_col_artifact_feedback_executor import (
@@ -950,13 +949,7 @@ class AgentColTurnService:
             continuity_choices=command.continuity_choices,
         )
 
-        model_input_context = (
-            *self._model_input_with_working_state(command),
-            *(
-                build_agent_col_artifact_queued_model_context(queued_action)
-                for queued_action in queue_result.queued_actions
-            ),
-        )
+        model_input_context = self._model_input_with_working_state(command)
         try:
             async with asyncio.timeout(self._remaining_seconds(deadline)):
                 result = await self._run_responder(

@@ -290,12 +290,7 @@ async def test_turn_service_routes_artifact_through_application_executor(
     responder_context = responder.contexts[0]
     assert responder_context.precompleted_actions == ()
     assert len(responder_context.prequeued_actions) == 1
-    assert len(responder_context.model_input_context) == 1
-    context_text = responder_context.model_input_context[0].parts[0].text
-    assert context_text is not None
-    assert "queued for background processing" in context_text
-    assert "[SERVER_VALIDATED_ARTIFACT_RESULT]" not in context_text
-    assert SOURCE_TEXT not in context_text
+    assert responder_context.model_input_context == ()
     assert result.actions == ()
     assert result.artifacts == ()
     assert result.adaptations == ()
@@ -351,11 +346,7 @@ async def test_turn_service_queues_artifact_before_responder_without_generation(
     assert responder_context.prequeued_actions == (queued_action,)
     assert responder_context.precompleted_actions == ()
     assert responder_context.precompleted_memory_proposals == ()
-    context_text = responder_context.model_input_context[0].parts[0].text
-    assert context_text is not None
-    assert "queued for background processing" in context_text
-    assert "application already created" not in context_text.lower()
-    assert SOURCE_TEXT not in context_text
+    assert responder_context.model_input_context == ()
 
 
 @pytest.mark.asyncio

@@ -2764,6 +2764,330 @@ test("memory proposal approval during a pending chat uses direct memory API", as
   });
 });
 
+test("note proposal approval during a pending chat uses direct note API", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const chatStream = createControlledSseResponse();
+  const calls = [];
+  let noteApproved = false;
+  let chatStreamCount = 0;
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (
+      path === "/api/users/wifiknight/projects/agent-col/notes/proposals/note-proposal-1/approve"
+      && init.method === "POST"
+    ) {
+      noteApproved = true;
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        action: {
+          action_name: "approve_collaborative_note",
+          status: "completed",
+        },
+        event: { event_id: "note-event-1", event_type: "approved" },
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: noteApproved
+          ? [{
+            note_id: "note-1",
+            note_kind: "constraint",
+            title: "API version",
+            body: "Use API version 3.",
+            revision: 1,
+            status: "active",
+          }]
+          : [],
+        pending_proposals: noteApproved
+          ? []
+          : [{
+            proposal_id: "note-proposal-1",
+            note_kind: "constraint",
+            title: "API version",
+            body: "Use API version 3.",
+            status: "pending",
+            expires_at: "2099-09-02T12:00:00Z",
+          }],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/reports")) {
+      return jsonResponse(200, {
+        agent_job_report_contract_version: "1.0",
+        reports: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      chatStreamCount += 1;
+      return chatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-note-direct-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  const input = elements.get("[data-chat-input]");
+  input.value = "Keep chat pending";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => chatStreamCount === 1,
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await waitFor(
+    () => findTree(
+      elements.get("[data-notes-panel]"),
+      (item) => item.attributes["data-disclosure-toggle"] === "note-proposal",
+    ),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  const proposalToggle = findTree(
+    elements.get("[data-notes-panel]"),
+    (item) => item.attributes["data-disclosure-toggle"] === "note-proposal",
+  );
+  proposalToggle.onclick();
+  const approve = findTree(
+    elements.get("[data-notes-panel]"),
+    (item) => item.attributes["data-note-decision"] === "approve",
+  );
+  approve.onclick();
+  await waitFor(
+    () => calls.some(([path, init]) => (
+      path === "/api/users/wifiknight/projects/agent-col/notes/proposals/note-proposal-1/approve"
+      && init.method === "POST"
+    )),
+    () => JSON.stringify(calls.map(([path, init]) => [path, init.method])),
+  );
+
+  assert.equal(
+    calls.filter(([path]) => path === "/api/chat/stream").length,
+    1,
+  );
+  assert.equal(calls.some(([path]) => path === "/api/chat"), false);
+  assert.equal(elements.get("[data-chat-error]").textContent, "");
+  chatStream.complete({
+    response: "Done",
+    actions: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    continuity_choices: [],
+    adaptations: [],
+  });
+});
+
+test("artifact lifecycle actions during a pending chat use direct work API", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const chatStream = createControlledSseResponse();
+  const calls = [];
+  let archived = false;
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (
+      path === "/api/projects/agent-col/artifacts/artifact--script/archive"
+      && init.method === "POST"
+    ) {
+      archived = true;
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        metadata: {
+          reference: {
+            artifact_id: "artifact--script",
+            artifact_type: "single_file_artifact",
+            display_label: "Build script",
+          },
+          lifecycle_status: "archived",
+        },
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/blueprints")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: archived
+          ? []
+          : [{
+            reference: {
+              artifact_id: "artifact--script",
+              artifact_type: "single_file_artifact",
+              display_label: "Build script",
+            },
+            created_at: "2026-09-01T12:00:00Z",
+          }],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return chatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-artifact-direct-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  const input = elements.get("[data-chat-input]");
+  input.value = "Keep chat pending";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  await waitFor(
+    () => findTree(
+      elements.get("[data-work-list]"),
+      (item) => item.attributes["data-disclosure-toggle"] === "artifact-lifecycle",
+    ),
+    () => textTree(elements.get("[data-work-list]")),
+  );
+  const artifactToggle = findTree(
+    elements.get("[data-work-list]"),
+    (item) => item.attributes["data-disclosure-toggle"] === "artifact-lifecycle",
+  );
+  artifactToggle.onclick();
+  const archive = findTree(
+    elements.get("[data-work-list]"),
+    (item) => item.attributes["data-archive-artifact"] === "",
+  );
+  archive.onclick({ stopPropagation() {} });
+  await waitFor(
+    () => calls.some(([path, init]) => (
+      path === "/api/projects/agent-col/artifacts/artifact--script/archive"
+      && init.method === "POST"
+    )),
+    () => JSON.stringify(calls.map(([path, init]) => [path, init.method])),
+  );
+
+  assert.equal(
+    calls.filter(([path]) => path === "/api/chat/stream").length,
+    1,
+  );
+  assert.equal(elements.get("[data-chat-error]").textContent, "");
+  chatStream.complete({
+    response: "Done",
+    actions: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    continuity_choices: [],
+    adaptations: [],
+  });
+});
+
 test("memory sub-card revoke and delete do not depend on chat submit readiness", async () => {
   const elements = new Map();
   const contextForm = node("form");

@@ -1344,6 +1344,21 @@ test("note lifecycle stores pending proposals, notes, detail, and clears on work
   assert.equal(completed.notes.notes[0].note_id, "note-1");
   assert.equal(completed.notes.next_note_id, "note-2");
 
+  const loadedWithProposal = completeNotesLoad(loading, {
+    notes: [],
+    pending_proposals: [{
+      proposal_id: "note-proposal-1",
+      title: "API version",
+      body: "Use API version 2.",
+      status: "pending",
+    }],
+    next_note_id: null,
+  });
+  assert.equal(
+    loadedWithProposal.notes.pendingProposals[0].proposal_id,
+    "note-proposal-1",
+  );
+
   const withProposal = storePendingNoteProposal(completed, {
     proposal_id: "note-proposal-1",
     title: "API version",

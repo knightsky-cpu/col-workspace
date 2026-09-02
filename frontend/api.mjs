@@ -552,6 +552,28 @@ export function listBlueprintFeedback(
   );
 }
 
+export function recordBlueprintFeedback(
+  projectId,
+  artifactId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("artifact_id", artifactId);
+  return apiFetchJson(
+    `/api/projects/${encodeURIComponent(projectId)}/blueprints/${encodeURIComponent(artifactId)}/feedback`,
+    {
+      method: "POST",
+      authToken: options.authToken,
+      idempotencyKey: options.idempotencyKey,
+      body: request,
+    },
+    fetchLike,
+  );
+}
+
 export function listArtifacts(
   projectId,
   options = {},
@@ -720,6 +742,28 @@ export function decideMemoryProposal(
   }
   return apiFetchJson(
     `/api/users/${encodeURIComponent(userId)}/memory/proposals/${encodeURIComponent(proposalId)}/${decision}`,
+    { method: "POST", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
+export function decideNoteProposal(
+  userId,
+  projectId,
+  proposalId,
+  decision,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("proposal_id", proposalId);
+  if (!["approve", "reject"].includes(decision)) {
+    throw new Error("decision must be approve or reject.");
+  }
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/notes/proposals/${encodeURIComponent(proposalId)}/${decision}`,
     { method: "POST", authToken: options.authToken },
     fetchLike,
   );
