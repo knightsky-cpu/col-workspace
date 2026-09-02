@@ -154,6 +154,7 @@ from schemas import (
     MemoryProposal,
     MemoryProposalReceipt,
     MemoryProposalReceiptV2,
+    QueuedActionReceipt,
     SingleFileArtifact,
     SingleFileArtifactCreateResponse,
     SingleFileArtifactDetailResponse,
@@ -3122,6 +3123,51 @@ async def test_chat_stream_preserves_structured_partial_failure_effects(
         "detail": "Agent_Col response failed after a completed action.",
         "actions": [action.model_dump(mode="json")],
         "memory_proposals": [proposal.model_dump(mode="json")],
+    }
+    assert "final" not in [event for event, _ in events]
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_preserves_queued_action_partial_failure_effects(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    queued_action = QueuedActionReceipt(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory request: response_length",
+        created_at=MEMORY_NOW,
+        agent_label="Memory Analyst",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.turn_service.stream_deltas = ("Provisional text",)
+    service_state.turn_service.error = AgentColTurnResponderError(
+        "private responder failure",
+        queued_actions=(queued_action,),
+    )
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "queued-partial-failure-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Remember this preference.",
+        },
+    )
+
+    events = parse_sse_events(response.text)
+    error = events[-1][1]
+    assert events[-1][0] == "error"
+    assert error["status"] == 502
+    assert error["provisional"] is True
+    assert error["partial_failure"] == {
+        "detail": "Agent_Col response failed after a completed action.",
+        "actions": [],
+        "memory_proposals": [],
+        "queued_actions": [queued_action.model_dump(mode="json")],
     }
     assert "final" not in [event for event, _ in events]
 

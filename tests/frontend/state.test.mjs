@@ -5,6 +5,7 @@ import {
   acceptContext,
   appendPendingResponseDelta,
   beginAgentJobsLoad,
+  beginAgentReportsLoad,
   beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
@@ -30,6 +31,7 @@ import {
   completeNotesLoad,
   completePendingTurn,
   completeAgentJobsLoad,
+  completeAgentReportsLoad,
   completeChatSessionDetailLoad,
   completeChatSessionListLoad,
   createInitialState,
@@ -37,6 +39,7 @@ import {
   expandNoteDetailDisclosure,
   failWorkDetailLoad,
   failAgentJobsLoad,
+  failAgentReportsLoad,
   failWorkspaceListLoad,
   failWorkListLoad,
   failMemoryLoad,
@@ -52,6 +55,8 @@ import {
   setWorkLifecycleStatus,
   storePendingNoteProposal,
   startNewConversation,
+  showAgentReports,
+  hideAgentReports,
   toggleArtifactDisclosure,
   toggleChatDisclosure,
   toggleMemoryEventsDisclosure,
@@ -179,6 +184,10 @@ test("agent job state loads backend-authoritative public jobs", () => {
   assert.deepEqual(initial.agents, {
     status: "idle",
     jobs: [],
+    reportsStatus: "idle",
+    reports: [],
+    reportsError: null,
+    reportsVisible: false,
     error: null,
   });
 
@@ -197,6 +206,44 @@ test("agent job state loads backend-authoritative public jobs", () => {
   assert.equal(failed.agents.status, "error");
   assert.equal(failed.agents.error, "job load failed");
   assert.deepEqual(failed.agents.jobs, loaded.agents.jobs);
+});
+
+test("agent report state loads public reports without replacing jobs", () => {
+  const initial = completeAgentJobsLoad(beginAgentJobsLoad(createInitialState()), {
+    agent_job_contract_version: "1.0",
+    jobs: [{ job_number: "001", status: "completed" }],
+  });
+
+  const loading = beginAgentReportsLoad(initial);
+  assert.equal(loading.agents.reportsStatus, "loading");
+  assert.deepEqual(loading.agents.jobs, initial.agents.jobs);
+
+  const loaded = completeAgentReportsLoad(loading, {
+    agent_job_report_contract_version: "1.0",
+    reports: [{
+      report_number: "001",
+      job_number: "001",
+      agent_label: "Memory Analyst",
+      status: "failed",
+      title: "Memory proposal not created",
+      summary: "A pending memory proposal already exists for this category.",
+      created_at: "2026-09-02T10:00:00Z",
+    }],
+  });
+  assert.equal(loaded.agents.reportsStatus, "loaded");
+  assert.deepEqual(loaded.agents.jobs, initial.agents.jobs);
+  assert.equal(loaded.agents.reports.length, 1);
+  assert.equal(loaded.agents.reportsError, null);
+
+  const visible = showAgentReports(loaded);
+  assert.equal(visible.agents.reportsVisible, true);
+  const hidden = hideAgentReports(visible);
+  assert.equal(hidden.agents.reportsVisible, false);
+
+  const failed = failAgentReportsLoad(loaded, new Error("report load failed"));
+  assert.equal(failed.agents.reportsStatus, "error");
+  assert.equal(failed.agents.reportsError, "report load failed");
+  assert.deepEqual(failed.agents.reports, loaded.agents.reports);
 });
 
 test("workspace list lifecycle stores selectable user containers", () => {

@@ -610,7 +610,7 @@ async def test_lease_next_queued_job_filters_by_action_kind(
             job_id="memory-job",
             idempotency_key="memory-idem",
             action_kind="propose_memory_signal",
-            display_label="Memory proposal: response_length",
+            display_label="Memory request: response_length",
             agent_label="Memory Analyst",
             created_at=NOW + timedelta(seconds=5),
             updated_at=NOW + timedelta(seconds=5),

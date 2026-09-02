@@ -33,6 +33,9 @@ function node(tagName = "div") {
     getAttribute(name) {
       return attributes[name] ?? null;
     },
+    addEventListener(name, handler) {
+      this[`on${name}`] = handler;
+    },
   };
 }
 
@@ -108,6 +111,104 @@ test("renderAgentsPanel shows a compact empty state from backend-authoritative d
   assert.match(container.textContent, /No queued tasks/);
   assert.match(container.textContent, /No completed tasks this session/);
   assert.equal(summary.textContent, "0 active · 0 queued");
+});
+
+test("renderAgentsPanel opens job reports from the existing footer arrow", () => {
+  const container = node();
+  let opened = false;
+
+  renderAgentsPanel(container, {
+    status: "loaded",
+    jobs: [],
+    reportsStatus: "loaded",
+    reports: [{
+      report_number: "001",
+      job_number: "002",
+      agent_label: "Memory Analyst",
+      status: "failed",
+      title: "Memory proposal not created",
+      summary: "A pending memory proposal already exists for this category.",
+      public_resource_label: null,
+      created_at: "2026-09-02T10:00:00Z",
+      report_id: "agent-job-report-secret",
+      job_id: "memory-job-secret",
+      session_id: "session-secret",
+    }],
+    reportsVisible: false,
+  }, {
+    onOpenReports() {
+      opened = true;
+    },
+  });
+
+  assert.match(container.textContent, /View all job reports/);
+  const footer = container.children.at(-1);
+  const arrow = footer.children.at(-1);
+  assert.equal(arrow.textContent, "↗");
+  assert.equal(arrow.tagName, "button");
+  arrow.onclick();
+  assert.equal(opened, true);
+  assert.doesNotMatch(container.textContent, /agent-job-report-secret/);
+  assert.doesNotMatch(container.textContent, /memory-job-secret/);
+  assert.doesNotMatch(container.textContent, /session-secret/);
+});
+
+test("renderAgentsPanel shows report popup as a compact public-safe list", () => {
+  const container = node();
+  let closed = false;
+
+  renderAgentsPanel(container, {
+    status: "loaded",
+    jobs: [],
+    reportsStatus: "loaded",
+    reports: [
+      {
+        report_number: "001",
+        job_number: "002",
+        agent_label: "Memory Analyst",
+        status: "failed",
+        title: "Memory proposal not created",
+        summary: "A pending memory proposal already exists for this category.",
+        public_resource_label: null,
+        created_at: "2026-09-02T10:00:00Z",
+        report_id: "agent-job-report-secret",
+        job_id: "memory-job-secret",
+        source_message_id: "message-secret",
+      },
+      {
+        report_number: "002",
+        job_number: "001",
+        agent_label: "Artifact Builder",
+        status: "completed",
+        title: "Artifact created",
+        summary: "The requested artifact was created.",
+        public_resource_label: "git_update.sh",
+        created_at: "2026-09-02T10:01:00Z",
+      },
+    ],
+    reportsVisible: true,
+  }, {
+    onCloseReports() {
+      closed = true;
+    },
+  });
+
+  assert.match(container.textContent, /Job Reports/);
+  assert.match(container.textContent, /Memory Analyst/);
+  assert.match(container.textContent, /Failed/);
+  assert.match(container.textContent, /A pending memory proposal already exists/);
+  assert.match(container.textContent, /Artifact Builder/);
+  assert.match(container.textContent, /git_update\.sh/);
+  assert.doesNotMatch(container.textContent, /agent-job-report-secret/);
+  assert.doesNotMatch(container.textContent, /memory-job-secret/);
+  assert.doesNotMatch(container.textContent, /message-secret/);
+
+  const popup = container.children.at(-1);
+  assert.equal(popup.getAttribute("role"), "dialog");
+  assert.equal(popup.getAttribute("aria-modal"), "true");
+  const close = popup.children[0].children.at(-1);
+  close.onclick();
+  assert.equal(closed, true);
 });
 
 test("renderAgentsPanel sorts active agents chronologically without reordering queued tasks", () => {

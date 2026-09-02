@@ -295,10 +295,10 @@ def json_dumps_compact(value: object) -> str:
 def _memory_job_display_label(command: NaturalMemoryCommand) -> str:
     category = getattr(command.decision, "category", None)
     if isinstance(category, str) and category:
-        return f"Memory proposal: {category}"[:160]
+        return f"Memory request: {category}"[:160]
     if command.decision.kind == "clarify":
         return "Memory clarification"[:160]
-    return "Memory proposal"[:160]
+    return "Memory request"[:160]
 
 
 def _raw_memory_job_digest(
@@ -328,10 +328,10 @@ def _raw_memory_job_digest(
 def _raw_memory_job_display_label(decision: dict[str, object]) -> str:
     category = decision.get("category")
     if isinstance(category, str) and category:
-        return f"Memory proposal: {category}"[:160]
+        return f"Memory request: {category}"[:160]
     if decision.get("kind") == "clarify":
         return "Memory clarification"[:160]
-    return "Memory proposal"[:160]
+    return "Memory request"[:160]
 
 
 def _raw_memory_job(
@@ -445,7 +445,7 @@ async def _queue_memory_agent_job(
         event=_memory_job_event(
             job=queued,
             event_type="queued",
-            message="Memory proposal queued.",
+            message="Memory request queued.",
             observed_at=queued.created_at,
         ),
     )
@@ -514,7 +514,7 @@ async def _queue_raw_memory_agent_job(
         event=_memory_job_event(
             job=queued,
             event_type="queued",
-            message="Memory proposal queued.",
+            message="Memory request queued.",
             observed_at=queued.created_at,
         ),
     )

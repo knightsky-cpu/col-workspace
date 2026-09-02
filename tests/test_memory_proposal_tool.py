@@ -384,7 +384,7 @@ async def test_proposal_tool_records_memory_agent_job_queue_receipt() -> None:
     assert job.action_kind == "propose_memory_signal"
     assert job.status == "queued"
     assert job.agent_label == "Memory Analyst"
-    assert job.display_label == "Memory proposal: response_length"
+    assert job.display_label == "Memory request: response_length"
     assert job.user_id == "user-1"
     assert job.workspace_id == "workspace-1"
     assert job.project_id == "workspace-1"
@@ -434,7 +434,7 @@ async def test_proposal_tool_queues_memory_work_without_calling_service(
     assert result["queued_action"]["action_kind"] == "propose_memory_signal"
     assert result["queued_action"]["status"] == "queued"
     assert result["queued_action"]["display_label"] == (
-        "Memory proposal: response_length"
+        "Memory request: response_length"
     )
     assert service.commands == []
     assert len(repository.enqueued) == 1

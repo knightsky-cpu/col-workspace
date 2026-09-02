@@ -195,7 +195,7 @@ def make_job(command: NaturalMemoryCommand) -> AgentJob:
         source_message_id=command.source_message_id,
         action_kind="propose_memory_signal",
         status="queued",
-        display_label="Memory proposal: response_length",
+        display_label="Memory request: response_length",
         agent_label="Memory Analyst",
         created_at=NOW,
         updated_at=NOW,

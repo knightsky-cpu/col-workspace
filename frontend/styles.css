@@ -1074,6 +1074,118 @@ p {
 }
 
 .agents-footer__icon {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+  padding: 0;
+}
+
+.agent-reports-overlay {
+  background: rgba(13, 25, 32, 0.98);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+  color: var(--text);
+  inset-block-start: 8rem;
+  inset-inline-start: 50%;
+  max-height: min(72vh, 48rem);
+  max-width: min(44rem, calc(100vw - 2rem));
+  overflow: auto;
+  padding: 1rem;
+  position: fixed;
+  transform: translateX(-50%);
+  width: min(44rem, calc(100vw - 2rem));
+  z-index: 80;
+}
+
+.agent-reports-overlay__header {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-block-end: 0.75rem;
+}
+
+.agent-reports-overlay__title {
+  color: var(--text);
+  font-size: 1rem;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.agent-reports-overlay__close {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  height: 1.8rem;
+  justify-content: center;
+  padding: 0;
+  width: 1.8rem;
+}
+
+.agent-reports-overlay__status,
+.agent-reports-overlay__empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin: 0;
+}
+
+.agent-reports-list {
+  display: grid;
+  gap: 0.7rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.agent-report-row {
+  border-block-start: 1px solid var(--border-soft);
+  padding-block-start: 0.7rem;
+}
+
+.agent-report-row__header {
+  align-items: baseline;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.agent-report-row__number,
+.agent-report-row__status {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.agent-report-row__agent {
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.agent-report-row__title,
+.agent-report-row__summary,
+.agent-report-row__resource {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0.28rem 0 0;
+}
+
+.agent-report-row__title {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.agent-report-row__summary {
+  color: var(--muted);
+}
+
+.agent-report-row__resource {
   color: var(--accent);
 }
 

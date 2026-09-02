@@ -2099,6 +2099,125 @@ test("agent jobs refresh while queued or running without blocking chat submit", 
   restoreTimers();
 });
 
+test("agent report popup loads reports from the background report surface", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const calls = [];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs/stream")) {
+      return jsonResponse(404, { detail: "Agent job stream is unavailable." });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/reports")) {
+      return jsonResponse(200, {
+        agent_job_report_contract_version: "1.0",
+        reports: [{
+          report_number: "001",
+          job_number: "001",
+          agent_label: "Memory Analyst",
+          status: "failed",
+          title: "Memory proposal not created",
+          summary: "A pending memory proposal already exists for this category.",
+          public_resource_label: null,
+          created_at: "2026-09-02T10:00:00Z",
+          report_id: "agent-job-report-secret",
+          job_id: "agent-job-secret",
+          session_id: "session-secret",
+        }],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-agent-report-popup-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  await waitFor(
+    () => textTree(elements.get("[data-agents-panel]")).includes("View all job reports"),
+    () => textTree(elements.get("[data-agents-panel]")),
+  );
+
+  const arrow = findTree(elements.get("[data-agents-panel]"), (item) => (
+    item.tagName === "button" && item.textContent === "↗"
+  ));
+  assert.ok(arrow);
+  assert.equal(typeof arrow.onclick, "function");
+  await arrow.onclick();
+
+  await waitFor(
+    () => calls.some(([path]) => path.includes("/agent/reports")),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  assert.match(textTree(elements.get("[data-agents-panel]")), /Job Reports/);
+  assert.match(textTree(elements.get("[data-agents-panel]")), /Memory Analyst/);
+  assert.match(textTree(elements.get("[data-agents-panel]")), /A pending memory proposal already exists/);
+  assert.doesNotMatch(textTree(elements.get("[data-agents-panel]")), /agent-job-report-secret/);
+  assert.doesNotMatch(textTree(elements.get("[data-agents-panel]")), /agent-job-secret/);
+  assert.doesNotMatch(textTree(elements.get("[data-agents-panel]")), /session-secret/);
+
+  const close = findTree(elements.get("[data-agents-panel]"), (item) => (
+    item.tagName === "button" && item.attributes["aria-label"] === "Close job reports"
+  ));
+  assert.ok(close);
+  close.onclick();
+  assert.doesNotMatch(textTree(elements.get("[data-agents-panel]")), /Job Reports/);
+});
+
 test("agent jobs use fast refresh while chat stream is pending", async (t) => {
   const { contextForm, elements } = installOrdinaryChatRuntimeDom();
   globalThis.sessionStorage = memoryStorage();

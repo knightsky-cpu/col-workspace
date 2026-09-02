@@ -18,6 +18,7 @@ import {
   getBlueprint,
   getNote,
   inspectMemory,
+  listAgentJobReports,
   listAgentJobs,
   listNotes,
   listChatSessions,
@@ -77,6 +78,7 @@ import {
   acceptContext,
   appendPendingResponseDelta,
   beginAgentJobsLoad,
+  beginAgentReportsLoad,
   beginWorkspaceListLoad,
   beginChatSessionDetailLoad,
   beginChatSessionListLoad,
@@ -106,10 +108,12 @@ import {
   completeWorkRestore,
   completePendingTurn,
   completeAgentJobsLoad,
+  completeAgentReportsLoad,
   createInitialState,
   expandChatDisclosure,
   expandNoteDetailDisclosure,
   failAgentJobsLoad,
+  failAgentReportsLoad,
   failMemoryLoad,
   failNoteDetailLoad,
   failNoteRequest,
@@ -127,6 +131,8 @@ import {
   selectWorkRefreshPlan,
   setNotesStatusFilter,
   setWorkLifecycleStatus,
+  hideAgentReports,
+  showAgentReports,
   storePendingNoteProposal,
   startNewConversation,
   toggleArtifactDisclosure,
@@ -1267,6 +1273,42 @@ function startAgentJobsStream() {
   return true;
 }
 
+async function loadAgentJobReports() {
+  if (!state.context) {
+    return;
+  }
+  const loadContext = { ...state.context };
+  const refreshToken = agentJobsRefreshToken;
+  state = beginAgentReportsLoad(state);
+  ensureAgentsView().render(state);
+  try {
+    const response = await listAgentJobReports(
+      loadContext.user_id,
+      loadContext.project_id,
+      authOptions({
+        limit: 50,
+        session_id: loadContext.session_id,
+      }),
+    );
+    if (
+      refreshToken !== agentJobsRefreshToken
+      || !sameAgentJobsContext(loadContext, state.context)
+    ) {
+      return;
+    }
+    state = completeAgentReportsLoad(state, response);
+  } catch (error) {
+    if (
+      refreshToken !== agentJobsRefreshToken
+      || !sameAgentJobsContext(loadContext, state.context)
+    ) {
+      return;
+    }
+    state = failAgentReportsLoad(state, error);
+  }
+  ensureAgentsView().render(state);
+}
+
 async function loadAgentJobs() {
   if (!state.context) {
     return;
@@ -1837,6 +1879,15 @@ function ensureAgentsView() {
   agentsView = createAgentsView({
     panel: document.querySelector("[data-agents-panel]"),
     summary: document.querySelector("[data-agents-summary]"),
+    async onOpenReports() {
+      state = showAgentReports(state);
+      ensureAgentsView().render(state);
+      await loadAgentJobReports();
+    },
+    onCloseReports() {
+      state = hideAgentReports(state);
+      ensureAgentsView().render(state);
+    },
   });
   return agentsView;
 }

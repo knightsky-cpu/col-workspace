@@ -936,7 +936,7 @@ async def test_run_turn_collects_queued_memory_receipt_from_function_response(
                 "job_id": "memory-job-1",
                 "action_kind": "propose_memory_signal",
                 "status": "queued",
-                "display_label": "Memory proposal: response_length",
+                "display_label": "Memory request: response_length",
                 "created_at": "2026-08-22T16:00:00Z",
                 "agent_label": "Memory Analyst",
             },
@@ -971,6 +971,108 @@ async def test_run_turn_collects_queued_memory_receipt_from_function_response(
     assert len(result.queued_actions) == 1
     assert result.queued_actions[0].job_id == "memory-job-1"
     assert result.queued_actions[0].action_kind == "propose_memory_signal"
+
+
+@pytest.mark.asyncio
+async def test_run_turn_does_not_promote_pending_memory_after_queued_work(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    queued_response = types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "memory-job-1",
+                "action_kind": "propose_memory_signal",
+                "status": "queued",
+                "display_label": "Memory request: response_length",
+                "created_at": "2026-08-22T16:00:00Z",
+                "agent_label": "Memory Analyst",
+            },
+        },
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [queued_response]),
+                FakeEvent(None, False, [pending_function_response()]),
+                FakeEvent("Memory work is queued.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Remember that I prefer concise responses.",
+        )
+    )
+
+    assert result.response == "Memory work is queued."
+    assert result.actions == ()
+    assert result.memory_proposals == ()
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].job_id == "memory-job-1"
+
+
+@pytest.mark.asyncio
+async def test_run_turn_rewrites_queued_memory_completion_claims() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    queued_response = types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "memory-job-1",
+                "action_kind": "propose_memory_signal",
+                "status": "queued",
+                "display_label": "Memory request: user_requested_memory",
+                "created_at": "2026-08-22T16:00:00Z",
+                "agent_label": "Memory Analyst",
+            },
+        },
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [queued_response]),
+                FakeEvent(
+                    (
+                        "The artifact has been created.\n\n"
+                        "Memory Request Status\n\n"
+                        "I have submitted a pending proposal to save your "
+                        "preference. Please approve or reject the proposal "
+                        "in the Memory UI."
+                    ),
+                    True,
+                ),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create an artifact and remember my preference.",
+        )
+    )
+
+    assert "The artifact has been created." in result.response
+    assert "Memory work has been queued for background processing." in (
+        result.response
+    )
+    assert "submitted a pending proposal" not in result.response
+    assert "approve or reject the proposal" not in result.response
+    assert result.memory_proposals == ()
+    assert len(result.queued_actions) == 1
 
 
 @pytest.mark.asyncio

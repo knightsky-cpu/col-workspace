@@ -165,6 +165,10 @@ function emptyAgentState() {
   return {
     status: "idle",
     jobs: [],
+    reportsStatus: "idle",
+    reports: [],
+    reportsError: null,
+    reportsVisible: false,
     error: null,
   };
 }
@@ -514,6 +518,7 @@ export function completeAgentJobsLoad(state, response) {
   return {
     ...state,
     agents: {
+      ...state.agents,
       status: "loaded",
       jobs: Array.isArray(response.jobs) ? response.jobs : [],
       error: null,
@@ -528,6 +533,60 @@ export function failAgentJobsLoad(state, error) {
       ...state.agents,
       status: "error",
       error: errorMessage(error),
+    },
+  };
+}
+
+export function beginAgentReportsLoad(state) {
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      reportsStatus: "loading",
+      reportsError: null,
+    },
+  };
+}
+
+export function completeAgentReportsLoad(state, response) {
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      reportsStatus: "loaded",
+      reports: Array.isArray(response.reports) ? response.reports : [],
+      reportsError: null,
+    },
+  };
+}
+
+export function failAgentReportsLoad(state, error) {
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      reportsStatus: "error",
+      reportsError: errorMessage(error),
+    },
+  };
+}
+
+export function showAgentReports(state) {
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      reportsVisible: true,
+    },
+  };
+}
+
+export function hideAgentReports(state) {
+  return {
+    ...state,
+    agents: {
+      ...state.agents,
+      reportsVisible: false,
     },
   };
 }

@@ -149,6 +149,99 @@ function renderSection(title, jobs, emptyText, group, now) {
   return section;
 }
 
+function reportText(report, field) {
+  const value = report?.[field];
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function renderReportRow(report) {
+  const row = element("li", "agent-report-row");
+
+  const header = element("div", "agent-report-row__header");
+  appendTextElement(
+    header,
+    "span",
+    "agent-report-row__number",
+    reportText(report, "report_number") || reportText(report, "job_number"),
+  );
+  appendTextElement(
+    header,
+    "strong",
+    "agent-report-row__agent",
+    reportText(report, "agent_label") || "Agent Task",
+  );
+  appendTextElement(
+    header,
+    "span",
+    "agent-report-row__status",
+    humanStatus(reportText(report, "status")),
+  );
+  row.append(header);
+
+  const title = reportText(report, "title");
+  if (title) {
+    appendTextElement(row, "p", "agent-report-row__title", title);
+  }
+  const summary = reportText(report, "summary");
+  if (summary) {
+    appendTextElement(row, "p", "agent-report-row__summary", summary);
+  }
+  const resourceLabel = reportText(report, "public_resource_label");
+  if (resourceLabel) {
+    appendTextElement(row, "p", "agent-report-row__resource", resourceLabel);
+  }
+  return row;
+}
+
+function renderReportsDialog(agentsState, options) {
+  const dialog = element("div", "agent-reports-overlay");
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "agent-reports-title");
+
+  const header = element("div", "agent-reports-overlay__header");
+  const title = appendTextElement(
+    header,
+    "h2",
+    "agent-reports-overlay__title",
+    "Job Reports",
+  );
+  title.setAttribute("id", "agent-reports-title");
+  const closeButton = element("button", "agent-reports-overlay__close", "x");
+  closeButton.type = "button";
+  closeButton.setAttribute("aria-label", "Close job reports");
+  closeButton.onclick = options.onCloseReports ?? null;
+  header.append(closeButton);
+  dialog.append(header);
+
+  if (agentsState?.reportsStatus === "loading") {
+    appendTextElement(dialog, "p", "agent-reports-overlay__status", "Loading reports...");
+    return dialog;
+  }
+  if (agentsState?.reportsStatus === "error" && agentsState.reportsError) {
+    appendTextElement(dialog, "p", "form-error", agentsState.reportsError);
+    return dialog;
+  }
+
+  const reports = Array.isArray(agentsState?.reports) ? agentsState.reports : [];
+  if (!reports.length) {
+    appendTextElement(
+      dialog,
+      "p",
+      "agent-reports-overlay__empty",
+      "No job reports for this session.",
+    );
+    return dialog;
+  }
+
+  const list = element("ol", "agent-reports-list");
+  for (const report of reports) {
+    list.append(renderReportRow(report));
+  }
+  dialog.append(list);
+  return dialog;
+}
+
 function updateSummary(summaryElement, groups) {
   if (!summaryElement) {
     return;
@@ -194,9 +287,17 @@ export function renderAgentsPanel(container, agentsState, options = {}) {
   );
 
   const footer = element("div", "agents-footer");
-  appendTextElement(footer, "span", "agents-footer__label", "View all agents");
-  appendTextElement(footer, "span", "agents-footer__icon", "↗");
+  appendTextElement(footer, "span", "agents-footer__label", "View all job reports");
+  const reportButton = element("button", "agents-footer__icon", "↗");
+  reportButton.type = "button";
+  reportButton.setAttribute("aria-label", "View all job reports");
+  reportButton.onclick = options.onOpenReports ?? null;
+  footer.append(reportButton);
   container.append(footer);
+
+  if (agentsState?.reportsVisible) {
+    container.append(renderReportsDialog(agentsState, options));
+  }
 }
 
 export function createAgentsView(elements) {
@@ -204,6 +305,8 @@ export function createAgentsView(elements) {
     render(state) {
       renderAgentsPanel(elements.panel, state.agents, {
         summaryElement: elements.summary,
+        onOpenReports: elements.onOpenReports,
+        onCloseReports: elements.onCloseReports,
       });
     },
   };

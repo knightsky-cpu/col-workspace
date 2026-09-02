@@ -197,6 +197,21 @@ def test_responder_instruction_prevents_duplicate_or_competing_job_outputs(
         assert required_rule in normalized
 
 
+def test_responder_instruction_does_not_report_queued_memory_as_pending(
+) -> None:
+    from agent_col_responder import RESPONDER_INSTRUCTION
+
+    normalized = " ".join(RESPONDER_INSTRUCTION.split()).lower()
+
+    for required_rule in (
+        "queued memory work is not a completed memory proposal receipt",
+        "do not describe queued memory work as a pending proposal",
+        "memory proposal completion, failure, conflict, and approval status",
+        "job reports",
+    ):
+        assert required_rule in normalized
+
+
 def test_responder_instruction_limits_proactive_notes_to_persistence_value(
 ) -> None:
     from agent_col_responder import RESPONDER_INSTRUCTION

@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 import json
 import logging
+import re
 import time
 from uuid import uuid4
 
@@ -43,6 +44,83 @@ from source_expert_runtime import SourceExpertTurnTracker
 
 logger = logging.getLogger(__name__)
 SUPERVISOR_MAX_LLM_CALLS = 4
+_QUEUED_MEMORY_REPLACEMENT_TEXT = (
+    "Memory work has been queued for background processing. Check the Memory "
+    "UI or job reports for the final result."
+)
+_MEMORY_STATUS_HEADINGS = frozenset(
+    {
+        "memory request status",
+        "memory proposal status",
+        "pending memory proposal",
+        "pending memory proposal status",
+    }
+)
+_QUEUED_MEMORY_COMPLETION_CLAIM_PATTERN = re.compile(
+    r"\b("
+    r"submitted a pending proposal|"
+    r"pending memory proposal|"
+    r"memory proposal (?:has been |was )?(?:created|generated|submitted)|"
+    r"proposal (?:has been |was )?(?:created|generated|submitted)|"
+    r"approve or reject (?:this|the) proposal|"
+    r"(?:saved|stored|remembered|recorded) (?:your|the) preference"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _has_queued_memory_work(
+    queued_actions: list[QueuedActionReceipt] | tuple[QueuedActionReceipt, ...],
+) -> bool:
+    return any(
+        action.action_kind == "propose_memory_signal"
+        for action in queued_actions
+    )
+
+
+def _is_memory_status_heading(paragraph: str) -> bool:
+    normalized = re.sub(r"^[#>*_\-\s`]+", "", paragraph.strip())
+    normalized = re.sub(r"[*_`:\s]+$", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).lower()
+    return normalized in _MEMORY_STATUS_HEADINGS
+
+
+def _contains_queued_memory_completion_claim(paragraph: str) -> bool:
+    normalized = paragraph.lower()
+    if "memory" not in normalized and "preference" not in normalized:
+        return False
+    return _QUEUED_MEMORY_COMPLETION_CLAIM_PATTERN.search(paragraph) is not None
+
+
+def _sanitize_queued_memory_response_text(
+    text: str,
+    *,
+    queued_actions: list[QueuedActionReceipt],
+    memory_proposals: list[VersionedMemoryProposalReceipt],
+) -> str:
+    if (
+        not _has_queued_memory_work(queued_actions)
+        or memory_proposals
+        or not _contains_queued_memory_completion_claim(text)
+    ):
+        return text
+
+    retained_paragraphs = []
+    removed_claim = False
+    for paragraph in re.split(r"\n\s*\n", text):
+        if _is_memory_status_heading(paragraph):
+            removed_claim = True
+            continue
+        if _contains_queued_memory_completion_claim(paragraph):
+            removed_claim = True
+            continue
+        retained_paragraphs.append(paragraph)
+
+    if removed_claim and _QUEUED_MEMORY_REPLACEMENT_TEXT not in text:
+        retained_paragraphs.append(_QUEUED_MEMORY_REPLACEMENT_TEXT)
+    return "\n\n".join(
+        paragraph for paragraph in retained_paragraphs if paragraph.strip()
+    ).strip()
 SUPERVISOR_TIMEOUT_SECONDS = 90
 _DURABLE_PRECOMPLETED_ACTION_NAMES = frozenset(
     {
@@ -435,6 +513,11 @@ class SupervisorRuntime:
                             parsed,
                             PendingMemoryProposalToolResponse,
                         ):
+                            if any(
+                                action.action_kind == "propose_memory_signal"
+                                for action in queued_actions
+                            ):
+                                continue
                             if not memory_proposals:
                                 actions.append(parsed.action)
                                 memory_proposals.append(
@@ -536,6 +619,11 @@ class SupervisorRuntime:
                     ):
                         text = self._extract_text(event)
                         if text:
+                            text = _sanitize_queued_memory_response_text(
+                                text,
+                                queued_actions=queued_actions,
+                                memory_proposals=memory_proposals,
+                            )
                             final_responses.append(text)
                             if streaming_mode is StreamingMode.SSE:
                                 delta = text_normalizer.finish(text)

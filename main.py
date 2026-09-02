@@ -1637,6 +1637,7 @@ def _partial_failure_response(
         and not clarifications
         and not note_proposals
         and not note_events
+        and not runtime_error.queued_actions
     ):
         return None
     proposal_actions = tuple(

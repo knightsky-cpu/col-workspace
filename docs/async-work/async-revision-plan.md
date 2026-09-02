@@ -10,6 +10,29 @@
 
 **Spec:** `docs/async-work/async-work-notes.md`
 
+## Current Plan Update: Full Background Ownership Split
+
+Manual verification after memory queueing showed that partial decoupling is not enough. Chat can still create contradictory user experience if it narrates background task completion or failure while the Agents panel and durable resource UIs show a different state.
+
+The direction remains full separation:
+
+- Agent Col owns conversation, intent recognition, and task delegation.
+- Background agents own task execution.
+- Durable resource surfaces own artifacts, notes, memory proposals, and approvals.
+- Job reports own completed, failed, and cancelled task explanations.
+- Chat may acknowledge queued work but must not be the authoritative reporter for background completion, failure, proposal status, approval status, or artifact persistence.
+
+The next implementation passes should stay on that path:
+
+1. Finish the public job-report inspection surface so users can inspect terminal background outcomes without relying on chat.
+2. Move artifact creation behind the same queued job/report boundary so chat no longer waits on artifact generation.
+3. Move note proposal/reporting behavior behind the same boundary.
+4. Revisit memory policy expansion, including multiple pending proposals per category and richer memory categories, only after the async ownership boundary is stable.
+
+### Recently Completed Boundary Hardening
+
+Queued memory work must now be labeled as a memory request until the worker creates a real proposal or terminal report. Agent Col must not describe queued memory work as a pending proposal, created proposal, submitted proposal, saved preference, approved memory, or failed memory outcome. The supervisor also sanitizes canonical final response text when a queued memory receipt exists without a completed memory proposal.
+
 ## Current Plan Update: Memory Intent Decoupling
 
 Manual verification after the public report-boundary work showed that memory was still partially coupled to the live chat tool. The chat path still used the strict `ProviderNaturalMemoryDecision` union as the tool argument type, so ADK could reject a loose provider category before the memory request reached the queue/report boundary.
@@ -462,11 +485,11 @@ node --test tests/frontend/agents-view.test.mjs tests/frontend/app-runtime.test.
 
 Expected: fails because report rendering and footer behavior do not exist.
 
-- [ ] **Step 3: Implement report rendering**
+- [x] **Step 3: Implement report rendering**
 
 Add public report state and render the brief under completed/failed rows when available. Add the footer label and arrow-triggered modal without creating nested cards.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run:
 
@@ -475,6 +498,8 @@ node --test tests/frontend/agents-view.test.mjs tests/frontend/app-runtime.test.
 ```
 
 Expected: report UI tests pass and existing Agents panel layout remains visually unchanged except for the footer text and optional expanded report content.
+
+Status: popup report inspection is implemented through the existing Agents footer arrow. Inline completed-row expansion remains deferred; the popup is the current authoritative report inspection surface.
 
 ## Focused Verification For The First Source Pass
 

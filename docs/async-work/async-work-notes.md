@@ -696,3 +696,177 @@ Remaining limitations:
 - a conflict caused by one-pending-memory-proposal-per-category still produces a failed Memory Analyst report until later category/multiple-pending policy work is approved;
 - responder wording can still mention artifacts or memory outcomes based on the chat path rather than relying solely on job reports;
 - the report modal and expandable completed-task report UI are still not implemented.
+
+## Chat Surface Memory Report Separation Pass
+
+After the queue-owned memory intent pass, the remaining problem was not the worker's ability to create memory proposals. The remaining problem was ownership: Agent Col could still promote memory proposal completion into the chat response after a queue receipt existed, and partial-failure handling could still drop queued-action receipts.
+
+Decision:
+
+Once memory work is queued, chat should not also become the reporter for that background task's completed/pending result. Memory proposal completion, failure, conflict, and approval status belong to the Memory UI, Agents panel, and job reports. Agent Col may acknowledge that work was queued when the queue receipt exists, but background task outcomes should not depend on the active chat response.
+
+Why:
+
+If Col reports background task outcomes inside the same chat turn, the system keeps fighting the same coupling boundary. A fast task may appear as both queued and completed; a failed responder may hide queued work; a later worker report may contradict chat text; and the user cannot reliably keep chatting while background work is active. Job reports are the correct public-safe authority for task outcomes.
+
+Implemented behavior:
+
+- `supervisor_runtime.py` now ignores a later direct pending memory-proposal function response if a memory proposal job has already been queued in the same turn;
+- queued memory work remains in `queued_actions`;
+- queued memory work is not promoted into chat-owned `actions` or `memory_proposals`;
+- `main.py` now treats queued actions as valid partial effects, so a responder failure after queueing can still return a partial-failure response with the queued-action receipt;
+- the job report/resource surfaces remain responsible for completed or failed background outcomes.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_run_turn_does_not_promote_pending_memory_after_queued_work` failed because the supervisor still appended a completed `propose_memory_signal` action and pending memory proposal after a queue receipt.
+- RED: `test_chat_stream_preserves_queued_action_partial_failure_effects` failed because queued actions were ignored when deciding whether a safe partial-failure response existed.
+- GREEN: queued memory work suppresses later chat-owned pending memory proposal effects in the same turn.
+- GREEN: queued-action partial failures now survive through the stream error payload.
+
+Focused verification after implementation:
+
+```text
+venv/bin/python -m pytest tests/test_supervisor_runtime.py::test_run_turn_does_not_promote_pending_memory_after_queued_work tests/test_main.py::test_chat_stream_preserves_queued_action_partial_failure_effects -q
+2 passed, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_supervisor_runtime.py tests/test_main.py -k "queued or memory_proposal or partial_failure or agent_job" -q
+18 passed, 308 deselected, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_memory_proposal_tool.py tests/test_memory_proposal_job_worker.py tests/test_memory_candidate_decisions.py -q
+38 passed
+```
+
+```text
+node --test tests/frontend/api.test.mjs tests/frontend/agents-view.test.mjs tests/frontend/app-runtime.test.mjs
+67 passed
+```
+
+```text
+venv/bin/python -m py_compile supervisor_runtime.py main.py memory_proposal_tool.py memory_proposal_job_worker.py memory_candidate_decisions.py
+passed
+```
+
+Remaining limitations:
+
+- artifact creation is still request-bound and should be the next major decoupling target;
+- note proposal completion is still not fully separated through reports;
+- memory clarification remains direct in chat;
+- the report modal and expandable completed-task report UI still need to be built;
+- artifact IDs can still leak in model-authored chat text because artifact context/responder wording has not yet been hardened in this pass.
+
+## Queued Memory Report Boundary Hardening Pass
+
+Manual verification of the previous pass showed the right architectural problem: the structured chat result no longer carried a memory proposal, but Agent Col's natural-language response still claimed that a pending memory proposal had been submitted. The Agents panel showed Memory Analyst as failed, while chat described a pending proposal. That contradiction proved the remaining bug was ownership and wording at the queue/report boundary, not the core memory write path.
+
+Decision:
+
+Queued memory work must be named and reported as a memory request until a background worker creates a real proposal or terminal failure report. Agent Col is allowed to acknowledge that memory work was queued, but it must not claim proposal creation, pending proposal status, saved memory, approval, rejection, conflict, or failure from the live chat path. Those outcomes belong to Memory UI and job reports.
+
+Why:
+
+This is the same boundary we are trying to make reliable across memory, notes, and artifacts. If chat can translate a queued job into a completed or pending outcome, the user gets contradictory state and manual testing remains muddy. The public report/resource surfaces need to be authoritative for terminal background outcomes. Chat should keep flowing and should not be responsible for proving or narrating background completion.
+
+Implemented behavior:
+
+- queued memory job labels now say `Memory request: <category>` instead of `Memory proposal: <category>`;
+- queued memory job events now say `Memory request queued.`;
+- Agent Col's responder instruction now explicitly states that queued memory work is not a completed memory proposal receipt;
+- Agent Col is instructed not to describe queued memory work as a pending proposal, created proposal, submitted proposal, saved preference, stored preference, remembered preference, approved memory, or failed memory outcome;
+- `supervisor_runtime.py` now sanitizes canonical final response text when queued memory work exists and no completed memory proposal exists, replacing unauthorized memory completion claims with report-bound queued wording while preserving unrelated response text.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_proposal_tool_records_memory_agent_job_queue_receipt` and `test_proposal_tool_queues_memory_work_without_calling_service` failed because queued memory jobs still used `Memory proposal: response_length`.
+- RED: `test_run_turn_rewrites_queued_memory_completion_claims` failed because the supervisor returned model-authored text claiming a pending proposal after only a queued memory receipt existed.
+- RED: `test_responder_instruction_does_not_report_queued_memory_as_pending` failed because the responder instruction did not contain the explicit queued-memory/report ownership rule.
+- GREEN: queued memory work is labeled as a request, final response text is guarded against false pending-proposal claims, and the responder instruction records the intended ownership boundary.
+
+Focused verification after implementation:
+
+```text
+venv/bin/python -m pytest tests/test_memory_proposal_tool.py::test_proposal_tool_records_memory_agent_job_queue_receipt tests/test_memory_proposal_tool.py::test_proposal_tool_queues_memory_work_without_calling_service -q
+2 passed
+```
+
+```text
+venv/bin/python -m pytest tests/test_supervisor_runtime.py::test_run_turn_rewrites_queued_memory_completion_claims tests/test_supervisor_runtime.py::test_run_turn_does_not_promote_pending_memory_after_queued_work tests/test_supervisor_runtime.py::test_run_turn_collects_queued_memory_receipt_from_function_response -q
+3 passed, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_agent_col_responder.py::test_responder_instruction_does_not_report_queued_memory_as_pending tests/test_agent_col_responder.py::test_responder_instruction_prevents_duplicate_or_competing_job_outputs -q
+2 passed, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_memory_proposal_tool.py tests/test_memory_proposal_job_worker.py tests/test_memory_candidate_decisions.py tests/test_supervisor_runtime.py tests/test_agent_col_responder.py -k "memory or queued or report or instruction" -q
+65 passed, 41 deselected, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_agent_job_repository.py tests/test_main.py -k "queued or memory_proposal or partial_failure or agent_job" -q
+35 passed, 270 deselected, 1 warning
+```
+
+Remaining limitations:
+
+- this pass hardens memory/report ownership but does not fully decouple artifacts or notes yet;
+- streaming partial deltas can still briefly show model-authored text before canonical final response sanitization if the model streams unsafe wording before the final event;
+- the report modal and completed-task report inspection UI remain unimplemented;
+- artifact creation is still request-bound and remains the main latency/coupling target;
+- memory policy still allows only one pending proposal per category until a later product-policy pass expands that behavior.
+
+## Agent Report Inspection Surface Pass
+
+After the report repository/API work, the next missing piece was user inspection. The Agents panel had completed/failed job rows but no report viewer, so job reports were authoritative in backend shape only. The user clarified the intended UI boundary: the existing small arrow in the Agents panel footer should become the clickable affordance, without a visual restyle, and should open a popup overlay rather than another card. The popup itself needs an `x` close button in its top-right corner.
+
+Decision:
+
+The Agents panel owns job report inspection. Agent Col chat should not be the report-delivery mechanism for background task completion, failure, approval, or conflict outcomes. The chat surface may keep conversational context and issue work, but reports must be inspectable from the background-work surface with public-safe display fields only.
+
+Why:
+
+This keeps the ownership split concrete for future artifact and note decoupling. If the only way to learn whether a background task completed is through a model-authored chat response, then chat remains coupled to task completion timing and error handling. A report popup gives users a separate, explicit place to inspect completed/failed work while chat stays available.
+
+Implemented behavior:
+
+- the Agents footer text now says `View all job reports`;
+- the existing arrow remains the arrow affordance, but is now a button with no visual button chrome;
+- clicking the arrow opens a popup overlay with `role="dialog"` and `aria-modal="true"`;
+- the popup has an `x` close button in the top-right of the overlay itself;
+- frontend state now tracks report loading status, report data, report errors, and popup visibility independently from job list state;
+- opening the popup loads reports through `/agent/reports`;
+- report rendering uses public display fields such as report number, job number, agent label, status, title, summary, public resource label, and timestamp;
+- internal IDs and backend routing fields are not rendered even if present in the report object.
+
+TDD evidence recorded during the pass:
+
+- RED: `agent report state loads public reports without replacing jobs` failed because report state functions did not exist.
+- RED: `renderAgentsPanel opens job reports from the existing footer arrow` failed because the footer still rendered static `View all agents` text and a non-clickable arrow.
+- RED: `renderAgentsPanel shows report popup as a compact public-safe list` failed because no popup existed.
+- RED: `agent report popup loads reports from the background report surface` failed because `app.mjs` did not wire the arrow callback or report endpoint fetch.
+- GREEN: state, renderer, CSS, and app wiring now load and display public-safe reports from the report surface.
+
+Focused verification after implementation:
+
+```text
+node --test tests/frontend/state.test.mjs tests/frontend/agents-view.test.mjs
+65 passed
+```
+
+```text
+node --test tests/frontend/app-runtime.test.mjs --test-name-pattern "agent report popup loads reports from the background report surface"
+31 passed
+```
+
+Remaining limitations:
+
+- this is report inspection only; artifact generation is still request-bound and remains the next major decoupling target;
+- note proposal execution/reporting still needs the same separation;
+- the popup is backed by `/agent/reports`, but completed-job row inline expansion is not implemented in this pass;
+- manual visual verification is still pending by design.
