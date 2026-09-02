@@ -185,6 +185,7 @@ class SupervisorTurnContext:
     precompleted_collaborative_note_events: tuple[
         CollaborativeNoteEvent, ...
     ] = ()
+    prequeued_actions: tuple[QueuedActionReceipt, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -328,7 +329,9 @@ class SupervisorRuntime:
         collaborative_note_events = list(
             context.precompleted_collaborative_note_events
         )
-        queued_actions: list[QueuedActionReceipt] = []
+        queued_actions: list[QueuedActionReceipt] = list(
+            context.prequeued_actions
+        )
         text_normalizer = _AppendOnlyTextNormalizer()
         delegation_budget = ExpertDelegationBudget()
         delegation_token = self._delegation_registry.register_turn(

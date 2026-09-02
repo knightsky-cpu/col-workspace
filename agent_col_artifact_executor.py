@@ -4,7 +4,8 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import Sequence
+import asyncio
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal, Protocol
@@ -12,12 +13,20 @@ from typing import Literal, Protocol
 from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent_col_agent_jobs import AgentJob, AgentJobEvent, AgentJobFailure
+from agent_col_agent_jobs import (
+    AgentJob,
+    AgentJobEvent,
+    AgentJobFailure,
+    AgentJobReport,
+    AgentJobReportStatus,
+)
+from agent_job_payloads import AgentJobPayload
 from agent_job_repository import AgentJobRepository
 from agent_col_routing_v4 import AgentColRoute, AgentColRoutingDirective
 from artifact_read_service import GetBlueprintArtifactCommand
 from chat_turns import ChatTurnClaim
 from database import ChatTurnArtifactEffectResult
+from generic_artifact_creation_service import GenericArtifactCreationCommand
 from generic_artifact_generation import (
     GENERIC_ARTIFACT_MODEL_NAME,
     GenericArtifactGenerationRequest,
@@ -28,6 +37,7 @@ from schemas import (
     AgentActionReceipt,
     ArtifactReference,
     BlueprintArtifactDetailResponse,
+    QueuedActionReceipt,
     SingleFileArtifact,
     SingleFileArtifactDetailResponse,
     VersionedAdaptationReceipt,
@@ -61,6 +71,8 @@ class ArtifactSynthesisService(Protocol):
         self,
         command: SynthesisCommand,
     ) -> GovernedSynthesisGenerationResult: ...
+
+    async def synthesize(self, command: SynthesisCommand) -> object: ...
 
 
 class ArtifactEffectLedger(Protocol):
@@ -100,6 +112,13 @@ class GenericArtifactGenerator(Protocol):
         client: object,
         request: GenericArtifactGenerationRequest,
     ) -> SingleFileArtifact: ...
+
+
+class GenericArtifactCreator(Protocol):
+    async def create_artifact(
+        self,
+        command: GenericArtifactCreationCommand,
+    ) -> object: ...
 
 
 class GenericArtifactReader(Protocol):
@@ -160,6 +179,14 @@ class AgentColArtifactExecutionResult:
     projection: AgentColArtifactResponderProjection
 
 
+@dataclass(frozen=True, slots=True)
+class AgentColArtifactQueueResult:
+    claim: ChatTurnClaim
+    queued_actions: tuple[QueuedActionReceipt, ...]
+    actions: tuple[AgentActionReceipt, ...] = ()
+    artifacts: tuple[ArtifactReference, ...] = ()
+
+
 def _artifact_job_digest(command: AgentColArtifactExecutionCommand) -> str:
     intent = command.routing_directive.artifact_intent
     assert intent is not None
@@ -210,6 +237,30 @@ def _artifact_job(command: AgentColArtifactExecutionCommand) -> AgentJob:
         created_at=command.observed_at,
         updated_at=command.observed_at,
         idempotency_key=f"artifact-create-{digest}",
+    )
+
+
+def artifact_job_payload(
+    command: AgentColArtifactExecutionCommand,
+    job: AgentJob,
+) -> AgentJobPayload:
+    """Build the private payload needed for background artifact creation."""
+    intent = command.routing_directive.artifact_intent
+    assert intent is not None
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "artifact_intent": intent.model_dump(mode="json"),
+            "source_text": command.source_text or command.claim.request.message,
+        },
     )
 
 
@@ -285,6 +336,30 @@ async def _start_artifact_agent_job(
         ),
     )
     return running, lease_owner
+
+
+async def _queue_artifact_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    command: AgentColArtifactExecutionCommand,
+) -> AgentJob:
+    job = _artifact_job(command)
+    queued = await agent_job_repository.enqueue_job_with_payload(
+        job,
+        artifact_job_payload(command, job),
+    )
+    await _append_artifact_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        event=_artifact_job_event(
+            job=queued,
+            event_type="queued",
+            message="Artifact creation queued.",
+            observed_at=queued.created_at,
+        ),
+    )
+    return queued
 
 
 async def _complete_artifact_agent_job(
@@ -409,6 +484,338 @@ async def _try_fail_artifact_agent_job(
         )
 
 
+class AgentColArtifactCreationJobWorker:
+    """Execute queued artifact creation jobs outside the chat response path."""
+
+    def __init__(
+        self,
+        *,
+        agent_job_repository: AgentJobRepository,
+        synthesis_service: ArtifactSynthesisService,
+        generic_artifact_generator: GenericArtifactGenerator | None = None,
+        generic_artifact_creator: GenericArtifactCreator | None = None,
+        genai_client: object | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        lease_seconds: int = _ARTIFACT_JOB_LEASE_SECONDS,
+    ) -> None:
+        self._agent_job_repository = agent_job_repository
+        self._synthesis_service = synthesis_service
+        self._generic_artifact_generator = generic_artifact_generator
+        self._generic_artifact_creator = generic_artifact_creator
+        self._genai_client = genai_client
+        self._clock = clock
+        self._lease_seconds = lease_seconds
+
+    def dispatch(
+        self,
+        job: AgentJob,
+        *,
+        task_set: set[asyncio.Task[AgentJob | None]] | None = None,
+    ) -> asyncio.Task[AgentJob | None]:
+        task = asyncio.create_task(
+            self.run_job(
+                job,
+                lease_owner=f"artifact-worker-{job.job_id}"[:128],
+            )
+        )
+        if task_set is not None:
+            task_set.add(task)
+            task.add_done_callback(task_set.discard)
+        task.add_done_callback(self._log_background_failure)
+        return task
+
+    async def run_one(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        lease_owner: str,
+    ) -> AgentJob | None:
+        observed_at = self._clock()
+        job = await self._agent_job_repository.lease_next_queued_job(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            lease_owner=lease_owner,
+            lease_expires_at=observed_at
+            + timedelta(seconds=self._lease_seconds),
+            observed_at=observed_at,
+            action_kind="create_artifact",
+        )
+        if job is None:
+            return None
+        return await self._execute_leased_job(
+            job,
+            lease_owner=lease_owner,
+            started_at=observed_at,
+        )
+
+    async def run_job(
+        self,
+        job: AgentJob,
+        *,
+        lease_owner: str,
+    ) -> AgentJob | None:
+        observed_at = self._clock()
+        leased = await self._agent_job_repository.lease_queued_job(
+            user_id=job.user_id,
+            workspace_id=job.workspace_id,
+            job_id=job.job_id,
+            lease_owner=lease_owner,
+            lease_expires_at=observed_at
+            + timedelta(seconds=self._lease_seconds),
+            observed_at=observed_at,
+        )
+        return await self._execute_leased_job(
+            leased,
+            lease_owner=lease_owner,
+            started_at=observed_at,
+        )
+
+    async def _execute_leased_job(
+        self,
+        job: AgentJob,
+        *,
+        lease_owner: str,
+        started_at: datetime,
+    ) -> AgentJob:
+        await self._append_event(
+            job=job,
+            event_type="started",
+            message="Artifact creation started.",
+            observed_at=started_at,
+        )
+        try:
+            payload = await self._agent_job_repository.get_job_payload(
+                user_id=job.user_id,
+                workspace_id=job.workspace_id,
+                job_id=job.job_id,
+            )
+            artifact_id, label = await self._execute_payload(payload)
+        except Exception:
+            return await self._fail_job(
+                job=job,
+                lease_owner=lease_owner,
+            )
+        return await self._complete_job(
+            job=job,
+            lease_owner=lease_owner,
+            artifact_id=artifact_id,
+            public_resource_label=label,
+        )
+
+    async def _execute_payload(
+        self,
+        payload: AgentJobPayload,
+    ) -> tuple[str, str]:
+        if payload.action_kind != "create_artifact":
+            raise ValueError("AgentJobPayload is not for artifact work.")
+        data = payload.payload
+        intent = data.get("artifact_intent")
+        source_text = data.get("source_text")
+        if not isinstance(intent, dict) or not isinstance(source_text, str):
+            raise ValueError("Artifact job payload is invalid.")
+        operation = intent.get("operation")
+        if operation == "create_single_file_artifact":
+            return await self._execute_single_file_payload(
+                payload,
+                intent,
+                source_text,
+            )
+        if operation == "create_blueprint":
+            return await self._execute_blueprint_payload(payload, source_text)
+        raise ValueError("Artifact job operation is invalid.")
+
+    async def _execute_blueprint_payload(
+        self,
+        payload: AgentJobPayload,
+        source_text: str,
+    ) -> tuple[str, str]:
+        result = await self._synthesis_service.synthesize(
+            SynthesisCommand(
+                project_id=payload.project_id,
+                session_id=payload.session_id,
+                user_id=payload.user_id,
+                source_text=source_text,
+            )
+        )
+        blueprint = result.blueprint
+        label = blueprint.synthesized_conceptual_model.project_name
+        return result.blueprint_id, label
+
+    async def _execute_single_file_payload(
+        self,
+        payload: AgentJobPayload,
+        intent: dict[str, object],
+        source_text: str,
+    ) -> tuple[str, str]:
+        if (
+            self._generic_artifact_generator is None
+            or self._generic_artifact_creator is None
+            or self._genai_client is None
+        ):
+            raise AgentColArtifactExecutorConfigurationError(
+                "Generic artifact worker dependencies are unavailable."
+            )
+        family = intent.get("artifact_family")
+        format_name = intent.get("format")
+        filename = intent.get("filename")
+        if (
+            not isinstance(family, str)
+            or not isinstance(format_name, str)
+            or not isinstance(filename, str)
+        ):
+            raise ValueError("Single-file artifact intent is invalid.")
+        generated = await self._generic_artifact_generator(
+            self._genai_client,
+            GenericArtifactGenerationRequest(
+                artifact_family=family,
+                artifact_format=format_name,
+                filename=filename,
+                source_text=source_text,
+                context_messages=(),
+            ),
+        )
+        created = await self._generic_artifact_creator.create_artifact(
+            GenericArtifactCreationCommand(
+                project_id=payload.project_id,
+                session_id=payload.session_id,
+                user_id=payload.user_id,
+                artifact=generated.model_dump(mode="json"),
+                display_label=None,
+                originating_turn_id=payload.source_turn_id,
+            )
+        )
+        return created.reference.artifact_id, created.reference.display_label
+
+    async def _complete_job(
+        self,
+        *,
+        job: AgentJob,
+        lease_owner: str,
+        artifact_id: str,
+        public_resource_label: str,
+    ) -> AgentJob:
+        observed_at = self._clock()
+        completed = await self._agent_job_repository.complete_job(
+            user_id=job.user_id,
+            workspace_id=job.workspace_id,
+            job_id=job.job_id,
+            lease_owner=lease_owner,
+            observed_at=observed_at,
+            result_refs={"artifact_id": artifact_id},
+        )
+        await self._append_event(
+            job=completed,
+            event_type="completed",
+            message="Artifact created.",
+            observed_at=observed_at,
+        )
+        await self._create_report(
+            job=completed,
+            status="completed",
+            title="Artifact created",
+            summary="The requested artifact was created.",
+            public_resource_label=public_resource_label,
+            observed_at=observed_at,
+        )
+        return completed
+
+    async def _fail_job(
+        self,
+        *,
+        job: AgentJob,
+        lease_owner: str,
+    ) -> AgentJob:
+        observed_at = self._clock()
+        failed = await self._agent_job_repository.fail_job(
+            user_id=job.user_id,
+            workspace_id=job.workspace_id,
+            job_id=job.job_id,
+            lease_owner=lease_owner,
+            observed_at=observed_at,
+            failure=AgentJobFailure(
+                code="artifact_creation_failed",
+                summary="Artifact could not be created.",
+                retryable=False,
+            ),
+        )
+        await self._append_event(
+            job=failed,
+            event_type="failed",
+            message="Artifact creation failed.",
+            observed_at=observed_at,
+        )
+        await self._create_report(
+            job=failed,
+            status="failed",
+            title="Artifact not created",
+            summary="Artifact could not be created.",
+            public_resource_label=None,
+            observed_at=observed_at,
+        )
+        return failed
+
+    async def _create_report(
+        self,
+        *,
+        job: AgentJob,
+        status: AgentJobReportStatus,
+        title: str,
+        summary: str,
+        public_resource_label: str | None,
+        observed_at: datetime,
+    ) -> AgentJobReport:
+        report = AgentJobReport(
+            report_id=_artifact_report_id(job),
+            job_id=job.job_id,
+            user_id=job.user_id,
+            project_id=job.project_id,
+            workspace_id=job.workspace_id,
+            session_id=job.session_id,
+            action_kind=job.action_kind,
+            agent_label=job.agent_label,
+            status=status,
+            title=title,
+            summary=summary,
+            public_resource_label=public_resource_label,
+            created_at=observed_at,
+        )
+        return await self._agent_job_repository.create_report(report)
+
+    async def _append_event(
+        self,
+        *,
+        job: AgentJob,
+        event_type: Literal["started", "completed", "failed"],
+        message: str,
+        observed_at: datetime,
+    ) -> None:
+        await self._agent_job_repository.append_event(
+            user_id=job.user_id,
+            workspace_id=job.workspace_id,
+            event=_artifact_job_event(
+                job=job,
+                event_type=event_type,
+                message=message,
+                observed_at=observed_at,
+            ),
+        )
+
+    @staticmethod
+    def _log_background_failure(task: asyncio.Task[AgentJob | None]) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("Artifact creation background job failed.")
+
+
+def _artifact_report_id(job: AgentJob) -> str:
+    digest = hashlib.sha256(job.job_id.encode("utf-8")).hexdigest()[:32]
+    return f"agent-job-report-{digest}"
+
+
 class AgentColArtifactExecutor:
     def __init__(
         self,
@@ -420,6 +827,7 @@ class AgentColArtifactExecutor:
         generic_artifact_reader: GenericArtifactReader | None = None,
         genai_client: object | None = None,
         agent_job_repository: AgentJobRepository | None = None,
+        artifact_job_dispatcher: Callable[[AgentJob], None] | None = None,
     ) -> None:
         self._synthesis_service = synthesis_service
         self._artifact_ledger = artifact_ledger
@@ -428,6 +836,7 @@ class AgentColArtifactExecutor:
         self._generic_artifact_reader = generic_artifact_reader
         self._genai_client = genai_client
         self._agent_job_repository = agent_job_repository
+        self._artifact_job_dispatcher = artifact_job_dispatcher
 
     async def execute(
         self,
@@ -440,6 +849,26 @@ class AgentColArtifactExecutor:
         if operation == "create_single_file_artifact":
             return await self._execute_single_file_artifact(command)
         return await self._execute_blueprint(command)
+
+    async def queue(
+        self,
+        command: AgentColArtifactExecutionCommand,
+    ) -> AgentColArtifactQueueResult:
+        self._validate_command(command)
+        if self._agent_job_repository is None:
+            raise AgentColArtifactExecutorConfigurationError(
+                "Artifact job repository is unavailable."
+            )
+        queued = await _queue_artifact_agent_job(
+            agent_job_repository=self._agent_job_repository,
+            command=command,
+        )
+        if self._artifact_job_dispatcher is not None:
+            self._artifact_job_dispatcher(queued)
+        return AgentColArtifactQueueResult(
+            claim=command.claim,
+            queued_actions=(queued.to_queued_action_receipt(),),
+        )
 
     async def _execute_blueprint(
         self,
@@ -776,6 +1205,29 @@ def build_agent_col_artifact_model_context(
         f"{_CONTEXT_START}\n"
         f"{payload}\n"
         f"{_CONTEXT_END}"
+    )
+    return types.Content(
+        role="user",
+        parts=[types.Part.from_text(text=text)],
+    )
+
+
+def build_agent_col_artifact_queued_model_context(
+    queued_action: QueuedActionReceipt,
+) -> types.Content:
+    payload = json.dumps(
+        queued_action.model_dump(mode="json", exclude={"job_id"}),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    text = (
+        "The application queued artifact creation. Artifact work is queued "
+        "for background processing. "
+        "Do not claim the artifact is already created, persisted, visible, "
+        "or inspectable yet. You may acknowledge that artifact work is queued "
+        "and direct the user to the artifact surface or job reports for the "
+        "final result. Do not expose internal job identifiers.\n"
+        f"{payload}"
     )
     return types.Content(
         role="user",

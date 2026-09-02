@@ -978,3 +978,80 @@ Remaining limitations:
   them;
 - manual visual verification is intentionally deferred until more background
   work surfaces are decoupled, per the current testing strategy.
+
+## Artifact Creation Queue Ownership
+
+The artifact creation pass moved request-bound artifact generation behind the
+existing AgentJob/report boundary.
+
+Behavioral change:
+
+- artifact routing still happens in the chat request path;
+- artifact work is now enqueued with an `AgentJobPayload` instead of generated
+  before the responder runs;
+- the chat turn receives a queued `create_artifact` action and no completed
+  artifact/action receipt;
+- the responder receives a bounded queued-artifact context and must not claim
+  the artifact is already created;
+- the artifact worker leases only `create_artifact` jobs;
+- the worker restores the private payload, generates the artifact, persists it
+  through the existing artifact services, completes/fails the job, and writes a
+  public-safe report;
+- queued artifact payloads do not serialize `owner_token` or `turn_lease`;
+- the production lifespan now owns an in-process artifact job worker and task
+  set, mirroring the memory worker shape.
+
+Why this matters:
+
+Before this pass, an artifact route wrote job lifecycle rows but still generated
+and persisted the artifact synchronously inside the chat request before the
+responder could complete. The job was therefore instrumentation, not ownership.
+After this pass, chat delegates artifact execution and returns with queued work;
+the artifact surface, Agents panel, and reports become the authoritative places
+to observe completion.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_artifact_executor_queues_single_file_work_without_generation`
+  failed because `AgentColArtifactExecutor` had no `queue` API.
+- RED: `test_artifact_worker_creates_single_file_artifact_from_private_payload`
+  failed because `AgentColArtifactCreationJobWorker` did not exist.
+- RED: `test_turn_service_queues_artifact_before_responder_without_generation`
+  failed because the turn service still called synchronous `execute`.
+- RED: dispatcher coverage failed because the executor constructor did not
+  accept an artifact job dispatcher.
+- RED: after backing out premature blueprint worker code,
+  `test_artifact_worker_creates_blueprint_artifact_from_private_payload` failed
+  because blueprint jobs finished as failed instead of completed.
+- GREEN: queue payload creation, worker leasing/execution/reporting,
+  prequeued responder context, main lifespan worker wiring, and blueprint
+  persistence were implemented.
+
+Focused verification after implementation:
+
+```text
+venv/bin/python -m pytest tests/test_agent_col_artifact_executor.py tests/test_agent_col_turn_service_artifacts.py tests/test_agent_col_turn_service.py -k "artifact or queued" -q
+34 passed, 45 deselected, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_agent_job_reports.py tests/test_agent_job_repository.py -k "report or agent_job" -q
+27 passed
+```
+
+```text
+venv/bin/python -m pytest tests/test_main.py -k "agent_report or agent_job or artifact" -q
+51 passed, 237 deselected, 1 warning
+```
+
+Remaining limitations:
+
+- artifact routing still runs in the chat request path so Agent Col can decide
+  whether artifact creation is appropriate;
+- chat still contains a queued action receipt with the internal job id because
+  the existing `QueuedActionReceipt` contract still carries it; public job and
+  report list surfaces remain sanitized;
+- artifact viewer refresh after job completion depends on existing frontend
+  refresh paths and requires manual verification;
+- workspace note proposal creation and approval are still later decoupling
+  passes.

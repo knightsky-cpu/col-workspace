@@ -16,6 +16,7 @@ from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
     ArtifactReference,
+    QueuedActionReceipt,
 )
 from supervisor_runtime import (
     SupervisorRuntimeError,
@@ -134,10 +135,49 @@ class RecordingArtifactExecutor:
     def __init__(self, result: AgentColArtifactExecutionResult) -> None:
         self.result = result
         self.commands: list[object] = []
+        self.execute_commands: list[object] = []
+
+    async def queue(self, command):
+        from agent_col_artifact_executor import AgentColArtifactQueueResult
+
+        self.commands.append(command)
+        return AgentColArtifactQueueResult(
+            claim=command.claim,
+            queued_actions=(
+                QueuedActionReceipt(
+                    job_id="artifact-job-1",
+                    action_kind="create_artifact",
+                    status="queued",
+                    display_label="Artifact: structured blueprint",
+                    created_at=NOW,
+                    agent_label="Artifact Builder",
+                ),
+            ),
+        )
 
     async def execute(self, command):
-        self.commands.append(command)
+        self.execute_commands.append(command)
         return self.result
+
+
+class QueueOnlyArtifactExecutor:
+    def __init__(self, queued_action: QueuedActionReceipt) -> None:
+        self.queued_action = queued_action
+        self.queue_commands: list[object] = []
+        self.execute_commands: list[object] = []
+
+    async def queue(self, command):
+        from agent_col_artifact_executor import AgentColArtifactQueueResult
+
+        self.queue_commands.append(command)
+        return AgentColArtifactQueueResult(
+            claim=command.claim,
+            queued_actions=(self.queued_action,),
+        )
+
+    async def execute(self, command):
+        self.execute_commands.append(command)
+        raise AssertionError("artifact generation must not run in chat path")
 
 
 class ValidationFailingArtifactModel(BaseModel):
@@ -148,6 +188,10 @@ class ValidationFailingArtifactExecutor:
     def __init__(self, error: ValidationError) -> None:
         self.error = error
         self.commands: list[object] = []
+
+    async def queue(self, command):
+        self.commands.append(command)
+        raise self.error
 
     async def execute(self, command):
         self.commands.append(command)
@@ -236,6 +280,7 @@ async def test_turn_service_routes_artifact_through_application_executor(
     assert routing_input.artifact_creation_available is True
     assert routing_input.structured_decision_present is False
     assert len(artifact_executor.commands) == 1
+    assert artifact_executor.execute_commands == []
     artifact_command = artifact_executor.commands[0]
     assert artifact_command.claim is claim
     assert artifact_command.routing_directive == artifact_directive()
@@ -243,16 +288,74 @@ async def test_turn_service_routes_artifact_through_application_executor(
     assert expert.calls == []
     assert len(responder.contexts) == 1
     responder_context = responder.contexts[0]
-    assert responder_context.precompleted_actions == execution.actions
+    assert responder_context.precompleted_actions == ()
+    assert len(responder_context.prequeued_actions) == 1
     assert len(responder_context.model_input_context) == 1
     context_text = responder_context.model_input_context[0].parts[0].text
     assert context_text is not None
-    assert "[SERVER_VALIDATED_ARTIFACT_RESULT]" in context_text
+    assert "queued for background processing" in context_text
+    assert "[SERVER_VALIDATED_ARTIFACT_RESULT]" not in context_text
     assert SOURCE_TEXT not in context_text
-    assert result.actions == execution.actions
-    assert result.artifacts == execution.artifacts
-    assert result.adaptations == execution.adaptations
-    assert result.chat_turn_claim is execution.claim
+    assert result.actions == ()
+    assert result.artifacts == ()
+    assert result.adaptations == ()
+    assert len(result.queued_actions) == 1
+    assert result.chat_turn_claim is claim
+
+
+@pytest.mark.asyncio
+async def test_turn_service_queues_artifact_before_responder_without_generation(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    claim = initial_claim()
+    queued_action = QueuedActionReceipt(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+        display_label="Artifact: structured blueprint",
+        created_at=NOW,
+        agent_label="Artifact Builder",
+    )
+    artifact_executor = QueueOnlyArtifactExecutor(queued_action)
+    responder = RecordingResponder()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExpertExecutor(),
+        responder_runtime=responder,
+        artifact_executor=artifact_executor,
+        artifact_routing_request=RecordingV4RoutingRequest(
+            artifact_directive()
+        ),
+        wall_clock=lambda: NOW,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id=claim.request.project_id,
+            session_id=claim.request.session_id,
+            user_id=claim.request.user_id,
+            message=claim.request.message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert len(artifact_executor.queue_commands) == 1
+    assert artifact_executor.execute_commands == []
+    assert result.actions == ()
+    assert result.artifacts == ()
+    assert result.queued_actions == (queued_action,)
+    assert result.chat_turn_claim is claim
+    assert len(responder.contexts) == 1
+    responder_context = responder.contexts[0]
+    assert responder_context.prequeued_actions == (queued_action,)
+    assert responder_context.precompleted_actions == ()
+    assert responder_context.precompleted_memory_proposals == ()
+    context_text = responder_context.model_input_context[0].parts[0].text
+    assert context_text is not None
+    assert "queued for background processing" in context_text
+    assert "application already created" not in context_text.lower()
+    assert SOURCE_TEXT not in context_text
 
 
 @pytest.mark.asyncio
@@ -294,12 +397,14 @@ async def test_turn_service_logs_artifact_pipeline_without_private_content(
         )
     )
 
-    assert result.artifacts == execution.artifacts
+    assert result.artifacts == ()
+    assert len(result.queued_actions) == 1
     assert "Agent_Col turn pipeline" in caplog.text
     assert "stage=routing_finish" in caplog.text
     assert "route=artifact" in caplog.text
-    assert "stage=artifact_finish" in caplog.text
-    assert "artifacts=1" in caplog.text
+    assert "stage=artifact_queued" in caplog.text
+    assert "artifacts=0" in caplog.text
+    assert "queued_actions=1" in caplog.text
     assert "stage=responder_finish" in caplog.text
     assert "private artifact prompt marker" not in caplog.text
     assert "Collaborative Study Workflow" not in caplog.text
@@ -358,6 +463,8 @@ async def test_streamed_artifact_routing_projects_long_recent_user_messages(
         for message in routing_input.recent_user_messages
     )
     assert events[-1].result.response == "Created."
+    assert events[-1].result.artifacts == ()
+    assert len(events[-1].result.queued_actions) == 1
 
 
 @pytest.mark.asyncio
@@ -441,8 +548,10 @@ async def test_turn_service_forwards_resumed_claim_to_artifact_executor(
     )
 
     assert artifact_executor.commands[0].claim is resumed
+    assert artifact_executor.execute_commands == []
     assert result.chat_turn_claim is resumed
-    assert result.artifacts == resumed.precompleted_artifacts
+    assert result.artifacts == ()
+    assert len(result.queued_actions) == 1
 
 
 @pytest.mark.asyncio
@@ -480,10 +589,11 @@ async def test_artifact_responder_failure_preserves_authoritative_effects(
         )
 
     assert captured.value.__cause__ is runtime_error
-    assert captured.value.actions == execution.actions
-    assert captured.value.artifacts == execution.artifacts
-    assert captured.value.adaptations == execution.adaptations
-    assert captured.value.chat_turn_claim is execution.claim
+    assert captured.value.actions == ()
+    assert captured.value.artifacts == ()
+    assert captured.value.adaptations == ()
+    assert len(captured.value.queued_actions) == 1
+    assert captured.value.chat_turn_claim is claim
     assert "private-responder-output" not in str(captured.value)
 
 

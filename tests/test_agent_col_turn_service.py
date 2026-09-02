@@ -15,6 +15,7 @@ from schemas import (
     MemoryClarificationChoice,
     MemoryClarificationReceipt,
     MemoryProposalReceipt,
+    QueuedActionReceipt,
 )
 from supervisor_runtime import (
     SupervisorTextDelta,
@@ -137,34 +138,28 @@ def continuity_receipt() -> ContinuitySourceReceipt:
 class RecordingArtifactExecutor:
     def __init__(self) -> None:
         self.calls: list[object] = []
+        self.execute_calls: list[object] = []
 
-    async def execute(self, command: object) -> object:
-        from agent_col_artifact_executor import (
-            AgentColArtifactExecutionResult,
-            AgentColArtifactResponderProjection,
-        )
-        from schemas import ArtifactReference
+    async def queue(self, command: object) -> object:
+        from agent_col_artifact_executor import AgentColArtifactQueueResult
 
         self.calls.append(command)
-        artifact = ArtifactReference(
-            artifact_type="synthesis_blueprint",
-            project_id=command.claim.request.project_id,
-            artifact_id="artifact-1",
-            schema_version="2.0",
-            display_label="Simple Pomodoro Timer",
+        queued_action = QueuedActionReceipt(
+            job_id="artifact-job-1",
+            action_kind="create_artifact",
+            status="queued",
+            display_label="Artifact: structured blueprint",
+            created_at=datetime(2026, 8, 24, tzinfo=UTC),
+            agent_label="Artifact Builder",
         )
-        return AgentColArtifactExecutionResult(
+        return AgentColArtifactQueueResult(
             claim=command.claim,
-            actions=(),
-            artifacts=(artifact,),
-            adaptations=(),
-            projection=AgentColArtifactResponderProjection(
-                artifact=artifact,
-                project_name="Simple Pomodoro Timer",
-                core_value_proposition="A minimal timer workflow.",
-                socratic_questions=(),
-            ),
+            queued_actions=(queued_action,),
         )
+
+    async def execute(self, command: object) -> object:
+        self.execute_calls.append(command)
+        raise AssertionError("artifact generation must not run in chat path")
 
 
 class SequenceClock:
@@ -403,9 +398,14 @@ async def test_turn_service_streams_after_artifact_routing_and_execution(
         "Agent_Col ",
         "response.",
     ]
-    assert streamed[-1].result.artifacts[0].artifact_id == "artifact-1"
+    assert streamed[-1].result.artifacts == ()
+    assert len(streamed[-1].result.queued_actions) == 1
+    assert streamed[-1].result.queued_actions[0].action_kind == (
+        "create_artifact"
+    )
     assert len(artifact_routing.calls) == 1
     assert len(artifact_executor.calls) == 1
+    assert artifact_executor.execute_calls == []
 
 
 @pytest.mark.asyncio

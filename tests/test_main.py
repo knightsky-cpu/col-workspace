@@ -1848,7 +1848,7 @@ class ServiceState:
         tuple[object, object, object | None, object | None]
     ]
     artifact_executor_dependencies: list[
-        tuple[object, object, object, object, object, object]
+        tuple[object, object, object, object, object, object, object | None, object]
     ]
     artifact_feedback_service_dependencies: list[tuple[object, object]]
     artifact_feedback_executor_dependencies: list[tuple[object, object]]
@@ -2102,7 +2102,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         tuple[object, object, object | None, object | None]
     ] = []
     artifact_executor_dependencies: list[
-        tuple[object, object, object, object, object, object]
+        tuple[object, object, object, object, object, object, object | None, object]
     ] = []
     artifact_feedback_service_dependencies: list[tuple[object, object]] = []
     artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
@@ -2445,6 +2445,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         generic_artifact_reader: object,
         genai_client: object,
         agent_job_repository: object | None = None,
+        artifact_job_dispatcher: object | None = None,
     ) -> object:
         artifact_executor_dependencies.append(
             (
@@ -2455,6 +2456,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 generic_artifact_reader,
                 genai_client,
                 agent_job_repository,
+                artifact_job_dispatcher,
             )
         )
         return artifact_executor
@@ -5782,17 +5784,20 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 service_state.requirements_verification_service,
             )
         ]
-        assert service_state.artifact_executor_dependencies == [
-            (
-                service_state.synthesis_service,
-                service_state.database,
-                service_state.artifact_service,
-                main.generate_generic_artifact,
-                service_state.generic_artifact_service,
-                service_state.genai_client,
-                service_state.agent_job_repository,
-            )
-        ]
+        assert len(service_state.artifact_executor_dependencies) == 1
+        artifact_executor_dependencies = (
+            service_state.artifact_executor_dependencies[0]
+        )
+        assert artifact_executor_dependencies[:-1] == (
+            service_state.synthesis_service,
+            service_state.database,
+            service_state.artifact_service,
+            main.generate_generic_artifact,
+            service_state.generic_artifact_service,
+            service_state.genai_client,
+            service_state.agent_job_repository,
+        )
+        assert callable(artifact_executor_dependencies[-1])
         assert service_state.artifact_feedback_service_dependencies == [
             (
                 service_state.artifact_service,

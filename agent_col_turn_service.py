@@ -18,7 +18,8 @@ from agent_col_artifact_executor import (
     AgentColArtifactExecutionCommand,
     AgentColArtifactExecutionResult,
     AgentColArtifactExecutorConfigurationError,
-    build_agent_col_artifact_model_context,
+    AgentColArtifactQueueResult,
+    build_agent_col_artifact_queued_model_context,
     build_artifact_source_text,
 )
 from agent_col_artifact_feedback_executor import (
@@ -129,6 +130,11 @@ class ArtifactRoutingRequest(Protocol):
 
 
 class ArtifactExecutor(Protocol):
+    async def queue(
+        self,
+        command: AgentColArtifactExecutionCommand,
+    ) -> AgentColArtifactQueueResult: ...
+
     async def execute(
         self,
         command: AgentColArtifactExecutionCommand,
@@ -888,7 +894,7 @@ class AgentColTurnService:
                 "Agent_Col artifact authority is unavailable."
             )
         try:
-            execution = await artifact_executor.execute(
+            queue_result = await artifact_executor.queue(
                 AgentColArtifactExecutionCommand(
                     claim=claim,
                     routing_directive=directive,
@@ -919,7 +925,7 @@ class AgentColTurnService:
                 continuity_choices=command.continuity_choices,
             )
             raise AgentColTurnServiceError(
-                "Agent_Col artifact execution failed.",
+                "Agent_Col artifact queueing failed.",
                 actions=claim.precompleted_actions,
                 artifacts=claim.precompleted_artifacts,
                 memory_proposals=claim.precompleted_memory_proposals,
@@ -931,26 +937,25 @@ class AgentColTurnService:
                 chat_turn_claim=claim,
             ) from exc
         _log_turn_pipeline(
-            "artifact_finish",
+            "artifact_queued",
             started_at=started_at,
             clock=self._clock,
             route=directive.route,
-            actions=execution.actions,
-            artifacts=execution.artifacts,
+            actions=(),
+            artifacts=(),
             memory_proposals=claim.precompleted_memory_proposals,
             memory_clarifications=claim.precompleted_memory_clarifications,
+            queued_actions=queue_result.queued_actions,
             continuity_receipts=command.continuity_receipts,
             continuity_choices=command.continuity_choices,
-            adaptations=execution.adaptations,
         )
 
         model_input_context = (
             *self._model_input_with_working_state(command),
-            build_agent_col_artifact_model_context(execution.projection),
-        )
-        authoritative_actions = _stable_merge(
-            command.precompleted_actions,
-            execution.actions,
+            *(
+                build_agent_col_artifact_queued_model_context(queued_action)
+                for queued_action in queue_result.queued_actions
+            ),
         )
         try:
             async with asyncio.timeout(self._remaining_seconds(deadline)):
@@ -966,13 +971,14 @@ class AgentColTurnService:
                             command.memory_decision_present
                         ),
                         turn_lease=command.turn_lease,
-                        precompleted_actions=authoritative_actions,
+                        precompleted_actions=command.precompleted_actions,
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals
                         ),
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
                         ),
+                        prequeued_actions=queue_result.queued_actions,
                     ),
                     on_delta=on_delta,
                 )
@@ -983,8 +989,8 @@ class AgentColTurnService:
                 clock=self._clock,
                 route=directive.route,
                 error=exc,
-                actions=_stable_merge(authoritative_actions, exc.actions),
-                artifacts=execution.artifacts,
+                actions=_stable_merge(command.precompleted_actions, exc.actions),
+                artifacts=(),
                 memory_proposals=_stable_merge(
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
@@ -993,18 +999,20 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
-                queued_actions=exc.queued_actions,
+                queued_actions=_stable_merge(
+                    queue_result.queued_actions,
+                    exc.queued_actions,
+                ),
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
-                adaptations=execution.adaptations,
             )
             raise AgentColTurnTimeoutError(
                 "Agent_Col turn timed out.",
                 actions=_stable_merge(
-                    authoritative_actions,
+                    command.precompleted_actions,
                     exc.actions,
                 ),
-                artifacts=execution.artifacts,
+                artifacts=(),
                 memory_proposals=_stable_merge(
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
@@ -1013,11 +1021,14 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
-                queued_actions=exc.queued_actions,
+                queued_actions=_stable_merge(
+                    queue_result.queued_actions,
+                    exc.queued_actions,
+                ),
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
-                adaptations=execution.adaptations,
-                chat_turn_claim=execution.claim,
+                adaptations=(),
+                chat_turn_claim=queue_result.claim,
             ) from exc
         except SupervisorRuntimeError as exc:
             _log_turn_pipeline(
@@ -1026,8 +1037,8 @@ class AgentColTurnService:
                 clock=self._clock,
                 route=directive.route,
                 error=exc,
-                actions=_stable_merge(authoritative_actions, exc.actions),
-                artifacts=execution.artifacts,
+                actions=_stable_merge(command.precompleted_actions, exc.actions),
+                artifacts=(),
                 memory_proposals=_stable_merge(
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
@@ -1036,17 +1047,20 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                queued_actions=_stable_merge(
+                    queue_result.queued_actions,
+                    exc.queued_actions,
+                ),
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
-                adaptations=execution.adaptations,
             )
             raise AgentColTurnResponderError(
                 "Agent_Col responder failed.",
                 actions=_stable_merge(
-                    authoritative_actions,
+                    command.precompleted_actions,
                     exc.actions,
                 ),
-                artifacts=execution.artifacts,
+                artifacts=(),
                 memory_proposals=_stable_merge(
                     command.precompleted_memory_proposals,
                     exc.memory_proposals,
@@ -1055,18 +1069,22 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
+                queued_actions=_stable_merge(
+                    queue_result.queued_actions,
+                    exc.queued_actions,
+                ),
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
-                adaptations=execution.adaptations,
-                chat_turn_claim=execution.claim,
+                adaptations=(),
+                chat_turn_claim=queue_result.claim,
             ) from exc
         _log_turn_pipeline(
             "responder_finish",
             started_at=started_at,
             clock=self._clock,
             route=directive.route,
-            actions=_stable_merge(authoritative_actions, result.actions),
-            artifacts=execution.artifacts,
+            actions=_stable_merge(command.precompleted_actions, result.actions),
+            artifacts=(),
             memory_proposals=_stable_merge(
                 command.precompleted_memory_proposals,
                 result.memory_proposals,
@@ -1075,15 +1093,17 @@ class AgentColTurnService:
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
             ),
-            queued_actions=result.queued_actions,
+            queued_actions=_stable_merge(
+                queue_result.queued_actions,
+                result.queued_actions,
+            ),
             continuity_receipts=command.continuity_receipts,
             continuity_choices=command.continuity_choices,
-            adaptations=execution.adaptations,
         )
         return AgentColTurnResult(
             response=result.response,
-            actions=_stable_merge(authoritative_actions, result.actions),
-            artifacts=execution.artifacts,
+            actions=_stable_merge(command.precompleted_actions, result.actions),
+            artifacts=(),
             citations=result.citations,
             memory_proposals=_stable_merge(
                 command.precompleted_memory_proposals,
@@ -1093,10 +1113,14 @@ class AgentColTurnService:
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
             ),
+            queued_actions=_stable_merge(
+                queue_result.queued_actions,
+                result.queued_actions,
+            ),
             continuity_receipts=command.continuity_receipts,
             continuity_choices=command.continuity_choices,
-            adaptations=execution.adaptations,
-            chat_turn_claim=execution.claim,
+            adaptations=(),
+            chat_turn_claim=queue_result.claim,
         )
 
     @staticmethod

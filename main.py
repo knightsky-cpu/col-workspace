@@ -36,7 +36,10 @@ from google.genai import types
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.datastructures import MutableHeaders
 
-from agent_col_artifact_executor import AgentColArtifactExecutor
+from agent_col_artifact_executor import (
+    AgentColArtifactCreationJobWorker,
+    AgentColArtifactExecutor,
+)
 from agent_col_artifact_feedback_executor import (
     AgentColArtifactFeedbackExecutor,
 )
@@ -1945,6 +1948,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             GenericArtifactCreationService(artifact_writer=database)
         )
         agent_job_repository = database.agent_jobs()
+        artifact_job_worker = AgentColArtifactCreationJobWorker(
+            agent_job_repository=agent_job_repository,
+            synthesis_service=synthesis_service,
+            generic_artifact_generator=generate_generic_artifact,
+            generic_artifact_creator=generic_artifact_creation_service,
+            genai_client=client,
+        )
+        artifact_job_background_tasks: set[asyncio.Task[AgentJob | None]] = set()
+
+        def dispatch_artifact_job(job: AgentJob) -> None:
+            artifact_job_worker.dispatch(
+                job,
+                task_set=artifact_job_background_tasks,
+            )
+
         artifact_executor = AgentColArtifactExecutor(
             synthesis_service=synthesis_service,
             artifact_ledger=database,
@@ -1953,6 +1971,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             generic_artifact_reader=generic_artifact_service,
             genai_client=client,
             agent_job_repository=agent_job_repository,
+            artifact_job_dispatcher=dispatch_artifact_job,
         )
         artifact_feedback_service = ArtifactFeedbackService(
             artifact_reader=artifact_service,
@@ -2043,6 +2062,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         generic_artifact_creation_service
     )
     app.state.generic_artifact_generator = generate_generic_artifact
+    app.state.artifact_job_worker = artifact_job_worker
+    app.state.artifact_job_background_tasks = artifact_job_background_tasks
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.memory_job_worker = memory_job_worker
@@ -2067,16 +2088,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         working_state_background_tasks = tuple(
             getattr(app.state, "working_state_background_tasks", set())
         )
+        artifact_job_background_tasks = tuple(
+            getattr(app.state, "artifact_job_background_tasks", set())
+        )
         memory_job_background_tasks = tuple(
             getattr(app.state, "memory_job_background_tasks", set())
         )
         for task in working_state_background_tasks:
+            task.cancel()
+        for task in artifact_job_background_tasks:
             task.cancel()
         for task in memory_job_background_tasks:
             task.cancel()
         if working_state_background_tasks:
             await asyncio.gather(
                 *working_state_background_tasks,
+                return_exceptions=True,
+            )
+        if artifact_job_background_tasks:
+            await asyncio.gather(
+                *artifact_job_background_tasks,
                 return_exceptions=True,
             )
         if memory_job_background_tasks:

@@ -596,15 +596,44 @@ Approval is required before implementation.
 - Memory proposal approve/reject now uses a direct Memory API endpoint from the
   Memory UI. It no longer depends on chat submit readiness and does not create a
   chat turn when the user accepts or rejects a proposal.
+- Artifact creation now enqueues a `create_artifact` AgentJob and returns a
+  queued action from the chat path. Generation and persistence are owned by an
+  artifact worker that writes terminal job state and a public report.
 
 Remaining direction:
 
-- artifact generation still needs to move behind the same job/report boundary
-  while preserving timely artifact delivery for the prompt that requested it;
 - workspace note proposal creation and approval still need the same ownership
   split;
+- artifact/job/report/resource refresh behavior needs manual verification in
+  the live UI after the queue-owned artifact pass;
 - chat should keep conversational context retrieval and task delegation, but
   background work completion/failure/approval reporting belongs to resource UIs
   and job reports;
 - public surfaces must continue to expose chronological display numbers and
   human labels only, never internal IDs or private routing fields.
+
+## Approved Artifact Decoupling Pass
+
+Implemented source boundary:
+
+- `AgentColArtifactExecutor.queue(...)` creates an `AgentJob` plus private
+  payload and dispatches the queued job without invoking generation, ledger
+  writes, readers, or chat-turn artifact effects;
+- `AgentColArtifactCreationJobWorker` leases `create_artifact` jobs and handles
+  both blueprint and single-file artifact persistence behind the job boundary;
+- `AgentColTurnService` uses queued artifact context for artifact routes and
+  returns queued action receipts instead of completed artifact receipts;
+- `SupervisorTurnContext.prequeued_actions` lets application-owned queued work
+  flow through the existing responder result collection;
+- `main.py` wires an in-process artifact worker and cancels outstanding
+  artifact tasks on shutdown.
+
+Focused verification used during this pass:
+
+```bash
+venv/bin/python -m pytest tests/test_agent_col_artifact_executor.py tests/test_agent_col_turn_service_artifacts.py tests/test_agent_col_turn_service.py -k "artifact or queued" -q
+venv/bin/python -m pytest tests/test_agent_job_reports.py tests/test_agent_job_repository.py -k "report or agent_job" -q
+venv/bin/python -m pytest tests/test_main.py -k "agent_report or agent_job or artifact" -q
+```
+
+Manual verification is still required before this pass is accepted.
