@@ -7,6 +7,7 @@ import {
   createNoteCorrection,
   createNoteProposal,
   createWorkspace,
+  decideMemoryProposal,
   deleteNote,
   deleteArtifact,
   deleteMemorySignal,
@@ -60,7 +61,6 @@ import {
   buildCollaborativeNoteDecisionChatRequest,
   buildContinuitySelectionChatRequest,
   buildExactRetryRequest,
-  buildMemoryDecisionChatRequest,
   buildMemoryClarificationSelectionChatRequest,
   buildOrdinaryChatRequest,
   readContextForm,
@@ -1905,15 +1905,23 @@ async function submitArtifactFeedback(decision) {
 }
 
 async function submitMemoryDecision(decision) {
-  if (!selectCanSubmit(state)) {
+  if (!state.context) {
     return;
   }
-  const request = buildMemoryDecisionChatRequest(
-    state.context,
-    `${decision.decision === "reject" ? "Reject" : "Approve"} this memory proposal.`,
-    decision,
-  );
-  await submitRequest(request);
+  clearMemoryError();
+  try {
+    await decideMemoryProposal(
+      state.context.user_id,
+      decision.proposal_id,
+      decision.decision,
+      authOptions(),
+    );
+    await loadMemory();
+    loadAgentJobReports();
+    loadAgentJobs();
+  } catch (error) {
+    showMemoryError(error.message);
+  }
 }
 
 async function submitCollaborativeNoteDecision(decision) {

@@ -870,3 +870,111 @@ Remaining limitations:
 - note proposal execution/reporting still needs the same separation;
 - the popup is backed by `/agent/reports`, but completed-job row inline expansion is not implemented in this pass;
 - manual visual verification is still pending by design.
+
+## Direct Memory Approval Surface Pass
+
+After the report popup pass, manual screenshots still showed memory approval
+results appearing as ordinary Agent Col chat responses. That behavior violated
+the ownership split we had established: Agent Col may queue work and converse,
+but background/task resource outcomes should be owned by their own surfaces.
+For memory, approve/reject is not model work. It is a direct user decision that
+should write through the memory API and refresh the Memory UI without asking
+Agent Col to narrate the result.
+
+Decision:
+
+Memory proposal approve/reject now belongs to the Memory UI and direct memory
+API. It must not depend on chat submit readiness, must not call `/api/chat` or
+`/api/chat/stream`, and must be usable while an ordinary chat turn is pending.
+Agent reports remain the authoritative inspection surface for background job
+completion/failure, while the Memory UI remains authoritative for user-managed
+memory state.
+
+Why:
+
+The earlier partial decoupling still let user approval actions collide with the
+chat turn lifecycle. That is the same failure family as the `ChatTurnStateError`
+and timeout/partial-effect confusion observed during manual runs: a task outcome
+or approval action had to flow back through the active conversation path. Moving
+memory approve/reject to direct resource endpoints creates a separate error
+boundary. If the memory decision fails, the Memory UI owns the error. If chat is
+pending, the decision can still be accepted. If background jobs are reporting,
+the report surface can update independently from the chat transcript.
+
+Implemented behavior:
+
+- added `POST /api/users/{user_id}/memory/proposals/{proposal_id}/{decision}`;
+- the endpoint accepts only `approve` or `reject`;
+- the endpoint calls `TrustedMemoryService.decide_memory_proposal` with
+  `confirmation_channel="memory_api"` and no chat session/message confirmation
+  identifiers;
+- the endpoint returns the same public `MemoryMutationResponse` shape used by
+  other direct memory mutation routes;
+- the frontend API now exposes `decideMemoryProposal`;
+- `submitMemoryDecision` in `frontend/app.mjs` no longer checks
+  `selectCanSubmit(state)`;
+- Memory UI proposal approve/reject calls the direct memory endpoint, refreshes
+  Memory UI state, and refreshes agent job/report surfaces;
+- approve/reject no longer creates an Agent Col chat turn or waits for the
+  active chat request to finish.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_approve_memory_proposal_uses_memory_api_without_chat_turn` and
+  `test_reject_memory_proposal_uses_memory_api_without_chat_turn` failed with
+  404 because no direct proposal decision route existed.
+- GREEN: the direct route was added and both backend tests passed, asserting the
+  memory service command uses `memory_api`, records no chat confirmation IDs,
+  emits the memory decision event, and never calls the turn service.
+- RED: `decideMemoryProposal calls the direct proposal decision path` failed
+  because `frontend/api.mjs` exported no direct proposal decision wrapper.
+- GREEN: `decideMemoryProposal` was added and validates user/proposal locators
+  plus the bounded decision value.
+- RED: `memory proposal approval during a pending chat uses direct memory API`
+  failed because the existing Memory UI handler returned early while chat was
+  pending and therefore never called the memory endpoint.
+- GREEN: the handler now calls the direct memory endpoint while chat is pending,
+  refreshes resource state, and does not issue any additional chat request.
+
+Focused verification after implementation:
+
+```text
+venv/bin/python -m pytest tests/test_main.py::test_approve_memory_proposal_uses_memory_api_without_chat_turn tests/test_main.py::test_reject_memory_proposal_uses_memory_api_without_chat_turn -q
+2 passed, 1 warning
+```
+
+```text
+node --test tests/frontend/api.test.mjs --test-name-pattern "decideMemoryProposal"
+35 passed
+```
+
+```text
+node --test tests/frontend/app-runtime.test.mjs --test-name-pattern "memory proposal approval during a pending chat uses direct memory API"
+31 passed
+```
+
+```text
+venv/bin/python -m pytest tests/test_main.py -k "memory_signal or memory_proposal" -q
+6 passed, 282 deselected, 1 warning
+```
+
+```text
+node --test tests/frontend/api.test.mjs tests/frontend/app-runtime.test.mjs tests/frontend/memory-view.test.mjs tests/frontend/requests.test.mjs
+98 passed
+```
+
+One attempted backend verification command failed because the `pytest -k`
+expression contained an unquoted bare word sequence. The command was corrected
+and rerun successfully as shown above.
+
+Remaining limitations:
+
+- memory proposal creation is already queued to background work, but artifact
+  creation remains request-bound and is still the major latency/coupling target;
+- workspace note proposal approve/reject and note proposal creation still need
+  the same direct resource/job ownership treatment;
+- legacy chat request builders for memory decisions still exist for older
+  request/recovery tests, but normal Memory UI approve/reject no longer uses
+  them;
+- manual visual verification is intentionally deferred until more background
+  work surfaces are decoupled, per the current testing strategy.

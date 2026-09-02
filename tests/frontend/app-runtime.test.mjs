@@ -2583,134 +2583,14 @@ test("agent panel updates from job stream before polling interval", async (t) =>
   await submitPromise;
 });
 
-test("JSON partial failure from submit refreshes authoritative memory and notes", async () => {
-  const elements = new Map();
-  const contextForm = node("form");
-  const projectInput = node("input");
-  projectInput.name = "project_id";
-  projectInput.value = "agent-col";
-  const userInput = node("input");
-  userInput.name = "user_id";
-  userInput.value = "wifiknight";
-  const contextSubmit = node("button");
-  contextSubmit.type = "submit";
-  contextForm.fields = { project_id: projectInput, user_id: userInput };
-  elements.set("[data-context-form]", contextForm);
-  elements.set('[name="project_id"]', projectInput);
-  elements.set('[name="user_id"]', userInput);
-  elements.set('[data-context-form] button[type="submit"]', contextSubmit);
-
-  for (const selector of [
-    "[data-auth-error]",
-    "[data-context-error]",
-    "[data-workspace]",
-    ".context-gate",
-    "[data-new-conversation]",
-    "[data-artifacts-expand]",
-    "[data-left-refresh]",
-    "#conversation-workspace",
-    "[data-work-error]",
-    "[data-memory-error]",
-    "[data-workspace-error]",
-    "[data-notes-error]",
-    "[data-chat-status]",
-    "[data-auth-mode-label]",
-    "[data-google-account-status]",
-    "[data-google-signin]",
-    "[data-google-button]",
-    "[data-workspace-indicator]",
-    "[data-chat-error]",
-    "[data-chat-form]",
-    "[data-chat-input]",
-    "[data-chat-submit]",
-    "[data-retry-turn]",
-    "[data-chat-transcript]",
-    "[data-character-count]",
-    "[data-memory-clarification-choices]",
-    "[data-continuity-choices]",
-    "[data-workspace-list]",
-    "[data-work-list]",
-    "[data-work-detail]",
-    "[data-memory-panel]",
-    "[data-notes-panel]",
-    "[data-chats-list]",
-    "[data-agents-panel]",
-    "[data-agents-summary]",
-  ]) {
-    if (!elements.has(selector)) {
-      elements.set(selector, node());
-    }
-  }
-  elements.get("[data-chat-form]").tagName = "form";
-  elements.get("[data-chat-input]").value = "";
-
-  const drawerButtons = [node("button"), node("button")];
-  drawerButtons[0].setAttribute("data-drawer-toggle", "left");
-  drawerButtons[1].setAttribute("data-drawer-toggle", "right");
-  const sectionButtons = ["workspace", "work", "notes", "memory", "chats", "agents"]
-    .map((section) => {
-      const button = node("button");
-      const content = node("div");
-      button.setAttribute("data-section-toggle", section);
-      content.setAttribute("data-section-content", section);
-      elements.set(`[data-section-toggle="${section}"]`, button);
-      elements.set(`[data-section-content="${section}"]`, content);
-      return button;
-    });
-
-  globalThis.document = {
-    head: node("head"),
-    createElement(tagName) {
-      return node(tagName);
-    },
-    createTextNode(text) {
-      const textNode = node("#text");
-      textNode.textContent = String(text);
-      return textNode;
-    },
-    querySelector(selector) {
-      return elements.get(selector) ?? null;
-    },
-    querySelectorAll(selector) {
-      if (selector === "[data-context-form] input") {
-        return [projectInput, userInput];
-      }
-      if (selector === "[data-drawer-toggle]") {
-        return drawerButtons;
-      }
-      if (selector === '[data-drawer-toggle="left"]') {
-        return [drawerButtons[0]];
-      }
-      if (selector === '[data-drawer-toggle="right"]') {
-        return [drawerButtons[1]];
-      }
-      if (selector === "[data-section-toggle]") {
-        return sectionButtons;
-      }
-      return [];
-    },
-  };
-
-  class FakeFormData {
-    constructor(form) {
-      this.form = form;
-    }
-    get(name) {
-      return this.form.fields?.[name]?.value ?? "";
-    }
-    has(name) {
-      return this.form.fields?.[name] !== undefined;
-    }
-  }
-  globalThis.FormData = FakeFormData;
-
-  let resolveStructuredChat;
-  const structuredChatResponse = new Promise((resolve) => {
-    resolveStructuredChat = resolve;
-  });
+test("memory proposal approval during a pending chat uses direct memory API", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const chatStream = createControlledSseResponse();
   const calls = [];
+  let memoryApproved = false;
   globalThis.fetch = async (path, init = {}) => {
-    calls.push([path, init?.method ?? "GET"]);
+    calls.push([path, init]);
     if (path === "/api/auth/config") {
       return jsonResponse(200, {
         auth_mode: "local_dev",
@@ -2734,16 +2614,50 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
         next_before: null,
       });
     }
+    if (
+      path === "/api/users/wifiknight/memory/proposals/response_length--proposal-1/approve"
+      && init.method === "POST"
+    ) {
+      memoryApproved = true;
+      return jsonResponse(200, {
+        action: { action_name: "approve_memory_signal", status: "completed" },
+        profile: {
+          active_preferences: {
+            response_length: {
+              category: "response_length",
+              signal_id: "response_length--signal-1",
+              value: "concise",
+              source_event_id: "response_length--signal-1--approved",
+            },
+          },
+          identity_context: {},
+        },
+      });
+    }
     if (path.startsWith("/api/users/wifiknight/memory")) {
       return jsonResponse(200, {
         memory_contract_version: "1.0",
-        profile: null,
-        unresolved_proposals: [{
-          proposal_id: "response_length--proposal-1",
-          category: "response_length",
-          proposed_value: "concise",
-          status: "pending",
-        }],
+        profile: memoryApproved
+          ? {
+            active_preferences: {
+              response_length: {
+                category: "response_length",
+                signal_id: "response_length--signal-1",
+                value: "concise",
+                source_event_id: "response_length--signal-1--approved",
+              },
+            },
+            identity_context: {},
+          }
+          : null,
+        unresolved_proposals: memoryApproved
+          ? []
+          : [{
+            proposal_id: "response_length--proposal-1",
+            category: "response_length",
+            proposed_value: "concise",
+            status: "pending",
+          }],
         events: [],
       });
     }
@@ -2761,19 +2675,38 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
         sessions: [],
       });
     }
-    if (path === "/api/chat") {
-      return structuredChatResponse;
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/reports")) {
+      return jsonResponse(200, {
+        agent_job_report_contract_version: "1.0",
+        reports: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return chatStream.response;
     }
     throw new Error(`Unexpected fetch: ${path}`);
   };
 
-  await import(`../../frontend/app.mjs?runtime-partial-${Date.now()}`);
+  await import(`../../frontend/app.mjs?runtime-memory-direct-${Date.now()}`);
   await waitFor(
     () => calls.some(([path]) => path === "/api/auth/config"),
     () => JSON.stringify(calls),
   );
   await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
-  assert.match(textTree(elements.get("[data-chat-transcript]")), /Start a conversation/);
+  const input = elements.get("[data-chat-input]");
+  input.value = "Keep chat pending";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
   await waitFor(
     () => findTree(
       elements.get("[data-memory-panel]"),
@@ -2796,45 +2729,39 @@ test("JSON partial failure from submit refreshes authoritative memory and notes"
   );
   approve.onclick();
   await waitFor(
-    () => calls.some(([path]) => path === "/api/chat"),
-    () => JSON.stringify(calls),
+    () => calls.some(([path, init]) => (
+      path === "/api/users/wifiknight/memory/proposals/response_length--proposal-1/approve"
+      && init.method === "POST"
+    )),
+    () => JSON.stringify(calls.map(([path, init]) => [path, init.method])),
   );
-  assert.equal(
-    elements.get("[data-chat-status]").attributes["aria-label"],
-    "Waiting for Agent Col",
-  );
-  assert.equal(
-    APPROVED_ORDINARY_CHAT_WAITING_QUIPS.includes(
-      elements.get("[data-chat-status]").attributes["aria-label"],
-    ),
-    false,
-  );
-  resolveStructuredChat(jsonResponse(504, {
-    detail: "Agent_Col response timed out after a completed action.",
-    response: "",
-    actions: [{
-      action_name: "approve_memory_signal",
-      status: "completed",
-    }],
-    memory_proposals: [],
-    collaborative_note_events: [{
-      event_type: "approved",
-      title: "API version",
-    }],
-  }));
   await waitFor(
-    () => (
-      calls.filter(([path]) => path.startsWith("/api/users/wifiknight/memory")).length >= 2
-      && calls.filter(([path]) => path.startsWith("/api/users/wifiknight/projects/agent-col/notes")).length >= 2
+    () => !findTree(
+      elements.get("[data-memory-panel]"),
+      (item) => item.attributes["data-memory-proposal"] === "response_length--proposal-1",
     ),
-    () => JSON.stringify(calls),
+    () => elements.get("[data-memory-panel]").textContent,
   );
 
-  assert.equal(calls.some(([path]) => path === "/api/chat"), true);
   assert.equal(
-    elements.get("[data-chat-error]").textContent,
-    "Agent Col timed out after recording a completed action. Retry will reuse completed receipts.",
+    calls.filter(([path]) => path === "/api/chat/stream").length,
+    1,
   );
+  assert.equal(calls.some(([path]) => path === "/api/chat"), false);
+  assert.equal(elements.get("[data-chat-error]").textContent, "");
+  chatStream.complete({
+    response: "Done",
+    actions: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    continuity_choices: [],
+    adaptations: [],
+  });
 });
 
 test("memory sub-card revoke and delete do not depend on chat submit readiness", async () => {

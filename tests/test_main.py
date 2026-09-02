@@ -1919,6 +1919,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                     "signal_id": "response_length--proposal-1",
                     "category": "response_length",
                     "value": "concise",
+                    "policy_version": "1.0",
                     "source_event_id": (
                         "response_length--proposal-1--approved"
                     ),
@@ -5462,6 +5463,85 @@ async def test_delete_memory_signal_returns_no_content(
             signal_id="response_length--signal-1",
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_approve_memory_proposal_uses_memory_api_without_chat_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/memory/proposals/"
+        "response_length--proposal-1/approve"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action"] == {
+        "action_name": "approve_memory_signal",
+        "status": "completed",
+    }
+    assert body["profile"]["memory_revision"] == 2
+    signal = body["profile"]["active_preferences"]["response_length"]
+    assert signal == {
+        "signal_id": "response_length--proposal-1",
+        "category": "response_length",
+        "value": "concise",
+        "policy_version": "1.0",
+        "source_event_id": "response_length--proposal-1--approved",
+        "approved_at": "2026-08-20T23:00:00Z",
+    }
+    assert service_state.memory_service.decision_calls == [
+        MemoryDecisionCommand(
+            user_id="user-1",
+            proposal_id="response_length--proposal-1",
+            decision="approve",
+            confirmation_channel="memory_api",
+            confirmation_session_id=None,
+            confirmation_message_id=None,
+        )
+    ]
+    assert service_state.events == [("memory_decision",)]
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_reject_memory_proposal_uses_memory_api_without_chat_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.memory_service.decision_result = (
+        TrustedMemoryMutationResult(
+            action=AgentActionReceipt(
+                action_name="reject_memory_signal",
+                status="completed",
+            ),
+            profile=CollaborationProfile(memory_revision=2),
+        )
+    )
+
+    response = await client.post(
+        "/api/users/user-1/memory/proposals/"
+        "response_length--proposal-1/reject"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["action"] == {
+        "action_name": "reject_memory_signal",
+        "status": "completed",
+    }
+    assert service_state.memory_service.decision_calls == [
+        MemoryDecisionCommand(
+            user_id="user-1",
+            proposal_id="response_length--proposal-1",
+            decision="reject",
+            confirmation_channel="memory_api",
+            confirmation_session_id=None,
+            confirmation_message_id=None,
+        )
+    ]
+    assert service_state.events == [("memory_decision",)]
+    assert service_state.turn_service.calls == []
 
 
 @pytest.mark.asyncio

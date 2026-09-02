@@ -585,3 +585,26 @@ Expected user-visible result:
 - chat remains no more coupled than it is today, but the next decoupling layer gets a clean report boundary to build on.
 
 Approval is required before implementation.
+
+## Current Progress Notes
+
+- Public job/report projections and report persistence are implemented.
+- The Agents panel now exposes `View all job reports` through the existing
+  arrow affordance and opens a popup report overlay with a top-right `x`.
+- Memory proposal creation is queued to background work and reports through the
+  agent/report boundary.
+- Memory proposal approve/reject now uses a direct Memory API endpoint from the
+  Memory UI. It no longer depends on chat submit readiness and does not create a
+  chat turn when the user accepts or rejects a proposal.
+
+Remaining direction:
+
+- artifact generation still needs to move behind the same job/report boundary
+  while preserving timely artifact delivery for the prompt that requested it;
+- workspace note proposal creation and approval still need the same ownership
+  split;
+- chat should keep conversational context retrieval and task delegation, but
+  background work completion/failure/approval reporting belongs to resource UIs
+  and job reports;
+- public surfaces must continue to expose chronological display numbers and
+  human labels only, never internal IDs or private routing fields.

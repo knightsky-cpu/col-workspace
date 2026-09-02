@@ -705,6 +705,26 @@ export function inspectMemory(
   );
 }
 
+export function decideMemoryProposal(
+  userId,
+  proposalId,
+  decision,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("proposal_id", proposalId);
+  if (!["approve", "reject"].includes(decision)) {
+    throw new Error("decision must be approve or reject.");
+  }
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/memory/proposals/${encodeURIComponent(proposalId)}/${decision}`,
+    { method: "POST", authToken: options.authToken },
+    fetchLike,
+  );
+}
+
 export function listWorkspaces(
   userId,
   options = {},

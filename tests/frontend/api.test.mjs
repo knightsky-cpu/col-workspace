@@ -14,6 +14,7 @@ import {
   getArtifact,
   getBlueprint,
   getChatSession,
+  decideMemoryProposal,
   inspectMemory,
   listAgentJobs,
   listAgentJobReports,
@@ -786,6 +787,35 @@ test("inspectMemory rejects invalid user and event cursors", async () => {
   );
 });
 
+test("decideMemoryProposal calls the direct proposal decision path", async () => {
+  const calls = [];
+  const result = await decideMemoryProposal(
+    "wifiknight",
+    "response_length--proposal-1",
+    "approve",
+    { authToken: "google-id-token" },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        action: { action_name: "approve_memory_signal", status: "completed" },
+        profile: { active_preferences: {} },
+      });
+    },
+  );
+
+  assert.deepEqual(result.action, {
+    action_name: "approve_memory_signal",
+    status: "completed",
+  });
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/memory/proposals/response_length--proposal-1/approve",
+  );
+  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+  assert.equal(calls[0][1].body, undefined);
+});
+
 test("revokeMemorySignal calls the canonical active memory revoke path", async () => {
   const calls = [];
   const result = await revokeMemorySignal(
@@ -831,6 +861,24 @@ test("deleteMemorySignal calls the canonical active memory delete path", async (
 });
 
 test("memory mutation wrappers reject invalid identifiers", async () => {
+  assert.throws(
+    () => decideMemoryProposal(
+      "wifiknight",
+      "response_length--proposal-1",
+      "accepted",
+      async () => jsonResponse(200, {}),
+    ),
+    /decision must be approve or reject/i,
+  );
+  assert.throws(
+    () => decideMemoryProposal(
+      "wifiknight",
+      "bad/slash",
+      "approve",
+      async () => jsonResponse(200, {}),
+    ),
+    /invalid/i,
+  );
   assert.throws(
     () => revokeMemorySignal(
       "bad/slash",

@@ -3331,6 +3331,66 @@ async def retry_agent_job(
 
 
 @app.post(
+    "/api/users/{user_id}/memory/proposals/{proposal_id}/{decision}",
+    response_model=MemoryMutationResponse,
+)
+async def decide_memory_proposal(
+    user_id: IdentifierStr,
+    proposal_id: IdentifierStr,
+    decision: Literal["approve", "reject"],
+    request: Request,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> MemoryMutationResponse:
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = (
+            await request.app.state.memory_service.decide_memory_proposal(
+                MemoryDecisionCommand(
+                    user_id=effective_user_id,
+                    proposal_id=proposal_id,
+                    decision=decision,
+                    confirmation_channel="memory_api",
+                    confirmation_session_id=None,
+                    confirmation_message_id=None,
+                )
+            )
+        )
+    except MemoryProposalNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Memory proposal was not found.",
+        ) from exc
+    except MemoryProposalConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Memory proposal state conflicts with this request.",
+        ) from exc
+    except MemoryProposalExpiredError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Memory proposal has expired.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Memory proposal identifier is invalid.",
+        ) from exc
+    return MemoryMutationResponse(
+        action=result.action,
+        profile=result.profile,
+    )
+
+
+@app.post(
     "/api/users/{user_id}/memory/signals/{signal_id}/revoke",
     response_model=MemoryMutationResponse,
 )
