@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 import logging
 from types import SimpleNamespace
 
@@ -517,6 +518,7 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
             "Remember that I prefer concise responses."
         ),
         "memory_decision_present": False,
+        "memory_prequeued_for_turn": False,
         "artifact_feedback_decision_present": False,
         "memory_turn_id": "a" * 64,
         "memory_turn_owner_token": "owner-token-1",
@@ -577,6 +579,7 @@ async def test_run_turn_places_server_owned_note_context_in_session_state(
             "Agent Col, note that this workspace must use API v2."
         ),
         "memory_decision_present": False,
+        "memory_prequeued_for_turn": False,
         "artifact_feedback_decision_present": False,
         "memory_turn_id": "a" * 64,
         "memory_turn_owner_token": "owner-token-1",
@@ -1087,6 +1090,95 @@ async def test_run_turn_collects_queued_memory_receipt_from_function_response(
     assert len(result.queued_actions) == 1
     assert result.queued_actions[0].job_id == "memory-job-1"
     assert result.queued_actions[0].action_kind == "propose_memory_signal"
+
+
+@pytest.mark.asyncio
+async def test_run_turn_marks_memory_prequeued_in_tool_state() -> None:
+    from schemas import QueuedActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(events=[FakeEvent("Memory work is queued.", True)]),
+        session_service=sessions,
+    )
+
+    await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="remember that I like pancakes on Saturday mornings",
+            source_message_id="message-1",
+            prequeued_actions=(
+                QueuedActionReceipt(
+                    job_id="memory-job-1",
+                    action_kind="propose_memory_signal",
+                    status="queued",
+                    display_label="Memory request: user_requested_memory",
+                    created_at=datetime(2026, 8, 22, 16, 0, tzinfo=UTC),
+                    agent_label="Memory Analyst",
+                ),
+            ),
+        )
+    )
+
+    state = dict(sessions.created[0]["state"])
+    assert state["memory_prequeued_for_turn"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_turn_ignores_duplicate_queued_memory_after_prequeued_work(
+) -> None:
+    from schemas import QueuedActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    duplicate_response = types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "memory-job-2",
+                "action_kind": "propose_memory_signal",
+                "status": "queued",
+                "display_label": "Memory request: user_requested_memory",
+                "created_at": "2026-08-22T16:00:00Z",
+                "agent_label": "Memory Analyst",
+            },
+        },
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [duplicate_response]),
+                FakeEvent("Memory work is queued.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="remember that I like pancakes on Saturday mornings",
+            source_message_id="message-1",
+            prequeued_actions=(
+                QueuedActionReceipt(
+                    job_id="memory-job-1",
+                    action_kind="propose_memory_signal",
+                    status="queued",
+                    display_label="Memory request: user_requested_memory",
+                    created_at=datetime(2026, 8, 22, 16, 0, tzinfo=UTC),
+                    agent_label="Memory Analyst",
+                ),
+            ),
+        )
+    )
+
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].job_id == "memory-job-1"
 
 
 @pytest.mark.asyncio

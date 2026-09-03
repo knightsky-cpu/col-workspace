@@ -146,6 +146,8 @@ def test_responder_app_catalog_exposes_governed_note_tool_separately(
     assert "note request must not become profile memory" in normalized
     assert "memory request must not become a note" in normalized
     assert "already completed an artifact" in normalized
+    assert "queued actions already contain memory work" in normalized
+    assert "never create both a note proposal and a memory proposal" not in normalized
 
 
 def test_responder_instruction_preserves_final_response_authority() -> None:

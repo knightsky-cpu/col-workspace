@@ -162,6 +162,38 @@ class RecordingArtifactExecutor:
         raise AssertionError("artifact generation must not run in chat path")
 
 
+class RecordingNoteQueue:
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+
+    async def queue(self, command: object) -> QueuedActionReceipt:
+        self.calls.append(command)
+        return QueuedActionReceipt(
+            job_id="note-job-1",
+            action_kind="propose_collaborative_note",
+            status="queued",
+            display_label="Workspace note: queued",
+            created_at=datetime(2026, 8, 24, tzinfo=UTC),
+            agent_label="Workspace Notes",
+        )
+
+
+class RecordingMemoryQueue:
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+
+    async def queue(self, command: object) -> QueuedActionReceipt:
+        self.calls.append(command)
+        return QueuedActionReceipt(
+            job_id="memory-job-1",
+            action_kind="propose_memory_signal",
+            status="queued",
+            display_label="Memory request: user_requested_memory",
+            created_at=datetime(2026, 8, 24, tzinfo=UTC),
+            agent_label="Memory Analyst",
+        )
+
+
 class SequenceClock:
     def __init__(self, *values: float) -> None:
         self._values = iter(values)
@@ -406,6 +438,681 @@ async def test_turn_service_streams_after_artifact_routing_and_execution(
     assert len(artifact_routing.calls) == 1
     assert len(artifact_executor.calls) == 1
     assert artifact_executor.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_turn_service_queues_workspace_note_from_natural_that_clause(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = (
+        "create a workspace note that we are going to build project zero for "
+        "macOS and we are using a zsh shell environment. also remember that i "
+        "prefer pancakes on saturday mornings for breakfast. then write me a C "
+        "program that prints, 'hello! i love pancakes!'"
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("note-stream-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    artifact_routing = RecordingRoutingRequest(
+        AgentColRoutingDirectiveV4.model_validate(
+            {
+                "schema_version": "4.0",
+                "route": "clarify",
+                "clarifying_question": "Which task should I handle next?",
+            }
+        )
+    )
+    note_queue = RecordingNoteQueue()
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=artifact_routing,
+        note_queue=note_queue,
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert len(note_queue.calls) == 1
+    assert len(memory_queue.calls) == 1
+    memory_command = memory_queue.calls[0]
+    assert memory_command.decision.kind == "profile_candidate"
+    assert memory_command.decision.category == "user_requested_memory"
+    assert memory_command.decision.canonical_value == (
+        "i prefer pancakes on saturday mornings for breakfast"
+    )
+    assert memory_command.decision.evidence_text == (
+        "also remember that i prefer pancakes on saturday mornings for breakfast"
+    )
+    assert memory_command.turn_lease == ProposalTurnLease(
+        turn_id=claim.ids.turn_id,
+        owner_token=claim.owner_token,
+    )
+    queued_note = note_queue.calls[0]
+    assert queued_note.decision.body == (
+        "we are going to build project zero for macOS and we are using a zsh "
+        "shell environment."
+    )
+    assert queued_note.turn_lease == ProposalTurnLease(
+        turn_id=claim.ids.turn_id,
+        owner_token=claim.owner_token,
+    )
+    assert [action.action_kind for action in result.queued_actions] == [
+        "propose_collaborative_note",
+        "propose_memory_signal",
+    ]
+    assert len(artifact_routing.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_turn_service_queues_explicit_memory_request_before_routing(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = "please remember I like eggs on Thursday mornings"
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert len(memory_queue.calls) == 1
+    memory_command = memory_queue.calls[0]
+    assert memory_command.source_message_text == message
+    assert memory_command.memory_decision_present is False
+    assert memory_command.decision.kind == "profile_candidate"
+    assert memory_command.decision.category == "user_requested_memory"
+    assert memory_command.decision.canonical_value == (
+        "I like eggs on Thursday mornings"
+    )
+    assert memory_command.decision.evidence_text == message
+    assert [action.action_kind for action in result.queued_actions] == [
+        "propose_memory_signal",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_turn_service_keeps_one_memory_receipt_when_responder_duplicates(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = "remember that i like pancakes on Saturday mornings"
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-duplicate-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(
+            SupervisorTurnResult(
+                response="Memory work is queued.",
+                queued_actions=(
+                    QueuedActionReceipt(
+                        job_id="memory-job-2",
+                        action_kind="propose_memory_signal",
+                        status="queued",
+                        display_label="Memory request: user_requested_memory",
+                        created_at=datetime(2026, 8, 24, tzinfo=UTC),
+                        agent_label="Memory Analyst",
+                    ),
+                ),
+            )
+        ),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert len(memory_queue.calls) == 1
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].job_id == "memory-job-1"
+    assert result.queued_actions[0].action_kind == "propose_memory_signal"
+
+
+@pytest.mark.asyncio
+async def test_turn_service_does_not_queue_historical_memory_recall() -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = "what do you remember about Project Zero?"
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-recall-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert memory_queue.calls == []
+    assert result.queued_actions == ()
+
+
+@pytest.mark.asyncio
+async def test_turn_service_queues_explicit_memory_preference_clause(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = "and remember my preference is eggs on Thursday mornings"
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-preference-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert len(memory_queue.calls) == 1
+    assert memory_queue.calls[0].decision.canonical_value == (
+        "eggs on Thursday mornings"
+    )
+    assert [action.action_kind for action in result.queued_actions] == [
+        "propose_memory_signal",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_turn_service_preserves_then_inside_workspace_note_body(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = (
+        "create a workspace note that we will build the API first and then "
+        "write tests"
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("note-then-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    note_queue = RecordingNoteQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        note_queue=note_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert len(note_queue.calls) == 1
+    assert note_queue.calls[0].decision.body == (
+        "we will build the API first and then write tests"
+    )
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].action_kind == "propose_collaborative_note"
+
+
+@pytest.mark.asyncio
+async def test_turn_service_splits_workspace_note_before_artifact_command(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = (
+        "Create a workspace note that Project Zero will target macOS using a "
+        "zsh shell environment. Also create an artifact called Project Zero "
+        "Hello World containing a C program that prints, 'hello! i love "
+        "pancakes!'"
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("note-artifact-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    artifact_executor = RecordingArtifactExecutor()
+    note_queue = RecordingNoteQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=artifact_executor,
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {
+                    "schema_version": "4.0",
+                    "route": "artifact",
+                    "artifact_intent": {
+                        "operation": "create_blueprint",
+                        "objective": "Create the requested artifact.",
+                    },
+                }
+            )
+        ),
+        note_queue=note_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert [action.action_kind for action in result.queued_actions] == [
+        "create_artifact",
+        "propose_collaborative_note",
+    ]
+    assert len(note_queue.calls) == 1
+    assert note_queue.calls[0].decision.body == (
+        "Project Zero will target macOS using a zsh shell environment."
+    )
+    assert len(artifact_executor.calls) == 1
+    assert artifact_executor.calls[0].source_text == message
+
+
+@pytest.mark.asyncio
+async def test_turn_service_queues_note_memory_and_artifact_independently(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = (
+        "Create a workspace note that Project Lantern will use Python 3.14 and "
+        "PostgreSQL for its local development environment. please remember "
+        "that I like eggs on Thursday morning when they are available. Then "
+        "create an artifact called Lantern Database Smoke Test containing a "
+        "Python program that prints 'let there be light'"
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("note-memory-artifact-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    artifact_executor = RecordingArtifactExecutor()
+    note_queue = RecordingNoteQueue()
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=artifact_executor,
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {
+                    "schema_version": "4.0",
+                    "route": "artifact",
+                    "artifact_intent": {
+                        "operation": "create_blueprint",
+                        "objective": "Create the requested artifact.",
+                    },
+                }
+            )
+        ),
+        note_queue=note_queue,
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert [action.action_kind for action in result.queued_actions] == [
+        "create_artifact",
+        "propose_collaborative_note",
+        "propose_memory_signal",
+    ]
+    assert len(note_queue.calls) == 1
+    assert note_queue.calls[0].decision.body == (
+        "Project Lantern will use Python 3.14 and PostgreSQL for its local "
+        "development environment."
+    )
+    assert len(memory_queue.calls) == 1
+    assert memory_queue.calls[0].decision.canonical_value == (
+        "I like eggs on Thursday morning when they are available"
+    )
+    assert len(artifact_executor.calls) == 1
+    assert artifact_executor.calls[0].source_text == message
+
+
+@pytest.mark.asyncio
+async def test_turn_service_still_queues_workspace_note_stating_clause(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = (
+        "create a workspace note stating: use zsh for project zero setup"
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("note-stating-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    note_queue = RecordingNoteQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        note_queue=note_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert len(note_queue.calls) == 1
+    assert note_queue.calls[0].decision.body == (
+        "use zsh for project zero setup"
+    )
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].action_kind == "propose_collaborative_note"
+
+
+@pytest.mark.asyncio
+async def test_turn_service_does_not_queue_workspace_note_without_claim(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    note_queue = RecordingNoteQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        note_queue=note_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=(
+                "create a workspace note that we will use zsh for project zero"
+            ),
+        )
+    )
+
+    assert note_queue.calls == []
+    assert result.queued_actions == ()
 
 
 @pytest.mark.asyncio

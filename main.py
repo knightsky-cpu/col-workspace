@@ -53,6 +53,7 @@ from agent_col_turn_service import (
     AgentColTurnService,
     AgentColTurnServiceError,
     AgentColTurnTimeoutError,
+    has_explicit_memory_clause,
 )
 from auth import (
     AuthConfigurationError,
@@ -184,6 +185,7 @@ from database import (
 from memory_context import MemoryContextRenderer
 from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
 from memory_proposal_job_worker import MemoryProposalJobWorker
+from memory_proposal_tool import queue_memory_agent_job
 from memory_proposals import ProposalTurnLease
 from preference_learning_service import (
     PreferenceLearningCommand,
@@ -2044,6 +2046,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 task_set=memory_job_background_tasks,
             )
 
+        class MemoryQueue:
+            async def queue(self, command: object) -> QueuedActionReceipt:
+                queued_action = await queue_memory_agent_job(
+                    agent_job_repository=agent_job_repository,
+                    command=command,
+                )
+                queued_job = await agent_job_repository.get_job(
+                    user_id=command.user_id,
+                    workspace_id=command.workspace_id,
+                    job_id=queued_action.job_id,
+                )
+                if queued_job is not None:
+                    dispatch_memory_job(queued_job)
+                return queued_action
+
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
@@ -2120,6 +2137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             artifact_executor=artifact_executor,
             artifact_feedback_executor=artifact_feedback_executor,
             note_queue=CollaborativeNoteQueue(),
+            memory_queue=MemoryQueue(),
         )
     except Exception:
         try:
@@ -4939,6 +4957,7 @@ async def _execute_chat(
         and payload.memory_clarification_selection is None
         and payload.artifact_feedback_decision is None
         and payload.collaborative_note_decision is None
+        and not has_explicit_memory_clause(payload.message)
     ) or payload.continuity_selection is not None:
         try:
             continuity_resolution = await continuity_service.resolve(

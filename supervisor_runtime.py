@@ -463,6 +463,9 @@ class SupervisorRuntime:
                             "memory_decision_present": (
                                 context.memory_decision_present
                             ),
+                            "memory_prequeued_for_turn": (
+                                _has_queued_memory_work(queued_actions)
+                            ),
                             "artifact_feedback_decision_present": (
                                 context.artifact_feedback_decision_present
                             ),
@@ -687,6 +690,8 @@ class SupervisorRuntime:
                             parsed,
                             QueuedMemoryProposalToolResponse,
                         ):
+                            if _has_queued_memory_work(queued_actions):
+                                continue
                             if parsed.queued_action not in queued_actions:
                                 queued_actions.append(parsed.queued_action)
                         if collaborative_note_proposals:

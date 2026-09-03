@@ -291,13 +291,13 @@ def _normalize_provider_aliases(value: object) -> object:
     if not isinstance(value, Mapping):
         return value
     normalized = dict(value)
-    if (
-        normalized.get("kind") == "profile_candidate"
-        and normalized.get("category") in _PROVIDER_CATEGORY_ALIASES
-    ):
-        normalized["category"] = _PROVIDER_CATEGORY_ALIASES[
-            normalized["category"]
-        ]
+    if normalized.get("kind") == "profile_candidate":
+        if normalized.get("category") in _PROVIDER_CATEGORY_ALIASES:
+            normalized["category"] = _PROVIDER_CATEGORY_ALIASES[
+                normalized["category"]
+            ]
+        if "value" in normalized and "canonical_value" not in normalized:
+            normalized["canonical_value"] = normalized.pop("value")
         return normalized
     if normalized.get("kind") == "clarify":
         candidates = normalized.get("candidates")

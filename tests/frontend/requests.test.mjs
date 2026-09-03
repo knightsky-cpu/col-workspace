@@ -121,6 +121,50 @@ test("chat endpoint selection streams only ordinary requests", () => {
   }
 });
 
+test("ordinary multi-intent request does not inherit stale continuity payload", () => {
+  const staleContinuityChoice = {
+    choice_id: "choice-stale",
+    source_kind: "collaborative_note",
+    source_id: "note-stale",
+    display_label: "Old project note",
+  };
+  const message = [
+    "create a workspace note that we are going to build project zero for",
+    "macOS and we are using a zsh shell environment.",
+    "also remember that i prefer pancakes on saturday mornings for breakfast.",
+    "then write me a C program that prints, 'hello! i love pancakes!'",
+  ].join(" ");
+
+  const ordinary = buildOrdinaryChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    message,
+    cryptoStub,
+  );
+  const continuitySelection = buildContinuitySelectionChatRequest(
+    {
+      project_id: "agent-col",
+      session_id: "session-1",
+      user_id: "wifiknight",
+    },
+    staleContinuityChoice,
+    cryptoStub,
+  );
+
+  assert.equal(ordinary.body.message, message);
+  assert.equal(ordinary.body.continuity_selection, undefined);
+  assert.equal(selectChatEndpoint(ordinary), "/api/chat/stream");
+  assert.equal(selectChatEndpoint(continuitySelection), "/api/chat");
+  assert.deepEqual(continuitySelection.body.continuity_selection, {
+    choice_id: "choice-stale",
+    source_kind: "collaborative_note",
+    source_id: "note-stale",
+  });
+});
+
 test("structured memory and artifact decisions are mutually exclusive", () => {
   assert.throws(
     () => buildChatRequest({

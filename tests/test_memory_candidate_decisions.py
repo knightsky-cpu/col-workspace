@@ -162,3 +162,117 @@ def test_evidence_preserves_whitespace_and_caps_unicode_scalars() -> None:
             canonical_value="detailed",
             evidence_text="x" * 501,
         )
+
+
+def test_provider_profile_candidate_accepts_value_alias() -> None:
+    from memory_candidate_decisions import (
+        ProfileCandidateDecision,
+        validate_provider_natural_memory_decision,
+    )
+
+    decision = validate_provider_natural_memory_decision(
+        {
+            "kind": "profile_candidate",
+            "category": "user_requested_memory",
+            "value": "Prefers pancakes on Saturday mornings for breakfast",
+            "evidence_text": (
+                "Remember that I prefer pancakes on Saturday mornings for "
+                "breakfast."
+            ),
+        }
+    )
+
+    assert isinstance(decision, ProfileCandidateDecision)
+    assert decision.category == "user_requested_memory"
+    assert decision.canonical_value == (
+        "Prefers pancakes on Saturday mornings for breakfast"
+    )
+    assert decision.evidence_text == (
+        "Remember that I prefer pancakes on Saturday mornings for breakfast."
+    )
+
+
+def test_provider_profile_candidate_keeps_canonical_value_payload() -> None:
+    from memory_candidate_decisions import (
+        ProfileCandidateDecision,
+        validate_provider_natural_memory_decision,
+    )
+
+    decision = validate_provider_natural_memory_decision(
+        {
+            "kind": "profile_candidate",
+            "category": "response_length",
+            "canonical_value": "concise",
+            "evidence_text": "concise answers",
+        }
+    )
+
+    assert isinstance(decision, ProfileCandidateDecision)
+    assert decision.category == "response_length"
+    assert decision.canonical_value == "concise"
+
+
+def test_provider_value_alias_does_not_apply_to_unrelated_kinds() -> None:
+    from memory_candidate_decisions import (
+        validate_provider_natural_memory_decision,
+    )
+
+    with pytest.raises(ValidationError):
+        validate_provider_natural_memory_decision(
+            {
+                "kind": "unsupported",
+                "reason_code": "unsupported_value",
+                "value": "private unrelated value",
+            }
+        )
+
+
+def test_provider_profile_candidate_rejects_value_and_canonical_value() -> None:
+    from memory_candidate_decisions import (
+        validate_provider_natural_memory_decision,
+    )
+
+    with pytest.raises(ValidationError):
+        validate_provider_natural_memory_decision(
+            {
+                "kind": "profile_candidate",
+                "category": "user_requested_memory",
+                "value": "Prefers waffles.",
+                "canonical_value": "Prefers pancakes.",
+                "evidence_text": "Remember that I prefer pancakes.",
+            }
+        )
+
+
+def test_provider_clarify_candidate_accepts_nested_value_alias() -> None:
+    from memory_candidate_decisions import (
+        ClarifyDecision,
+        validate_provider_natural_memory_decision,
+    )
+
+    decision = validate_provider_natural_memory_decision(
+        {
+            "kind": "clarify",
+            "candidates": [
+                {
+                    "kind": "profile_candidate",
+                    "category": "user_requested_memory",
+                    "value": "Prefers pancakes on Saturday mornings.",
+                    "evidence_text": "I prefer pancakes on Saturday mornings",
+                },
+                {
+                    "kind": "profile_candidate",
+                    "category": "response_length",
+                    "canonical_value": "concise",
+                    "evidence_text": "concise answers",
+                },
+            ],
+        }
+    )
+
+    assert isinstance(decision, ClarifyDecision)
+    assert decision.candidates[0].category == "user_requested_memory"
+    assert decision.candidates[0].canonical_value == (
+        "Prefers pancakes on Saturday mornings."
+    )
+    assert decision.candidates[1].canonical_value == "concise"

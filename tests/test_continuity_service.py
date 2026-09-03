@@ -213,6 +213,108 @@ async def test_resolver_does_not_read_notes_without_explicit_prior_reference() -
 
 
 @pytest.mark.asyncio
+async def test_resolver_does_not_treat_multi_intent_new_work_prompt_as_continuity() -> None:
+    store = FakeContinuityStore(
+        (
+            active_note(
+                "note-shell",
+                "Shell environment",
+                "Use zsh shell for project work.",
+            ),
+        )
+    )
+    service = ContinuityService(store=store)
+
+    result = await service.resolve(
+        ContinuityResolutionCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-current",
+            message=(
+                "create a workspace note that we are going to build project "
+                "zero for macOS and we are using a zsh shell environment. "
+                "also remember that i prefer pancakes on saturday mornings "
+                "for breakfast. then write me a C program that prints, "
+                "'hello! i love pancakes!'"
+            ),
+        )
+    )
+
+    assert result.status == "none"
+    assert result.receipts == []
+    assert result.choices == []
+    assert result.source_texts == []
+    assert store.calls == []
+    assert store.session_list_calls == []
+    assert store.session_detail_calls == []
+
+
+@pytest.mark.asyncio
+async def test_resolver_does_not_treat_explicit_memory_request_as_continuity() -> None:
+    store = FakeContinuityStore(
+        (
+            active_note(
+                "note-breakfast",
+                "Breakfast preference",
+                "The user prefers oatmeal on weekday mornings.",
+            ),
+        )
+    )
+    service = ContinuityService(store=store)
+
+    result = await service.resolve(
+        ContinuityResolutionCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-current",
+            message=(
+                "Remember that I prefer pancakes on Saturday mornings for "
+                "breakfast."
+            ),
+        )
+    )
+
+    assert result.status == "none"
+    assert result.receipts == []
+    assert result.choices == []
+    assert result.source_texts == []
+    assert store.calls == []
+    assert store.session_list_calls == []
+    assert store.session_detail_calls == []
+
+
+@pytest.mark.asyncio
+async def test_resolver_treats_remind_me_to_do_work_as_new_instruction() -> None:
+    store = FakeContinuityStore(
+        (
+            active_note(
+                "note-api",
+                "API decision",
+                "We decided the API should be implemented first.",
+            ),
+        )
+    )
+    service = ContinuityService(store=store)
+
+    result = await service.resolve(
+        ContinuityResolutionCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-current",
+            message="Remind me to write tests after the API implementation.",
+        )
+    )
+
+    assert result.status == "none"
+    assert result.receipts == []
+    assert result.choices == []
+    assert result.source_texts == []
+    assert store.calls == []
+    assert store.session_list_calls == []
+    assert store.session_detail_calls == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "message",
     (
@@ -1094,6 +1196,7 @@ async def test_resolver_uses_server_selected_note_without_trusting_body() -> Non
     (
         "what was that name we settled on earlier?",
         "what did we decide about that?",
+        "remind me what we decided about Project Zero",
         "what were we doing before?",
         "what did I say I wanted for this?",
         "remind me where we left off",

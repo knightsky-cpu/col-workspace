@@ -73,6 +73,7 @@ from database import (
 )
 from computational_expert import ComputationResponderResult
 from expert_contracts import ExpertCapability, ExpertStatus
+from memory_candidate_decisions import ProfileCandidateDecision
 from memory_proposals import ProposalTurnLease
 from research_expert import ResearchExpertResult
 from requirements_verification import RequirementsVerificationResult
@@ -99,6 +100,7 @@ from supervisor_runtime import (
     SupervisorTurnContext,
     SupervisorTurnResult,
 )
+from trusted_memory_service import NaturalMemoryCommand
 
 
 TURN_ROUTING_TIMEOUT_SECONDS = 15.0
@@ -113,7 +115,34 @@ _EXPLICIT_BLUEPRINT_ARTIFACT_REQUEST = re.compile(
 )
 _EXPLICIT_WORKSPACE_NOTE_STATING = re.compile(
     r"\b(?:also\s+)?(?:propose|create|record|save)\s+"
-    r"(?:a\s+)?workspace\s+note\s+stating:\s*(?P<body>.+?)\s*$",
+    r"(?:a\s+)?workspace\s+note\s+"
+    r"(?:stating:\s*|(?:that|saying)\s+)(?P<body>.+?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_EXPLICIT_WORKSPACE_NOTE_BOUNDARY = re.compile(
+    r"\s+(?="
+    r"(?:(?:also|and|please)\s+)?remember(?:\s+that)?\b"
+    r"|(?:also\s+)?create\s+(?:a\s+|an\s+)?"
+    r"(?:blueprint\s+)?artifact\b"
+    r"|then\s+write\s+me\s+(?:a|an)\s+"
+    r"(?:[a-z0-9+#.-]+\s+){0,3}"
+    r"(?:program|script|artifact|document|file)\b"
+    r")",
+    re.IGNORECASE,
+)
+_EXPLICIT_MEMORY_CLAUSE = re.compile(
+    r"(?P<prefix>^(?:also|and)\s+|^|[.!?]\s+|\s+(?:also|and)\s+)"
+    r"(?P<request>(?:please\s+)?remember"
+    r"(?:\s+that\s+(?P<that_body>(?:i|me|my|we|our|us)\b.+?)|"
+    r"\s+my\s+preference\s+is\s+(?P<preference_body>.+?)|"
+    r"\s+(?P<body>(?:i|me|my|we|our|us)\b.+?)))"
+    r"(?=$|[.!?](?:\s+|$)|\s+(?:also|and|then)\s+create\s+"
+    r"(?:a\s+|an\s+)?(?:blueprint\s+)?artifact\b|"
+    r"\s+then\s+write\s+me\s+(?:a|an)\s+"
+    r"(?:[a-z0-9+#.-]+\s+){0,3}"
+    r"(?:program|script|artifact|document|file)\b|"
+    r"\s+(?:also|and|then)\s+(?:propose|create|record|save)\s+"
+    r"(?:a\s+)?workspace\s+note\b)",
     re.IGNORECASE | re.DOTALL,
 )
 _MAX_ACCEPTED_NOTE_TITLE_CHARS = 80
@@ -164,6 +193,13 @@ class NoteQueue(Protocol):
     async def queue(
         self,
         command: NaturalCollaborativeNoteCommand,
+    ) -> QueuedActionReceipt: ...
+
+
+class MemoryQueue(Protocol):
+    async def queue(
+        self,
+        command: NaturalMemoryCommand,
     ) -> QueuedActionReceipt: ...
 
 
@@ -329,6 +365,22 @@ def _stable_merge(
     return tuple(merged)
 
 
+def _stable_merge_queued_actions(
+    *groups: tuple[QueuedActionReceipt, ...],
+) -> tuple[QueuedActionReceipt, ...]:
+    merged: list[QueuedActionReceipt] = []
+    for group in groups:
+        for item in group:
+            if item.action_kind == "propose_memory_signal" and any(
+                existing.action_kind == "propose_memory_signal"
+                for existing in merged
+            ):
+                continue
+            if item not in merged:
+                merged.append(item)
+    return tuple(merged)
+
+
 def _has_queued_action_kind(
     queued_actions: tuple[QueuedActionReceipt, ...],
     action_kind: str,
@@ -371,6 +423,9 @@ def _explicit_workspace_note_command(
     if match is None:
         return None
     body = match.group("body").strip()
+    boundary = _EXPLICIT_WORKSPACE_NOTE_BOUNDARY.search(body)
+    if boundary is not None:
+        body = body[: boundary.start()].strip()
     if not body:
         return None
     decision = NoteCandidateDecision(
@@ -402,6 +457,60 @@ def _explicit_workspace_note_command(
         observed_at=observed_at,
         turn_lease=command.turn_lease,
         accepted_action_index=action_index,
+    )
+
+
+def _source_message_id(command: AgentColTurnCommand) -> str:
+    if command.source_message_id:
+        return command.source_message_id
+    if command.chat_turn_claim is not None:
+        return command.chat_turn_claim.ids.user_message_id
+    return command.session_id
+
+
+def _explicit_memory_clause_text(message: str) -> tuple[str, str] | None:
+    match = _EXPLICIT_MEMORY_CLAUSE.search(message)
+    if match is None:
+        return None
+    request = match.group("request").strip()
+    prefix = match.group("prefix").strip()
+    if prefix.lower() in {"also", "and"}:
+        request = f"{prefix} {request}"
+    body = (
+        match.group("that_body")
+        or match.group("preference_body")
+        or match.group("body")
+        or ""
+    ).strip()
+    if not request or not body:
+        return None
+    return request, body
+
+
+def has_explicit_memory_clause(message: str) -> bool:
+    return _explicit_memory_clause_text(message) is not None
+
+
+def _explicit_memory_command(
+    command: AgentColTurnCommand,
+) -> NaturalMemoryCommand | None:
+    extracted = _explicit_memory_clause_text(command.message)
+    if extracted is None:
+        return None
+    evidence, body = extracted
+    return NaturalMemoryCommand(
+        user_id=command.user_id,
+        workspace_id=command.project_id,
+        session_id=command.session_id,
+        source_message_id=_source_message_id(command),
+        source_message_text=command.message,
+        memory_decision_present=command.memory_decision_present,
+        decision=ProfileCandidateDecision(
+            category="user_requested_memory",
+            canonical_value=body,
+            evidence_text=evidence[:500],
+        ),
+        turn_lease=command.turn_lease,
     )
 
 
@@ -484,6 +593,7 @@ class AgentColTurnService:
         artifact_executor: ArtifactExecutor | None = None,
         artifact_feedback_executor: ArtifactFeedbackExecutor | None = None,
         note_queue: NoteQueue | None = None,
+        memory_queue: MemoryQueue | None = None,
         artifact_routing_request: ArtifactRoutingRequest = (
             request_agent_col_routing_v4_directive
         ),
@@ -511,6 +621,7 @@ class AgentColTurnService:
         self._artifact_executor = artifact_executor
         self._artifact_feedback_executor = artifact_feedback_executor
         self._note_queue = note_queue
+        self._memory_queue = memory_queue
         self._artifact_routing_request = artifact_routing_request
         self._turn_timeout_seconds = turn_timeout_seconds
         self._routing_timeout_seconds = routing_timeout_seconds
@@ -846,6 +957,11 @@ class AgentColTurnService:
         )
         if note_command is not None and self._note_queue is not None:
             queued_actions.append(await self._note_queue.queue(note_command))
+            next_index += 1
+
+        memory_command = _explicit_memory_command(command)
+        if memory_command is not None and self._memory_queue is not None:
+            queued_actions.append(await self._memory_queue.queue(memory_command))
 
         return tuple(queued_actions)
 
@@ -1150,7 +1266,7 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
-                queued_actions=_stable_merge(
+                queued_actions=_stable_merge_queued_actions(
                     queue_result.queued_actions,
                     exc.queued_actions,
                 ),
@@ -1172,7 +1288,7 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
-                queued_actions=_stable_merge(
+                queued_actions=_stable_merge_queued_actions(
                     queue_result.queued_actions,
                     exc.queued_actions,
                 ),
@@ -1198,7 +1314,7 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
-                queued_actions=_stable_merge(
+                queued_actions=_stable_merge_queued_actions(
                     queue_result.queued_actions,
                     exc.queued_actions,
                 ),
@@ -1220,7 +1336,7 @@ class AgentColTurnService:
                     command.precompleted_memory_clarifications,
                     exc.memory_clarifications,
                 ),
-                queued_actions=_stable_merge(
+                queued_actions=_stable_merge_queued_actions(
                     queue_result.queued_actions,
                     exc.queued_actions,
                 ),
@@ -1244,7 +1360,7 @@ class AgentColTurnService:
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
             ),
-            queued_actions=_stable_merge(
+            queued_actions=_stable_merge_queued_actions(
                 queue_result.queued_actions,
                 result.queued_actions,
             ),
@@ -1264,7 +1380,7 @@ class AgentColTurnService:
                 command.precompleted_memory_clarifications,
                 result.memory_clarifications,
             ),
-            queued_actions=_stable_merge(
+            queued_actions=_stable_merge_queued_actions(
                 queue_result.queued_actions,
                 result.queued_actions,
             ),
@@ -1317,7 +1433,10 @@ class AgentColTurnService:
                     on_delta=on_delta,
                 )
         except SupervisorTimeoutError as exc:
-            queued_actions = _stable_merge(prequeued_actions, exc.queued_actions)
+            queued_actions = _stable_merge_queued_actions(
+                prequeued_actions,
+                exc.queued_actions,
+            )
             _log_turn_pipeline(
                 "responder_timeout",
                 started_at=started_at,
@@ -1371,7 +1490,10 @@ class AgentColTurnService:
                 chat_turn_claim=claim,
             ) from exc
         except SupervisorRuntimeError as exc:
-            queued_actions = _stable_merge(prequeued_actions, exc.queued_actions)
+            queued_actions = _stable_merge_queued_actions(
+                prequeued_actions,
+                exc.queued_actions,
+            )
             _log_turn_pipeline(
                 "responder_failure",
                 started_at=started_at,
@@ -1424,7 +1546,10 @@ class AgentColTurnService:
                 continuity_choices=command.continuity_choices,
                 chat_turn_claim=claim,
             ) from exc
-        queued_actions = _stable_merge(prequeued_actions, result.queued_actions)
+        queued_actions = _stable_merge_queued_actions(
+            prequeued_actions,
+            result.queued_actions,
+        )
         _log_turn_pipeline(
             "responder_finish",
             started_at=started_at,
@@ -1818,7 +1943,10 @@ class AgentColTurnService:
                     on_delta=on_delta,
                 )
         except SupervisorTimeoutError as exc:
-            queued_actions = _stable_merge(prequeued_actions, exc.queued_actions)
+            queued_actions = _stable_merge_queued_actions(
+                prequeued_actions,
+                exc.queued_actions,
+            )
             _log_turn_pipeline(
                 "responder_timeout",
                 started_at=started_at,
@@ -1882,7 +2010,10 @@ class AgentColTurnService:
                 continuity_choices=command.continuity_choices,
             ) from exc
         except SupervisorRuntimeError as exc:
-            queued_actions = _stable_merge(prequeued_actions, exc.queued_actions)
+            queued_actions = _stable_merge_queued_actions(
+                prequeued_actions,
+                exc.queued_actions,
+            )
             _log_turn_pipeline(
                 "responder_failure",
                 started_at=started_at,
@@ -1945,7 +2076,10 @@ class AgentColTurnService:
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
             ) from exc
-        queued_actions = _stable_merge(prequeued_actions, result.queued_actions)
+        queued_actions = _stable_merge_queued_actions(
+            prequeued_actions,
+            result.queued_actions,
+        )
         _log_turn_pipeline(
             "responder_finish",
             started_at=started_at,

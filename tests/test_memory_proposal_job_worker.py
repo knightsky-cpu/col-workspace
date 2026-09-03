@@ -7,7 +7,7 @@ from agent_job_payloads import AgentJobPayload
 from database import MemoryProposalConflictError
 from memory_candidate_decisions import ProfileCandidateDecision
 from memory_proposals import ProposalTurnLease
-from schemas import AgentActionReceipt, MemoryProposalReceiptV2
+from schemas import AgentActionReceipt, MemoryProposalReceiptV2, MemoryProposalV2
 from trusted_memory_service import (
     NaturalMemoryCommand,
     NaturalMemoryProposalResult,
@@ -162,6 +162,31 @@ class RecordingAgentJobRepository:
         return report
 
 
+class RecordingGovernedMemoryDatabase:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def create_guarded_memory_proposal_v2(
+        self,
+        **kwargs,
+    ) -> MemoryProposalV2:
+        self.calls.append(kwargs)
+        ids = kwargs["origin_ids"]
+        return MemoryProposalV2(
+            proposal_id=ids.proposal_id,
+            category=kwargs["category"],
+            proposed_value=kwargs["proposed_value"],
+            expected_signal_id=None,
+            status="pending",
+            source_session_id=kwargs["session_id"],
+            source_message_id=kwargs["source_message_id"],
+            evidence_message_id=kwargs["evidence_message_id"],
+            clarification_id=kwargs["clarification_id"],
+            created_at=kwargs["observed_at"],
+            expires_at=kwargs["observed_at"] + timedelta(hours=24),
+        )
+
+
 def make_command() -> NaturalMemoryCommand:
     return NaturalMemoryCommand(
         user_id="user-1",
@@ -200,6 +225,111 @@ def make_job(command: NaturalMemoryCommand) -> AgentJob:
         created_at=NOW,
         updated_at=NOW,
         idempotency_key="memory-proposal-1",
+    )
+
+
+def exact_failed_user_requested_memory_payload(job: AgentJob) -> AgentJobPayload:
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "user_requested_memory",
+                "value": "Prefers pancakes on Saturday mornings for breakfast",
+                "evidence_text": (
+                    "Remember that I prefer pancakes on Saturday mornings "
+                    "for breakfast."
+                ),
+            },
+            "clarification_selection": None,
+            "source_message_text": (
+                "Remember that I prefer pancakes on Saturday mornings "
+                "for breakfast."
+            ),
+            "memory_decision_present": False,
+        },
+    )
+
+
+def test_memory_command_restores_persisted_value_alias_payload() -> None:
+    from memory_proposal_job_worker import memory_command_from_payload
+
+    command = make_command()
+    job = make_job(command)
+
+    restored = memory_command_from_payload(
+        exact_failed_user_requested_memory_payload(job)
+    )
+
+    assert restored.decision.kind == "profile_candidate"
+    assert restored.decision.category == "user_requested_memory"
+    assert restored.decision.canonical_value == (
+        "Prefers pancakes on Saturday mornings for breakfast"
+    )
+    assert restored.decision.evidence_text == (
+        "Remember that I prefer pancakes on Saturday mornings for breakfast."
+    )
+    assert restored.source_message_text == (
+        "Remember that I prefer pancakes on Saturday mornings for breakfast."
+    )
+    assert restored.memory_decision_present is False
+    assert restored.turn_lease is None
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_creates_proposal_from_standalone_value_alias_payload(
+) -> None:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+    from trusted_memory_service import TrustedMemoryService
+
+    command = make_command()
+    job = make_job(command).model_copy(
+        update={
+            "job_id": "memory-job-c201d61827fb072d2a4c5138c94e6d88",
+            "display_label": "Memory request: user_requested_memory",
+            "idempotency_key": "memory-proposal-c201d61827fb072d2a4c5138c94e6d88",
+        }
+    )
+    payload = exact_failed_user_requested_memory_payload(job)
+    repository = RecordingAgentJobRepository(job=job, payload=payload)
+    database = RecordingGovernedMemoryDatabase()
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=TrustedMemoryService(
+            database=database,
+            clock=lambda: NOW + timedelta(minutes=1),
+        ),
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    completed = await worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-1",
+    )
+
+    assert completed.status == "completed"
+    assert repository.failed == []
+    assert len(repository.completed) == 1
+    assert len(database.calls) == 1
+    assert database.calls[0]["category"] == "user_requested_memory"
+    assert database.calls[0]["proposed_value"] == (
+        "Prefers pancakes on Saturday mornings for breakfast"
+    )
+    assert database.calls[0]["evidence_message_id"] == job.source_message_id
+    assert database.calls[0]["turn_lease"] is None
+    assert repository.reports[0].status == "completed"
+    assert repository.reports[0].title == "Memory proposal pending review"
+    assert repository.reports[0].public_resource_label == (
+        "Prefers pancakes on Saturday mornings for breakfast"
     )
 
 

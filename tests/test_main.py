@@ -1874,7 +1874,7 @@ class ServiceState:
     working_state_service_dependencies: list[object]
     preference_learning_service_dependencies: list[object]
     turn_service_dependencies: list[
-        tuple[object, object, object, object, object, object]
+        tuple[object, object, object, object, object, object, object]
     ]
 
 
@@ -2129,7 +2129,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     working_state_service_dependencies: list[object] = []
     preference_learning_service_dependencies: list[object] = []
     turn_service_dependencies: list[
-        tuple[object, object, object, object, object, object]
+        tuple[object, object, object, object, object, object, object]
     ] = []
     state = ServiceState(
         events=events,
@@ -2331,6 +2331,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         artifact_executor: object,
         artifact_feedback_executor: object,
         note_queue: object,
+        memory_queue: object,
     ) -> object:
         turn_service_dependencies.append(
             (
@@ -2340,6 +2341,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 artifact_executor,
                 artifact_feedback_executor,
                 note_queue,
+                memory_queue,
             )
         )
         return turn_service
@@ -2614,6 +2616,156 @@ async def test_chat_stream_emits_deltas_then_canonical_final(
         adaptations=[],
     ).model_dump(mode="json")
     assert service_state.database.complete_calls
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_multi_intent_new_work_prompt_bypasses_continuity(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+
+    class Store:
+        async def list_active_collaborative_notes_for_continuity(
+            self,
+            *,
+            user_id: str,
+            workspace_id: str,
+            limit: int,
+        ) -> tuple[CollaborativeNote, ...]:
+            raise ValueError("ordinary new work prompt should not read notes")
+
+        async def list_recent_session_continuity_receipts(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+        ) -> tuple[ContinuitySourceReceipt, ...]:
+            raise ValueError(
+                "ordinary new work prompt should not read recent receipts"
+            )
+
+        async def list_chat_sessions(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            limit: int,
+        ) -> ChatSessionListResponse:
+            raise ValueError(
+                "ordinary new work prompt should not read chat sessions"
+            )
+
+        async def get_chat_session_detail(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+            observed_at: datetime,
+        ) -> ChatSessionDetailResponse:
+            raise ValueError(
+                "ordinary new work prompt should not read chat detail"
+            )
+
+    main.app.state.continuity_service = ContinuityService(store=Store())
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "owned-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": (
+                "create a workspace note that we are going to build project "
+                "zero for macOS and we are using a zsh shell environment. "
+                "also remember that i prefer pancakes on saturday mornings "
+                "for breakfast. then write me a C program that prints, "
+                "'hello! i love pancakes!'"
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events[-1][0] == "final"
+    assert service_state.turn_service.calls
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_explicit_memory_request_bypasses_continuity(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+
+    class Store:
+        async def list_active_collaborative_notes_for_continuity(
+            self,
+            *,
+            user_id: str,
+            workspace_id: str,
+            limit: int,
+        ) -> tuple[CollaborativeNote, ...]:
+            raise ValueError("explicit memory request should not read notes")
+
+        async def list_recent_session_continuity_receipts(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+        ) -> tuple[ContinuitySourceReceipt, ...]:
+            raise ValueError(
+                "explicit memory request should not read recent receipts"
+            )
+
+        async def list_chat_sessions(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            limit: int,
+        ) -> ChatSessionListResponse:
+            raise ValueError(
+                "explicit memory request should not read chat sessions"
+            )
+
+        async def get_chat_session_detail(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+            observed_at: datetime,
+        ) -> ChatSessionDetailResponse:
+            raise ValueError(
+                "explicit memory request should not read chat detail"
+            )
+
+    main.app.state.continuity_service = ContinuityService(store=Store())
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "memory-stream-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "please remember I like eggs on Thursday mornings",
+        },
+    )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events[-1][0] == "final"
+    assert service_state.turn_service.calls
 
 
 @pytest.mark.asyncio
@@ -5853,9 +6005,13 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 service_state.supervisor,
                 service_state.artifact_executor,
                 service_state.artifact_feedback_executor,
+                service_state.turn_service_dependencies[0][-2],
                 service_state.turn_service_dependencies[0][-1],
             )
         ]
+        assert callable(
+            getattr(service_state.turn_service_dependencies[0][-2], "queue")
+        )
         assert callable(
             getattr(service_state.turn_service_dependencies[0][-1], "queue")
         )

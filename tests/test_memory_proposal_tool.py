@@ -506,6 +506,42 @@ async def test_proposal_tool_queues_loose_profile_candidate_without_validation(
 
 
 @pytest.mark.asyncio
+async def test_proposal_tool_does_not_enqueue_when_memory_prequeued_for_turn(
+) -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    state = tool_context_state()
+    state["memory_prequeued_for_turn"] = True
+    service = RecordingMemoryService()
+    repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "user_requested_memory",
+                "canonical_value": "I like pancakes on Saturday mornings",
+                "evidence_text": (
+                    "remember that I like pancakes on Saturday mornings"
+                ),
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=state, delta={})
+        ),
+    )
+
+    assert result == {"status": "no_memory"}
+    assert repository.enqueued == []
+    assert repository.payloads == []
+    assert service.commands == []
+
+
+@pytest.mark.asyncio
 async def test_proposal_tool_does_not_execute_directly_when_queue_fails(
 ) -> None:
     from agent_job_repository import AgentJobRepositoryError

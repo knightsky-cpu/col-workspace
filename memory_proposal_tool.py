@@ -75,6 +75,7 @@ class _MemoryToolServerContext:
     source_message_id: str
     source_message_text: str
     memory_decision_present: bool
+    memory_prequeued_for_turn: bool
     turn_lease: ProposalTurnLease | None
 
 
@@ -209,6 +210,11 @@ def _server_context(tool_context: ToolContext) -> _MemoryToolServerContext:
         raise MemoryProposalToolConfigurationError(
             "Memory proposal tool context is invalid."
         )
+    memory_prequeued_for_turn = state.get("memory_prequeued_for_turn", False)
+    if type(memory_prequeued_for_turn) is not bool:
+        raise MemoryProposalToolConfigurationError(
+            "Memory proposal tool context is invalid."
+        )
     if artifact_feedback_decision_present:
         raise ValueError(
             "Artifact feedback turns cannot create memory proposals."
@@ -236,6 +242,7 @@ def _server_context(tool_context: ToolContext) -> _MemoryToolServerContext:
         source_message_id=source_message_id,
         source_message_text=source_message_text,
         memory_decision_present=memory_decision_present,
+        memory_prequeued_for_turn=memory_prequeued_for_turn,
         turn_lease=turn_lease,
     )
 
@@ -465,6 +472,19 @@ async def _try_queue_memory_agent_job(
     )
 
 
+async def queue_memory_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    command: NaturalMemoryCommand,
+) -> QueuedActionReceipt:
+    """Queue one governed memory proposal job for background execution."""
+    job = await _queue_memory_agent_job(
+        agent_job_repository=agent_job_repository,
+        command=command,
+    )
+    return job.to_queued_action_receipt()
+
+
 def _raw_tool_mapping(value: object) -> dict[str, object]:
     if isinstance(value, BaseModel):
         raw = value.model_dump(mode="python")
@@ -538,13 +558,16 @@ def create_propose_memory_signal_tool(
         try:
             raw_decision = _raw_tool_mapping(decision)
             raw_selection = _raw_optional_mapping(clarification_selection)
+            context = _server_context(tool_context)
+            if context.memory_prequeued_for_turn:
+                return {"status": "no_memory"}
             if (
                 agent_job_repository is not None
                 and _should_queue_raw_memory_job(raw_decision)
             ):
                 queued_job = await _queue_raw_memory_agent_job(
                     agent_job_repository=agent_job_repository,
-                    context=_server_context(tool_context),
+                    context=context,
                     decision=raw_decision,
                     clarification_selection=raw_selection,
                 )

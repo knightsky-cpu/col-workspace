@@ -591,6 +591,9 @@ class ContinuityService:
 
 
 def _should_resolve(message: str) -> bool:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    if _is_imperative_new_work_prompt(normalized):
+        return False
     return bool(
         _PRIOR_REFERENCE_RE.search(message)
         or _has_historical_question_shape(message)
@@ -636,6 +639,8 @@ def _has_broad_continuity_intent(message: str) -> bool:
     normalized = " ".join(_WORD_RE.findall(message.casefold()))
     if not normalized or not _CONTINUITY_PROMPT_RE.search(normalized):
         return False
+    if _is_imperative_new_work_prompt(normalized):
+        return False
     if re.search(r"\b(what|which|how)\s+(?:is|are)\s+(?:a|an)\b", normalized):
         return False
     if re.search(r"\bwhat\s+do\s+you\s+call\s+(?:a|an)\b", normalized):
@@ -660,7 +665,53 @@ def _has_broad_continuity_intent(message: str) -> bool:
     return False
 
 
+def _is_imperative_new_work_prompt(normalized_message: str) -> bool:
+    if not normalized_message:
+        return False
+    if _QUESTION_SHAPE_RE.search(normalized_message):
+        return False
+    if _COLLABORATIVE_DECISION_QUESTION_RE.search(normalized_message):
+        return False
+    if _ANAPHORIC_FOLLOW_UP_RE.search(normalized_message):
+        return False
+    if re.search(
+        r"\b(previous|prior|earlier|last|before|decided|agreed|settled|"
+        r"left\s+off|talked|discussed|mentioned|said)\b",
+        normalized_message,
+    ):
+        return False
+    if _is_explicit_new_memory_instruction(normalized_message):
+        return True
+    return bool(
+        re.search(
+            r"\b(create|add|write|build|make|generate|draft|record|save)\b",
+            normalized_message,
+        )
+        and re.search(
+            r"\b(workspace|note|artifact|program|code|project|app|"
+            r"application)\b",
+            normalized_message,
+        )
+    )
+
+
+def _is_explicit_new_memory_instruction(normalized_message: str) -> bool:
+    return bool(
+        re.search(
+            r"^(?:please\s+)?remember\s+that\s+(?:i|me|my|we|our|us)\b",
+            normalized_message,
+        )
+        or re.search(
+            r"^(?:please\s+)?remind\s+me\s+to\s+[a-z0-9]+\b",
+            normalized_message,
+        )
+    )
+
+
 def _has_historical_reference_intent(message: str) -> bool:
+    normalized = " ".join(_WORD_RE.findall(message.casefold()))
+    if _is_imperative_new_work_prompt(normalized):
+        return False
     return bool(
         _PRIOR_REFERENCE_RE.search(message)
         or _has_historical_question_shape(message)
