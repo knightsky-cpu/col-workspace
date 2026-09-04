@@ -4704,6 +4704,13 @@ async def _execute_chat(
                 "Memory proposal decisions must use the direct Memory API."
             ),
         )
+    if payload.memory_clarification_selection is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Memory clarification selection must use the direct Memory API."
+            ),
+        )
     if payload.collaborative_note_decision is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -2569,3 +2569,72 @@ Next remaining live chat-owned Memory dependency:
   `ProposalTurnLease`; the active frontend uses the direct Memory selection
   API, so retiring or redirecting this compatibility path is a separate
   bounded pass.
+
+## Legacy Chat Clarification-Selection Retirement Pass
+
+This uncommitted review pass retired the last reachable
+`memory_clarification_selection` lifecycle owned by `/api/chat`.
+
+Completed work:
+
+- `/api/chat` now rejects `memory_clarification_selection` with HTTP 409 and
+  directs callers to the direct Memory API;
+- rejection occurs before clarification-specific idempotency handling, chat
+  turn claim, `ProposalTurnLease` construction, Memory service execution, turn
+  service execution, or chat completion;
+- the direct Memory clarification-selection endpoint remains unchanged and
+  continues to execute with `turn_lease=None`;
+- queued natural-language clarification selection remains unchanged;
+- `ChatRequest`, historical `ChatTurnRequest` metadata, and the frontend
+  compatibility request builder remain for later contract cleanup;
+- tests requiring successful chat-owned selection and its downstream error
+  handling were removed because that lifecycle is no longer reachable.
+
+TDD evidence:
+
+- RED: the focused chat regression returned the former idempotency-key 422
+  response instead of the required pre-claim 409;
+- GREEN: the early structured-decision guard returned 409 with no claim,
+  Memory service call, turn-service call, completion, or durable effect;
+- REFACTOR: obsolete execution-path tests were removed; production execution
+  code remains deferred cleanup behind the new guard.
+
+Focused verification:
+
+```text
+venv/bin/pytest -q tests/test_main.py::test_chat_rejects_clarification_selection_before_claim_or_execution tests/test_main.py::test_select_memory_clarification_uses_memory_api_without_chat_turn tests/test_main.py::test_select_memory_clarification_memory_api_requires_idempotency_key tests/test_main.py::test_select_memory_clarification_memory_api_maps_stale_state_to_conflict tests/test_memory_proposal_tool.py::test_clarification_selection_tool_queues_memory_work_without_service_call tests/test_memory_proposal_job_worker.py::test_memory_worker_completes_queued_clarification_selection_without_turn_lease tests/test_supervisor_runtime.py::test_run_turn_collects_queued_memory_clarification_selection_only
+8 passed, 1 warning
+```
+
+```text
+node --test --test-name-pattern "memory clarification selection during a pending chat uses direct memory API" tests/frontend/app-runtime.test.mjs
+1 passed
+```
+
+```text
+node --test --test-name-pattern "selectMemoryClarification" tests/frontend/api.test.mjs
+2 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_schemas.py tests/test_chat_turn_database.py -k "memory_clarification_selection"
+5 passed, 153 deselected
+```
+
+```text
+node --test --test-name-pattern "memory clarification selection" tests/frontend/requests.test.mjs
+2 passed
+```
+
+```text
+venv/bin/python -m py_compile main.py
+passed
+```
+
+Deferred cleanup:
+
+- remove the now-unreachable `/api/chat` clarification-selection execution and
+  fallback branches;
+- remove compatibility request builders and chat-state helpers after the
+  public contract retirement boundary is approved;
+- retain historical persisted turn metadata until a separate schema migration.

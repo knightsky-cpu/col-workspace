@@ -7325,12 +7325,21 @@ async def test_chat_stream_rejects_memory_decision_without_claiming_turn(
 
 
 @pytest.mark.asyncio
-async def test_chat_clarification_selection_requires_idempotency_key(
+@pytest.mark.parametrize(
+    "headers",
+    (
+        {},
+        {"Idempotency-Key": "retired-clarification-selection-key-1"},
+    ),
+)
+async def test_chat_rejects_clarification_selection_before_claim_or_execution(
     client: httpx.AsyncClient,
     service_state: ServiceState,
+    headers: dict[str, str],
 ) -> None:
     response = await client.post(
         "/api/chat",
+        headers=headers,
         json={
             "project_id": "project-1",
             "session_id": "session-1",
@@ -7345,10 +7354,16 @@ async def test_chat_clarification_selection_requires_idempotency_key(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 409
     assert response.json() == {
-        "detail": "Memory clarification selection requires an idempotency key."
+        "detail": (
+            "Memory clarification selection must use the direct Memory API."
+        )
     }
+    assert service_state.database.claim_calls == []
+    assert service_state.memory_service.selection_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.database.complete_calls == []
     assert service_state.events == []
 
 
@@ -8009,256 +8024,6 @@ async def test_select_continuity_choice_maps_unresolved_selection_to_conflict(
     }
     assert service_state.database.claim_calls == []
     assert service_state.database.continuity_selection_calls == []
-
-
-@pytest.mark.asyncio
-async def test_chat_clarification_selection_returns_and_replays_proposal(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    selection = MemoryClarificationSelectionRequest(
-        clarification_id="memory-clarification--clarification-1",
-        selected_candidate_index=0,
-    )
-    claim = make_chat_turn_claim(
-        memory_clarification_selection=selection
-    )
-    service_state.database.chat_turn_result = claim
-    headers = {"Idempotency-Key": "clarification-selection-key-1"}
-    payload = {
-        "project_id": "project-1",
-        "session_id": "session-1",
-        "user_id": "user-1",
-        "message": "New question",
-        "memory_clarification_selection": selection.model_dump(mode="json"),
-    }
-
-    response = await client.post(
-        "/api/chat",
-        headers=headers,
-        json=payload,
-    )
-
-    assert response.status_code == 200
-    assert response.json()["actions"] == [
-        {
-            "action_name": "propose_memory_signal",
-            "status": "completed",
-        }
-    ]
-    assert response.json()["memory_proposals"] == [
-        {
-            "proposal_id": "response_length--clarified-proposal-1",
-            "category": "response_length",
-            "proposed_value": "detailed",
-            "policy_version": "2.0",
-            "expires_at": "2026-08-21T23:00:00Z",
-        }
-    ]
-    assert service_state.database.claim_calls[0][0] == claim.request
-    assert service_state.memory_service.selection_calls == [
-        SelectMemoryClarificationCommand(
-            user_id="user-1",
-            workspace_id="project-1",
-            session_id="session-1",
-            source_message_id=f"turn--{DEFAULT_TURN_ID}--user",
-            clarification_id=(
-                "memory-clarification--clarification-1"
-            ),
-            selected_candidate_index=0,
-            turn_lease=ProposalTurnLease(
-                turn_id=DEFAULT_TURN_ID,
-                owner_token="owner-token-1",
-            ),
-        )
-    ]
-    turn_command = service_state.turn_service.calls[0]
-    assert turn_command.memory_decision_present is True
-    assert turn_command.precompleted_actions == (
-        service_state.memory_service.selection_result.action,
-    )
-    assert turn_command.precompleted_memory_proposals == (
-        service_state.memory_service.selection_result.proposal,
-    )
-
-    stored_response = service_state.database.complete_calls[0][1]
-    service_state.database.chat_turn_result = ChatTurnReplay(
-        response=stored_response
-    )
-    event_count = len(service_state.events)
-
-    replay = await client.post(
-        "/api/chat",
-        headers=headers,
-        json=payload,
-    )
-
-    assert replay.status_code == 200
-    assert replay.json() == response.json()
-    assert service_state.events[event_count:] == [("claim_chat_turn",)]
-    assert len(service_state.memory_service.selection_calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_chat_clarification_selection_returns_fallback_when_responder_fails_after_proposal(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    selection = MemoryClarificationSelectionRequest(
-        clarification_id="memory-clarification--clarification-1",
-        selected_candidate_index=0,
-    )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        memory_clarification_selection=selection
-    )
-    service_state.turn_service.error = AgentColTurnServiceError(
-        "private responder failure"
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "clarification-failure-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "New question",
-            "memory_clarification_selection": selection.model_dump(
-                mode="json"
-            ),
-        },
-    )
-
-    assert response.status_code == 200
-    assert "pending memory proposal" in response.json()["response"]
-    assert response.json()["actions"] == [
-        {
-            "action_name": "propose_memory_signal",
-            "status": "completed",
-        }
-    ]
-    assert response.json()["memory_proposals"][0]["proposal_id"] == (
-        "response_length--clarified-proposal-1"
-    )
-    assert service_state.database.release_calls == []
-    assert len(service_state.database.complete_calls) == 1
-    completed_response = service_state.database.complete_calls[0][1]
-    assert "pending memory proposal" in completed_response.response
-    assert completed_response.memory_proposals == [
-        service_state.memory_service.selection_result.proposal
-    ]
-
-
-@pytest.mark.asyncio
-async def test_chat_clarification_selection_maps_stale_state_to_conflict(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    selection = MemoryClarificationSelectionRequest(
-        clarification_id="memory-clarification--clarification-1",
-        selected_candidate_index=0,
-    )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        memory_clarification_selection=selection
-    )
-    service_state.memory_service.error = MemoryClarificationSelectionError(
-        "private stale selection"
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "clarification-conflict-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "New question",
-            "memory_clarification_selection": selection.model_dump(
-                mode="json"
-            ),
-        },
-    )
-
-    assert response.status_code == 409
-    assert response.json() == {
-        "detail": "Memory clarification cannot be selected."
-    }
-    assert len(service_state.database.release_calls) == 1
-    assert service_state.turn_service.calls == []
-
-
-@pytest.mark.asyncio
-async def test_chat_clarification_selection_maps_corrupt_state_safely(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    selection = MemoryClarificationSelectionRequest(
-        clarification_id="memory-clarification--clarification-1",
-        selected_candidate_index=0,
-    )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        memory_clarification_selection=selection
-    )
-    service_state.memory_service.error = ChatTurnStateError(
-        "private corrupt turn state"
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "clarification-state-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "New question",
-            "memory_clarification_selection": selection.model_dump(
-                mode="json"
-            ),
-        },
-    )
-
-    assert response.status_code == 500
-    assert response.json() == {"detail": "Chat turn state is invalid."}
-    assert "private corrupt turn state" not in response.text
-    assert len(service_state.database.release_calls) == 1
-    assert service_state.turn_service.calls == []
-
-
-@pytest.mark.asyncio
-async def test_chat_clarification_selection_hides_ownership_mismatch(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    selection = MemoryClarificationSelectionRequest(
-        clarification_id="memory-clarification--clarification-1",
-        selected_candidate_index=0,
-    )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        memory_clarification_selection=selection
-    )
-    service_state.memory_service.error = ChatSessionOwnershipError(
-        "private clarification owner"
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "clarification-owner-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "New question",
-            "memory_clarification_selection": selection.model_dump(
-                mode="json"
-            ),
-        },
-    )
-
-    assert response.status_code == 404
-    assert response.json() == {"detail": "Chat session is unavailable."}
-    assert "private clarification owner" not in response.text
-    assert len(service_state.database.release_calls) == 1
-    assert service_state.turn_service.calls == []
 
 
 @pytest.mark.parametrize(
