@@ -440,13 +440,6 @@ class MemoryProposalJobWorker:
                             observation
                         )
                     )
-                    return await self._complete_preference_capture(
-                        job=job,
-                        lease_owner=lease_owner,
-                        observation=observation,
-                        result=preference_result,
-                        suppress_confirmation=suppress_confirmation,
-                    )
                 except Exception:
                     return await self._fail_job(
                         job=job,
@@ -454,6 +447,13 @@ class MemoryProposalJobWorker:
                         error_code="preference_capture_failed",
                         retryable=True,
                     )
+                return await self._complete_preference_capture(
+                    job=job,
+                    lease_owner=lease_owner,
+                    observation=observation,
+                    result=preference_result,
+                    suppress_confirmation=suppress_confirmation,
+                )
             else:
                 result = await self._memory_service.handle_natural_memory_decision(
                     memory_command_from_payload(payload)
@@ -582,16 +582,27 @@ class MemoryProposalJobWorker:
             and not suppress_confirmation
         ):
             if self._preference_confirmation_queue is None:
-                raise RuntimeError(
-                    "Preference confirmation queue is not configured."
+                return await self._fail_job(
+                    job=job,
+                    lease_owner=lease_owner,
+                    error_code="preference_confirmation_enqueue_failed",
+                    retryable=True,
                 )
-            queued = await self._preference_confirmation_queue(
-                user_id=observation.user_id,
-                workspace_id=observation.project_id,
-                session_id=observation.session_id,
-                source_message_id=observation.source_message_id,
-                hypothesis=result.surfaced_hypothesis,
-            )
+            try:
+                queued = await self._preference_confirmation_queue(
+                    user_id=observation.user_id,
+                    workspace_id=observation.project_id,
+                    session_id=observation.session_id,
+                    source_message_id=observation.source_message_id,
+                    hypothesis=result.surfaced_hypothesis,
+                )
+            except Exception:
+                return await self._fail_job(
+                    job=job,
+                    lease_owner=lease_owner,
+                    error_code="preference_confirmation_enqueue_failed",
+                    retryable=True,
+                )
             result_refs["confirmation_job_id"] = queued.job_id
         return await self._complete_job(
             job=job,
@@ -705,6 +716,14 @@ def _memory_report_id(job: AgentJob) -> str:
 
 
 def _memory_failure_report(error_code: str) -> tuple[str, str]:
+    if error_code == "preference_confirmation_enqueue_failed":
+        return (
+            "Preference confirmation not scheduled",
+            (
+                "Preference evidence was captured, but confirmation could not "
+                "be scheduled."
+            ),
+        )
     if error_code == "preference_capture_failed":
         return (
             "Preference evidence not captured",

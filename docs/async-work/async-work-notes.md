@@ -2741,3 +2741,41 @@ Preserved behavior:
 - Memory confirmation governance and deterministic duplicate suppression;
 - direct Memory APIs, deterministic memory preflight, clarification selection,
   mixed-intent routing, and ordinary chat response contracts.
+
+## Preference Capture/Confirmation Failure Attribution
+
+The closure audit found one phase-attribution defect in the queued preference
+capture worker: the exception boundary covered both atomic evidence capture and
+the later confirmation-job enqueue. A confirmation scheduling failure could
+therefore report that evidence was not captured after capture had succeeded.
+
+This uncommitted review pass narrows those failure phases:
+
+- an exception from `capture_observation_strict()` remains the sanitized,
+  retryable `preference_capture_failed` result;
+- an exception while scheduling a surfaced hypothesis now produces the
+  separate retryable `preference_confirmation_enqueue_failed` result;
+- the confirmation failure report states that preference evidence was
+  captured but confirmation could not be scheduled;
+- confirmation failure is not silently swallowed and confirmation remains a
+  required governed follow-up for a surfaced hypothesis;
+- retry execution can safely revisit the same atomic capture and deterministic
+  confirmation identities without duplicating evidence or clarification work.
+
+TDD evidence:
+
+- RED: the downstream enqueue-failure regression received
+  `preference_capture_failed`;
+- GREEN: the same scenario receives
+  `preference_confirmation_enqueue_failed`, while the existing true capture
+  failure test still receives `preference_capture_failed`;
+- the focused retry regression executes the same stored observation twice,
+  records one logical evidence write, and reuses one confirmation-job identity.
+
+Audited closure sequence:
+
+1. finish required deferred correctness and dead-path cleanup;
+2. implement AgentJob retry, lease recovery, and drainer work;
+3. run automated cross-boundary lifecycle verification;
+4. perform manual break-testing across chat, resource surfaces, process
+   restart, retry, failure, and mixed-intent behavior.

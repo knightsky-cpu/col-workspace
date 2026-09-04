@@ -928,6 +928,168 @@ async def test_memory_worker_fails_preference_capture_safely() -> None:
 
 
 @pytest.mark.asyncio
+async def test_memory_worker_reports_confirmation_enqueue_failure_after_capture(
+) -> None:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+    from preference_learning import PreferenceHypothesis, PreferenceObservation
+    from preference_learning_service import PreferenceLearningResult
+
+    observation = PreferenceObservation(
+        observation_id="pref-obs--turn-preference-retry",
+        user_id="user-1",
+        project_id="workspace-1",
+        session_id="session-1",
+        source_turn_id="turn-preference-retry",
+        source_message_id="message-preference-retry",
+        category="response_length",
+        canonical_value="concise",
+        evidence_kind="repeated_collaboration_preference",
+        evidence_summary="User requested concise responses.",
+        confidence_delta=0.35,
+        created_at=NOW,
+    )
+    hypothesis = PreferenceHypothesis(
+        hypothesis_id="pref-hyp--user-1--workspace-1--response_length",
+        user_id="user-1",
+        project_id="workspace-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_count=2,
+        contradiction_count=0,
+        confidence=0.70,
+        source_observation_ids=(
+            "pref-obs--turn-1",
+            observation.observation_id,
+        ),
+        first_observed_at=NOW - timedelta(minutes=5),
+        last_observed_at=NOW,
+    )
+    job = AgentJob(
+        job_id="memory-preference-capture-job-retry",
+        user_id=observation.user_id,
+        project_id=observation.project_id,
+        workspace_id=observation.project_id,
+        session_id=observation.session_id,
+        source_turn_id=observation.source_turn_id,
+        source_message_id=observation.source_message_id,
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Preference learning capture",
+        agent_label="Memory Analyst",
+        created_at=NOW,
+        updated_at=NOW,
+        idempotency_key="memory-preference-capture-retry",
+    )
+    payload = AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "preference_learning_capture",
+            "observation": observation.model_dump(mode="json"),
+            "suppress_confirmation": False,
+        },
+    )
+
+    class IdempotentPreferenceService:
+        def __init__(self) -> None:
+            self.calls = []
+            self.persisted_observation_ids = set()
+            self.evidence_writes = 0
+
+        async def capture_observation_strict(self, captured_observation):
+            self.calls.append(captured_observation)
+            if captured_observation.observation_id not in (
+                self.persisted_observation_ids
+            ):
+                self.persisted_observation_ids.add(
+                    captured_observation.observation_id
+                )
+                self.evidence_writes += 1
+            return PreferenceLearningResult(
+                observation=captured_observation,
+                hypothesis=hypothesis,
+                surfaced_hypothesis=hypothesis,
+            )
+
+    preference_service = IdempotentPreferenceService()
+    confirmation_job_ids = set()
+    confirmation_attempts = 0
+
+    async def queue_confirmation(**kwargs):
+        nonlocal confirmation_attempts
+        confirmation_attempts += 1
+        confirmation_job_ids.add("memory-preference-confirmation-job-retry")
+        if confirmation_attempts == 1:
+            raise RuntimeError("private confirmation queue failure")
+        return QueuedActionReceipt(
+            job_id="memory-preference-confirmation-job-retry",
+            action_kind="propose_memory_signal",
+            status="queued",
+            display_label="Memory preference confirmation",
+            created_at=NOW,
+            agent_label="Memory Analyst",
+        )
+
+    first_repository = RecordingAgentJobRepository(job=job, payload=payload)
+    first_worker = MemoryProposalJobWorker(
+        agent_job_repository=first_repository,
+        memory_service=RecordingMemoryService(),
+        preference_learning_service=preference_service,
+        preference_confirmation_queue=queue_confirmation,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    failed = await first_worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-first",
+    )
+
+    assert failed.status == "failed"
+    assert first_repository.failed[0]["failure"].code == (
+        "preference_confirmation_enqueue_failed"
+    )
+    assert first_repository.failed[0]["failure"].retryable is True
+    assert "evidence was captured" in first_repository.reports[0].summary.lower()
+    assert "private confirmation queue failure" not in (
+        first_repository.reports[0].summary
+    )
+
+    retry_repository = RecordingAgentJobRepository(job=job, payload=payload)
+    retry_worker = MemoryProposalJobWorker(
+        agent_job_repository=retry_repository,
+        memory_service=RecordingMemoryService(),
+        preference_learning_service=preference_service,
+        preference_confirmation_queue=queue_confirmation,
+        clock=lambda: NOW + timedelta(minutes=2),
+    )
+
+    completed = await retry_worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-retry",
+    )
+
+    assert completed.status == "completed"
+    assert preference_service.calls == [observation, observation]
+    assert preference_service.evidence_writes == 1
+    assert confirmation_attempts == 2
+    assert confirmation_job_ids == {
+        "memory-preference-confirmation-job-retry"
+    }
+    assert retry_repository.completed[0]["result_refs"][
+        "confirmation_job_id"
+    ] == "memory-preference-confirmation-job-retry"
+
+
+@pytest.mark.asyncio
 async def test_memory_worker_completes_queued_clarification_selection_without_turn_lease(
 ) -> None:
     from memory_proposal_job_worker import MemoryProposalJobWorker
