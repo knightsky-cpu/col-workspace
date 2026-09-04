@@ -9,7 +9,6 @@ from collaborative_note_candidates import (
     validate_note_candidate_evidence,
 )
 from collaborative_note_policy import CollaborativeNoteKind
-from memory_proposals import ProposalTurnLease
 from schemas import (
     AgentActionReceipt,
     CollaborativeNote,
@@ -77,7 +76,6 @@ class NaturalCollaborativeNoteCommand:
     artifact_feedback_decision_present: bool
     decision: NaturalCollaborativeNoteDecision
     observed_at: datetime
-    turn_lease: ProposalTurnLease | None = None
     accepted_action_index: int | None = None
 
 
@@ -242,11 +240,7 @@ class CollaborativeNoteService:
             command.decision,
             command.source_message_text,
         )
-        idempotency_key = (
-            command.turn_lease.turn_id
-            if command.turn_lease is not None
-            else command.source_message_id
-        )
+        idempotency_key = command.source_message_id
         proposal = await self._database.create_collaborative_note_proposal(
             user_id=command.user_id,
             workspace_id=command.workspace_id,
@@ -259,7 +253,7 @@ class CollaborativeNoteService:
             expected_note_id=None,
             expected_revision=None,
             observed_at=command.observed_at,
-            turn_lease=command.turn_lease,
+            turn_lease=None,
         )
         return CollaborativeNoteProposalResult(
             proposal=proposal,

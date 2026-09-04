@@ -3790,7 +3790,6 @@ async def select_memory_clarification(
                 ),
                 clarification_id=clarification_id,
                 selected_candidate_index=payload.selected_candidate_index,
-                turn_lease=None,
             )
         )
     except MemoryClarificationSelectionError as exc:
@@ -4916,7 +4915,6 @@ async def _execute_chat(
                             source_message_text=payload.message,
                             memory_decision_present=False,
                             decision=preflight_decision,
-                            turn_lease=None,
                         )
                     ),
                 )

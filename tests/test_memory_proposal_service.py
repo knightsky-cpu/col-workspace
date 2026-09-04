@@ -94,7 +94,6 @@ def command(**updates):
         "memory_decision_present": False,
         "category": "response_length",
         "proposed_value": "concise",
-        "turn_lease": None,
     }
     values.update(updates)
     return ProposeMemorySignalCommand(**values)
@@ -119,10 +118,55 @@ def natural_command(**updates):
             evidence_text="macOS and Linux environments",
         ),
         "clarification_selection": None,
-        "turn_lease": None,
     }
     values.update(updates)
     return NaturalMemoryCommand(**values)
+
+
+def test_memory_commands_do_not_accept_turn_lease_capability() -> None:
+    from memory_candidate_decisions import NoMemoryDecision
+    from memory_clarifications import MemoryClarificationSelection
+    from trusted_memory_service import (
+        NaturalMemoryCommand,
+        ProposeMemorySignalCommand,
+        SelectMemoryClarificationCommand,
+    )
+
+    with pytest.raises(TypeError, match="turn_lease"):
+        ProposeMemorySignalCommand(
+            user_id="user-1",
+            session_id="session-1",
+            source_message_id="message-1",
+            source_message_text="Remember concise answers.",
+            memory_decision_present=False,
+            category="response_length",
+            proposed_value="concise",
+            turn_lease=None,
+        )
+
+    with pytest.raises(TypeError, match="turn_lease"):
+        NaturalMemoryCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-1",
+            source_message_id="message-1",
+            source_message_text="No memory change.",
+            memory_decision_present=False,
+            decision=NoMemoryDecision(),
+            clarification_selection=None,
+            turn_lease=None,
+        )
+
+    with pytest.raises(TypeError, match="turn_lease"):
+        SelectMemoryClarificationCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-1",
+            source_message_id="memory-api--selection-1",
+            clarification_id="memory-clarification--clarify-1",
+            selected_candidate_index=0,
+            turn_lease=None,
+        )
 
 
 @pytest.mark.asyncio
@@ -278,7 +322,6 @@ async def test_natural_clarification_selection_uses_server_owned_envelope(
 ) -> None:
     from memory_candidate_decisions import NoMemoryDecision
     from memory_clarifications import MemoryClarificationSelection
-    from memory_proposals import ProposalTurnLease
     from trusted_memory_service import (
         NaturalMemoryProposalResult,
         TrustedMemoryService,
@@ -295,10 +338,6 @@ async def test_natural_clarification_selection_uses_server_owned_envelope(
             decision=NoMemoryDecision(),
             clarification_selection=MemoryClarificationSelection(
                 selected_candidate_index=1,
-            ),
-            turn_lease=ProposalTurnLease(
-                turn_id="b" * 64,
-                owner_token="owner-2",
             ),
         )
     )
@@ -317,10 +356,7 @@ async def test_natural_clarification_selection_uses_server_owned_envelope(
                 selected_candidate_index=1,
             ),
             "observed_at": NOW,
-            "turn_lease": ProposalTurnLease(
-                turn_id="b" * 64,
-                owner_token="owner-2",
-            ),
+            "turn_lease": None,
         }
     ]
 
@@ -328,7 +364,6 @@ async def test_natural_clarification_selection_uses_server_owned_envelope(
 @pytest.mark.asyncio
 async def test_explicit_clarification_selection_binds_public_id() -> None:
     from memory_clarifications import MemoryClarificationSelection
-    from memory_proposals import ProposalTurnLease
     from trusted_memory_service import (
         NaturalMemoryProposalResult,
         SelectMemoryClarificationCommand,
@@ -336,10 +371,6 @@ async def test_explicit_clarification_selection_binds_public_id() -> None:
     )
 
     database = FakeProposalDatabase()
-    turn_lease = ProposalTurnLease(
-        turn_id="b" * 64,
-        owner_token="owner-2",
-    )
     result = await TrustedMemoryService(
         database=database,
         clock=lambda: NOW,
@@ -351,7 +382,6 @@ async def test_explicit_clarification_selection_binds_public_id() -> None:
             source_message_id="message-2",
             clarification_id="memory-clarification--clarify-1",
             selected_candidate_index=1,
-            turn_lease=turn_lease,
         )
     )
 
@@ -371,7 +401,7 @@ async def test_explicit_clarification_selection_binds_public_id() -> None:
                 "memory-clarification--clarify-1"
             ),
             "observed_at": NOW,
-            "turn_lease": turn_lease,
+            "turn_lease": None,
         }
     ]
 
@@ -398,7 +428,6 @@ async def test_memory_api_clarification_selection_does_not_require_turn_lease(
             source_message_id="memory-api--selection-1",
             clarification_id="memory-clarification--clarify-1",
             selected_candidate_index=1,
-            turn_lease=None,
         )
     )
 
@@ -426,7 +455,6 @@ async def test_memory_api_clarification_selection_does_not_require_turn_lease(
 @pytest.mark.asyncio
 async def test_explicit_clarification_selection_rejects_boolean_index(
 ) -> None:
-    from memory_proposals import ProposalTurnLease
     from trusted_memory_service import (
         SelectMemoryClarificationCommand,
         TrustedMemoryService,
@@ -446,10 +474,6 @@ async def test_explicit_clarification_selection_rejects_boolean_index(
                 source_message_id="message-2",
                 clarification_id="memory-clarification--clarify-1",
                 selected_candidate_index=True,
-                turn_lease=ProposalTurnLease(
-                    turn_id="b" * 64,
-                    owner_token="owner-2",
-                ),
             )
         )
 
@@ -462,17 +486,12 @@ async def test_natural_clarification_persists_with_observed_timestamp() -> None:
         ClarifyDecision,
         ProfileCandidateDecision,
     )
-    from memory_proposals import ProposalTurnLease
     from trusted_memory_service import (
         NaturalMemoryClarificationResult,
         TrustedMemoryService,
     )
 
     database = FakeProposalDatabase()
-    turn_lease = ProposalTurnLease(
-        turn_id="a" * 64,
-        owner_token="owner-1",
-    )
     result = await TrustedMemoryService(
         database=database,
         clock=lambda: NOW,
@@ -495,13 +514,12 @@ async def test_natural_clarification_persists_with_observed_timestamp() -> None:
             source_message_text=(
                 "Please remember wifiknight and macOS and Linux."
             ),
-            turn_lease=turn_lease,
         )
     )
 
     assert isinstance(result, NaturalMemoryClarificationResult)
     assert database.calls[0]["observed_at"] == NOW
-    assert database.calls[0]["turn_lease"] == turn_lease
+    assert database.calls[0]["turn_lease"] is None
 
 
 @pytest.mark.asyncio
@@ -542,7 +560,6 @@ async def test_natural_clarification_uses_source_message_provenance_without_turn
             source_message_text=(
                 "Please remember wifiknight and macOS and Linux."
             ),
-            turn_lease=None,
         )
     )
 

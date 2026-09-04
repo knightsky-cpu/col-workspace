@@ -225,10 +225,6 @@ async def test_confirmed_hypothesis_creates_pending_proposal_not_active_memory()
             source_message_id="message-4",
             clarification_id=receipt.clarification_id,
             selected_candidate_index=0,
-            turn_lease=ProposalTurnLease(
-                turn_id="b" * 64,
-                owner_token="owner-2",
-            ),
         )
     )
     inspection = await service.inspect_memory(

@@ -74,7 +74,6 @@ def note_command_from_payload(
         artifact_feedback_decision_present=artifact_feedback_decision_present,
         decision=decision,
         observed_at=datetime.now(UTC),
-        turn_lease=None,
     )
 
 

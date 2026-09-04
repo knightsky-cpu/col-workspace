@@ -458,7 +458,6 @@ def _explicit_workspace_note_command(
         ),
         decision=decision,
         observed_at=observed_at,
-        turn_lease=None,
         accepted_action_index=action_index,
     )
 
@@ -513,7 +512,6 @@ def _explicit_memory_command(
             canonical_value=body,
             evidence_text=evidence[:500],
         ),
-        turn_lease=None,
     )
 
 

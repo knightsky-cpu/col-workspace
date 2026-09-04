@@ -99,7 +99,6 @@ class ProposeMemorySignalCommand:
     memory_decision_present: bool
     category: MemoryCategory
     proposed_value: object
-    turn_lease: ProposalTurnLease | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +113,6 @@ class NaturalMemoryCommand:
     memory_decision_present: bool
     decision: NaturalMemoryDecision
     clarification_selection: MemoryClarificationSelection | None = None
-    turn_lease: ProposalTurnLease | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +125,6 @@ class SelectMemoryClarificationCommand:
     source_message_id: str
     clarification_id: str
     selected_candidate_index: int
-    turn_lease: ProposalTurnLease | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,7 +268,7 @@ class TrustedMemoryService:
             category=category,
             proposed_value=proposed_value,
             observed_at=observed_at,
-            turn_lease=command.turn_lease,
+            turn_lease=None,
         )
         return TrustedMemoryProposalResult(
             action=AgentActionReceipt(
@@ -334,11 +331,6 @@ class TrustedMemoryService:
                     "A clarification selection cannot create another "
                     "memory decision."
                 )
-            if command.turn_lease is None:
-                raise ValueError(
-                    "A clarification selection requires retry-safe turn "
-                    "ownership."
-                )
             observed_at = self._clock()
             stored = (
                 await self._database
@@ -349,7 +341,7 @@ class TrustedMemoryService:
                     source_message_id=command.source_message_id,
                     selection=command.clarification_selection,
                     observed_at=observed_at,
-                    turn_lease=command.turn_lease,
+                    turn_lease=None,
                 )
             )
             return NaturalMemoryProposalResult(
@@ -387,7 +379,7 @@ class TrustedMemoryService:
                 category=command.decision.category,
                 proposed_value=command.decision.canonical_value,
                 observed_at=observed_at,
-                turn_lease=command.turn_lease,
+                turn_lease=None,
             )
             return NaturalMemoryProposalResult(
                 status="pending",
@@ -404,11 +396,7 @@ class TrustedMemoryService:
             )
         if isinstance(command.decision, ClarifyDecision):
             observed_at = self._clock()
-            clarification_source_id = (
-                command.turn_lease.turn_id
-                if command.turn_lease is not None
-                else command.source_message_id
-            )
+            clarification_source_id = command.source_message_id
             envelope = MemoryClarificationEnvelope(
                 clarification_id=derive_memory_clarification_id(
                     user_id=command.user_id,
@@ -435,7 +423,7 @@ class TrustedMemoryService:
             stored = await self._database.create_memory_clarification(
                 envelope=envelope,
                 observed_at=observed_at,
-                turn_lease=command.turn_lease,
+                turn_lease=None,
             )
             return NaturalMemoryClarificationResult(
                 status="clarification_required",
@@ -479,7 +467,7 @@ class TrustedMemoryService:
                 selection=selection,
                 expected_clarification_id=command.clarification_id,
                 observed_at=observed_at,
-                turn_lease=command.turn_lease,
+                turn_lease=None,
             )
         )
         if stored is None:

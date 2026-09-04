@@ -5810,7 +5810,6 @@ async def test_select_memory_clarification_uses_memory_api_without_chat_turn(
             ),
             clarification_id="memory-clarification--clarification-1",
             selected_candidate_index=0,
-            turn_lease=None,
         )
     ]
     assert service_state.database.claim_calls == []
@@ -8739,7 +8738,6 @@ async def test_chat_preflights_ambiguous_memory_request_into_clarification(
     assert queued_command.source_message_id == f"turn--{DEFAULT_TURN_ID}--user"
     assert queued_command.source_message_text == prompt
     assert queued_command.memory_decision_present is False
-    assert queued_command.turn_lease is None
     assert queued_command.decision.kind == "clarify"
     assert [
         (candidate.category, candidate.canonical_value)
@@ -8792,7 +8790,6 @@ async def test_chat_passes_preflight_receipt_tuple_through_real_turn_service(
     memory_queue = service_state.turn_service_dependencies[0][6]
 
     async def queue_memory(command: NaturalMemoryCommand) -> QueuedActionReceipt:
-        assert command.turn_lease is None
         return queued_action
 
     async def route_direct(*args: object, **kwargs: object) -> object:
@@ -8950,7 +8947,6 @@ async def test_chat_preflight_clarification_returns_fallback_when_responder_fail
     memory_queue = service_state.turn_service_dependencies[0][6]
 
     async def queue_memory(command: NaturalMemoryCommand) -> QueuedActionReceipt:
-        assert command.turn_lease is None
         return queued_action
 
     monkeypatch.setattr(memory_queue, "queue", queue_memory)

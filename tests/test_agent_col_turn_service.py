@@ -511,13 +511,11 @@ async def test_turn_service_queues_workspace_note_from_natural_that_clause(
     assert memory_command.decision.evidence_text == (
         "also remember that i prefer pancakes on saturday mornings for breakfast"
     )
-    assert memory_command.turn_lease is None
     queued_note = note_queue.calls[0]
     assert queued_note.decision.body == (
         "we are going to build project zero for macOS and we are using a zsh "
         "shell environment."
     )
-    assert queued_note.turn_lease is None
     assert [action.action_kind for action in result.queued_actions] == [
         "propose_collaborative_note",
         "propose_memory_signal",
@@ -584,7 +582,6 @@ async def test_turn_service_queues_explicit_memory_request_before_routing(
         "I like eggs on Thursday mornings"
     )
     assert memory_command.decision.evidence_text == message
-    assert memory_command.turn_lease is None
     assert [action.action_kind for action in result.queued_actions] == [
         "propose_memory_signal",
     ]
@@ -993,7 +990,6 @@ async def test_turn_service_preserves_then_inside_workspace_note_body(
     assert note_queue.calls[0].decision.body == (
         "we will build the API first and then write tests"
     )
-    assert note_queue.calls[0].turn_lease is None
     assert len(result.queued_actions) == 1
     assert result.queued_actions[0].action_kind == "propose_collaborative_note"
 
@@ -1068,7 +1064,6 @@ async def test_turn_service_splits_workspace_note_before_artifact_command(
     assert note_queue.calls[0].decision.body == (
         "Project Zero will target macOS using a zsh shell environment."
     )
-    assert note_queue.calls[0].turn_lease is None
     assert len(artifact_executor.calls) == 1
     assert artifact_executor.calls[0].source_text == message
 
@@ -1152,7 +1147,6 @@ async def test_turn_service_queues_note_memory_and_artifact_independently(
     assert memory_queue.calls[0].decision.canonical_value == (
         "I like eggs on Thursday morning when they are available"
     )
-    assert memory_queue.calls[0].turn_lease is None
     assert len(artifact_executor.calls) == 1
     assert artifact_executor.calls[0].source_text == message
 
@@ -1212,7 +1206,6 @@ async def test_turn_service_still_queues_workspace_note_stating_clause(
     assert note_queue.calls[0].decision.body == (
         "use zsh for project zero setup"
     )
-    assert note_queue.calls[0].turn_lease is None
     assert len(result.queued_actions) == 1
     assert result.queued_actions[0].action_kind == "propose_collaborative_note"
 

@@ -197,7 +197,6 @@ async def test_note_tool_builds_pending_result_from_adk_state() -> None:
     assert command.memory_decision_present is False
     assert command.collaborative_note_decision_present is False
     assert isinstance(command.decision, NoteCandidateDecision)
-    assert command.turn_lease is None
 
 
 @pytest.mark.asyncio

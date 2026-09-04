@@ -9,6 +9,31 @@ from schemas import CollaborativeNote, CollaborativeNoteEvent, CollaborativeNote
 NOW = datetime(2026, 8, 26, 16, 0, tzinfo=UTC)
 
 
+def test_natural_note_command_does_not_accept_turn_lease_capability() -> None:
+    from collaborative_note_candidates import NoteCandidateDecision
+    from collaborative_note_service import NaturalCollaborativeNoteCommand
+
+    with pytest.raises(TypeError, match="turn_lease"):
+        NaturalCollaborativeNoteCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-1",
+            source_message_id="message-1",
+            source_message_text="Agent Col, note that use API version 2.",
+            memory_decision_present=False,
+            collaborative_note_decision_present=False,
+            artifact_feedback_decision_present=False,
+            decision=NoteCandidateDecision(
+                note_kind="constraint",
+                title="API version",
+                body="Use API version 2.",
+                evidence_text="use API version 2",
+            ),
+            observed_at=NOW,
+            turn_lease=None,
+        )
+
+
 def note_payload(*, status: str = "active", revision: int = 1) -> dict[str, object]:
     return {
         "note_contract_version": "1.0",
@@ -355,14 +380,9 @@ async def test_note_service_creates_natural_pending_proposal_from_current_messag
         CollaborativeNoteService,
         NaturalCollaborativeNoteCommand,
     )
-    from memory_proposals import ProposalTurnLease
 
     database = FakeNoteDatabase()
     service = CollaborativeNoteService(database=database)
-    turn_lease = ProposalTurnLease(
-        turn_id="a" * 64,
-        owner_token="owner-token-1",
-    )
 
     result = await service.create_natural_proposal(
         NaturalCollaborativeNoteCommand(
@@ -383,7 +403,6 @@ async def test_note_service_creates_natural_pending_proposal_from_current_messag
                 evidence_text="this workspace must use API version 2",
             ),
             observed_at=NOW,
-            turn_lease=turn_lease,
         )
     )
 
@@ -399,11 +418,11 @@ async def test_note_service_creates_natural_pending_proposal_from_current_messag
             "note_kind": "constraint",
             "title": "API version",
             "body": "Use API version 2.",
-            "idempotency_key": "a" * 64,
+            "idempotency_key": "message-1",
             "expected_note_id": None,
             "expected_revision": None,
             "observed_at": NOW,
-            "turn_lease": turn_lease,
+            "turn_lease": None,
         }
     ]
 

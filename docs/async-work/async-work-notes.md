@@ -2940,3 +2940,43 @@ Intentionally deferred:
 - synchronous artifact executor and artifact-feedback executor legacy effect
   behavior;
 - AgentJob retry/recovery/drainer work and Note shutdown hygiene.
+
+## Memory/Note Command Lease Cleanup
+
+This uncommitted backend cleanup pass removes resource-command ownership of
+`ProposalTurnLease` now that live chat orchestration, direct resource APIs, and
+AgentJob workers no longer execute Memory/Note resource mutations under chat-turn
+ownership.
+
+Removed:
+
+- `ProposeMemorySignalCommand.turn_lease`;
+- `NaturalMemoryCommand.turn_lease`;
+- `SelectMemoryClarificationCommand.turn_lease`;
+- `NaturalCollaborativeNoteCommand.turn_lease`;
+- production caller arguments that only supplied `turn_lease=None`;
+- Memory and Note tool/job digest branches that could vary by command lease,
+  while preserving the active no-lease digest/source-message behavior;
+- tests and assertions whose only purpose was proving those commands received or
+  forwarded a lease.
+
+Preserved:
+
+- direct Memory clarification selection through the Memory service;
+- deterministic ambiguous-Memory preflight queueing;
+- Memory and Note AgentJob payload restoration and execution;
+- natural Memory and Note tool queue paths;
+- current no-lease Memory proposal, Memory clarification, and Note proposal
+  semantics;
+- `ChatTurnClaim.owner_token`, historical `ChatTurnRequest` metadata,
+  `ChatTurnClaim.precompleted_*`, and historical replay/effect readers.
+
+Still deferred:
+
+- database optional `turn_lease` parameters and chat-turn effect-writer branches;
+- `record_chat_turn_decision_action`;
+- `record_chat_turn_collaborative_note_decision_effect`;
+- historical replay readers/assertions;
+- synchronous artifact executor and artifact-feedback executor legacy effect
+  behavior;
+- AgentJob retry/recovery/drainer work and Note shutdown hygiene.

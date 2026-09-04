@@ -206,7 +206,6 @@ def memory_command_from_payload(payload: AgentJobPayload) -> NaturalMemoryComman
         memory_decision_present=memory_decision_present,
         decision=decision,
         clarification_selection=selection,
-        turn_lease=None,
     )
 
 
@@ -232,7 +231,6 @@ def memory_clarification_selection_command_from_payload(
         source_message_id=payload.source_message_id,
         clarification_id=clarification_id,
         selected_candidate_index=selected_candidate_index,
-        turn_lease=None,
     )
 
 

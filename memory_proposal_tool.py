@@ -36,7 +36,6 @@ from memory_clarifications import (
     MemoryClarificationReceipt,
     MemoryClarificationSelection,
 )
-from memory_proposals import ProposalTurnLease
 from memory_proposal_job_worker import memory_clarification_selection_job_payload
 from memory_proposal_job_worker import memory_job_payload
 from memory_proposal_job_worker import (
@@ -86,7 +85,6 @@ class _MemoryToolServerContext:
     source_message_text: str
     memory_decision_present: bool
     memory_prequeued_for_turn: bool
-    turn_lease: ProposalTurnLease | None
 
 
 class _StrictToolResponse(BaseModel):
@@ -238,7 +236,6 @@ def _server_context(tool_context: ToolContext) -> _MemoryToolServerContext:
         source_message_text=source_message_text,
         memory_decision_present=memory_decision_present,
         memory_prequeued_for_turn=memory_prequeued_for_turn,
-        turn_lease=None,
     )
 
 
@@ -258,12 +255,10 @@ def _server_command(
         memory_decision_present=context.memory_decision_present,
         decision=decision,
         clarification_selection=clarification_selection,
-        turn_lease=context.turn_lease,
     )
 
 
 def _memory_job_digest(command: NaturalMemoryCommand) -> str:
-    turn_id = command.turn_lease.turn_id if command.turn_lease else ""
     selection = (
         command.clarification_selection.model_dump(mode="json")
         if command.clarification_selection is not None
@@ -275,7 +270,7 @@ def _memory_job_digest(command: NaturalMemoryCommand) -> str:
             "workspace_id": command.workspace_id,
             "session_id": command.session_id,
             "source_message_id": command.source_message_id,
-            "turn_id": turn_id,
+            "turn_id": "",
             "decision": command.decision.model_dump(mode="json"),
             "clarification_selection": selection,
         }
@@ -315,11 +310,7 @@ def _raw_memory_job_digest(
             "workspace_id": context.workspace_id,
             "session_id": context.session_id,
             "source_message_id": context.source_message_id,
-            "turn_id": (
-                context.turn_lease.turn_id
-                if context.turn_lease is not None
-                else ""
-            ),
+            "turn_id": "",
             "decision": decision,
             "clarification_selection": clarification_selection,
         }
@@ -403,11 +394,7 @@ def _raw_memory_job(
         project_id=context.workspace_id,
         workspace_id=context.workspace_id,
         session_id=context.session_id,
-        source_turn_id=(
-            context.turn_lease.turn_id
-            if context.turn_lease
-            else context.source_message_id
-        ),
+        source_turn_id=context.source_message_id,
         source_message_id=context.source_message_id,
         action_kind="propose_memory_signal",
         status="queued",
@@ -428,11 +415,7 @@ def _memory_job(command: NaturalMemoryCommand) -> AgentJob:
         project_id=command.workspace_id,
         workspace_id=command.workspace_id,
         session_id=command.session_id,
-        source_turn_id=(
-            command.turn_lease.turn_id
-            if command.turn_lease
-            else command.source_message_id
-        ),
+        source_turn_id=command.source_message_id,
         source_message_id=command.source_message_id,
         action_kind="propose_memory_signal",
         status="queued",

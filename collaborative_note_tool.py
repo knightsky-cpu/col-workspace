@@ -171,7 +171,6 @@ def _server_command(
         artifact_feedback_decision_present=artifact_feedback_decision_present,
         decision=decision,
         observed_at=datetime.now(UTC),
-        turn_lease=None,
     )
 
 
@@ -204,14 +203,13 @@ def _turn_has_prequeued_note(tool_context: ToolContext) -> bool:
 
 
 def _note_job_digest(command: NaturalCollaborativeNoteCommand) -> str:
-    turn_id = command.turn_lease.turn_id if command.turn_lease else ""
     material = "\0".join(
         (
             command.user_id,
             command.workspace_id,
             command.session_id,
             command.source_message_id,
-            turn_id,
+            "",
             str(command.accepted_action_index)
             if command.accepted_action_index is not None
             else "",
@@ -233,11 +231,7 @@ def _note_job(command: NaturalCollaborativeNoteCommand) -> AgentJob:
         project_id=command.workspace_id,
         workspace_id=command.workspace_id,
         session_id=command.session_id,
-        source_turn_id=(
-            command.turn_lease.turn_id
-            if command.turn_lease
-            else command.source_message_id
-        ),
+        source_turn_id=command.source_message_id,
         source_message_id=command.source_message_id,
         action_kind="propose_collaborative_note",
         status="queued",

@@ -377,7 +377,6 @@ async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
     assert command.decision.category == "response_length"
     assert command.decision.canonical_value == "concise"
     assert command.clarification_selection is None
-    assert command.turn_lease is None
 
 
 @pytest.mark.asyncio

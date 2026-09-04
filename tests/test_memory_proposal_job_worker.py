@@ -9,7 +9,6 @@ from database import (
     MemoryProposalConflictError,
 )
 from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
-from memory_proposals import ProposalTurnLease
 from schemas import (
     AgentActionReceipt,
     MemoryClarificationChoice,
@@ -256,10 +255,6 @@ def make_command() -> NaturalMemoryCommand:
             evidence_text="I prefer concise responses.",
         ),
         clarification_selection=None,
-        turn_lease=ProposalTurnLease(
-            turn_id="a" * 64,
-            owner_token="owner-1",
-        ),
     )
 
 
@@ -270,7 +265,7 @@ def make_job(command: NaturalMemoryCommand) -> AgentJob:
         project_id=command.workspace_id,
         workspace_id=command.workspace_id,
         session_id=command.session_id,
-        source_turn_id=command.turn_lease.turn_id,
+        source_turn_id=command.source_message_id,
         source_message_id=command.source_message_id,
         action_kind="propose_memory_signal",
         status="queued",
@@ -373,7 +368,6 @@ def test_memory_command_restores_persisted_value_alias_payload() -> None:
         "Remember that I prefer pancakes on Saturday mornings for breakfast."
     )
     assert restored.memory_decision_present is False
-    assert restored.turn_lease is None
 
 
 @pytest.mark.asyncio
@@ -463,7 +457,6 @@ async def test_memory_worker_completes_queued_memory_proposal_from_private_paylo
     assert recorded.memory_decision_present == command.memory_decision_present
     assert recorded.decision == command.decision
     assert recorded.clarification_selection == command.clarification_selection
-    assert recorded.turn_lease is None
     assert repository.leased[0]["action_kind"] == "propose_memory_signal"
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
@@ -520,7 +513,6 @@ async def test_memory_worker_creates_queued_clarification_without_turn_lease(
             ],
         ),
         clarification_selection=None,
-        turn_lease=None,
     )
     job = make_job(make_command()).model_copy(
         update={
@@ -579,7 +571,6 @@ async def test_memory_worker_creates_queued_clarification_without_turn_lease(
     assert len(service.commands) == 1
     assert service.commands[0].decision == command.decision
     assert service.commands[0].source_message_id == command.source_message_id
-    assert service.commands[0].turn_lease is None
     assert repository.completed[0]["result_refs"] == {
         "clarification_id": clarification.clarification_id
     }
@@ -1122,7 +1113,6 @@ async def test_memory_worker_completes_queued_clarification_selection_without_tu
             source_message_id="message-2",
             clarification_id="memory-clarification--clarification-1",
             selected_candidate_index=0,
-            turn_lease=None,
         )
     ]
     assert repository.completed[0]["result_refs"] == {
@@ -1204,7 +1194,6 @@ async def test_memory_worker_records_conflict_failure_without_private_details(
     assert recorded.session_id == command.session_id
     assert recorded.source_message_id == command.source_message_id
     assert recorded.decision == command.decision
-    assert recorded.turn_lease is None
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
         "failed",

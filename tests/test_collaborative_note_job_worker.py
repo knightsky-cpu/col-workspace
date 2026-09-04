@@ -10,7 +10,6 @@ from collaborative_note_service import (
     NaturalCollaborativeNoteCommand,
 )
 from database import MemoryProposalConflictError
-from memory_proposals import ProposalTurnLease
 from schemas import AgentActionReceipt, CollaborativeNoteProposal
 
 
@@ -208,10 +207,6 @@ def make_command() -> NaturalCollaborativeNoteCommand:
             evidence_text="this workspace must use API version 2",
         ),
         observed_at=NOW,
-        turn_lease=ProposalTurnLease(
-            turn_id="a" * 64,
-            owner_token="owner-1",
-        ),
     )
 
 
@@ -222,7 +217,7 @@ def make_job(command: NaturalCollaborativeNoteCommand) -> AgentJob:
         project_id=command.workspace_id,
         workspace_id=command.workspace_id,
         session_id=command.session_id,
-        source_turn_id=command.turn_lease.turn_id,
+        source_turn_id=command.source_message_id,
         source_message_id=command.source_message_id,
         action_kind="propose_collaborative_note",
         status="queued",
@@ -270,7 +265,6 @@ async def test_note_worker_completes_queued_note_proposal_from_private_payload(
     assert recorded.source_message_id == command.source_message_id
     assert recorded.source_message_text == command.source_message_text
     assert recorded.decision == command.decision
-    assert recorded.turn_lease is None
     assert repository.leased[0]["action_kind"] == "propose_collaborative_note"
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
@@ -322,7 +316,6 @@ async def test_note_worker_records_conflict_failure_without_private_details(
 
     assert failed.status == "failed"
     assert len(service.commands) == 1
-    assert service.commands[0].turn_lease is None
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
         "failed",
