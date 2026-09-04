@@ -111,7 +111,6 @@ export function buildExactRetryRequest(turn) {
 export function selectChatEndpoint(request) {
   const body = request?.body ?? {};
   const structuredFields = [
-    "memory_decision",
     "artifact_feedback_decision",
     "collaborative_note_decision",
   ];

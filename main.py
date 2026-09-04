@@ -4654,6 +4654,13 @@ async def _execute_chat(
                 "Continuity selection must use the direct continuity API."
             ),
         )
+    if payload.memory_decision is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Memory proposal decisions must use the direct Memory API."
+            ),
+        )
 
     if ordinary_only and _chat_request_requires_json(payload):
         raise HTTPException(

@@ -1419,3 +1419,95 @@ Work deferred until core decoupling is complete:
   queued action receipts;
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
+
+## Direct Memory Decision Enforcement Pass
+
+This pass made the direct Memory proposal approve/reject API the only public
+execution path for explicit memory proposal decisions. The existing direct route
+at `/api/users/{user_id}/memory/proposals/{proposal_id}/{decision}` already
+owned the Memory lifecycle; the remaining defect was that `/api/chat` still
+accepted `memory_decision`, saved a chat message, called the Memory service with
+chat confirmation metadata, and could continue through the chat turn service.
+
+Completed work:
+
+- `/api/chat` now rejects `memory_decision` immediately with a safe conflict
+  response telling callers to use the direct Memory API;
+- `/api/chat/stream` returns the same direct-Memory enforcement response for
+  `memory_decision` instead of redirecting callers to `/api/chat`;
+- the rejection happens before chat-turn claim, history reads, message saves,
+  Memory service mutation, turn service dispatch, chat-turn completion, or
+  release;
+- frontend chat endpoint selection no longer treats `memory_decision` as a
+  reason to use `/api/chat`;
+- stale backend tests that proved chat-owned memory decision execution were
+  replaced with direct-route coverage or removed when they only described the
+  retired chat confirmation lifecycle.
+
+Why this matters:
+
+Before this pass, memory proposal approval had two authorities: the direct
+Memory API and a chat-turn-owned structured decision path. That second path
+created unnecessary dependency on chat-turn claiming and chat message identity.
+After this pass, explicit memory proposal approval/rejection is Memory-owned.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_chat_rejects_memory_decision_without_claiming_turn` failed because
+  `/api/chat` still reached `claim_chat_turn` instead of rejecting before chat
+  lifecycle work.
+- RED: `test_chat_stream_rejects_memory_decision_without_claiming_turn` failed
+  because `/api/chat/stream` still returned the old structured-decision
+  `/api/chat` redirect response.
+- RED: `chat endpoint selection streams only ordinary requests` failed because
+  the frontend request selector still routed `memory_decision` to `/api/chat`.
+- GREEN: `_execute_chat` now rejects `memory_decision` before the generic
+  structured-decision stream check, and `selectChatEndpoint` no longer includes
+  `memory_decision` in its JSON-chat selector list.
+- Follow-up focused backend verification exposed stale chat-owned tests; those
+  were narrowed to direct-route error mapping or ordinary replay behavior, and
+  the retired deterministic chat confirmation-message-id test was removed.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_main.py
+295 passed, 1 warning
+```
+
+```text
+node --test tests/frontend/api.test.mjs tests/frontend/requests.test.mjs tests/frontend/app-runtime.test.mjs tests/frontend/workspace-static.test.mjs
+123 passed
+```
+
+```text
+git diff --check
+no output
+```
+
+Remaining direct decoupling:
+
+- `/api/chat` still accepts and executes `collaborative_note_decision`;
+- legacy schema/request-builder compatibility still allows parsing retired
+  structured chat decisions, even when the app now uses direct APIs for those
+  user actions;
+- unreachable legacy memory-decision code remains inside `_execute_chat` until
+  the final structured-decision cleanup pass.
+
+Next proposed pass:
+
+- reject `collaborative_note_decision` in `/api/chat` and make the direct
+  collaborative note proposal approve/reject API the only execution path for
+  note proposal decisions.
+
+Work deferred until core decoupling is complete:
+
+- remove legacy frontend request helpers and schema fields for retired chat
+  structured decisions after all direct lifecycle routes are in place;
+- delete unreachable backend structured-decision branches after the final direct
+  lifecycle owner is enforced;
+- broad manual end-to-end browser acceptance for every drawer action;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.

@@ -3003,7 +3003,9 @@ async def test_chat_stream_requires_structured_decisions_to_use_json_endpoint(
 
     assert response.status_code == 409
     assert response.json() == {
-        "detail": "Structured chat decisions must use /api/chat."
+        "detail": (
+            "Memory proposal decisions must use the direct Memory API."
+        )
     }
     assert service_state.events == []
 
@@ -7257,12 +7259,13 @@ async def test_synthesize_rejects_incomplete_or_malformed_json(
 
 
 @pytest.mark.asyncio
-async def test_chat_decision_uses_updated_profile_and_returns_receipts(
+async def test_chat_rejects_memory_decision_without_claiming_turn(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
     response = await client.post(
         "/api/chat",
+        headers={"Idempotency-Key": "memory-decision-key-1"},
         json={
             "project_id": "project-1",
             "session_id": "confirmation-session",
@@ -7275,124 +7278,50 @@ async def test_chat_decision_uses_updated_profile_and_returns_receipts(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 409
     assert response.json() == {
-        "response": "Generated answer",
-        "actions": [
-            {
-                "action_name": "approve_memory_signal",
-                "status": "completed",
-            }
-            ],
-            "artifacts": [],
-            "artifact_feedback": [],
-            "queued_actions": [],
-            "citations": [],
-            "memory_proposals": [],
-            "memory_clarifications": [],
-            "collaborative_note_proposals": [],
-            "collaborative_note_events": [],
-            "continuity_receipts": [],
-            "continuity_choices": [],
-            "adaptations": [
-            {
-                "signal_id": "response_length--proposal-1",
-                "category": "response_length",
-                "value": "concise",
-                "source_event_id": (
-                    "response_length--proposal-1--approved"
-                ),
-                "status": "provided_to_model",
-            }
-        ],
-    }
-    assert service_state.events == [
-        ("history", "confirmation-session", 20),
-        (
-            "save",
-            "confirmation-session",
-            "user",
-            "Yes, remember that preference.",
-        ),
-        ("memory_decision",),
-        ("turn_service",),
-        (
-            "save",
-            "confirmation-session",
-            "model",
-            "Generated answer",
-        ),
-    ]
-    assert service_state.memory_service.decision_calls == [
-        MemoryDecisionCommand(
-            user_id="user-1",
-            proposal_id="response_length--proposal-1",
-            decision="approve",
-            confirmation_channel="chat_decision",
-            confirmation_session_id="confirmation-session",
-            confirmation_message_id="user-message-1",
+        "detail": (
+            "Memory proposal decisions must use the direct Memory API."
         )
-    ]
-    assert len(service_state.turn_service.calls) == 1
-    context = service_state.turn_service.calls[0]
-    assert context.message == "Yes, remember that preference."
-    context_text = "\n".join(
-        part.text
-        for content in context.model_input_context
-        for part in content.parts
-        if part.text
-    )
-    assert "[APPROVED_COLLABORATION_PREFERENCES]" in context_text
-    assert "response_length=concise" in context_text
-    assert "response_length--proposal-1" not in context_text
-    assert "[SESSION_HISTORY_DATA]" in context_text
-    assert context_text.index("Earlier question") < context_text.index(
-        "Earlier answer"
-    )
-    assert "New question" not in context_text
-    assert "Yes, remember that preference." not in context_text
+    }
+    assert service_state.database.claim_calls == []
+    assert service_state.database.history_calls == []
+    assert service_state.database.save_calls == []
+    assert service_state.memory_service.decision_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.events == []
 
 
 @pytest.mark.asyncio
-async def test_chat_rejection_returns_action_without_adaptation(
+async def test_chat_stream_rejects_memory_decision_without_claiming_turn(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
-    service_state.memory_service.decision_result = (
-        TrustedMemoryMutationResult(
-            action=AgentActionReceipt(
-                action_name="reject_memory_signal",
-                status="completed",
-            ),
-            profile=CollaborationProfile(),
-        )
-    )
-
     response = await client.post(
-        "/api/chat",
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "memory-decision-key-2"},
         json={
             "project_id": "project-1",
             "session_id": "confirmation-session",
             "user_id": "user-1",
-            "message": "No, do not remember that.",
+            "message": "Yes, remember that preference.",
             "memory_decision": {
                 "proposal_id": "response_length--proposal-1",
-                "decision": "reject",
+                "decision": "approve",
             },
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["actions"] == [
-        {
-            "action_name": "reject_memory_signal",
-            "status": "completed",
-        }
-    ]
-    assert response.json()["adaptations"] == []
-    assert service_state.memory_service.decision_calls[0].decision == (
-        "reject"
-    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "Memory proposal decisions must use the direct Memory API."
+        )
+    }
+    assert service_state.database.claim_calls == []
+    assert service_state.memory_service.decision_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.events == []
 
 
 @pytest.mark.asyncio
@@ -8353,12 +8282,12 @@ async def test_chat_clarification_selection_hides_ownership_mismatch(
         (
             ValueError("private invalid proposal identifier"),
             422,
-            "Memory decision is invalid.",
+            "Memory proposal identifier is invalid.",
         ),
     ),
 )
 @pytest.mark.asyncio
-async def test_chat_decision_maps_domain_errors_before_supervisor(
+async def test_direct_memory_decision_maps_domain_errors(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     error: Exception,
@@ -8368,36 +8297,18 @@ async def test_chat_decision_maps_domain_errors_before_supervisor(
     service_state.memory_service.error = error
 
     response = await client.post(
-        "/api/chat",
-        json={
-            "project_id": "project-1",
-            "session_id": "confirmation-session",
-            "user_id": "user-1",
-            "message": "Apply my explicit decision.",
-            "memory_decision": {
-                "proposal_id": "response_length--proposal-1",
-                "decision": "approve",
-            },
-        },
+        "/api/users/user-1/memory/proposals/"
+        "response_length--proposal-1/approve"
     )
 
     assert response.status_code == expected_status
     assert response.json() == {"detail": expected_detail}
-    assert service_state.events == [
-        ("history", "confirmation-session", 20),
-        (
-            "save",
-            "confirmation-session",
-            "user",
-            "Apply my explicit decision.",
-        ),
-        ("memory_decision",),
-    ]
+    assert service_state.events == [("memory_decision",)]
     assert service_state.turn_service.calls == []
 
 
 @pytest.mark.asyncio
-async def test_chat_decision_translates_database_failure_safely(
+async def test_direct_memory_decision_translates_database_failure_safely(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     caplog: pytest.LogCaptureFixture,
@@ -8407,17 +8318,8 @@ async def test_chat_decision_translates_database_failure_safely(
     )
 
     response = await client.post(
-        "/api/chat",
-        json={
-            "project_id": "project-1",
-            "session_id": "private-session",
-            "user_id": "private-user",
-            "message": "Approve my private preference.",
-            "memory_decision": {
-                "proposal_id": "response_length--private-proposal",
-                "decision": "approve",
-            },
-        },
+        "/api/users/private-user/memory/proposals/"
+        "response_length--private-proposal/approve"
     )
 
     assert response.status_code == 500
@@ -8712,10 +8614,6 @@ async def test_chat_does_not_capture_preference_on_replay_or_structured_decision
         proposal_id="response_length--proposal-1",
         decision="approve",
     )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        memory_decision=decision,
-    )
-
     response = await client.post(
         "/api/chat",
         headers={"Idempotency-Key": "pref-chat-key-3"},
@@ -8728,7 +8626,7 @@ async def test_chat_does_not_capture_preference_on_replay_or_structured_decision
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 409
     assert service_state.preference_learning_service.calls == []
     completed_response = ChatResponse(
         response="Replay answer",
@@ -10528,111 +10426,6 @@ async def test_chat_claimed_turn_starts_context_reads_concurrently(
 
     assert both_reads_started
     assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-async def test_chat_idempotent_decision_uses_deterministic_confirmation_message_id(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    memory_decision = MemoryDecisionRequest(
-        proposal_id="response_length--proposal-1",
-        decision="approve",
-    )
-    claim = ChatTurnClaim(
-        request=ChatTurnRequest(
-            project_id="project-1",
-            session_id="confirmation-session",
-            user_id="user-1",
-            message="Yes, remember that preference.",
-            memory_decision=memory_decision,
-        ),
-        ids=ChatTurnIds(
-            turn_id="c" * 64,
-            user_message_id=f"turn--{'c' * 64}--user",
-            model_message_id=f"turn--{'c' * 64}--model",
-        ),
-        owner_token="decision-owner-token",
-        lease_expires_at=MEMORY_NOW + timedelta(seconds=120),
-        resumed=False,
-    )
-    service_state.database.chat_turn_result = claim
-    completed_action = AgentActionReceipt(
-        action_name="approve_memory_signal",
-        status="completed",
-    )
-    service_state.turn_service.turn_result = AgentColTurnResult(
-        response="Generated answer",
-        actions=(completed_action,),
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "decision-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "confirmation-session",
-            "user_id": "user-1",
-            "message": "Yes, remember that preference.",
-            "memory_decision": memory_decision.model_dump(mode="json"),
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["actions"] == [
-        {
-            "action_name": "approve_memory_signal",
-            "status": "completed",
-        }
-    ]
-    assert response.json()["adaptations"] == [
-        {
-            "signal_id": "response_length--proposal-1",
-            "category": "response_length",
-            "value": "concise",
-            "source_event_id": (
-                "response_length--proposal-1--approved"
-            ),
-            "status": "provided_to_model",
-        }
-    ]
-    assert service_state.events == [
-        ("claim_chat_turn",),
-        (
-            "history",
-            "confirmation-session",
-            20,
-            f"turn--{'c' * 64}--user",
-        ),
-        ("memory_decision",),
-        ("record_chat_turn_decision_action",),
-        ("renew_chat_turn_lease",),
-        ("turn_service",),
-        ("complete_chat_turn",),
-    ]
-    assert service_state.memory_service.decision_calls == [
-        MemoryDecisionCommand(
-            user_id="user-1",
-            proposal_id="response_length--proposal-1",
-            decision="approve",
-            confirmation_channel="chat_decision",
-            confirmation_session_id="confirmation-session",
-            confirmation_message_id=f"turn--{'c' * 64}--user",
-        )
-    ]
-    assert len(service_state.database.decision_action_calls) == 1
-    recorded_claim, recorded_action, recorded_at = (
-        service_state.database.decision_action_calls[0]
-    )
-    assert recorded_claim == claim
-    decision_result = service_state.memory_service.decision_result
-    assert decision_result is not None
-    assert recorded_action == decision_result.action
-    assert recorded_at.tzinfo is not None
-    assert not any(event[0] == "save" for event in service_state.events)
-    assert len(service_state.database.complete_calls) == 1
-    completed_response = service_state.database.complete_calls[0][1]
-    assert completed_response.model_dump(mode="json") == response.json()
 
 
 @pytest.mark.parametrize(
