@@ -7,9 +7,6 @@ from typing import Protocol
 from preference_learning import (
     PreferenceHypothesis,
     PreferenceObservation,
-    derive_preference_hypothesis_id,
-    merge_observation_into_hypothesis,
-    should_surface_hypothesis,
 )
 from schemas import ChatMessageText, IdentifierStr, StrictModel
 
@@ -103,35 +100,8 @@ class PreferenceLearningService:
             return PreferenceLearningResult()
         if extracted is None:
             return PreferenceLearningResult()
-
-        now = self._clock()
         try:
-            observation = PreferenceObservation.model_validate(
-                {
-                    "observation_id": f"pref-obs--{command.turn_id}",
-                    "user_id": command.user_id,
-                    "project_id": command.project_id,
-                    "session_id": command.session_id,
-                    "source_turn_id": command.turn_id,
-                    "source_message_id": command.source_message_id,
-                    "created_at": now,
-                }
-                | dict(extracted)
-            )
-            hypothesis_id = derive_preference_hypothesis_id(observation)
-            existing = await self._database.get_preference_hypothesis(
-                command.user_id,
-                command.project_id,
-                hypothesis_id,
-            )
-            hypothesis = merge_observation_into_hypothesis(
-                existing,
-                observation,
-                now=now,
-            )
-            await self._database.save_preference_observation(observation)
-            if hypothesis is not None:
-                await self._database.save_preference_hypothesis(hypothesis)
+            return await self._capture_extracted(command, extracted)
         except Exception as exc:
             logger.error(
                 "Preference learning capture failed (%s).",
@@ -139,14 +109,40 @@ class PreferenceLearningService:
             )
             return PreferenceLearningResult()
 
-        surfaced = (
-            hypothesis
-            if hypothesis is not None
-            and should_surface_hypothesis(hypothesis, now=now)
-            else None
+    async def capture_strict(
+        self,
+        command: PreferenceLearningCommand,
+    ) -> PreferenceLearningResult:
+        """Capture preference evidence while propagating persistence failure."""
+        extracted = await self._extractor.extract(command)
+        if extracted is None:
+            return PreferenceLearningResult()
+        return await self._capture_extracted(command, extracted)
+
+    async def _capture_extracted(
+        self,
+        command: PreferenceLearningCommand,
+        extracted: object,
+    ) -> PreferenceLearningResult:
+        now = self._clock()
+        observation = PreferenceObservation.model_validate(
+            {
+                "observation_id": f"pref-obs--{command.turn_id}",
+                "user_id": command.user_id,
+                "project_id": command.project_id,
+                "session_id": command.session_id,
+                "source_turn_id": command.turn_id,
+                "source_message_id": command.source_message_id,
+                "created_at": now,
+            }
+            | dict(extracted)
+        )
+        outcome = await self._database.capture_preference_observation(
+            observation,
+            observed_at=now,
         )
         return PreferenceLearningResult(
-            observation=observation,
-            hypothesis=hypothesis,
-            surfaced_hypothesis=surfaced,
+            observation=outcome.observation,
+            hypothesis=outcome.hypothesis,
+            surfaced_hypothesis=outcome.surfaced_hypothesis,
         )

@@ -60,7 +60,14 @@ from memory_proposals import (
     parse_proposal_origin,
     proposal_origin_id_from_signal_id,
 )
-from preference_learning import PreferenceHypothesis, PreferenceObservation
+from preference_learning import (
+    PreferenceHypothesis,
+    PreferenceLearningCaptureOutcome,
+    PreferenceObservation,
+    derive_preference_hypothesis_id,
+    merge_observation_into_hypothesis,
+    should_surface_hypothesis,
+)
 from collaborative_notes import derive_note_proposal_ids
 from collaborative_note_policy import (
     CollaborativeNoteKind,
@@ -5595,6 +5602,124 @@ class MemoryEngine:
             raise
         except GoogleAPIError as exc:
             self._raise_firestore_error("save_working_state", exc)
+
+    async def capture_preference_observation(
+        self,
+        observation: PreferenceObservation,
+        *,
+        observed_at: datetime,
+    ) -> PreferenceLearningCaptureOutcome:
+        """Atomically persist one idempotent preference-learning outcome."""
+        if not isinstance(observation, PreferenceObservation):
+            raise ValueError("observation must be a PreferenceObservation.")
+        if not self._is_aware_datetime(observed_at):
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+        self._validate_string(observation.user_id, "user_id")
+        self._validate_string(observation.project_id, "project_id")
+        self._validate_string(observation.observation_id, "observation_id")
+        hypothesis_id = derive_preference_hypothesis_id(observation)
+        workspace_ref = (
+            self._client.collection("users")
+            .document(observation.user_id)
+            .collection("workspaces")
+            .document(observation.project_id)
+        )
+        observation_ref = workspace_ref.collection(
+            "preference_observations"
+        ).document(observation.observation_id)
+        hypothesis_ref = workspace_ref.collection(
+            "preference_hypotheses"
+        ).document(hypothesis_id)
+        outcome_ref = workspace_ref.collection(
+            "preference_capture_outcomes"
+        ).document(observation.observation_id)
+        transaction = self._client.transaction()
+
+        async def capture_in_transaction(
+            transaction: AsyncTransaction,
+        ) -> PreferenceLearningCaptureOutcome:
+            outcome_snapshot = await outcome_ref.get(transaction=transaction)
+            if outcome_snapshot.exists:
+                stored_outcome = PreferenceLearningCaptureOutcome.model_validate(
+                    outcome_snapshot.to_dict()
+                )
+                if stored_outcome.observation.model_dump(
+                    exclude={"created_at"}
+                ) != observation.model_dump(exclude={"created_at"}):
+                    raise ValueError(
+                        "Preference capture conflicts with existing observation."
+                    )
+                return stored_outcome
+
+            observation_snapshot = await observation_ref.get(
+                transaction=transaction
+            )
+            hypothesis_snapshot = await hypothesis_ref.get(
+                transaction=transaction
+            )
+            if observation_snapshot.exists:
+                stored_observation = PreferenceObservation.model_validate(
+                    observation_snapshot.to_dict()
+                )
+                if stored_observation.model_dump(
+                    exclude={"created_at"}
+                ) != observation.model_dump(exclude={"created_at"}):
+                    raise ValueError(
+                        "Preference observation identity conflicts."
+                    )
+            existing = (
+                PreferenceHypothesis.model_validate(
+                    hypothesis_snapshot.to_dict()
+                )
+                if hypothesis_snapshot.exists
+                else None
+            )
+            hypothesis = merge_observation_into_hypothesis(
+                existing,
+                observation,
+                now=observed_at,
+            )
+            if hypothesis is None:
+                raise ValueError("Preference hypothesis could not be derived.")
+            surfaced = (
+                hypothesis
+                if should_surface_hypothesis(
+                    hypothesis,
+                    now=observed_at,
+                )
+                else None
+            )
+            outcome = PreferenceLearningCaptureOutcome(
+                observation=observation,
+                hypothesis=hypothesis,
+                surfaced_hypothesis=surfaced,
+            )
+            if not observation_snapshot.exists:
+                transaction.set(
+                    observation_ref,
+                    observation.model_dump(mode="python"),
+                )
+            if hypothesis != existing:
+                transaction.set(
+                    hypothesis_ref,
+                    hypothesis.model_dump(mode="python"),
+                )
+            transaction.set(
+                outcome_ref,
+                outcome.model_dump(mode="python"),
+            )
+            return outcome
+
+        run_transaction = firestore.async_transactional(
+            capture_in_transaction
+        )
+        try:
+            return await run_transaction(transaction)
+        except (GoogleAPIError, ValidationError) as exc:
+            self._raise_firestore_error(
+                "capture_preference_observation",
+                exc,
+            )
 
     async def save_preference_observation(
         self,

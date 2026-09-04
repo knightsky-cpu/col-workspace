@@ -1,3 +1,5 @@
+import asyncio
+from copy import deepcopy
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -82,6 +84,154 @@ def preference_store():
     collection.document.return_value = document
     document.set = AsyncMock()
     return client, users, user, workspaces, workspace, collection, document
+
+
+class InMemoryPreferenceDocument:
+    def __init__(self, store, path: tuple[str, ...]) -> None:
+        self.store = store
+        self.path = path
+
+    def collection(self, name: str):
+        return InMemoryPreferenceCollection(self.store, (*self.path, name))
+
+    async def get(self, transaction=None):
+        data = (
+            transaction.read(self.path)
+            if transaction is not None
+            else self.store.documents.get(self.path)
+        )
+        return SimpleNamespace(
+            exists=data is not None,
+            to_dict=lambda: deepcopy(data),
+        )
+
+
+class InMemoryPreferenceCollection:
+    def __init__(self, store, path: tuple[str, ...]) -> None:
+        self.store = store
+        self.path = path
+
+    def document(self, name: str):
+        return InMemoryPreferenceDocument(self.store, (*self.path, name))
+
+
+class InMemoryPreferenceTransaction:
+    def __init__(self, store) -> None:
+        self.store = store
+        self.documents = {}
+        self.writes = {}
+        self.reads = []
+
+    def begin(self) -> None:
+        self.documents = deepcopy(self.store.documents)
+        self.writes = {}
+        self.reads = []
+
+    def read(self, path: tuple[str, ...]):
+        data = self.documents.get(path)
+        self.reads.append((path, deepcopy(data)))
+        return data
+
+    def set(self, document, data) -> None:
+        self.writes[document.path] = deepcopy(data)
+
+    def commit(self) -> None:
+        self.store.documents.update(deepcopy(self.writes))
+        self.store.write_count += len(self.writes)
+
+
+class InMemoryPreferenceStore:
+    def __init__(self) -> None:
+        self.documents: dict[tuple[str, ...], object] = {}
+        self.write_count = 0
+        self.lock = asyncio.Lock()
+
+    def collection(self, name: str):
+        return InMemoryPreferenceCollection(self, (name,))
+
+    def transaction(self):
+        return InMemoryPreferenceTransaction(self)
+
+
+def install_atomic_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    store: InMemoryPreferenceStore,
+) -> None:
+    def run_serially(callback):
+        async def run(transaction, *args, **kwargs):
+            async with store.lock:
+                transaction.begin()
+                result = await callback(transaction, *args, **kwargs)
+                transaction.commit()
+                return result
+
+        return run
+
+    monkeypatch.setattr(
+        "database.firestore.async_transactional",
+        run_serially,
+    )
+
+
+def install_forced_conflict_runner(
+    monkeypatch: pytest.MonkeyPatch,
+    store: InMemoryPreferenceStore,
+) -> dict[str, object]:
+    competing_read_complete = asyncio.Event()
+    winner_committed = asyncio.Event()
+    stats: dict[str, object] = {
+        "callback_count": 0,
+        "retry_count": 0,
+        "initial_hypothesis_reads": [],
+        "retry_hypothesis_read": None,
+    }
+    invocation_count = 0
+
+    def hypothesis_read(transaction):
+        return next(
+            (
+                data
+                for path, data in transaction.reads
+                if "preference_hypotheses" in path
+            ),
+            None,
+        )
+
+    def run_with_one_forced_retry(callback):
+        async def run(transaction, *args, **kwargs):
+            nonlocal invocation_count
+            invocation = invocation_count
+            invocation_count += 1
+            transaction.begin()
+            result = await callback(transaction, *args, **kwargs)
+            stats["callback_count"] += 1
+            stats["initial_hypothesis_reads"].append(
+                hypothesis_read(transaction)
+            )
+
+            if invocation == 0:
+                await competing_read_complete.wait()
+                transaction.commit()
+                winner_committed.set()
+                return result
+
+            competing_read_complete.set()
+            await winner_committed.wait()
+            stats["retry_count"] += 1
+            transaction.begin()
+            result = await callback(transaction, *args, **kwargs)
+            stats["callback_count"] += 1
+            stats["retry_hypothesis_read"] = hypothesis_read(transaction)
+            transaction.commit()
+            return result
+
+        return run
+
+    monkeypatch.setattr(
+        "database.firestore.async_transactional",
+        run_with_one_forced_retry,
+    )
+    return stats
 
 
 @pytest.mark.asyncio
@@ -177,3 +327,100 @@ async def test_missing_preference_hypothesis_returns_none():
     collection.document.assert_called_once_with(
         "pref-hyp--user-1--project-b--response_length"
     )
+
+
+@pytest.mark.asyncio
+async def test_atomic_preference_capture_exact_retry_returns_stable_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryPreferenceStore()
+    install_atomic_runner(monkeypatch, store)
+    engine = MemoryEngine(store)
+    item = observation()
+
+    first = await engine.capture_preference_observation(
+        item,
+        observed_at=NOW,
+    )
+    writes_after_first = store.write_count
+    second = await engine.capture_preference_observation(
+        observation(created_at=NOW.replace(minute=1)),
+        observed_at=NOW.replace(minute=1),
+    )
+
+    assert second == first
+    assert second.observation == item
+    assert second.hypothesis.evidence_count == 1
+    assert second.surfaced_hypothesis is None
+    assert store.write_count == writes_after_first
+
+
+@pytest.mark.asyncio
+async def test_atomic_preference_capture_keeps_concurrent_distinct_observations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryPreferenceStore()
+    retry_stats = install_forced_conflict_runner(monkeypatch, store)
+    engine = MemoryEngine(store)
+    first = observation()
+    second = observation(
+        observation_id="pref-obs--turn-2",
+        source_turn_id="turn-2",
+        source_message_id="message-2",
+    )
+
+    await asyncio.gather(
+        engine.capture_preference_observation(first, observed_at=NOW),
+        engine.capture_preference_observation(second, observed_at=NOW),
+    )
+    stored = await engine.get_preference_hypothesis(
+        "user-1",
+        "project-a",
+        "pref-hyp--user-1--project-a--response_length",
+    )
+
+    assert stored is not None
+    assert stored.evidence_count == 2
+    assert stored.confidence == 0.70
+    assert set(stored.source_observation_ids) == {
+        first.observation_id,
+        second.observation_id,
+    }
+    assert retry_stats["initial_hypothesis_reads"] == [None, None]
+    assert retry_stats["retry_count"] == 1
+    assert retry_stats["callback_count"] == 3
+    assert retry_stats["retry_hypothesis_read"] is not None
+
+
+@pytest.mark.asyncio
+async def test_atomic_preference_capture_preserves_stable_surface_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryPreferenceStore()
+    install_atomic_runner(monkeypatch, store)
+    engine = MemoryEngine(store)
+    first = observation()
+    second = observation(
+        observation_id="pref-obs--turn-2",
+        source_turn_id="turn-2",
+        source_message_id="message-2",
+    )
+
+    first_outcome = await engine.capture_preference_observation(
+        first,
+        observed_at=NOW,
+    )
+    surfaced = await engine.capture_preference_observation(
+        second,
+        observed_at=NOW,
+    )
+    retry = await engine.capture_preference_observation(
+        second,
+        observed_at=NOW,
+    )
+
+    assert first_outcome.surfaced_hypothesis is None
+    assert surfaced.surfaced_hypothesis is not None
+    assert surfaced.surfaced_hypothesis.evidence_count == 2
+    assert surfaced.surfaced_hypothesis.confidence == 0.70
+    assert retry == surfaced

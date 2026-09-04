@@ -19,6 +19,41 @@ class FakeDatabase:
         self.saved_hypotheses.append(hypothesis)
         self.hypothesis = hypothesis
 
+    async def capture_preference_observation(
+        self,
+        observation,
+        *,
+        observed_at,
+    ):
+        from preference_learning import (
+            PreferenceLearningCaptureOutcome,
+            merge_observation_into_hypothesis,
+            should_surface_hypothesis,
+        )
+
+        hypothesis = merge_observation_into_hypothesis(
+            self.hypothesis,
+            observation,
+            now=observed_at,
+        )
+        self.saved_observations.append(observation)
+        if hypothesis is not None:
+            self.saved_hypotheses.append(hypothesis)
+            self.hypothesis = hypothesis
+        return PreferenceLearningCaptureOutcome(
+            observation=observation,
+            hypothesis=hypothesis,
+            surfaced_hypothesis=(
+                hypothesis
+                if hypothesis is not None
+                and should_surface_hypothesis(
+                    hypothesis,
+                    now=observed_at,
+                )
+                else None
+            ),
+        )
+
 
 class FakeExtractor:
     async def extract(self, command):
@@ -144,11 +179,11 @@ async def test_capture_failure_logs_without_private_identifiers_or_content(
     from preference_learning_service import PreferenceLearningService
 
     class FailingDatabase(FakeDatabase):
-        async def get_preference_hypothesis(
+        async def capture_preference_observation(
             self,
-            user_id,
-            project_id,
-            hypothesis_id,
+            observation,
+            *,
+            observed_at,
         ):
             raise RuntimeError("private database detail")
 
@@ -185,6 +220,32 @@ async def test_capture_failure_logs_without_private_identifiers_or_content(
         "private database detail",
     ]:
         assert private_marker not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_capture_strict_propagates_persistence_failure() -> None:
+    from preference_learning_service import PreferenceLearningService
+
+    class FailingDatabase(FakeDatabase):
+        async def capture_preference_observation(
+            self,
+            observation,
+            *,
+            observed_at,
+        ):
+            raise RuntimeError("preference persistence unavailable")
+
+    service = PreferenceLearningService(
+        database=FailingDatabase(),
+        extractor=FakeExtractor(),
+        clock=lambda: datetime(2026, 8, 28, tzinfo=UTC),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="preference persistence unavailable",
+    ):
+        await service.capture_strict(command())
 
 
 @pytest.mark.asyncio

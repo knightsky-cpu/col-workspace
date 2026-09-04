@@ -2638,3 +2638,50 @@ Deferred cleanup:
 - remove compatibility request builders and chat-state helpers after the
   public contract retirement boundary is approved;
 - retain historical persisted turn metadata until a separate schema migration.
+
+## Atomic/Idempotent Preference-Capture Prerequisite (Pass A)
+
+This uncommitted review pass adds the persistence prerequisite for moving
+preference capture out of the synchronous chat lifecycle later. Chat
+orchestration and queue behavior are intentionally unchanged in Pass A.
+
+Completed work:
+
+- one Firestore transaction now covers deterministic observation insertion,
+  hypothesis read/merge/write, and capture-outcome persistence;
+- the deterministic observation id keys an immutable capture-outcome document,
+  so exact retries return the original observation, hypothesis, and surfaced
+  hypothesis snapshot without incrementing evidence or rewriting state;
+- retry-time clock drift does not change the stored logical outcome, while
+  conflicting content under the same observation id is rejected;
+- distinct concurrent observations targeting one hypothesis use Firestore
+  transaction conflict retries, preventing lost hypothesis updates;
+- the transaction still delegates confidence, contradiction, evidence-count,
+  age, and surfacing decisions to the existing preference-learning policy
+  functions;
+- `PreferenceLearningService.capture_strict(...)` exposes the same capture
+  behavior with persistence failures propagated for a future worker, while the
+  current synchronous `capture(...)` caller retains its sanitized no-effect
+  failure behavior.
+
+TDD evidence:
+
+- RED: atomic database tests failed because no atomic capture operation
+  existed, and the strict service test failed because no propagating service
+  path existed;
+- GREEN: the transaction and strict service path made exact retry, concurrent
+  merge, stable threshold outcome, and persistence propagation tests pass;
+- RED/GREEN follow-up: a retry with a later clock value initially conflicted;
+  logical observation comparison was narrowed to exclude only `created_at`, so
+  the original persisted outcome is now returned unchanged.
+
+Pass B — next approved dependency:
+
+- add durable queued/background preference-capture work using the Pass A
+  primitive, then remove synchronous capture from the live chat lifecycle;
+- preference capture is non-authoritative internal learning work. Preserve the
+  current user-facing response behavior and do not append its queued receipt to
+  `ChatResponse` unless a source-backed policy requirement is identified;
+- keep surfaced hypotheses flowing into the existing Memory-owned
+  preference-confirmation job, preserving provenance, thresholds, governance,
+  and duplicate suppression.

@@ -80,6 +80,23 @@ class PreferenceHypothesis(StrictModel):
         return self
 
 
+class PreferenceLearningCaptureOutcome(StrictModel):
+    observation: PreferenceObservation
+    hypothesis: PreferenceHypothesis
+    surfaced_hypothesis: PreferenceHypothesis | None = None
+
+    @model_validator(mode="after")
+    def validate_surface_snapshot(self) -> "PreferenceLearningCaptureOutcome":
+        if (
+            self.surfaced_hypothesis is not None
+            and self.surfaced_hypothesis != self.hypothesis
+        ):
+            raise ValueError(
+                "Surfaced preference hypothesis must match the capture outcome."
+            )
+        return self
+
+
 def preference_hypothesis_confirmation_digest(
     *,
     user_id: str,
