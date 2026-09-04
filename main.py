@@ -1790,32 +1790,6 @@ def _partial_failure_response(
     )
 
 
-def _memory_clarification_selection_fallback_response(
-    *,
-    decision_actions: tuple[AgentActionReceipt, ...],
-    decision_memory_proposals: tuple[VersionedMemoryProposalReceipt, ...],
-) -> ChatResponse | None:
-    if not decision_memory_proposals:
-        return None
-    proposal = decision_memory_proposals[0]
-    category = proposal.category.replace("_", " ").capitalize()
-    response = (
-        "I created a pending memory proposal for "
-        f"{category}: {proposal.proposed_value}. "
-        "Please approve or reject it before I use it as saved memory."
-    )
-    return ChatResponse(
-        response=response,
-        actions=list(decision_actions),
-        artifacts=[],
-        artifact_feedback=[],
-        citations=[],
-        memory_proposals=list(decision_memory_proposals),
-        memory_clarifications=[],
-        adaptations=[],
-    )
-
-
 def _memory_clarification_preflight_fallback_response(
     *,
     decision_memory_clarifications: tuple[MemoryClarificationReceipt, ...],
@@ -5118,88 +5092,6 @@ async def _execute_chat(
             )
         chat_turn_claim = effect_result.claim
 
-    if payload.memory_clarification_selection is not None:
-        if chat_turn_claim is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Chat turn state is invalid.",
-            )
-        selection = payload.memory_clarification_selection
-        try:
-            selection_result = (
-                await memory_service.select_memory_clarification(
-                    SelectMemoryClarificationCommand(
-                        user_id=effective_user_id,
-                        workspace_id=effective_project_id,
-                        session_id=payload.session_id,
-                        source_message_id=user_message_id,
-                        clarification_id=selection.clarification_id,
-                        selected_candidate_index=(
-                            selection.selected_candidate_index
-                        ),
-                        turn_lease=ProposalTurnLease(
-                            turn_id=chat_turn_claim.ids.turn_id,
-                            owner_token=chat_turn_claim.owner_token,
-                        ),
-                    )
-                )
-            )
-        except MemoryClarificationSelectionError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Memory clarification cannot be selected.",
-            ) from exc
-        except (
-            MemoryProposalConflictError,
-            MemoryProposalOriginConflictError,
-            MemorySignalAlreadyActiveError,
-        ) as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Memory proposal state conflicts with this request."
-                ),
-            ) from exc
-        except ChatSessionOwnershipError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            _raise_chat_session_unavailable(exc)
-        except (ChatTurnOwnershipError, ChatTurnStateError) as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            _raise_chat_turn_operation_http_error(
-                exc,
-                "clarification selection",
-            )
-        except (
-            MemoryClarificationStateError,
-            MemoryProposalStateError,
-        ) as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            logger.error(
-                "Memory clarification selection state failed (%s).",
-                type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Memory clarification state is invalid.",
-            ) from exc
-        except MemoryEngineError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            _raise_database_http_error(exc)
-        except ValueError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Memory clarification selection is invalid.",
-            ) from exc
-        if isinstance(selection_result, NaturalMemoryNoEffectResult):
-            decision_actions = ()
-            decision_memory_proposals = ()
-        else:
-            decision_actions = (selection_result.action,)
-            decision_memory_proposals = (selection_result.proposal,)
-
     if (
         chat_turn_claim is not None
         and payload.memory_decision is None
@@ -5537,17 +5429,8 @@ async def _execute_chat(
             runtime_error=exc,
         )
         _log_chat_turn_timeout(exc)
-        fallback_response = (
-            _memory_clarification_selection_fallback_response(
-                decision_actions=decision_actions,
-                decision_memory_proposals=decision_memory_proposals,
-            )
-            if payload.memory_clarification_selection is not None
-            else _memory_clarification_preflight_fallback_response(
-                decision_memory_clarifications=(
-                    decision_memory_clarifications
-                ),
-            )
+        fallback_response = _memory_clarification_preflight_fallback_response(
+            decision_memory_clarifications=decision_memory_clarifications,
         )
         failure_claim = exc.chat_turn_claim or chat_turn_claim
         if fallback_response is not None and failure_claim is not None:
@@ -5602,17 +5485,8 @@ async def _execute_chat(
             "Agent_Col response failed (%s).",
             type(exc).__name__,
         )
-        fallback_response = (
-            _memory_clarification_selection_fallback_response(
-                decision_actions=decision_actions,
-                decision_memory_proposals=decision_memory_proposals,
-            )
-            if payload.memory_clarification_selection is not None
-            else _memory_clarification_preflight_fallback_response(
-                decision_memory_clarifications=(
-                    decision_memory_clarifications
-                ),
-            )
+        fallback_response = _memory_clarification_preflight_fallback_response(
+            decision_memory_clarifications=decision_memory_clarifications,
         )
         failure_claim = exc.chat_turn_claim or chat_turn_claim
         if fallback_response is not None and failure_claim is not None:

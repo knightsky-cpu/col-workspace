@@ -2779,3 +2779,34 @@ Audited closure sequence:
 3. run automated cross-boundary lifecycle verification;
 4. perform manual break-testing across chat, resource surfaces, process
    restart, retry, failure, and mixed-intent behavior.
+
+## Dead Chat Clarification-Selection Execution Cleanup
+
+This uncommitted cleanup pass removes only the unreachable synchronous
+`memory_clarification_selection` execution lifecycle behind `/api/chat`'s
+authoritative early HTTP 409 guard.
+
+Removed:
+
+- the dead `_execute_chat` branch that called
+  `select_memory_clarification(...)` with an active `ProposalTurnLease`;
+- its dead synchronous result/error mapping into chat-owned actions and Memory
+  proposal receipts;
+- the selection-specific responder failure/timeout fallback helper and its
+  unreachable call sites.
+
+Preserved:
+
+- the early `/api/chat` 409 compatibility response;
+- the direct Memory clarification-selection API with `turn_lease=None`;
+- queued natural-language clarification selection;
+- `ChatRequest.memory_clarification_selection`;
+- historical `ChatTurnRequest` and persisted structured-decision metadata;
+- all other deferred structured-decision branches and inert lease plumbing.
+
+Remaining closure work:
+
+- separately approved cleanup of the other unreachable structured-decision
+  branches, inert turn-lease/effect plumbing, and inactive frontend builders;
+- AgentJob retry/recovery/drainer work remains the next later phase, followed by
+  automated boundary verification and manual break-testing.
