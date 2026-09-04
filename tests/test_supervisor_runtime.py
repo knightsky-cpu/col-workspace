@@ -125,6 +125,23 @@ def clarification_function_response() -> types.FunctionResponse:
     )
 
 
+def queued_memory_clarification_response() -> types.FunctionResponse:
+    return types.FunctionResponse(
+        name="propose_memory_signal",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "memory-clarification-job-1",
+                "action_kind": "propose_memory_signal",
+                "status": "queued",
+                "display_label": "Memory clarification",
+                "created_at": "2026-08-26T16:00:00Z",
+                "agent_label": "Memory Analyst",
+            },
+        },
+    )
+
+
 def pending_note_function_response() -> types.FunctionResponse:
     return types.FunctionResponse(
         name="propose_collaborative_note",
@@ -926,16 +943,20 @@ async def test_run_turn_collects_version_two_proposal_receipt_truthfully(
 
 
 @pytest.mark.asyncio
-async def test_run_turn_collects_memory_clarification_receipt_truthfully(
+async def test_run_turn_collects_queued_memory_clarification_only(
 ) -> None:
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
 
     runtime = SupervisorRuntime(
         runner=FakeRunner(
             events=[
-                FakeEvent(None, False, [clarification_function_response()]),
                 FakeEvent(
-                    "Which preference would you like me to remember?",
+                    None,
+                    False,
+                    [queued_memory_clarification_response()],
+                ),
+                FakeEvent(
+                    "Memory clarification queued.",
                     True,
                 ),
             ]
@@ -953,23 +974,10 @@ async def test_run_turn_collects_memory_clarification_receipt_truthfully(
     )
 
     assert result.memory_proposals == ()
-    assert len(result.memory_clarifications) == 1
-    assert result.memory_clarifications[0].model_dump(mode="json") == {
-        "clarification_id": "memory-clarification--clarification-1",
-        "choices": [
-            {
-                "candidate_index": 0,
-                "category_label": "Response length",
-                "value_label": "detailed",
-            },
-            {
-                "candidate_index": 1,
-                "category_label": "Explanation structure",
-                "value_label": "step by step",
-            },
-        ],
-        "expires_at": "2026-08-25T16:15:00Z",
-    }
+    assert result.memory_clarifications == ()
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].job_id == "memory-clarification-job-1"
+    assert result.queued_actions[0].display_label == "Memory clarification"
 
 
 @pytest.mark.asyncio

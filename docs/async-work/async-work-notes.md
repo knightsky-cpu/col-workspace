@@ -2509,3 +2509,63 @@ Work deferred until core decoupling is complete:
   queued action receipts;
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
+
+## Responder ClarifyDecision Queue Decoupling Pass
+
+This uncommitted review pass moved responder-generated ambiguous Memory
+decisions onto the existing Memory AgentJob lifecycle.
+
+Completed work:
+
+- the raw and validated queue predicates now admit only
+  `profile_candidate` and `clarify` decisions;
+- responder `ClarifyDecision` calls queue exactly one Memory Analyst job and
+  return only its queued receipt;
+- the responder tool no longer calls synchronous Memory clarification
+  creation when the production job repository is available;
+- supervisor and chat responses carry no completed clarification effect for
+  this path;
+- the existing worker restores the queued `ClarifyDecision` and creates the
+  governed clarification with `turn_lease=None`;
+- deterministic preflight duplicate suppression, preference confirmation,
+  profile-candidate queueing, and direct clarification selection remain
+  unchanged.
+
+TDD evidence:
+
+- RED: the focused responder-tool regression failed because `clarify` still
+  fell through to synchronous `handle_natural_memory_decision`;
+- GREEN: admitting only `clarify` alongside `profile_candidate` in the raw and
+  validated queue predicates made the tool return one queued receipt without a
+  synchronous service call;
+- REFACTOR: none.
+
+Focused verification:
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_tool.py tests/test_memory_proposal_job_worker.py
+42 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_supervisor_runtime.py -k "queued_memory or clarification or prequeued"
+9 passed, 40 deselected, 1 warning
+```
+
+```text
+venv/bin/pytest -q tests/test_main.py::test_chat_returns_responder_queued_clarification_without_effect tests/test_main.py::test_chat_preflights_ambiguous_memory_request_into_clarification tests/test_main.py::test_chat_passes_preflight_receipt_tuple_through_real_turn_service tests/test_main.py::test_chat_preflight_still_captures_unrelated_preference_feedback tests/test_main.py::test_chat_surfaces_preference_confirmation_without_saving_memory tests/test_agent_col_turn_service.py::test_turn_service_preserves_preflight_memory_queue_without_requeue
+6 passed, 1 warning
+```
+
+```text
+venv/bin/python -m py_compile memory_proposal_tool.py
+passed
+```
+
+Next remaining live chat-owned Memory dependency:
+
+- legacy `memory_clarification_selection` requests sent through `/api/chat`
+  still synchronously consume the clarification with an active
+  `ProposalTurnLease`; the active frontend uses the direct Memory selection
+  API, so retiring or redirecting this compatibility path is a separate
+  bounded pass.

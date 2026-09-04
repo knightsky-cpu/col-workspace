@@ -510,7 +510,7 @@ async def _append_memory_job_event(
 
 
 def _should_record_memory_job(command: NaturalMemoryCommand) -> bool:
-    return command.decision.kind == "profile_candidate"
+    return command.decision.kind in {"profile_candidate", "clarify"}
 
 
 async def _queue_memory_agent_job(
@@ -618,7 +618,7 @@ def _raw_optional_mapping(value: object | None) -> dict[str, object] | None:
 
 
 def _should_queue_raw_memory_job(decision: dict[str, object]) -> bool:
-    return decision.get("kind") == "profile_candidate"
+    return decision.get("kind") in {"profile_candidate", "clarify"}
 
 
 async def _queue_raw_memory_agent_job(

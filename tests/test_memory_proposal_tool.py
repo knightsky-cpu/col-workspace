@@ -1073,37 +1073,20 @@ async def test_proposal_tool_returns_application_owned_clarification() -> None:
 
 
 @pytest.mark.asyncio
-async def test_proposal_tool_keeps_clarification_direct_when_job_repository_exists(
+async def test_proposal_tool_queues_clarification_once_without_service_call(
 ) -> None:
-    from memory_clarifications import MemoryClarificationReceipt
     from memory_proposal_tool import create_propose_memory_signal_tool
 
     service = RecordingMemoryService()
     service.handle_natural_memory_decision = AsyncMock(
-        return_value=NaturalMemoryClarificationResult(
-            status="clarification_required",
-            clarification=MemoryClarificationReceipt(
-                clarification_id="memory-clarification--abc",
-                choices=[
-                    {
-                        "candidate_index": 0,
-                        "category_label": "Preferred name",
-                        "value_label": "wifiknight",
-                    },
-                    {
-                        "candidate_index": 1,
-                        "category_label": "Development environments",
-                        "value_label": "macOS and Linux",
-                    },
-                ],
-                expires_at=NOW,
-            ),
-        )
+        side_effect=AssertionError("clarification must execute in the worker")
     )
     repository = RecordingAgentJobRepository()
+    dispatched = []
     tool = create_propose_memory_signal_tool(
         service,
         agent_job_repository=repository,
+        memory_job_dispatcher=dispatched.append,
     )
 
     result = await tool.run_async(
@@ -1131,10 +1114,14 @@ async def test_proposal_tool_keeps_clarification_direct_when_job_repository_exis
         ),
     )
 
-    assert result["status"] == "clarification_required"
-    service.handle_natural_memory_decision.assert_awaited_once()
-    assert repository.enqueued == []
-    assert repository.payloads == []
+    assert result["status"] == "queued"
+    assert result["queued_action"]["action_kind"] == "propose_memory_signal"
+    assert result["queued_action"]["display_label"] == "Memory clarification"
+    service.handle_natural_memory_decision.assert_not_awaited()
+    assert len(repository.enqueued) == 1
+    assert len(repository.payloads) == 1
+    assert repository.payloads[0].payload["decision"]["kind"] == "clarify"
+    assert dispatched == [repository.enqueued[0]]
 
 
 @pytest.mark.parametrize(

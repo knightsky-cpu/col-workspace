@@ -8632,6 +8632,49 @@ async def test_chat_surfaces_preference_confirmation_without_saving_memory(
 
 
 @pytest.mark.asyncio
+async def test_chat_returns_responder_queued_clarification_without_effect(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    queued_action = QueuedActionReceipt(
+        job_id="memory-responder-clarification-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification",
+        created_at=MEMORY_NOW,
+        agent_label="Memory Analyst",
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="I queued a Memory clarification.",
+        queued_actions=(queued_action,),
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "responder-memory-clarification-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": (
+                "Please assess the two reusable preferences I mentioned and "
+                "ask for clarification if needed."
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["queued_actions"] == [
+        queued_action.model_dump(mode="json")
+    ]
+    assert response.json()["memory_clarifications"] == []
+    completed_response = service_state.database.complete_calls[-1][1]
+    assert completed_response.queued_actions == [queued_action]
+    assert completed_response.memory_clarifications == []
+
+
+@pytest.mark.asyncio
 async def test_chat_does_not_capture_preference_on_replay_or_structured_decision(
     client: httpx.AsyncClient,
     service_state: ServiceState,
