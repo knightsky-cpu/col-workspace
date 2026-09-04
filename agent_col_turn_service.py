@@ -989,6 +989,16 @@ class AgentColTurnService:
             claim,
             observed_at=observed_at,
         )
+        if _has_queued_action_kind(prequeued_actions, "create_artifact"):
+            return await self._complete_prequeued_turn(
+                command,
+                claim,
+                AgentColRouteV4.ARTIFACT,
+                deadline,
+                started_at=started_at,
+                prequeued_actions=prequeued_actions,
+                on_delta=on_delta,
+            )
         numeric_projection = project_routing_numeric_candidates(
             command.message
         )
@@ -1111,16 +1121,6 @@ class AgentColTurnService:
         )
 
         if directive.route is AgentColRouteV4.ARTIFACT:
-            if _has_queued_action_kind(prequeued_actions, "create_artifact"):
-                return await self._complete_prequeued_turn(
-                    command,
-                    claim,
-                    directive.route,
-                    deadline,
-                    started_at=started_at,
-                    prequeued_actions=prequeued_actions,
-                    on_delta=on_delta,
-                )
             return await self._complete_artifact_turn(
                 command,
                 claim,

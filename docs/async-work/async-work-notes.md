@@ -1606,3 +1606,86 @@ Work deferred until core decoupling is complete:
   queued action receipts;
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
+
+## Explicit Artifact Router Decoupling Pass
+
+This pass removed the live artifact-router dependency after deterministic
+artifact work has already been queued.
+
+Completed work:
+
+- explicit artifact creation requests that are recognized by the deterministic
+  prequeue path now enqueue `create_artifact` and complete the chat turn through
+  the prequeued-action responder path without calling the artifact router;
+- combined explicit artifact plus workspace-note requests preserve action
+  ordering and pass both queued receipts to the responder;
+- ambiguous artifact discussion still uses the artifact router and still fails
+  through the existing routing-timeout path when the router times out;
+- artifact generation and persistence remain owned by the queued artifact job
+  worker, not by the chat turn.
+
+Why this matters:
+
+The prior artifact execution decoupling moved generation/persistence behind
+AgentJob, but explicit artifact turns could still fail after successful prequeue
+because the chat turn called the artifact router before responding. That left a
+live blocking dependency in front of an already-authoritative durable lifecycle.
+After this pass, once explicit artifact work is queued, chat does not need the
+router to decide the same artifact lifecycle again.
+
+TDD evidence recorded during the pass:
+
+- RED:
+  `test_explicit_artifact_and_note_request_completes_without_router` failed
+  because the turn service still called `TimingOutV4RoutingRequest` and raised
+  `AgentColTurnRoutingTimeoutError` after queuing artifact and note work.
+- GREEN: `_run_artifact_capable_with_deadline` now short-circuits to
+  `_complete_prequeued_turn` when prequeued actions include `create_artifact`,
+  before building router input or calling the artifact router.
+- REFACTOR: the old post-router duplicate `create_artifact` prequeue branch was
+  removed because the prequeued artifact path now exits earlier.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_agent_col_turn_service_artifacts.py::test_explicit_artifact_and_note_request_completes_without_router
+1 passed, 1 warning
+```
+
+```text
+venv/bin/pytest -q tests/test_agent_col_turn_service_artifacts.py -k "explicit_artifact_and_note_request or ambiguous_artifact_discussion or artifact"
+12 passed, 1 warning
+```
+
+```text
+venv/bin/pytest -q tests/test_agent_col_turn_service.py -k "prequeue or note or memory"
+13 passed, 45 deselected, 1 warning
+```
+
+Remaining direct decoupling:
+
+- explicit workspace-note and memory prequeue paths still run through the
+  artifact-capable turn path and can still depend on router completion even
+  after deterministic durable work has been queued;
+- ambiguous artifact requests still require chat-time routing, which is
+  intentional until a separate artifact-intent lifecycle exists outside chat;
+- legacy structured-decision schemas, frontend request helpers, and unreachable
+  backend branches remain as deferred cleanup.
+
+Next proposed pass:
+
+- remove the artifact-router dependency for explicit note-only and memory-only
+  durable requests once their deterministic prequeue has already produced
+  queued actions, while preserving router behavior for ordinary chat and
+  ambiguous artifact discussion.
+
+Work deferred until core decoupling is complete:
+
+- structured-decision cleanup: remove retired frontend request builders,
+  retired structured chat fields, and unreachable backend execution branches
+  only after the active lifecycle dependencies are gone;
+- broad manual end-to-end browser acceptance for every drawer action;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.

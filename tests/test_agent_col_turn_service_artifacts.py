@@ -378,11 +378,10 @@ async def test_turn_service_queues_artifact_before_responder_without_generation(
 
 
 @pytest.mark.asyncio
-async def test_explicit_artifact_and_note_request_queues_before_router_timeout(
+async def test_explicit_artifact_and_note_request_completes_without_router(
 ) -> None:
     from agent_col_turn_service import (
         AgentColTurnCommand,
-        AgentColTurnRoutingTimeoutError,
         AgentColTurnService,
     )
 
@@ -418,32 +417,40 @@ async def test_explicit_artifact_and_note_request_queues_before_router_timeout(
     )
     artifact_executor = QueueOnlyArtifactExecutor(artifact_action)
     note_queue = RecordingNoteQueue(note_action)
+    responder = RecordingResponder()
     routing = TimingOutV4RoutingRequest()
     service = AgentColTurnService(
         routing_client=object(),
         expert_executor=RecordingExpertExecutor(),
-        responder_runtime=RecordingResponder(),
+        responder_runtime=responder,
         artifact_executor=artifact_executor,
         note_queue=note_queue,
         artifact_routing_request=routing,
         wall_clock=lambda: NOW,
     )
 
-    with pytest.raises(AgentColTurnRoutingTimeoutError) as exc_info:
-        await service.run_turn(
-            AgentColTurnCommand(
-                project_id=claim.request.project_id,
-                session_id=claim.request.session_id,
-                user_id=claim.request.user_id,
-                message=claim.request.message,
-                chat_turn_claim=claim,
-            )
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id=claim.request.project_id,
+            session_id=claim.request.session_id,
+            user_id=claim.request.user_id,
+            message=claim.request.message,
+            chat_turn_claim=claim,
         )
+    )
 
     assert len(artifact_executor.queue_commands) == 1
     assert len(note_queue.commands) == 1
-    assert len(routing.calls) == 1
-    assert exc_info.value.queued_actions == (artifact_action, note_action)
+    assert routing.calls == []
+    assert result.actions == ()
+    assert result.artifacts == ()
+    assert result.queued_actions == (artifact_action, note_action)
+    assert result.chat_turn_claim is claim
+    assert len(responder.contexts) == 1
+    assert responder.contexts[0].prequeued_actions == (
+        artifact_action,
+        note_action,
+    )
     assert artifact_executor.queue_commands[0].routing_directive.route == "artifact"
     assert artifact_executor.queue_commands[0].accepted_action_index == 0
     assert (
