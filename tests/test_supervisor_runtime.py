@@ -530,6 +530,7 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
             "Remember that I prefer concise responses."
         ),
         "collaborative_note_decision_present": False,
+        "note_prequeued_for_turn": False,
         "note_turn_id": "a" * 64,
         "note_turn_owner_token": "owner-token-1",
     }
@@ -591,6 +592,7 @@ async def test_run_turn_places_server_owned_note_context_in_session_state(
             "Agent Col, note that this workspace must use API v2."
         ),
         "collaborative_note_decision_present": False,
+        "note_prequeued_for_turn": False,
         "note_turn_id": "a" * 64,
         "note_turn_owner_token": "owner-token-1",
     }
@@ -1128,6 +1130,41 @@ async def test_run_turn_marks_memory_prequeued_in_tool_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_turn_marks_note_prequeued_in_tool_state() -> None:
+    from schemas import QueuedActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    sessions = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(events=[FakeEvent("Workspace note work is queued.", True)]),
+        session_service=sessions,
+    )
+
+    await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Agent Col, note that this workspace must use API v2.",
+            source_message_id="message-1",
+            prequeued_actions=(
+                QueuedActionReceipt(
+                    job_id="note-job-1",
+                    action_kind="propose_collaborative_note",
+                    status="queued",
+                    display_label="Workspace note: API version",
+                    created_at=datetime(2026, 8, 22, 16, 0, tzinfo=UTC),
+                    agent_label="Note Curator",
+                ),
+            ),
+        )
+    )
+
+    state = dict(sessions.created[0]["state"])
+    assert state["note_prequeued_for_turn"] is True
+
+
+@pytest.mark.asyncio
 async def test_run_turn_ignores_duplicate_queued_memory_after_prequeued_work(
 ) -> None:
     from schemas import QueuedActionReceipt
@@ -1179,6 +1216,60 @@ async def test_run_turn_ignores_duplicate_queued_memory_after_prequeued_work(
 
     assert len(result.queued_actions) == 1
     assert result.queued_actions[0].job_id == "memory-job-1"
+
+
+@pytest.mark.asyncio
+async def test_run_turn_ignores_duplicate_queued_note_after_prequeued_work(
+) -> None:
+    from schemas import QueuedActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    duplicate_response = types.FunctionResponse(
+        name="propose_collaborative_note",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "note-job-2",
+                "action_kind": "propose_collaborative_note",
+                "status": "queued",
+                "display_label": "Workspace note: API version",
+                "created_at": "2026-08-22T16:00:00Z",
+                "agent_label": "Note Curator",
+            },
+        },
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(None, False, [duplicate_response]),
+                FakeEvent("Workspace note work is queued.", True),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Agent Col, note that this workspace must use API v2.",
+            source_message_id="message-1",
+            prequeued_actions=(
+                QueuedActionReceipt(
+                    job_id="note-job-1",
+                    action_kind="propose_collaborative_note",
+                    status="queued",
+                    display_label="Workspace note: API version",
+                    created_at=datetime(2026, 8, 22, 16, 0, tzinfo=UTC),
+                    agent_label="Note Curator",
+                ),
+            ),
+        )
+    )
+
+    assert len(result.queued_actions) == 1
+    assert result.queued_actions[0].job_id == "note-job-1"
 
 
 @pytest.mark.asyncio

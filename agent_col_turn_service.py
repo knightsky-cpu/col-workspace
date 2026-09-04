@@ -368,12 +368,15 @@ def _stable_merge(
 def _stable_merge_queued_actions(
     *groups: tuple[QueuedActionReceipt, ...],
 ) -> tuple[QueuedActionReceipt, ...]:
+    singleton_action_kinds = {
+        "propose_memory_signal",
+        "propose_collaborative_note",
+    }
     merged: list[QueuedActionReceipt] = []
     for group in groups:
         for item in group:
-            if item.action_kind == "propose_memory_signal" and any(
-                existing.action_kind == "propose_memory_signal"
-                for existing in merged
+            if item.action_kind in singleton_action_kinds and any(
+                existing.action_kind == item.action_kind for existing in merged
             ):
                 continue
             if item not in merged:

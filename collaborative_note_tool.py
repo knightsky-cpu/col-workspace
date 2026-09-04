@@ -206,6 +206,20 @@ def _turn_has_precompleted_durable_effect(tool_context: ToolContext) -> bool:
     return value
 
 
+def _turn_has_prequeued_note(tool_context: ToolContext) -> bool:
+    state = getattr(tool_context, "state", None)
+    if not callable(getattr(state, "get", None)):
+        raise CollaborativeNoteToolConfigurationError(
+            "Collaborative note tool context is invalid."
+        )
+    value = state.get("note_prequeued_for_turn", False)
+    if type(value) is not bool:
+        raise CollaborativeNoteToolConfigurationError(
+            "Collaborative note tool context is invalid."
+        )
+    return value
+
+
 def _note_job_digest(command: NaturalCollaborativeNoteCommand) -> str:
     turn_id = command.turn_lease.turn_id if command.turn_lease else ""
     material = "\0".join(
@@ -535,6 +549,8 @@ def create_propose_collaborative_note_tool(
             if not isinstance(validated_decision, NoteCandidateDecision):
                 return {"status": "no_note"}
             if _turn_has_precompleted_durable_effect(tool_context):
+                return {"status": "no_note"}
+            if _turn_has_prequeued_note(tool_context):
                 return {"status": "no_note"}
             command = _server_command(
                 decision=validated_decision,

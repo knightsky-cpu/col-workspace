@@ -324,6 +324,40 @@ async def test_note_tool_skips_candidate_when_turn_already_has_durable_effect(
 
 
 @pytest.mark.asyncio
+async def test_note_tool_does_not_enqueue_when_note_prequeued_for_turn(
+) -> None:
+    from collaborative_note_tool import create_propose_collaborative_note_tool
+
+    dispatched = []
+    jobs = RecordingAgentJobRepository()
+    service = RecordingCollaborativeNoteService()
+    tool = create_propose_collaborative_note_tool(
+        service,
+        agent_job_repository=jobs,
+        note_job_dispatcher=dispatched.append,
+    )
+    state = note_tool_state() | {"note_prequeued_for_turn": True}
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "note_candidate",
+                "note_kind": "constraint",
+                "title": "API version",
+                "body": "Use API version 2.",
+                "evidence_text": "this workspace must use API version 2",
+            }
+        },
+        tool_context=SimpleNamespace(state=State(value=state, delta={})),
+    )
+
+    assert result == {"status": "no_note"}
+    assert service.commands == []
+    assert jobs.enqueued == []
+    assert dispatched == []
+
+
+@pytest.mark.asyncio
 async def test_note_tool_rejects_unsafe_or_ungrounded_candidates() -> None:
     from collaborative_note_tool import create_propose_collaborative_note_tool
 

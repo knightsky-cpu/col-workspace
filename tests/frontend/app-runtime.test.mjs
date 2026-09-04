@@ -42,10 +42,12 @@ function node(tagName = "div") {
     textContent: "",
     scrollHeight: 0,
     scrollTop: 0,
+    replaceChildrenCount: 0,
     append(...items) {
       this.children.push(...items);
     },
     replaceChildren(...items) {
+      this.replaceChildrenCount += 1;
       this.children = items;
     },
     setAttribute(name, value) {
@@ -2605,7 +2607,7 @@ test("agent panel updates from job stream before polling interval", async (t) =>
   await submitPromise;
 });
 
-test("completed background jobs refresh work and notes while chat remains pending", async () => {
+test("completed background jobs refresh work notes and memory while chat remains pending", async () => {
   const { contextForm, elements } = installOrdinaryChatRuntimeDom();
   globalThis.sessionStorage = memoryStorage();
   const chatStream = createControlledSseResponse();
@@ -2613,6 +2615,7 @@ test("completed background jobs refresh work and notes while chat remains pendin
   const calls = [];
   let blueprintCalls = 0;
   let noteCalls = 0;
+  let memoryCalls = 0;
   globalThis.fetch = async (path, init = {}) => {
     calls.push([path, init]);
     if (path === "/api/auth/config") {
@@ -2679,10 +2682,17 @@ test("completed background jobs refresh work and notes while chat remains pendin
       });
     }
     if (path.startsWith("/api/users/wifiknight/memory")) {
+      memoryCalls += 1;
       return jsonResponse(200, {
         memory_contract_version: "1.0",
         profile: null,
-        unresolved_proposals: [],
+        unresolved_proposals: memoryCalls > 1 ? [{
+          proposal_id: "memory-proposal-1",
+          category: "user_requested_memory",
+          proposed_value: "Prefers source-backed implementation notes.",
+          status: "pending",
+          expires_at: "2026-09-02T12:00:01Z",
+        }] : [],
         events: [],
       });
     }
@@ -2765,6 +2775,16 @@ test("completed background jobs refresh work and notes while chat remains pendin
         updated_at: "2026-09-01T12:00:01Z",
       },
       {
+        job_ref: "jobref_memory",
+        job_number: "003",
+        status: "completed",
+        action_kind: "propose_memory_signal",
+        agent_label: "Memory Analyst",
+        display_label: "Memory request: user_requested_memory",
+        created_at: "2026-09-01T12:00:00Z",
+        updated_at: "2026-09-01T12:00:01Z",
+      },
+      {
         job_ref: "jobref_note",
         job_number: "002",
         status: "completed",
@@ -2778,13 +2798,15 @@ test("completed background jobs refresh work and notes while chat remains pendin
   });
 
   await waitFor(
-    () => blueprintCalls > 1 && noteCalls > 1,
+    () => blueprintCalls > 1 && noteCalls > 1 && memoryCalls > 1,
     () => JSON.stringify(calls.map(([path]) => path)),
   );
   assert.match(textTree(elements.get("[data-work-list]")), /Async Work Smoke Test/);
   assert.match(textTree(elements.get("[data-notes-panel]")), /Async background work/);
+  assert.match(textTree(elements.get("[data-memory-panel]")), /source backed implementation notes/);
   const blueprintCallsAfterFirstRefresh = blueprintCalls;
   const noteCallsAfterFirstRefresh = noteCalls;
+  const memoryCallsAfterFirstRefresh = memoryCalls;
   agentStream.event("snapshot", {
     agent_job_contract_version: "1.0",
     jobs: [
@@ -2795,6 +2817,16 @@ test("completed background jobs refresh work and notes while chat remains pendin
         action_kind: "create_artifact",
         agent_label: "Artifact Builder",
         display_label: "Artifact: Async Work Smoke Test",
+        created_at: "2026-09-01T12:00:00Z",
+        updated_at: "2026-09-01T12:00:01Z",
+      },
+      {
+        job_ref: "jobref_memory",
+        job_number: "007",
+        status: "completed",
+        action_kind: "propose_memory_signal",
+        agent_label: "Memory Analyst",
+        display_label: "Memory request: user_requested_memory",
         created_at: "2026-09-01T12:00:00Z",
         updated_at: "2026-09-01T12:00:01Z",
       },
@@ -2813,6 +2845,7 @@ test("completed background jobs refresh work and notes while chat remains pendin
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(blueprintCalls, blueprintCallsAfterFirstRefresh);
   assert.equal(noteCalls, noteCallsAfterFirstRefresh);
+  assert.equal(memoryCalls, memoryCallsAfterFirstRefresh);
   assert.equal(
     calls.filter(([path]) => path === "/api/chat" || path === "/api/chat/stream").length,
     chatCallsBeforeSnapshot,
@@ -2826,6 +2859,122 @@ test("completed background jobs refresh work and notes while chat remains pendin
     artifacts: [],
     artifact_feedback: [],
     memory_proposals: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    adaptations: [],
+  });
+  await submitPromise;
+});
+
+test("chat stream deltas update chat without replacing resource panels", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const chatStream = createControlledSseResponse();
+  const calls = [];
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      return chatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-chat-delta-narrow-render-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  const input = elements.get("[data-chat-input]");
+  input.value = "Stream a response";
+  input.oninput();
+  const submitPromise = elements.get("[data-chat-form]").onsubmit({
+    preventDefault() {},
+  });
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/chat/stream"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const workReplacements = elements.get("[data-work-list]").replaceChildrenCount;
+  const notesReplacements = elements.get("[data-notes-panel]").replaceChildrenCount;
+  const memoryReplacements = elements.get("[data-memory-panel]").replaceChildrenCount;
+  const agentsReplacements = elements.get("[data-agents-panel]").replaceChildrenCount;
+
+  chatStream.delta("Partial response");
+  await waitFor(
+    () => textTree(elements.get("[data-chat-transcript]")).includes("Partial response"),
+    () => textTree(elements.get("[data-chat-transcript]")),
+  );
+
+  assert.equal(elements.get("[data-work-list]").replaceChildrenCount, workReplacements);
+  assert.equal(elements.get("[data-notes-panel]").replaceChildrenCount, notesReplacements);
+  assert.equal(elements.get("[data-memory-panel]").replaceChildrenCount, memoryReplacements);
+  assert.equal(elements.get("[data-agents-panel]").replaceChildrenCount, agentsReplacements);
+
+  chatStream.complete({
+    response: "Finished response.",
+    actions: [],
+    citations: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [],
     collaborative_note_proposals: [],
     collaborative_note_events: [],
     continuity_receipts: [],

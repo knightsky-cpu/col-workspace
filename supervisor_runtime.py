@@ -107,6 +107,15 @@ def _has_queued_memory_work(
     )
 
 
+def _has_queued_note_work(
+    queued_actions: list[QueuedActionReceipt] | tuple[QueuedActionReceipt, ...],
+) -> bool:
+    return any(
+        action.action_kind == "propose_collaborative_note"
+        for action in queued_actions
+    )
+
+
 def _has_queued_work_kind(
     queued_actions: list[QueuedActionReceipt] | tuple[QueuedActionReceipt, ...],
     action_kind: str,
@@ -479,6 +488,12 @@ class SupervisorRuntime:
                             "collaborative_note_decision_present": (
                                 context.collaborative_note_decision_present
                             ),
+                            "note_prequeued_for_turn": (
+                                _has_queued_work_kind(
+                                    queued_actions,
+                                    "propose_collaborative_note",
+                                )
+                            ),
                         }
                     )
                     if has_precompleted_durable_effect:
@@ -581,6 +596,8 @@ class SupervisorRuntime:
                                 parsed_note,
                                 QueuedCollaborativeNoteToolResponse,
                             ):
+                                if _has_queued_note_work(queued_actions):
+                                    continue
                                 if parsed_note.queued_action not in queued_actions:
                                     queued_actions.append(parsed_note.queued_action)
                             if memory_proposals or memory_clarifications:

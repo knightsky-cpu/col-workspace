@@ -678,6 +678,96 @@ async def test_turn_service_keeps_one_memory_receipt_when_responder_duplicates(
 
 
 @pytest.mark.asyncio
+async def test_turn_service_keeps_one_note_receipt_when_responder_duplicates(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = (
+        "create a workspace note that this workspace must use API version 2. "
+        "also remember that I prefer source-backed implementation notes."
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("note-duplicate-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    note_queue = RecordingNoteQueue()
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(
+            SupervisorTurnResult(
+                response="Workspace note and memory work are queued.",
+                queued_actions=(
+                    QueuedActionReceipt(
+                        job_id="note-job-2",
+                        action_kind="propose_collaborative_note",
+                        status="queued",
+                        display_label="Workspace note: duplicate queued",
+                        created_at=datetime(2026, 8, 24, tzinfo=UTC),
+                        agent_label="Note Curator",
+                    ),
+                    QueuedActionReceipt(
+                        job_id="memory-job-2",
+                        action_kind="propose_memory_signal",
+                        status="queued",
+                        display_label="Memory request: user_requested_memory",
+                        created_at=datetime(2026, 8, 24, tzinfo=UTC),
+                        agent_label="Memory Analyst",
+                    ),
+                ),
+            )
+        ),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        note_queue=note_queue,
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert len(note_queue.calls) == 1
+    assert len(memory_queue.calls) == 1
+    assert [action.action_kind for action in result.queued_actions] == [
+        "propose_collaborative_note",
+        "propose_memory_signal",
+    ]
+    assert result.queued_actions[0].job_id == "note-job-1"
+    assert result.queued_actions[1].job_id == "memory-job-1"
+
+
+@pytest.mark.asyncio
 async def test_turn_service_does_not_queue_historical_memory_recall() -> None:
     from agent_col_routing_v4 import (
         AgentColRoutingDirective as AgentColRoutingDirectiveV4,

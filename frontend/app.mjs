@@ -904,6 +904,14 @@ function renderWorkspace() {
   renderLayout();
 }
 
+function renderChatSurface() {
+  document.querySelector("[data-new-conversation]").disabled = (
+    state.pendingTurn !== null
+    || state.lastFailure?.recovered === true
+  );
+  ensureChatView().render(state);
+}
+
 function renderTopBarWorkspaceIndicator() {
   renderWorkspaceIndicator(
     document.querySelector("[data-workspace-indicator]"),
@@ -1202,6 +1210,7 @@ function refreshAuthoritativeResourcesForCompletedJobs(jobs) {
   }
   let shouldRefreshWork = false;
   let shouldRefreshNotes = false;
+  let shouldRefreshMemory = false;
   for (const job of jobs) {
     const status = String(job?.status ?? "").toLowerCase();
     const actionKind = job?.action_kind;
@@ -1222,6 +1231,8 @@ function refreshAuthoritativeResourcesForCompletedJobs(jobs) {
       shouldRefreshWork = true;
     } else if (actionKind === "propose_collaborative_note") {
       shouldRefreshNotes = true;
+    } else if (actionKind === "propose_memory_signal") {
+      shouldRefreshMemory = true;
     }
   }
   if (shouldRefreshWork) {
@@ -1229,6 +1240,9 @@ function refreshAuthoritativeResourcesForCompletedJobs(jobs) {
   }
   if (shouldRefreshNotes) {
     loadNotes(state.notes.statusFilter);
+  }
+  if (shouldRefreshMemory) {
+    loadMemory();
   }
 }
 
@@ -1490,7 +1504,7 @@ async function submitRequest(request) {
           if (firstDelta) {
             setChatStatus("");
           }
-          renderWorkspace();
+          renderChatSurface();
         },
       })
       : await apiFetchJson(endpoint, options);
