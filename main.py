@@ -5656,7 +5656,6 @@ async def _execute_chat(
         and not chat_response.collaborative_note_events
         and not chat_response.artifact_feedback
         and not chat_response.continuity_choices
-        and not decision_queued_actions
     ):
         try:
             preference_result = await preference_learning_service.capture(
@@ -5674,6 +5673,7 @@ async def _execute_chat(
                 preference_result.surfaced_hypothesis is not None
                 and not chat_response.memory_proposals
                 and not chat_response.memory_clarifications
+                and not decision_queued_actions
             ):
                 confirmation = (
                     await memory_service.open_preference_hypothesis_confirmation(

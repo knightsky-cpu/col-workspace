@@ -8896,7 +8896,180 @@ async def test_chat_preflights_ambiguous_memory_request_into_clarification(
     turn_command = service_state.turn_service.calls[0]
     assert turn_command.precompleted_memory_clarifications == ()
     assert turn_command.prequeued_actions == (queued_action,)
-    assert service_state.preference_learning_service.calls == []
+    assert service_state.memory_service.preference_confirmation_calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_passes_preflight_receipt_tuple_through_real_turn_service(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_col_responder_context_v3 import AgentColResponderContextV3
+    from agent_col_routing_v3 import AgentColRoutingDirective as V3Directive
+    from agent_col_routing_v4 import AgentColRoutingDirective
+    from agent_col_turn_service import AgentColTurnService
+
+    prompt = (
+        "Please remember one of these preferences, but help me choose which "
+        "one to save: I prefer practical examples whenever helpful, or I "
+        "prefer Agent Col to ask fewer follow-up questions and make "
+        "reasonable assumptions."
+    )
+    queued_action = QueuedActionReceipt(
+        job_id="memory-job-preflight-real-service-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification",
+        created_at=MEMORY_NOW,
+        agent_label="Memory Analyst",
+    )
+    claim = make_chat_turn_claim()
+    service_state.database.chat_turn_result = replace(
+        claim,
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=prompt,
+        ),
+    )
+    memory_queue = service_state.turn_service_dependencies[0][6]
+
+    async def queue_memory(command: NaturalMemoryCommand) -> QueuedActionReceipt:
+        assert command.turn_lease is None
+        return queued_action
+
+    async def route_direct(*args: object, **kwargs: object) -> object:
+        return AgentColRoutingDirective.model_validate(
+            {"schema_version": "4.0", "route": "direct"}
+        )
+
+    class ExpertExecutor:
+        available_capabilities = ("source", "research", "computation")
+
+        async def execute(
+            self,
+            directive: V3Directive,
+            routing_input: object,
+        ) -> AgentColResponderContextV3:
+            return AgentColResponderContextV3(
+                routing_directive=directive,
+            )
+
+    responder_contexts: list[SupervisorTurnContext] = []
+
+    class Responder:
+        async def run_turn(
+            self,
+            context: SupervisorTurnContext,
+        ) -> SupervisorTurnResult:
+            responder_contexts.append(context)
+            return SupervisorTurnResult(response="Please choose one.")
+
+    real_turn_service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=ExpertExecutor(),
+        responder_runtime=Responder(),
+        artifact_executor=object(),
+        artifact_routing_request=route_direct,
+    )
+    monkeypatch.setattr(memory_queue, "queue", queue_memory)
+    monkeypatch.setattr(main.app.state, "turn_service", real_turn_service)
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "memory-preflight-real-service-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": prompt,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(responder_contexts) == 1
+    assert isinstance(responder_contexts[0].prequeued_actions, tuple)
+    assert responder_contexts[0].prequeued_actions == (queued_action,)
+    assert response.json()["memory_clarifications"] == []
+    assert response.json()["queued_actions"] == [
+        queued_action.model_dump(mode="json")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_chat_preflight_still_captures_unrelated_preference_feedback(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from preference_learning import PreferenceHypothesis
+    from preference_learning_service import PreferenceLearningResult
+
+    prompt = (
+        "Concise please. Also remember one of these preferences, but help me "
+        "choose which one to save: I prefer practical examples whenever "
+        "helpful, or I prefer Agent Col to ask fewer follow-up questions and "
+        "make reasonable assumptions."
+    )
+    queued_action = QueuedActionReceipt(
+        job_id="memory-job-preflight-mixed-preference-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification",
+        created_at=MEMORY_NOW,
+        agent_label="Memory Analyst",
+    )
+    hypothesis = PreferenceHypothesis(
+        hypothesis_id="pref-hyp--user-1--project-1--response_length",
+        user_id="user-1",
+        project_id="project-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_count=2,
+        contradiction_count=0,
+        confidence=0.75,
+        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-2"),
+        first_observed_at=MEMORY_NOW,
+        last_observed_at=MEMORY_NOW,
+    )
+    service_state.preference_learning_service.result = (
+        PreferenceLearningResult(surfaced_hypothesis=hypothesis)
+    )
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="Please choose one."
+    )
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    memory_queue = service_state.turn_service_dependencies[0][6]
+
+    async def queue_memory(command: NaturalMemoryCommand) -> QueuedActionReceipt:
+        return queued_action
+
+    monkeypatch.setattr(memory_queue, "queue", queue_memory)
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "memory-preflight-mixed-preference-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": prompt,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(service_state.preference_learning_service.calls) == 1
+    assert (
+        service_state.preference_learning_service.calls[0].user_message
+        == prompt
+    )
+    assert service_state.memory_service.preference_confirmation_calls == []
+    assert response.json()["memory_clarifications"] == []
+    assert response.json()["queued_actions"] == [
+        queued_action.model_dump(mode="json")
+    ]
 
 
 @pytest.mark.asyncio

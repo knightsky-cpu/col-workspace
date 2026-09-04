@@ -1709,8 +1709,10 @@ Completed work:
   clarification receipt;
 - responder failure preserves the accepted queued receipt as a partial failure
   instead of completing a chat-owned clarification effect;
-- accepted preflight work suppresses post-response preference learning for that
-  turn, preventing a second clarification lifecycle from being opened;
+- post-response preference learning can still capture an unrelated
+  non-authoritative observation from a mixed-intent turn, while a surfaced
+  hypothesis cannot open a second chat-owned clarification after deterministic
+  preflight work has already been queued;
 - the Memory worker restores the private clarification command with
   `turn_lease=None`, creates the clarification through the governed Memory
   service, and records the clarification id and terminal job report;
@@ -1736,9 +1738,16 @@ TDD evidence:
 - GREEN: the same command passed after preflight used the Memory queue, chat
   carried only the queued receipt, and failure reconciliation preserved that
   receipt without completing a chat effect.
-- RED/GREEN: the focused success test then exposed that preference learning
-  still ran after queued preflight acceptance; the preflight queued receipt now
-  suppresses that post-response path for the same turn.
+- RED/GREEN review follow-up: a mixed-intent regression proved that suppressing
+  all preference capture whenever preflight work was queued was too broad.
+  Capture now remains available for unrelated explicit style feedback, while
+  only the second chat-owned preference-confirmation clarification is
+  suppressed.
+- Collection-shape review confirmed that the awaited Memory queue receipt
+  already has a trailing comma and therefore forms a one-element tuple. A
+  regression now executes `_execute_chat` through the real
+  `AgentColTurnService` and verifies tuple-shaped prequeued actions reach the
+  responder boundary.
 - REFACTOR: the lifespan now keeps one shared Memory queue instance for both
   turn-service and deterministic-preflight acceptance; no unrelated cleanup
   was performed.
