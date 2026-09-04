@@ -184,8 +184,6 @@ def tool_context_state() -> dict[str, object]:
         "memory_source_message_text": "I prefer concise responses.",
         "memory_decision_present": False,
         "artifact_feedback_decision_present": False,
-        "memory_turn_id": "a" * 64,
-        "memory_turn_owner_token": "owner-1",
     }
 
 
@@ -271,6 +269,11 @@ async def test_proposal_tool_preserves_user_requested_memory_candidate() -> None
     service = RecordingMemoryService()
     tool = create_propose_memory_signal_tool(service)
 
+    state = tool_context_state() | {
+        "memory_turn_id": "a" * 64,
+        "memory_turn_owner_token": "owner-1",
+    }
+
     result = await tool.run_async(
         args={
             "decision": {
@@ -305,6 +308,10 @@ async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
 
     service = RecordingMemoryService()
     tool = create_propose_memory_signal_tool(service)
+    state = tool_context_state() | {
+        "memory_turn_id": "a" * 64,
+        "memory_turn_owner_token": "owner-1",
+    }
 
     result = await tool.run_async(
         args={
@@ -315,9 +322,7 @@ async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
                 "evidence_text": "prefer concise responses",
             },
         },
-        tool_context=SimpleNamespace(
-            state=State(value=tool_context_state(), delta={})
-        ),
+        tool_context=SimpleNamespace(state=State(value=state, delta={})),
     )
 
     assert result == {
@@ -347,8 +352,7 @@ async def test_proposal_tool_builds_pending_result_from_adk_state() -> None:
     assert command.decision.category == "response_length"
     assert command.decision.canonical_value == "concise"
     assert command.clarification_selection is None
-    assert command.turn_lease.turn_id == "a" * 64
-    assert command.turn_lease.owner_token == "owner-1"
+    assert command.turn_lease is None
 
 
 @pytest.mark.asyncio
@@ -389,7 +393,7 @@ async def test_proposal_tool_records_memory_agent_job_queue_receipt() -> None:
     assert job.workspace_id == "workspace-1"
     assert job.project_id == "workspace-1"
     assert job.session_id == "session-1"
-    assert job.source_turn_id == "a" * 64
+    assert job.source_turn_id == "message-1"
     assert job.source_message_id == "message-1"
     assert job.idempotency_key.startswith("memory-proposal-")
     assert [entry["event"].event_type for entry in repository.events] == [
@@ -960,7 +964,6 @@ async def test_proposal_tool_keeps_clarification_direct_when_job_repository_exis
     "invalid_state",
     (
         {"memory_source_message_id": None},
-        {"memory_turn_owner_token": None},
     ),
 )
 @pytest.mark.asyncio

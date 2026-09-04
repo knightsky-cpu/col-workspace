@@ -219,22 +219,6 @@ def _server_context(tool_context: ToolContext) -> _MemoryToolServerContext:
         raise ValueError(
             "Artifact feedback turns cannot create memory proposals."
         )
-    turn_id = state.get("memory_turn_id")
-    owner_token = state.get("memory_turn_owner_token")
-    if (turn_id is None) != (owner_token is None):
-        raise MemoryProposalToolConfigurationError(
-            "Memory proposal tool context is invalid."
-        )
-    try:
-        turn_lease = (
-            ProposalTurnLease(turn_id=turn_id, owner_token=owner_token)
-            if turn_id is not None
-            else None
-        )
-    except ValueError as exc:
-        raise MemoryProposalToolConfigurationError(
-            "Memory proposal tool context is invalid."
-        ) from exc
     return _MemoryToolServerContext(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -243,7 +227,7 @@ def _server_context(tool_context: ToolContext) -> _MemoryToolServerContext:
         source_message_text=source_message_text,
         memory_decision_present=memory_decision_present,
         memory_prequeued_for_turn=memory_prequeued_for_turn,
-        turn_lease=turn_lease,
+        turn_lease=None,
     )
 
 

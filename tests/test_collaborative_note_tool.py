@@ -117,8 +117,6 @@ def note_tool_state() -> dict[str, object]:
         "memory_decision_present": False,
         "collaborative_note_decision_present": False,
         "artifact_feedback_decision_present": False,
-        "note_turn_id": "a" * 64,
-        "note_turn_owner_token": "owner-1",
     }
 
 
@@ -162,6 +160,11 @@ async def test_note_tool_builds_pending_result_from_adk_state() -> None:
     service = RecordingCollaborativeNoteService()
     tool = create_propose_collaborative_note_tool(service)
 
+    state = note_tool_state() | {
+        "note_turn_id": "a" * 64,
+        "note_turn_owner_token": "owner-1",
+    }
+
     result = await tool.run_async(
         args={
             "decision": {
@@ -172,9 +175,7 @@ async def test_note_tool_builds_pending_result_from_adk_state() -> None:
                 "evidence_text": "this workspace must use API version 2",
             }
         },
-        tool_context=SimpleNamespace(
-            state=State(value=note_tool_state(), delta={})
-        ),
+        tool_context=SimpleNamespace(state=State(value=state, delta={})),
     )
 
     assert result["status"] == "pending"
@@ -196,7 +197,7 @@ async def test_note_tool_builds_pending_result_from_adk_state() -> None:
     assert command.memory_decision_present is False
     assert command.collaborative_note_decision_present is False
     assert isinstance(command.decision, NoteCandidateDecision)
-    assert command.turn_lease.turn_id == "a" * 64
+    assert command.turn_lease is None
 
 
 @pytest.mark.asyncio
@@ -280,7 +281,7 @@ async def test_note_tool_records_agent_job_lifecycle_for_pending_proposal(
     assert job.workspace_id == "workspace-1"
     assert job.session_id == "session-1"
     assert job.source_message_id == "message-1"
-    assert job.source_turn_id == "a" * 64
+    assert job.source_turn_id == "message-1"
     assert job.agent_label == "Note Curator"
     assert "API version" in job.display_label
     assert jobs.leases[0]["job_id"] == job.job_id

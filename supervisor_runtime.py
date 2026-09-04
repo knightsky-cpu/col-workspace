@@ -500,19 +500,6 @@ class SupervisorRuntime:
                         session_state[
                             "governed_turn_has_precompleted_durable_effect"
                         ] = True
-                    if context.turn_lease is not None:
-                        session_state.update(
-                            {
-                                "memory_turn_id": context.turn_lease.turn_id,
-                                "memory_turn_owner_token": (
-                                    context.turn_lease.owner_token
-                                ),
-                                "note_turn_id": context.turn_lease.turn_id,
-                                "note_turn_owner_token": (
-                                    context.turn_lease.owner_token
-                                ),
-                            }
-                        )
                 await self._session_service.create_session(
                     app_name=SUPERVISOR_APP_NAME,
                     user_id=context.user_id,

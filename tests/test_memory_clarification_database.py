@@ -22,6 +22,7 @@ from schemas import MemoryProposalV2
 NOW = datetime(2026, 8, 24, 19, 0, tzinfo=UTC)
 TURN_ID = "a" * 64
 PRIOR_TURN_ID = "b" * 64
+DIRECT_SOURCE_MESSAGE_ID = "message-1"
 
 
 def prior_clarification_id() -> str:
@@ -63,6 +64,37 @@ def envelope(**updates: object) -> MemoryClarificationEnvelope:
         "workspace_id": "workspace-1",
         "evidence_message_id": "message-1",
         "clarification_turn_id": TURN_ID,
+        "candidates": [
+            {
+                "category": "preferred_name",
+                "canonical_value": "wifiknight",
+            },
+            {
+                "category": "development_environments",
+                "canonical_value": ["macos", "linux"],
+            },
+        ],
+        "created_at": NOW,
+        "expires_at": NOW + timedelta(minutes=15),
+        "status": "open",
+    }
+    payload.update(updates)
+    return MemoryClarificationEnvelope.model_validate(payload)
+
+
+def direct_envelope(**updates: object) -> MemoryClarificationEnvelope:
+    payload: dict[str, object] = {
+        "clarification_id": derive_memory_clarification_id(
+            user_id="user-1",
+            session_id="session-1",
+            evidence_message_id=DIRECT_SOURCE_MESSAGE_ID,
+            clarification_turn_id=DIRECT_SOURCE_MESSAGE_ID,
+        ),
+        "user_id": "user-1",
+        "session_id": "session-1",
+        "workspace_id": "workspace-1",
+        "evidence_message_id": DIRECT_SOURCE_MESSAGE_ID,
+        "clarification_turn_id": DIRECT_SOURCE_MESSAGE_ID,
         "candidates": [
             {
                 "category": "preferred_name",
@@ -123,7 +155,10 @@ def clarification_store() -> SimpleNamespace:
     session.collection.side_effect = session_collection
 
     def clarification_document(document_id: str):
-        if document_id == envelope().clarification_id:
+        if document_id in {
+            envelope().clarification_id,
+            direct_envelope().clarification_id,
+        }:
             return clarification
         if document_id == prior_clarification_id():
             return prior
@@ -189,9 +224,9 @@ def lease() -> ProposalTurnLease:
 async def test_clarification_validates_before_firestore_access() -> None:
     store = clarification_store()
 
-    with pytest.raises(ValueError, match="turn lease"):
+    with pytest.raises(ValueError, match="clarification_id"):
         await MemoryEngine(store.client).create_memory_clarification(
-            envelope=envelope(),
+            envelope=direct_envelope(clarification_id="memory-clarification--bad"),
             observed_at=NOW,
             turn_lease=None,
         )
@@ -260,6 +295,45 @@ async def test_clarification_creation_writes_envelope_receipt_and_pointer(
 
 
 @pytest.mark.asyncio
+async def test_clarification_creation_without_turn_lease_writes_envelope_and_pointer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store = clarification_store()
+    direct = direct_envelope()
+    store.session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"user_id": "user-1", "project_id": "workspace-1"},
+        )
+    )
+    store.clarification.get = AsyncMock(return_value=snapshot(exists=False))
+
+    result = await MemoryEngine(store.client).create_memory_clarification(
+        envelope=direct,
+        observed_at=NOW,
+        turn_lease=None,
+    )
+
+    assert result == direct
+    store.turn.get.assert_not_called()
+    assert store.transaction.set.call_args_list == [
+        call(
+            store.clarification,
+            direct.model_dump(mode="python", exclude_none=True),
+        ),
+        call(
+            store.session,
+            {
+                "active_memory_clarification_id": direct.clarification_id,
+                "updated_at": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_clarification_exact_retry_returns_existing_without_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -296,6 +370,41 @@ async def test_clarification_exact_retry_returns_existing_without_write(
     )
 
     assert result == envelope()
+    store.transaction.set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_clarification_exact_retry_without_turn_lease_returns_existing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install_transaction_runner(monkeypatch)
+    store = clarification_store()
+    direct = direct_envelope()
+    store.session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={
+                "user_id": "user-1",
+                "project_id": "workspace-1",
+                "active_memory_clarification_id": direct.clarification_id,
+            },
+        )
+    )
+    store.clarification.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data=direct.model_dump(mode="python"),
+        )
+    )
+
+    result = await MemoryEngine(store.client).create_memory_clarification(
+        envelope=direct,
+        observed_at=NOW,
+        turn_lease=None,
+    )
+
+    assert result == direct
+    store.turn.get.assert_not_called()
     store.transaction.set.assert_not_called()
 
 

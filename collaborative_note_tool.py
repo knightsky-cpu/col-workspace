@@ -28,7 +28,6 @@ from database import (
     MemoryProposalConflictError,
     MemoryProposalOriginConflictError,
 )
-from memory_proposals import ProposalTurnLease
 from schemas import (
     AgentActionReceipt,
     CollaborativeNoteProposal,
@@ -161,22 +160,6 @@ def _server_command(
         raise CollaborativeNoteToolConfigurationError(
             "Collaborative note tool context is invalid."
         )
-    turn_id = state.get("note_turn_id")
-    owner_token = state.get("note_turn_owner_token")
-    if (turn_id is None) != (owner_token is None):
-        raise CollaborativeNoteToolConfigurationError(
-            "Collaborative note tool context is invalid."
-        )
-    try:
-        turn_lease = (
-            ProposalTurnLease(turn_id=turn_id, owner_token=owner_token)
-            if turn_id is not None
-            else None
-        )
-    except ValueError as exc:
-        raise CollaborativeNoteToolConfigurationError(
-            "Collaborative note tool context is invalid."
-        ) from exc
     return NaturalCollaborativeNoteCommand(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -188,7 +171,7 @@ def _server_command(
         artifact_feedback_decision_present=artifact_feedback_decision_present,
         decision=decision,
         observed_at=datetime.now(UTC),
-        turn_lease=turn_lease,
+        turn_lease=None,
     )
 
 

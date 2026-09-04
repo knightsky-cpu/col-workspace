@@ -400,23 +400,24 @@ class TrustedMemoryService:
                 ),
             )
         if isinstance(command.decision, ClarifyDecision):
-            if command.turn_lease is None:
-                raise ValueError(
-                    "A clarification requires retry-safe turn ownership."
-                )
             observed_at = self._clock()
+            clarification_source_id = (
+                command.turn_lease.turn_id
+                if command.turn_lease is not None
+                else command.source_message_id
+            )
             envelope = MemoryClarificationEnvelope(
                 clarification_id=derive_memory_clarification_id(
                     user_id=command.user_id,
                     session_id=command.session_id,
                     evidence_message_id=command.source_message_id,
-                    clarification_turn_id=command.turn_lease.turn_id,
+                    clarification_turn_id=clarification_source_id,
                 ),
                 user_id=command.user_id,
                 session_id=command.session_id,
                 workspace_id=command.workspace_id,
                 evidence_message_id=command.source_message_id,
-                clarification_turn_id=command.turn_lease.turn_id,
+                clarification_turn_id=clarification_source_id,
                 candidates=[
                     {
                         "category": candidate.category,

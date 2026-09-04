@@ -1690,6 +1690,139 @@ Work deferred until core decoupling is complete:
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
 
+## Responder Memory/Note Owner-Token And Clarification Creation Decoupling Pass
+
+This pass removed the remaining live responder owner-token dependency for
+model-invoked memory/note proposal tools and moved Memory clarification
+creation off chat-turn lease ownership.
+
+Completed work:
+
+- supervisor ADK session state no longer exposes `memory_turn_id`,
+  `memory_turn_owner_token`, `note_turn_id`, or `note_turn_owner_token`;
+- memory and collaborative-note tools ignore stale owner-token state and submit
+  `turn_lease=None` to their owning services;
+- queued memory/note proposal jobs now use `source_message_id` as
+  `source_turn_id` when no lease exists, matching the already-decoupled worker
+  restore path;
+- natural Memory clarification creation now uses `source_message_id` as
+  clarification provenance when no chat-turn lease is present;
+- Memory clarification creation can persist a Memory-owned clarification
+  document and active session pointer without reading or writing a chat turn;
+- duplicate/retry suppression is preserved for both turn-owned and
+  source-message-owned clarification creation;
+- the already-direct clarification selection lifecycle remains covered and
+  unchanged;
+- mixed-intent routing remains intact: deterministic durable work can be queued
+  without a live owner token, but chat routing still handles conversational work
+  in the same user prompt.
+
+Why this matters:
+
+The prior pass removed turn leases from explicit note/memory prequeue, but a
+live chat-owned lease still leaked through responder tool session state. That
+left model-invoked note/memory proposal work dependent on a chat turn owner
+token even though queued jobs and worker restores already use source-message
+provenance. Memory clarification creation had the same ownership issue: the
+service rejected no-lease clarification creation and the database transaction
+required a turn document/effect write. This pass makes those lifecycles
+Memory/Note-owned while preserving governance checks, session/project scoping,
+idempotent duplicate handling, and mixed-intent chat routing.
+
+TDD evidence recorded during the pass:
+
+- RED: `venv/bin/pytest -q tests/test_supervisor_runtime.py -k "server_owned_memory_context or server_owned_note_context"`
+  failed because responder session state still contained memory/note turn ids
+  and owner tokens.
+- RED: `venv/bin/pytest -q tests/test_memory_proposal_tool.py tests/test_collaborative_note_tool.py -k "queued or turn_lease or owner_token or pending_result"`
+  failed because stale tool state still reconstructed `ProposalTurnLease`.
+- RED: `venv/bin/pytest -q tests/test_memory_proposal_service.py -k "natural_clarification"`
+  failed because natural clarification creation still required retry-safe turn
+  ownership.
+- RED: `venv/bin/pytest -q tests/test_memory_clarification_database.py -k "clarification_creation_without_turn_lease or exact_retry_without_turn_lease or validates_before_firestore_access"`
+  failed because database validation still rejected `turn_lease=None`.
+- GREEN: supervisor stopped placing owner tokens into ADK session state;
+  memory/note tools stopped reading owner tokens; natural clarification
+  creation uses source-message provenance when no lease exists; database
+  clarification creation skips turn reads/writes in the no-lease path.
+- REFACTOR: none beyond narrow naming/docstring updates.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_supervisor_runtime.py
+47 passed, 1 warning
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_tool.py tests/test_collaborative_note_tool.py
+42 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_service.py
+22 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_clarification_database.py
+12 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_main.py -k "select_memory_clarification or memory_clarification"
+4 passed, 290 deselected, 1 warning
+```
+
+```text
+node --test tests/frontend/requests.test.mjs --test-name-pattern "chat endpoint selection"
+21 passed
+```
+
+```text
+node --test tests/frontend/api.test.mjs --test-name-pattern "selectMemoryClarification"
+39 passed
+```
+
+```text
+node --test tests/frontend/app-runtime.test.mjs --test-name-pattern "memory clarification selection during a pending chat uses direct memory API"
+41 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_job_worker.py
+5 passed
+```
+
+Remaining direct decoupling:
+
+- the legacy natural Memory clarification-selection branch in
+  `TrustedMemoryService.handle_natural_memory_decision` still requires a
+  `ProposalTurnLease`; direct clarification selection already has its own
+  Memory-owned API, so this remaining branch should be retired or redirected
+  without reintroducing chat ownership;
+- ambiguous artifact requests still require chat-time routing;
+- legacy structured-decision schemas, frontend request helpers, and unreachable
+  backend branches remain as deferred cleanup.
+
+Next proposed pass:
+
+- remove or quarantine the legacy natural Memory clarification-selection branch
+  that still requires a live chat-turn lease, while preserving the direct
+  `/memory/clarifications/{clarification_id}/select` lifecycle as the only
+  active selection path.
+
+Work deferred until core decoupling is complete:
+
+- structured-decision cleanup: remove retired frontend request builders,
+  retired structured chat fields, and unreachable backend execution branches
+  only after the active lifecycle dependencies are gone;
+- broad manual end-to-end browser acceptance for every drawer action;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.
+
 ## Explicit Note/Memory Prequeue Lease Decoupling Pass
 
 This pass removed chat-turn lease ownership from deterministic explicit

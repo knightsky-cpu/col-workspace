@@ -5920,7 +5920,7 @@ class MemoryEngine:
         observed_at: datetime,
         turn_lease: ProposalTurnLease | None,
     ) -> MemoryClarificationEnvelope:
-        """Atomically persist one retry-safe clarification turn effect."""
+        """Atomically persist one retry-safe memory clarification."""
         self._validate_memory_clarification_creation(
             envelope=envelope,
             observed_at=observed_at,
@@ -5935,8 +5935,10 @@ class MemoryEngine:
         clarification_ref = clarifications_ref.document(
             envelope.clarification_id
         )
-        turn_ref = session_ref.collection("turns").document(
-            turn_lease.turn_id
+        turn_ref = (
+            session_ref.collection("turns").document(turn_lease.turn_id)
+            if turn_lease is not None
+            else None
         )
         transaction = self._client.transaction()
 
@@ -5949,7 +5951,11 @@ class MemoryEngine:
             clarification_snapshot = await clarification_ref.get(
                 transaction=transaction
             )
-            turn_snapshot = await turn_ref.get(transaction=transaction)
+            turn_snapshot = (
+                await turn_ref.get(transaction=transaction)
+                if turn_ref is not None
+                else None
+            )
             if not session_snapshot.exists:
                 raise ChatTurnOwnershipError(
                     "Stored chat session cannot own a clarification effect."
@@ -5982,16 +5988,17 @@ class MemoryEngine:
                         "Stored clarification is not the active session "
                         "clarification."
                     )
-                effect = self._memory_clarification_turn_effect_update(
-                    turn_snapshot=turn_snapshot,
-                    envelope=envelope,
-                    turn_lease=turn_lease,
-                    observed_at=observed_at,
-                )
-                if effect is not None:
-                    raise MemoryClarificationStateError(
-                        "Stored clarification has no matching turn effect."
+                if turn_lease is not None:
+                    effect = self._memory_clarification_turn_effect_update(
+                        turn_snapshot=turn_snapshot,
+                        envelope=envelope,
+                        turn_lease=turn_lease,
+                        observed_at=observed_at,
                     )
+                    if effect is not None:
+                        raise MemoryClarificationStateError(
+                            "Stored clarification has no matching turn effect."
+                        )
                 return stored
 
             prior_ref = None
@@ -6019,11 +6026,15 @@ class MemoryEngine:
                         "Active clarification pointer is invalid."
                     )
 
-            effect = self._memory_clarification_turn_effect_update(
-                turn_snapshot=turn_snapshot,
-                envelope=envelope,
-                turn_lease=turn_lease,
-                observed_at=observed_at,
+            effect = (
+                self._memory_clarification_turn_effect_update(
+                    turn_snapshot=turn_snapshot,
+                    envelope=envelope,
+                    turn_lease=turn_lease,
+                    observed_at=observed_at,
+                )
+                if turn_lease is not None
+                else None
             )
             if prior_ref is not None and prior is not None:
                 transaction.set(
@@ -6035,7 +6046,8 @@ class MemoryEngine:
                 clarification_ref,
                 envelope.model_dump(mode="python", exclude_none=True),
             )
-            transaction.set(turn_ref, effect, merge=True)
+            if turn_ref is not None and effect is not None:
+                transaction.set(turn_ref, effect, merge=True)
             transaction.set(
                 session_ref,
                 {
@@ -8133,10 +8145,13 @@ class MemoryEngine:
             raise ValueError("envelope must be a memory clarification.")
         if envelope.status != "open":
             raise ValueError("Only an open clarification can be created.")
-        if not isinstance(turn_lease, ProposalTurnLease):
-            raise ValueError("A valid turn lease is required.")
-        if turn_lease.turn_id != envelope.clarification_turn_id:
-            raise ValueError("The turn lease does not own the clarification.")
+        if turn_lease is not None:
+            if not isinstance(turn_lease, ProposalTurnLease):
+                raise ValueError("turn_lease must be valid when provided.")
+            if turn_lease.turn_id != envelope.clarification_turn_id:
+                raise ValueError(
+                    "The turn lease does not own the clarification."
+                )
         if not MemoryEngine._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
         if not envelope.created_at <= observed_at < envelope.expires_at:

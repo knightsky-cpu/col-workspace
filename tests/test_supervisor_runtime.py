@@ -520,8 +520,6 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
         "memory_decision_present": False,
         "memory_prequeued_for_turn": False,
         "artifact_feedback_decision_present": False,
-        "memory_turn_id": "a" * 64,
-        "memory_turn_owner_token": "owner-token-1",
         "note_user_id": "user-1",
         "note_workspace_id": "project-1",
         "note_session_id": "session-1",
@@ -531,9 +529,11 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
         ),
         "collaborative_note_decision_present": False,
         "note_prequeued_for_turn": False,
-        "note_turn_id": "a" * 64,
-        "note_turn_owner_token": "owner-token-1",
     }
+    assert "memory_turn_owner_token" not in state
+    assert "note_turn_owner_token" not in state
+    assert "memory_turn_id" not in state
+    assert "note_turn_id" not in state
 
 
 @pytest.mark.asyncio
@@ -582,8 +582,6 @@ async def test_run_turn_places_server_owned_note_context_in_session_state(
         "memory_decision_present": False,
         "memory_prequeued_for_turn": False,
         "artifact_feedback_decision_present": False,
-        "memory_turn_id": "a" * 64,
-        "memory_turn_owner_token": "owner-token-1",
         "note_user_id": "user-1",
         "note_workspace_id": "project-1",
         "note_session_id": "session-1",
@@ -593,9 +591,11 @@ async def test_run_turn_places_server_owned_note_context_in_session_state(
         ),
         "collaborative_note_decision_present": False,
         "note_prequeued_for_turn": False,
-        "note_turn_id": "a" * 64,
-        "note_turn_owner_token": "owner-token-1",
     }
+    assert "memory_turn_owner_token" not in state
+    assert "note_turn_owner_token" not in state
+    assert "memory_turn_id" not in state
+    assert "note_turn_id" not in state
 
 
 @pytest.mark.asyncio

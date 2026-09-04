@@ -505,6 +505,61 @@ async def test_natural_clarification_persists_with_observed_timestamp() -> None:
 
 
 @pytest.mark.asyncio
+async def test_natural_clarification_uses_source_message_provenance_without_turn_lease(
+) -> None:
+    from memory_candidate_decisions import (
+        ClarifyDecision,
+        ProfileCandidateDecision,
+    )
+    from memory_clarifications import derive_memory_clarification_id
+    from trusted_memory_service import (
+        NaturalMemoryClarificationResult,
+        TrustedMemoryService,
+    )
+
+    database = FakeProposalDatabase()
+
+    result = await TrustedMemoryService(
+        database=database,
+        clock=lambda: NOW,
+    ).handle_natural_memory_decision(
+        natural_command(
+            decision=ClarifyDecision(
+                candidates=[
+                    ProfileCandidateDecision(
+                        category="preferred_name",
+                        canonical_value="wifiknight",
+                        evidence_text="wifiknight",
+                    ),
+                    ProfileCandidateDecision(
+                        category="development_environments",
+                        canonical_value=["macos", "linux"],
+                        evidence_text="macOS and Linux",
+                    ),
+                ],
+            ),
+            source_message_id="message-1",
+            source_message_text=(
+                "Please remember wifiknight and macOS and Linux."
+            ),
+            turn_lease=None,
+        )
+    )
+
+    assert isinstance(result, NaturalMemoryClarificationResult)
+    assert database.calls[0]["turn_lease"] is None
+    envelope = database.calls[0]["envelope"]
+    assert envelope.evidence_message_id == "message-1"
+    assert envelope.clarification_turn_id == "message-1"
+    assert envelope.clarification_id == derive_memory_clarification_id(
+        user_id="user-1",
+        session_id="session-1",
+        evidence_message_id="message-1",
+        clarification_turn_id="message-1",
+    )
+
+
+@pytest.mark.asyncio
 async def test_propose_memory_signal_normalizes_and_returns_stored_receipts(
 ) -> None:
     from trusted_memory_service import TrustedMemoryService
