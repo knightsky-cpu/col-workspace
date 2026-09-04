@@ -113,7 +113,6 @@ from speech_service import (
     SpeechSynthesisChunkError,
     SpeechSynthesisProviderError,
 )
-from memory_proposals import ProposalTurnLease
 from schemas import (
     AdaptationReceipt,
     AgentActionReceipt,
@@ -8554,7 +8553,7 @@ async def test_headerless_chat_returns_proposal_from_persisted_source_message(
     context = service_state.turn_service.calls[0]
     assert context.source_message_id == "user-message-1"
     assert context.memory_decision_present is False
-    assert context.turn_lease is None
+    assert not hasattr(context, "turn_lease")
     assert context.precompleted_actions == ()
     assert context.precompleted_memory_proposals == ()
 
@@ -10269,10 +10268,7 @@ async def test_resumed_idempotent_chat_supplies_owned_precompleted_effects(
     assert response.status_code == 200
     context = service_state.turn_service.calls[0]
     assert context.source_message_id == f"turn--{turn_id}--user"
-    assert context.turn_lease == ProposalTurnLease(
-        turn_id=turn_id,
-        owner_token="owner-token-1",
-    )
+    assert not hasattr(context, "turn_lease")
     assert context.precompleted_actions == (action,)
     assert context.precompleted_memory_proposals == (proposal,)
     assert response.json()["memory_proposals"] == [

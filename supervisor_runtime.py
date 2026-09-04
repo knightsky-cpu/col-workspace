@@ -21,7 +21,6 @@ from collaborative_note_tool import (
     QueuedCollaborativeNoteToolResponse,
     parse_collaborative_note_tool_response,
 )
-from memory_proposals import ProposalTurnLease
 from memory_proposal_tool import (
     ClarificationMemoryProposalToolResponse,
     PendingMemoryProposalToolResponse,
@@ -264,7 +263,6 @@ class SupervisorTurnContext:
     memory_decision_present: bool = False
     collaborative_note_decision_present: bool = False
     artifact_feedback_decision_present: bool = False
-    turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
     precompleted_memory_proposals: tuple[
         VersionedMemoryProposalReceipt, ...

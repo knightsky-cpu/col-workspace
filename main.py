@@ -190,7 +190,6 @@ from memory_proposal_tool import (
     queue_preference_hypothesis_confirmation_agent_job,
     queue_preference_learning_capture_agent_job,
 )
-from memory_proposals import ProposalTurnLease
 from preference_learning import PreferenceHypothesis, PreferenceObservation
 from preference_learning_service import (
     PreferenceLearningCommand,
@@ -5110,14 +5109,6 @@ async def _execute_chat(
         memory_decision_present=bool(precompleted_memory_clarifications),
         artifact_feedback_decision_present=False,
         collaborative_note_decision_present=False,
-        turn_lease=(
-            ProposalTurnLease(
-                turn_id=chat_turn_claim.ids.turn_id,
-                owner_token=chat_turn_claim.owner_token,
-            )
-            if chat_turn_claim is not None
-            else None
-        ),
         precompleted_actions=(
             _merge_receipts(
                 chat_turn_claim.precompleted_actions,

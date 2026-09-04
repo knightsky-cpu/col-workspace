@@ -534,7 +534,6 @@ async def test_run_turn_uses_bounded_fresh_session_and_returns_final_text(
 @pytest.mark.asyncio
 async def test_run_turn_places_server_owned_memory_context_in_session_state(
 ) -> None:
-    from memory_proposals import ProposalTurnLease
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
 
     sessions = FakeSessionService()
@@ -551,10 +550,6 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
             message="Remember that I prefer concise responses.",
             source_message_id="turn--source-message--user",
             memory_decision_present=False,
-            turn_lease=ProposalTurnLease(
-                turn_id="a" * 64,
-                owner_token="owner-token-1",
-            ),
         )
     )
 
@@ -594,7 +589,6 @@ async def test_run_turn_places_server_owned_memory_context_in_session_state(
 @pytest.mark.asyncio
 async def test_run_turn_places_server_owned_note_context_in_session_state(
 ) -> None:
-    from memory_proposals import ProposalTurnLease
     from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
 
     sessions = FakeSessionService()
@@ -613,10 +607,6 @@ async def test_run_turn_places_server_owned_note_context_in_session_state(
             memory_decision_present=False,
             collaborative_note_decision_present=False,
             artifact_feedback_decision_present=False,
-            turn_lease=ProposalTurnLease(
-                turn_id="a" * 64,
-                owner_token="owner-token-1",
-            ),
         )
     )
 

@@ -74,7 +74,6 @@ from database import (
 from computational_expert import ComputationResponderResult
 from expert_contracts import ExpertCapability, ExpertStatus
 from memory_candidate_decisions import ProfileCandidateDecision
-from memory_proposals import ProposalTurnLease
 from research_expert import ResearchExpertResult
 from requirements_verification import RequirementsVerificationResult
 from schemas import (
@@ -239,7 +238,6 @@ class AgentColTurnCommand:
     memory_decision_present: bool = False
     artifact_feedback_decision_present: bool = False
     collaborative_note_decision_present: bool = False
-    turn_lease: ProposalTurnLease | None = None
     precompleted_actions: tuple[AgentActionReceipt, ...] = ()
     precompleted_memory_proposals: tuple[
         VersionedMemoryProposalReceipt, ...
@@ -806,7 +804,6 @@ class AgentColTurnService:
                         source_message_id=command.source_message_id,
                         memory_decision_present=False,
                         artifact_feedback_decision_present=True,
-                        turn_lease=command.turn_lease,
                         precompleted_actions=authoritative_actions,
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals
@@ -1270,7 +1267,6 @@ class AgentColTurnService:
                         memory_decision_present=(
                             command.memory_decision_present
                         ),
-                        turn_lease=command.turn_lease,
                         precompleted_actions=command.precompleted_actions,
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals
@@ -1450,7 +1446,6 @@ class AgentColTurnService:
                         ),
                         source_message_id=command.source_message_id,
                         memory_decision_present=command.memory_decision_present,
-                        turn_lease=command.turn_lease,
                         precompleted_actions=command.precompleted_actions,
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals
@@ -1963,7 +1958,6 @@ class AgentColTurnService:
                         memory_decision_present=(
                             command.memory_decision_present
                         ),
-                        turn_lease=command.turn_lease,
                         precompleted_actions=command.precompleted_actions,
                         precompleted_memory_proposals=(
                             command.precompleted_memory_proposals

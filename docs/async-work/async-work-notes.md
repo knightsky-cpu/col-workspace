@@ -2899,3 +2899,44 @@ Remaining deferred work:
 - AgentJob payload-preserving retry, retry dispatch, startup/runtime draining,
   expired running-lease recovery, terminal report/event consistency, hidden
   working-state durability, and Note shutdown hygiene.
+
+## Live Orchestration Lease Cleanup
+
+This uncommitted backend cleanup pass removes the remaining live chat
+orchestration propagation of `ProposalTurnLease` after Memory, Note, Artifact,
+preflight, and preference work moved to queue-owned or direct resource
+lifecycles.
+
+Removed:
+
+- `AgentColTurnCommand.turn_lease`;
+- `SupervisorTurnContext.turn_lease`;
+- `_execute_chat` construction of `ProposalTurnLease` for ordinary
+  conversational turns;
+- turn-service forwarding of `command.turn_lease` into responder/supervisor
+  contexts;
+- tests whose only purpose was asserting that live turn orchestration propagated
+  the chat lease into responder context.
+
+Preserved:
+
+- `ChatTurnClaim.owner_token` and chat-turn claim, renew, release, complete,
+  replay, transcript, and message persistence;
+- historical `ChatTurnRequest` structured metadata;
+- `ChatTurnClaim.precompleted_*` historical/recovery fields and stored effect
+  readers/assertions;
+- deterministic Memory preflight queueing with `turn_lease=None`;
+- preference capture queueing;
+- Memory, Note, and Artifact AgentJob queueing and queue receipts returned from
+  chat;
+- direct resource APIs.
+
+Intentionally deferred:
+
+- `TrustedMemoryService` command `turn_lease` fields and lease-aware branches;
+- `NaturalCollaborativeNoteCommand.turn_lease`;
+- database optional `turn_lease` parameters and chat-turn effect
+  writers/readers;
+- synchronous artifact executor and artifact-feedback executor legacy effect
+  behavior;
+- AgentJob retry/recovery/drainer work and Note shutdown hygiene.

@@ -8,7 +8,6 @@ from agent_col_responder_context_v3 import (
     AgentColResponderContextV3 as AgentColResponderContext,
 )
 from agent_col_routing_v3 import AgentColRoute, AgentColRoutingDirective
-from memory_proposals import ProposalTurnLease
 from schemas import (
     AgentActionReceipt,
     ContinuitySourceReceipt,
@@ -498,10 +497,6 @@ async def test_turn_service_queues_workspace_note_from_natural_that_clause(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -576,10 +571,6 @@ async def test_turn_service_queues_explicit_memory_request_before_routing(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -660,10 +651,6 @@ async def test_turn_service_preserves_preflight_memory_queue_without_requeue(
             message=message,
             prequeued_actions=(queued_action,),
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -745,10 +732,6 @@ async def test_turn_service_keeps_one_memory_receipt_when_responder_duplicates(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -831,10 +814,6 @@ async def test_turn_service_keeps_one_note_receipt_when_responder_duplicates(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -946,10 +925,6 @@ async def test_turn_service_queues_explicit_memory_preference_clause(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -1011,10 +986,6 @@ async def test_turn_service_preserves_then_inside_workspace_note_body(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -1086,10 +1057,6 @@ async def test_turn_service_splits_workspace_note_before_artifact_command(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -1168,10 +1135,6 @@ async def test_turn_service_queues_note_memory_and_artifact_independently(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -1242,10 +1205,6 @@ async def test_turn_service_still_queues_workspace_note_stating_clause(
             user_id="user-1",
             message=message,
             chat_turn_claim=claim,
-            turn_lease=ProposalTurnLease(
-                turn_id=claim.ids.turn_id,
-                owner_token=claim.owner_token,
-            ),
         )
     )
 
@@ -1368,10 +1327,6 @@ async def test_turn_service_projects_only_minimal_routing_input() -> None:
         ),
         source_message_id="private-message-id",
         memory_decision_present=True,
-        turn_lease=ProposalTurnLease(
-            turn_id="a" * 64,
-            owner_token="private-owner-token",
-        ),
         precompleted_actions=(
             AgentActionReceipt(
                 action_name="approve_memory_signal",
@@ -1916,10 +1871,6 @@ async def test_turn_service_composes_each_route_into_responder_context(
         role="user",
         parts=[types.Part.from_text(text="existing-context")],
     )
-    lease = ProposalTurnLease(
-        turn_id="b" * 64,
-        owner_token="owner-token",
-    )
     command = AgentColTurnCommand(
         project_id="project-1",
         session_id="session-1",
@@ -1930,7 +1881,6 @@ async def test_turn_service_composes_each_route_into_responder_context(
         model_input_context=(original_context,),
         source_message_id="message-1",
         memory_decision_present=True,
-        turn_lease=lease,
     )
     routing_request = RecordingRoutingRequest(directive)
     executor = RecordingExecutor(responder_context)
@@ -1957,7 +1907,7 @@ async def test_turn_service_composes_each_route_into_responder_context(
     assert runtime_context.message == command.message
     assert runtime_context.source_message_id == command.source_message_id
     assert runtime_context.memory_decision_present is True
-    assert runtime_context.turn_lease is lease
+    assert not hasattr(runtime_context, "turn_lease")
     assert runtime_context.model_input_context[0] is original_context
     assert len(runtime_context.model_input_context) == 2
     routed_context = runtime_context.model_input_context[1]
