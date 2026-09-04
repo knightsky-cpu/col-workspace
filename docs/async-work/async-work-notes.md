@@ -1690,6 +1690,237 @@ Work deferred until core decoupling is complete:
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
 
+## Memory Clarification Creation Dependency Audit
+
+Checkpoint commit before this audit: `93229f0e255c74b942cd7e48df603f20ce80d538`.
+
+Read-only inspection covered the two remaining source-backed Memory
+clarification creation dependencies:
+
+1. deterministic ambiguous-memory preflight in `main.py`;
+2. preference-hypothesis confirmation in `trusted_memory_service.py`.
+
+No source behavior was changed during this audit.
+
+### Deterministic ambiguous-memory preflight
+
+Active production call path:
+
+- ordinary `/api/chat` and `/api/chat/stream` enter `_execute_chat`;
+- after structured Memory decision and clarification-selection handling, the
+  preflight gate runs when there is a claimed chat turn, no structured Memory
+  or other durable decision, and no precompleted Memory proposal or
+  clarification;
+- `_deterministic_memory_clarification_decision(payload.message)` recognizes a
+  narrow ambiguous explicit Memory request, such as a request to remember one
+  of multiple preferences;
+- `_execute_chat` calls
+  `TrustedMemoryService.handle_natural_memory_decision(...)` with a
+  `ClarifyDecision` and `ProposalTurnLease(turn_id=chat_turn_claim.ids.turn_id,
+  owner_token=chat_turn_claim.owner_token)`;
+- `TrustedMemoryService.handle_natural_memory_decision` creates a
+  `MemoryClarificationEnvelope`, using the lease turn id as
+  `clarification_turn_id`, and calls
+  `database.create_memory_clarification(..., turn_lease=command.turn_lease)`;
+- `_execute_chat` inserts the resulting clarification receipt into
+  `precompleted_memory_clarifications`, passes it through
+  `AgentColTurnCommand`, and returns it in `ChatResponse.memory_clarifications`.
+
+Where `ProposalTurnLease` is introduced and why it is required today:
+
+- the lease is constructed in `main.py` from `chat_turn_claim`;
+- it is required by the current chat response contract, not by the Memory
+  storage primitive itself;
+- `database.create_memory_clarification` accepts `turn_lease=None`, but with a
+  lease it also writes the clarification as a chat-turn effect;
+- `database.complete_chat_turn` then requires
+  `response.memory_clarifications` to exactly match stored chat-turn
+  clarification effects. Returning a completed clarification receipt without a
+  matching stored chat-turn effect would fail
+  `Completed response conflicts with stored turn effects.`
+
+Memory-owned feasibility:
+
+- Memory-owned creation with `turn_lease=None` is source-supported:
+  `TrustedMemoryService.handle_natural_memory_decision` already falls back to
+  `source_message_id` for `clarification_turn_id` when no lease is supplied,
+  and `database.create_memory_clarification` skips chat-turn reads and writes in
+  the no-lease path;
+- it is not safe to keep the current synchronous chat-returned completed
+  clarification shape while using `turn_lease=None`, because chat completion
+  would either fail the stored-effect invariant or require restoring chat-turn
+  Memory ownership;
+- the safe boundary is queued Memory work: the chat turn receives only a queued
+  action receipt, while the Memory worker creates the active clarification with
+  `turn_lease=None`.
+
+Recommended execution style:
+
+- queued Memory work, not a direct Memory operation;
+- reuse the existing worker contract that already handles queued
+  `NaturalMemoryClarificationResult` by storing `clarification_id` in job
+  result refs and emitting the "Memory clarification pending response" report;
+- keep server-derived candidates from the deterministic recognizer and
+  `source_message_id` provenance; do not infer clarification identity or
+  candidates from model text.
+
+Tests currently locking in old behavior:
+
+- `tests/test_main.py::test_chat_preflights_ambiguous_memory_request_into_clarification`
+  asserts the completed clarification is returned in chat and the natural
+  Memory command carries a `ProposalTurnLease`;
+- `tests/test_main.py::test_chat_preflight_clarification_returns_fallback_when_responder_fails`
+  asserts the fallback chat response also returns a completed clarification.
+
+### Preference-hypothesis confirmation
+
+Active production call path:
+
+- ordinary `_execute_chat` completes responder execution and builds
+  `chat_response`;
+- if there is a claimed chat turn, no structured durable decision, no
+  continuity selection, and the response has no Memory proposals, Memory
+  clarifications, collaborative note effects, artifact feedback, or continuity
+  choices, `_execute_chat` calls `preference_learning_service.capture(...)`;
+- when capture returns a `surfaced_hypothesis`, `_execute_chat` calls
+  `TrustedMemoryService.open_preference_hypothesis_confirmation(...)` with
+  `ProposalTurnLease(turn_id=chat_turn_claim.ids.turn_id,
+  owner_token=chat_turn_claim.owner_token)`;
+- `TrustedMemoryService.open_preference_hypothesis_confirmation` creates a
+  two-choice clarification from the hypothesis and "Do not save", derives the
+  clarification id using the lease turn id, and calls
+  `database.create_memory_clarification(..., turn_lease=turn_lease)`;
+- `_execute_chat` overwrites `chat_response.memory_clarifications` with the
+  returned receipt before calling `database.complete_chat_turn`.
+
+Where `ProposalTurnLease` is introduced and why it is required today:
+
+- the lease is constructed in `main.py` from `chat_turn_claim`;
+- `TrustedMemoryService.open_preference_hypothesis_confirmation` explicitly
+  rejects non-lease calls with "A preference confirmation requires retry-safe
+  turn ownership";
+- as with deterministic preflight, the deeper reason is the current chat
+  response effect invariant: a completed clarification returned from chat must
+  have been written as a chat-turn clarification effect.
+
+Memory-owned feasibility:
+
+- the storage layer can support no-lease clarification creation, but
+  `open_preference_hypothesis_confirmation` would need a narrow API change to
+  allow `turn_lease=None` and derive `clarification_turn_id` from
+  `source_message_id`;
+- keeping the completed clarification in `ChatResponse.memory_clarifications`
+  would remain unsafe without chat-turn effect ownership;
+- Memory-owned preference confirmation is safest as queued Memory work that
+  carries the server-validated `PreferenceHypothesis` payload privately to the
+  worker, then calls the Memory service with `turn_lease=None`.
+
+Recommended execution style:
+
+- queued Memory work, not direct synchronous Memory creation;
+- preference confirmation is opportunistic post-response learning, so it should
+  not block chat completion or restore chat effect ownership;
+- the queued receipt should be the only chat-visible artifact for this
+  lifecycle. The active clarification should surface through Memory-owned
+  session state, job result refs, and the worker report.
+
+Tests currently locking in old behavior:
+
+- `tests/test_main.py::test_chat_surfaces_preference_confirmation_without_saving_memory`
+  asserts the completed preference clarification is returned in chat;
+- `tests/test_trusted_memory_service.py::test_preference_hypothesis_confirmation_opens_unsaved_memory_choice`
+  constructs a required `ProposalTurnLease`;
+- `tests/test_trusted_memory_service.py::test_confirmed_hypothesis_creates_pending_proposal_not_active_memory`
+  opens the preference confirmation with a lease before selecting it.
+
+### Shared contract and pass split
+
+Both dependencies should converge on the same Memory-owned clarification
+creation contract:
+
+- server-validated source context and candidates;
+- `source_message_id` as the no-lease clarification turn/source discriminator;
+- `TrustedMemoryService`/database creation with `turn_lease=None`;
+- no completed Memory clarification receipt in `ChatResponse`;
+- chat-visible queued action receipt only;
+- Memory worker completion/report owns the created clarification result.
+
+They should be split into two implementation passes:
+
+1. deterministic ambiguous-memory preflight first;
+2. preference-hypothesis confirmation second.
+
+The split is recommended because the trigger timing and product behavior differ.
+The deterministic path is an explicit user Memory request that currently
+short-circuits into immediate clarification UI and fallback response handling.
+Preference confirmation is post-response, opportunistic, and already suppressed
+whenever other durable effects exist. Keeping them separate reduces regression
+risk and keeps TDD evidence easy to inspect.
+
+### Recommended next pass
+
+Goal:
+
+- move deterministic ambiguous-memory preflight creation to queued Memory-owned
+  clarification work with `turn_lease=None`.
+
+Expected files:
+
+- `main.py`: replace synchronous preflight clarification creation and
+  `precompleted_memory_clarifications` insertion with queued Memory job
+  creation/dispatch and queued action receipt handling;
+- `memory_proposal_job_worker.py`: likely add or generalize a private
+  clarification-creation payload helper if the existing natural-memory payload
+  is not sufficient for preflight provenance/reporting;
+- `memory_proposal_tool.py`: possible helper reuse only if the queue-building
+  code should not live in `main.py`;
+- `tests/test_main.py`: update the two deterministic preflight tests to assert
+  queued receipt only, no completed chat clarification, and no
+  `ProposalTurnLease`;
+- `tests/test_memory_proposal_job_worker.py`: add focused worker coverage for
+  the queued deterministic clarification payload creating via
+  `TrustedMemoryService.handle_natural_memory_decision(..., turn_lease=None)`;
+- `docs/async-work/async-work-notes.md`: record pass outcome after
+  implementation.
+
+Expected verification:
+
+- focused RED/GREEN pytest for the two `tests/test_main.py` deterministic
+  preflight cases;
+- focused worker pytest for the new queued clarification-creation payload;
+- focused related Memory proposal tool/job tests if queue helper code is shared;
+- `py_compile` for touched Python modules;
+- `git diff --check`.
+
+Time/usage estimate:
+
+- deterministic preflight pass alone is a medium pass, roughly 60-90 minutes
+  for TDD, implementation, focused verification, docs, commit, and push;
+- this is unlikely to fit comfortably inside half of the current remaining
+  window if half means about 45-50 minutes, though it might fit only with a very
+  tight implementation and no unexpected test fallout;
+- preference-hypothesis confirmation is another medium-to-large pass, roughly
+  75-120 minutes because it needs a Memory service API contract change plus
+  private queued hypothesis payload handling;
+- both paths together should not be attempted in the current remaining window.
+
+Handoff context:
+
+- exact remaining live chat ownership is limited to Memory clarification
+  creation paths that return completed clarification receipts from chat:
+  deterministic ambiguous-memory preflight in `main.py` and
+  preference-hypothesis confirmation in `main.py`/
+  `trusted_memory_service.py`;
+- Memory clarification selection has already moved to queued Memory-owned work
+  and calls `TrustedMemoryService.select_memory_clarification(...,
+  turn_lease=None)`;
+- direct Memory storage supports no-lease clarification creation, but chat
+  completion still requires any completed Memory clarification included in
+  `ChatResponse` to match stored chat-turn effects;
+- legacy structured `/api/chat` compatibility cleanup remains deferred unless a
+  source-level conflict appears while removing these active creation
+  dependencies.
+
 ## Memory-Owned Natural Clarification Selection Pass
 
 This pass preserved natural chat answers to active Memory clarifications while
