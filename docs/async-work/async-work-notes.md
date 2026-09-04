@@ -1511,3 +1511,98 @@ Work deferred until core decoupling is complete:
   queued action receipts;
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
+
+## Direct Collaborative Note Decision Enforcement Pass
+
+This pass made the direct collaborative note proposal approve/reject API the
+only public execution path for explicit note proposal decisions. The existing
+direct route at
+`/api/users/{user_id}/projects/{project_id}/notes/proposals/{proposal_id}/{decision}`
+already owned the Notes lifecycle; the remaining defect was that `/api/chat`
+still accepted `collaborative_note_decision`, claimed a chat turn, recorded a
+chat-turn decision effect, and could continue through the turn service.
+
+Completed work:
+
+- `/api/chat` now rejects `collaborative_note_decision` immediately with a safe
+  conflict response telling callers to use the direct notes API;
+- `/api/chat/stream` returns the same direct-notes enforcement response for
+  `collaborative_note_decision` instead of redirecting callers to `/api/chat`;
+- the rejection happens before chat-turn claim, Note service mutation,
+  chat-turn decision-effect writes, turn service dispatch, chat-turn
+  completion, or release;
+- frontend chat endpoint selection no longer treats
+  `collaborative_note_decision` as a reason to use `/api/chat`;
+- stale backend tests that proved chat-owned note decision execution were
+  replaced with direct-route coverage or removed when they only described the
+  retired chat effect/responder lifecycle;
+- direct-route Google privacy coverage now verifies public-safe note decision
+  event receipts without depending on chat completion.
+
+Why this matters:
+
+Before this pass, collaborative note proposal approval had two authorities: the
+direct Notes API and a chat-turn-owned structured decision path. After this
+pass, explicit note proposal approval/rejection is Notes-owned and no longer
+depends on a live chat-turn lease.
+
+TDD evidence recorded during the pass:
+
+- RED:
+  `test_chat_rejects_collaborative_note_decision_without_claiming_turn` failed
+  because `/api/chat` still returned the old idempotency-key requirement before
+  direct-route enforcement.
+- RED:
+  `test_chat_stream_rejects_collaborative_note_decision_without_claiming_turn`
+  failed because `/api/chat/stream` still returned the old structured-decision
+  `/api/chat` redirect response.
+- RED: `chat endpoint selection streams only ordinary requests` failed because
+  the frontend request selector still routed `collaborative_note_decision` to
+  `/api/chat`.
+- GREEN: `_execute_chat` now rejects `collaborative_note_decision` before the
+  generic structured-decision stream check, and `selectChatEndpoint` no longer
+  includes `collaborative_note_decision` in its JSON-chat selector list.
+- Follow-up focused backend verification exposed stale chat-owned tests; the
+  direct privacy behavior was retargeted to the direct route, and the retired
+  chat effect/responder tests were removed.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_main.py
+294 passed, 1 warning
+```
+
+```text
+node --test tests/frontend/api.test.mjs tests/frontend/requests.test.mjs tests/frontend/app-runtime.test.mjs tests/frontend/workspace-static.test.mjs
+123 passed
+```
+
+```text
+git diff --check
+no output
+```
+
+Remaining direct decoupling:
+
+- legacy schema/request-builder compatibility still allows parsing retired
+  structured chat decisions, even though `/api/chat` now rejects their
+  execution;
+- unreachable legacy structured-decision branches remain inside `_execute_chat`
+  for memory decisions and collaborative note decisions;
+- old frontend request builders for retired chat structured decisions remain
+  only for compatibility/test coverage.
+
+Next proposed pass:
+
+- remove retired structured-decision execution branches and stale request
+  helpers now that Memory, Artifact, Notes, and Continuity direct lifecycle
+  APIs own their user actions.
+
+Work deferred until core decoupling is complete:
+
+- broad manual end-to-end browser acceptance for every drawer action;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.

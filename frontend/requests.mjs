@@ -112,7 +112,6 @@ export function selectChatEndpoint(request) {
   const body = request?.body ?? {};
   const structuredFields = [
     "artifact_feedback_decision",
-    "collaborative_note_decision",
   ];
   return structuredFields.some((field) => body[field] != null)
     ? "/api/chat"

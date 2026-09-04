@@ -109,7 +109,6 @@ test("chat endpoint selection streams only ordinary requests", () => {
 
   for (const field of [
     "artifact_feedback_decision",
-    "collaborative_note_decision",
   ]) {
     assert.equal(
       selectChatEndpoint({ body: { ...ordinary.body, [field]: {} } }),
@@ -119,6 +118,12 @@ test("chat endpoint selection streams only ordinary requests", () => {
   assert.equal(
     selectChatEndpoint({
       body: { ...ordinary.body, memory_decision: {} },
+    }),
+    "/api/chat/stream",
+  );
+  assert.equal(
+    selectChatEndpoint({
+      body: { ...ordinary.body, collaborative_note_decision: {} },
     }),
     "/api/chat/stream",
   );

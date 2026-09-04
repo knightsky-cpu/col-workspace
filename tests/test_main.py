@@ -9674,7 +9674,7 @@ async def test_direct_artifact_feedback_does_not_use_chat_turn(
 
 
 @pytest.mark.asyncio
-async def test_chat_requires_idempotency_key_for_collaborative_note_decision(
+async def test_chat_rejects_collaborative_note_decision_without_claiming_turn(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
@@ -9692,10 +9692,47 @@ async def test_chat_requires_idempotency_key_for_collaborative_note_decision(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 409
     assert response.json() == {
-        "detail": "Collaborative note decision requires an idempotency key."
+        "detail": (
+            "Collaborative note decisions must use the direct notes API."
+        )
     }
+    assert service_state.database.claim_calls == []
+    assert service_state.collaborative_note_service.decision_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.events == []
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_rejects_collaborative_note_decision_without_claiming_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "note-decision-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Approve that note.",
+            "collaborative_note_decision": {
+                "proposal_id": "note-proposal-1",
+                "decision": "approve",
+            },
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "Collaborative note decisions must use the direct notes API."
+        )
+    }
+    assert service_state.database.claim_calls == []
+    assert service_state.collaborative_note_service.decision_calls == []
+    assert service_state.turn_service.calls == []
     assert service_state.events == []
 
 
@@ -9747,97 +9784,7 @@ async def test_direct_collaborative_note_decision_does_not_use_chat_turn(
 
 
 @pytest.mark.asyncio
-async def test_chat_completes_structured_collaborative_note_decision_turn(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    decision = CollaborativeNoteDecisionRequest(
-        proposal_id="note-proposal-1",
-        decision="approve",
-    )
-    claim = make_chat_turn_claim(collaborative_note_decision=decision)
-    renewed_claim = replace(
-        claim,
-        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
-    )
-    action = AgentActionReceipt(
-        action_name="approve_collaborative_note",
-        status="completed",
-    )
-    event = CollaborativeNoteEvent.model_validate(
-        collaborative_note_event_payload("approved")
-    )
-    effect_claim = replace(
-        renewed_claim,
-        precompleted_actions=(action,),
-        precompleted_collaborative_note_events=(event,),
-    )
-    service_state.database.chat_turn_result = claim
-    service_state.database.renewed_claim = renewed_claim
-    service_state.collaborative_note_service.decision_result = (
-        CollaborativeNoteDecisionResult(
-            action=action,
-            note=CollaborativeNote.model_validate(
-                collaborative_note_payload()
-            ),
-            event=event,
-        )
-    )
-    service_state.turn_service.turn_result = AgentColTurnResult(
-        response="I recorded that note.",
-        actions=(action,),
-        collaborative_note_events=(event,),
-        chat_turn_claim=effect_claim,
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "note-decision-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "Approve that note.",
-            "collaborative_note_decision": decision.model_dump(mode="json"),
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.json()["actions"] == [action.model_dump(mode="json")]
-    assert response.json()["collaborative_note_events"] == [
-        event.model_dump(mode="json")
-    ]
-    assert service_state.collaborative_note_service.decision_calls == [
-        CollaborativeNoteDecisionCommand(
-            user_id="user-1",
-            workspace_id="project-1",
-            proposal_id="note-proposal-1",
-            decision="approve",
-            observed_at=service_state.collaborative_note_service.decision_calls[
-                0
-            ].observed_at,
-        )
-    ]
-    turn_request = service_state.database.claim_calls[0][0]
-    assert turn_request.collaborative_note_decision == decision
-    assert service_state.database.note_decision_effect_calls == [
-        (
-            claim,
-            event,
-            service_state.database.note_decision_effect_calls[0][2],
-        )
-    ]
-    command = service_state.turn_service.calls[0]
-    assert command.collaborative_note_decision_present is True
-    assert command.precompleted_collaborative_note_events == (event,)
-    assert service_state.database.complete_calls[0][0] is effect_claim
-    assert service_state.database.complete_calls[0][1].collaborative_note_events == [
-        event
-    ]
-
-
-@pytest.mark.asyncio
-async def test_google_chat_note_event_receipts_hide_internal_owner(
+async def test_google_direct_note_decision_receipts_hide_internal_owner(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
@@ -9854,15 +9801,6 @@ async def test_google_chat_note_event_receipts_hide_internal_owner(
             )
         ]
     )
-    decision = CollaborativeNoteDecisionRequest(
-        proposal_id="note-proposal-1",
-        decision="approve",
-    )
-    claim = make_chat_turn_claim(collaborative_note_decision=decision)
-    renewed_claim = replace(
-        claim,
-        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
-    )
     action = AgentActionReceipt(
         action_name="approve_collaborative_note",
         status="completed",
@@ -9874,17 +9812,10 @@ async def test_google_chat_note_event_receipts_hide_internal_owner(
             "workspace_id": project_id,
         }
     )
-    effect_claim = replace(
-        renewed_claim,
-        precompleted_actions=(action,),
-        precompleted_collaborative_note_events=(event,),
-    )
     main.app.state.authenticator = Authenticator(
         AuthSettings(mode="google_oidc", google_client_id="client-123"),
         token_verifier=lambda token, client_id: {"sub": subject},
     )
-    service_state.database.chat_turn_result = claim
-    service_state.database.renewed_claim = renewed_claim
     service_state.collaborative_note_service.decision_result = (
         CollaborativeNoteDecisionResult(
             action=action,
@@ -9898,105 +9829,25 @@ async def test_google_chat_note_event_receipts_hide_internal_owner(
             event=event,
         )
     )
-    service_state.turn_service.turn_result = AgentColTurnResult(
-        response="I recorded that note.",
-        actions=(action,),
-        collaborative_note_events=(event,),
-        chat_turn_claim=effect_claim,
-    )
 
     response = await client.post(
-        "/api/chat",
+        f"/api/users/{public_user_id}/projects/{project_id}/notes/proposals/"
+        "note-proposal-1/approve",
         headers={
             "Authorization": "Bearer token-abc",
-            "Idempotency-Key": "google-note-decision-key-1",
-        },
-        json={
-            "project_id": project_id,
-            "session_id": "session-1",
-            "user_id": public_user_id,
-            "message": "Approve that note.",
-            "collaborative_note_decision": decision.model_dump(mode="json"),
         },
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert (
-        payload["collaborative_note_events"][0]["owner_user_id"]
+        payload["event"]["owner_user_id"]
         == public_user_id
     )
     assert internal_user_id not in str(payload)
     assert service_state.collaborative_note_service.decision_calls[0].user_id == (
         internal_user_id
     )
-    assert service_state.database.complete_calls[0][1].collaborative_note_events == [
-        event
-    ]
-
-
-@pytest.mark.asyncio
-async def test_note_decision_responder_failure_returns_completed_receipt(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    decision = CollaborativeNoteDecisionRequest(
-        proposal_id="note-proposal-1",
-        decision="reject",
-    )
-    claim = make_chat_turn_claim(collaborative_note_decision=decision)
-    action = AgentActionReceipt(
-        action_name="reject_collaborative_note",
-        status="completed",
-    )
-    event = CollaborativeNoteEvent.model_validate(
-        {
-            **collaborative_note_event_payload("rejected"),
-            "note_kind": None,
-            "title": None,
-            "body": None,
-            "source_session_id": None,
-            "source_message_ids": [],
-        }
-    )
-    effect_claim = replace(
-        claim,
-        precompleted_actions=(action,),
-        precompleted_collaborative_note_events=(event,),
-    )
-    service_state.database.chat_turn_result = claim
-    service_state.database.released_claim = effect_claim
-    service_state.collaborative_note_service.decision_result = (
-        CollaborativeNoteDecisionResult(
-            action=action,
-            note=None,
-            event=event,
-        )
-    )
-    service_state.turn_service.error = AgentColTurnResponderError(
-        "private responder failure",
-        actions=(action,),
-        collaborative_note_events=(event,),
-        chat_turn_claim=effect_claim,
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "note-decision-failure-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "Reject that note.",
-            "collaborative_note_decision": decision.model_dump(mode="json"),
-        },
-    )
-
-    assert response.status_code == 502
-    assert response.json()["actions"] == [action.model_dump(mode="json")]
-    assert response.json()["collaborative_note_events"] == [
-        event.model_dump(mode="json")
-    ]
     assert service_state.database.complete_calls == []
 
 

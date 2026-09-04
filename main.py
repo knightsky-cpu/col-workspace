@@ -4661,6 +4661,13 @@ async def _execute_chat(
                 "Memory proposal decisions must use the direct Memory API."
             ),
         )
+    if payload.collaborative_note_decision is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Collaborative note decisions must use the direct notes API."
+            ),
+        )
 
     if ordinary_only and _chat_request_requires_json(payload):
         raise HTTPException(
@@ -4687,17 +4694,6 @@ async def _execute_chat(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=(
                 "Memory clarification selection requires an idempotency key."
-            ),
-        )
-
-    if (
-        payload.collaborative_note_decision is not None
-        and idempotency_key is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=(
-                "Collaborative note decision requires an idempotency key."
             ),
         )
 
