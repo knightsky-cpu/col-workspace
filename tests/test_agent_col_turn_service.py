@@ -600,6 +600,92 @@ async def test_turn_service_queues_explicit_memory_request_before_routing(
 
 
 @pytest.mark.asyncio
+async def test_turn_service_preserves_preflight_memory_queue_without_requeue(
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    message = (
+        "Create a workspace note that Project Lantern uses Python. also "
+        "remember one of these preferences, but help me choose which "
+        "one to save: concise answers or practical examples."
+    )
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-preflight-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    queued_action = QueuedActionReceipt(
+        job_id="memory-preflight-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification",
+        created_at=datetime(2026, 8, 24, tzinfo=UTC),
+        agent_label="Memory Analyst",
+    )
+    memory_queue = RecordingMemoryQueue()
+    note_queue = RecordingNoteQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        note_queue=note_queue,
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            prequeued_actions=(queued_action,),
+            chat_turn_claim=claim,
+            turn_lease=ProposalTurnLease(
+                turn_id=claim.ids.turn_id,
+                owner_token=claim.owner_token,
+            ),
+        )
+    )
+
+    assert memory_queue.calls == []
+    assert len(note_queue.calls) == 1
+    assert note_queue.calls[0].decision.body == (
+        "Project Lantern uses Python."
+    )
+    assert result.queued_actions == (
+        QueuedActionReceipt(
+            job_id="note-job-1",
+            action_kind="propose_collaborative_note",
+            status="queued",
+            display_label="Workspace note: queued",
+            created_at=datetime(2026, 8, 24, tzinfo=UTC),
+            agent_label="Workspace Notes",
+        ),
+        queued_action,
+    )
+
+
+@pytest.mark.asyncio
 async def test_turn_service_keeps_one_memory_receipt_when_responder_duplicates(
 ) -> None:
     from agent_col_routing_v4 import (

@@ -257,6 +257,7 @@ class AgentColTurnCommand:
     precompleted_collaborative_note_events: tuple[
         CollaborativeNoteEvent, ...
     ] = ()
+    prequeued_actions: tuple[QueuedActionReceipt, ...] = ()
     continuity_receipts: tuple[ContinuitySourceReceipt, ...] = ()
     continuity_choices: tuple[ContinuityChoice, ...] = ()
     chat_turn_claim: ChatTurnClaim | None = None
@@ -736,6 +737,7 @@ class AgentColTurnService:
                     if command.chat_turn_claim is not None
                     else command.precompleted_collaborative_note_events
                 ),
+                queued_actions=command.prequeued_actions,
                 continuity_receipts=command.continuity_receipts,
                 continuity_choices=command.continuity_choices,
                 chat_turn_claim=command.chat_turn_claim,
@@ -941,7 +943,14 @@ class AgentColTurnService:
         artifact_directive = _explicit_blueprint_artifact_directive(
             command.message
         )
-        if artifact_directive is not None and self._artifact_executor is not None:
+        if (
+            artifact_directive is not None
+            and self._artifact_executor is not None
+            and not _has_queued_action_kind(
+                command.prequeued_actions,
+                "create_artifact",
+            )
+        ):
             queue_result = await self._artifact_executor.queue(
                 AgentColArtifactExecutionCommand(
                     claim=claim,
@@ -962,15 +971,32 @@ class AgentColTurnService:
             action_index=next_index,
             observed_at=observed_at,
         )
-        if note_command is not None and self._note_queue is not None:
+        if (
+            note_command is not None
+            and self._note_queue is not None
+            and not _has_queued_action_kind(
+                command.prequeued_actions,
+                "propose_collaborative_note",
+            )
+        ):
             queued_actions.append(await self._note_queue.queue(note_command))
             next_index += 1
 
         memory_command = _explicit_memory_command(command)
-        if memory_command is not None and self._memory_queue is not None:
+        if (
+            memory_command is not None
+            and self._memory_queue is not None
+            and not _has_queued_action_kind(
+                command.prequeued_actions,
+                "propose_memory_signal",
+            )
+        ):
             queued_actions.append(await self._memory_queue.queue(memory_command))
 
-        return tuple(queued_actions)
+        return _stable_merge_queued_actions(
+            tuple(queued_actions),
+            command.prequeued_actions,
+        )
 
     async def _run_artifact_capable_with_deadline(
         self,

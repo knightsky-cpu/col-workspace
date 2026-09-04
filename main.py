@@ -1624,6 +1624,7 @@ def _partial_failure_response(
     decision_memory_clarifications: tuple[
         MemoryClarificationReceipt, ...
     ],
+    decision_queued_actions: tuple[QueuedActionReceipt, ...] = (),
     decision_note_proposals: tuple[CollaborativeNoteProposal, ...] = (),
     decision_note_events: tuple[CollaborativeNoteEvent, ...] = (),
     runtime_error: AgentColTurnServiceError,
@@ -1704,6 +1705,7 @@ def _partial_failure_response(
         and not clarifications
         and not note_proposals
         and not note_events
+        and not decision_queued_actions
         and not runtime_error.queued_actions
     ):
         return None
@@ -1733,7 +1735,12 @@ def _partial_failure_response(
         memory_clarifications=list(clarifications),
         collaborative_note_proposals=list(note_proposals),
         collaborative_note_events=list(note_events),
-        queued_actions=list(runtime_error.queued_actions),
+        queued_actions=list(
+            _merge_receipts(
+                runtime_error.queued_actions,
+                decision_queued_actions,
+            )
+        ),
         adaptations=list(runtime_error.adaptations),
     )
     if response.collaborative_note_events:
@@ -2073,6 +2080,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     dispatch_memory_job(queued_job)
                 return queued_action
 
+        memory_queue = MemoryQueue()
         collaborative_note_service = CollaborativeNoteService(
             database=database
         )
@@ -2149,7 +2157,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             artifact_executor=artifact_executor,
             artifact_feedback_executor=artifact_feedback_executor,
             note_queue=CollaborativeNoteQueue(),
-            memory_queue=MemoryQueue(),
+            memory_queue=memory_queue,
         )
     except Exception:
         try:
@@ -2177,6 +2185,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.memory_service = memory_service
     app.state.memory_job_worker = memory_job_worker
     app.state.memory_job_background_tasks = memory_job_background_tasks
+    app.state.memory_queue = memory_queue
     app.state.collaborative_note_service = collaborative_note_service
     app.state.continuity_service = continuity_service
     app.state.working_state_service = working_state_service
@@ -4617,6 +4626,7 @@ async def _execute_chat(
     decision_memory_clarifications: tuple[
         MemoryClarificationReceipt, ...
     ] = ()
+    decision_queued_actions: tuple[QueuedActionReceipt, ...] = ()
     decision_note_proposals: tuple[CollaborativeNoteProposal, ...] = ()
     decision_note_events: tuple[CollaborativeNoteEvent, ...] = ()
     continuity_resolution = ContinuityResolution(status="none")
@@ -5123,8 +5133,8 @@ async def _execute_chat(
         )
         if preflight_decision is not None:
             try:
-                preflight_result = (
-                    await memory_service.handle_natural_memory_decision(
+                decision_queued_actions = (
+                    await request.app.state.memory_queue.queue(
                         NaturalMemoryCommand(
                             user_id=effective_user_id,
                             workspace_id=effective_project_id,
@@ -5133,63 +5143,20 @@ async def _execute_chat(
                             source_message_text=payload.message,
                             memory_decision_present=False,
                             decision=preflight_decision,
-                            turn_lease=ProposalTurnLease(
-                                turn_id=chat_turn_claim.ids.turn_id,
-                                owner_token=chat_turn_claim.owner_token,
-                            ),
+                            turn_lease=None,
                         )
-                    )
-                )
-            except (
-                MemoryProposalConflictError,
-                MemoryProposalOriginConflictError,
-                MemorySignalAlreadyActiveError,
-            ) as exc:
-                await _release_chat_turn_safely(database, chat_turn_claim)
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        "Memory proposal state conflicts with this request."
                     ),
-                ) from exc
-            except ChatSessionOwnershipError as exc:
-                await _release_chat_turn_safely(database, chat_turn_claim)
-                _raise_chat_session_unavailable(exc)
-            except (ChatTurnOwnershipError, ChatTurnStateError) as exc:
-                await _release_chat_turn_safely(database, chat_turn_claim)
-                _raise_chat_turn_operation_http_error(
-                    exc,
-                    "memory clarification preflight",
                 )
+            except AgentJobConflictError as exc:
+                await _release_chat_turn_safely(database, chat_turn_claim)
+                _raise_agent_job_http_error(exc)
             except (
-                MemoryClarificationStateError,
-                MemoryProposalStateError,
+                AgentJobRepositoryError,
+                AgentJobStateError,
+                ValueError,
             ) as exc:
                 await _release_chat_turn_safely(database, chat_turn_claim)
-                logger.error(
-                    "Memory clarification preflight state failed (%s).",
-                    type(exc).__name__,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Memory clarification state is invalid.",
-                ) from exc
-            except MemoryEngineError as exc:
-                await _release_chat_turn_safely(database, chat_turn_claim)
-                _raise_database_http_error(exc)
-            except ValueError as exc:
-                await _release_chat_turn_safely(database, chat_turn_claim)
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="Memory clarification preflight is invalid.",
-                ) from exc
-            if isinstance(
-                preflight_result,
-                NaturalMemoryClarificationResult,
-            ):
-                decision_memory_clarifications = (
-                    preflight_result.clarification,
-                )
+                _raise_agent_job_http_error(exc)
 
     if payload.memory_decision is not None:
         try:
@@ -5456,6 +5423,7 @@ async def _execute_chat(
             if chat_turn_claim is not None
             else decision_note_events
         ),
+        prequeued_actions=decision_queued_actions,
         continuity_receipts=tuple(continuity_resolution.receipts),
         continuity_choices=tuple(continuity_resolution.choices),
         chat_turn_claim=chat_turn_claim,
@@ -5529,6 +5497,7 @@ async def _execute_chat(
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
             decision_memory_clarifications=decision_memory_clarifications,
+            decision_queued_actions=decision_queued_actions,
             decision_note_proposals=decision_note_proposals,
             decision_note_events=decision_note_events,
             runtime_error=exc,
@@ -5591,6 +5560,7 @@ async def _execute_chat(
             decision_actions=decision_actions,
             decision_memory_proposals=decision_memory_proposals,
             decision_memory_clarifications=decision_memory_clarifications,
+            decision_queued_actions=decision_queued_actions,
             decision_note_proposals=decision_note_proposals,
             decision_note_events=decision_note_events,
             runtime_error=exc,
@@ -5619,7 +5589,12 @@ async def _execute_chat(
         actions=list(_merge_receipts(decision_actions, result.actions)),
         artifacts=list(result.artifacts),
         artifact_feedback=list(result.artifact_feedback),
-        queued_actions=list(result.queued_actions),
+        queued_actions=list(
+            _merge_receipts(
+                result.queued_actions,
+                decision_queued_actions,
+            )
+        ),
         citations=list(result.citations),
         memory_proposals=list(
             _merge_receipts(
@@ -5681,6 +5656,7 @@ async def _execute_chat(
         and not chat_response.collaborative_note_events
         and not chat_response.artifact_feedback
         and not chat_response.continuity_choices
+        and not decision_queued_actions
     ):
         try:
             preference_result = await preference_learning_service.capture(

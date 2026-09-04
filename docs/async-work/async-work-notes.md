@@ -1690,6 +1690,110 @@ Work deferred until core decoupling is complete:
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
 
+## Deterministic Ambiguous-Memory Preflight Decoupling Pass
+
+This test-branch pass moved deterministic ambiguous-memory clarification
+creation out of active chat-turn effect ownership.
+
+Completed work:
+
+- deterministic preflight still recognizes and validates the same bounded
+  server-derived Memory candidates;
+- preflight now queues a Memory Analyst job through the application-owned
+  Memory queue with `turn_lease=None`;
+- source-message provenance remains the claimed user message id;
+- the queued receipt is passed into the turn service as prequeued work, which
+  suppresses a duplicate explicit-memory queue attempt while preserving other
+  independently supported actions in the same prompt;
+- chat returns only the queued action receipt and no completed Memory
+  clarification receipt;
+- responder failure preserves the accepted queued receipt as a partial failure
+  instead of completing a chat-owned clarification effect;
+- accepted preflight work suppresses post-response preference learning for that
+  turn, preventing a second clarification lifecycle from being opened;
+- the Memory worker restores the private clarification command with
+  `turn_lease=None`, creates the clarification through the governed Memory
+  service, and records the clarification id and terminal job report;
+- direct clarification selection and preference-hypothesis confirmation were
+  not changed.
+
+Why this matters:
+
+Before this pass, `_execute_chat` synchronously called
+`TrustedMemoryService.handle_natural_memory_decision` with the active
+`ProposalTurnLease`, inserted the completed clarification receipt into the chat
+turn, and depended on chat completion to persist matching effect state. The new
+path ends chat ownership at queue acceptance. Clarification creation and its
+terminal explanation now belong to the Memory worker, Memory state, and job
+report surfaces.
+
+TDD evidence:
+
+- RED:
+  `venv/bin/pytest -q tests/test_main.py -k "chat_preflight"` failed both
+  preflight cases because chat still synchronously created and returned the
+  clarification instead of queueing Memory-owned work.
+- GREEN: the same command passed after preflight used the Memory queue, chat
+  carried only the queued receipt, and failure reconciliation preserved that
+  receipt without completing a chat effect.
+- RED/GREEN: the focused success test then exposed that preference learning
+  still ran after queued preflight acceptance; the preflight queued receipt now
+  suppresses that post-response path for the same turn.
+- REFACTOR: the lifespan now keeps one shared Memory queue instance for both
+  turn-service and deterministic-preflight acceptance; no unrelated cleanup
+  was performed.
+
+Focused verification:
+
+```text
+venv/bin/pytest -q tests/test_main.py -k "chat_preflight"
+2 passed, 293 deselected, 1 warning
+```
+
+```text
+venv/bin/pytest -q tests/test_main.py -k "chat_preflight or select_memory_clarification or preference_confirmation"
+6 passed, 289 deselected, 1 warning
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_job_worker.py
+8 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_tool.py -k "queued or clarification"
+8 passed, 24 deselected
+```
+
+```text
+venv/bin/pytest -q tests/test_agent_col_turn_service.py -k "preflight_memory or prequeue or note or memory"
+15 passed, 45 deselected, 1 warning
+```
+
+Broader verification note:
+
+- running `tests/test_main.py` together with the Memory worker file produced
+  301 passing tests and two unrelated event-order assertion failures:
+  `test_chat_builds_turn_command_and_persists_both_messages` and
+  `test_chat_completes_claimed_turn_without_duplicate_message_writes`; both
+  expect no `chat_session_detail` event even though ordinary chat already loads
+  the active Memory clarification before this pass. They were not changed
+  because that test expectation is outside this boundary.
+
+Next remaining live chat-ownership dependency:
+
+- preference-hypothesis confirmation still creates a completed Memory
+  clarification synchronously after the responder and supplies the active
+  `ProposalTurnLease`; the next bounded pass should queue that validated
+  hypothesis as Memory-owned work without changing preference policy.
+
+Work still deferred:
+
+- legacy structured `/api/chat` cleanup;
+- old chat-turn durable-effect helper cleanup;
+- memory category policy;
+- UI hardening and broad manual testing.
+
 ## Memory Clarification Creation Dependency Audit
 
 Checkpoint commit before this audit: `93229f0e255c74b942cd7e48df603f20ce80d538`.

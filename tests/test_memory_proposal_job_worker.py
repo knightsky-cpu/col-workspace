@@ -8,9 +8,15 @@ from database import (
     MemoryClarificationSelectionError,
     MemoryProposalConflictError,
 )
-from memory_candidate_decisions import ProfileCandidateDecision
+from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
 from memory_proposals import ProposalTurnLease
-from schemas import AgentActionReceipt, MemoryProposalReceiptV2, MemoryProposalV2
+from schemas import (
+    AgentActionReceipt,
+    MemoryClarificationChoice,
+    MemoryClarificationReceipt,
+    MemoryProposalReceiptV2,
+    MemoryProposalV2,
+)
 from trusted_memory_service import (
     NaturalMemoryCommand,
     NaturalMemoryProposalResult,
@@ -453,6 +459,111 @@ async def test_memory_worker_completes_queued_memory_proposal_from_private_paylo
         "A memory proposal was created and is pending your review."
     )
     assert report.public_resource_label == "concise"
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_creates_queued_clarification_without_turn_lease(
+) -> None:
+    from memory_proposal_job_worker import (
+        MemoryProposalJobWorker,
+        memory_job_payload,
+    )
+    from trusted_memory_service import NaturalMemoryClarificationResult
+
+    command = NaturalMemoryCommand(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_message_id="message-clarification-1",
+        source_message_text=(
+            "Remember either concise answers or practical examples."
+        ),
+        memory_decision_present=False,
+        decision=ClarifyDecision(
+            kind="clarify",
+            candidates=[
+                ProfileCandidateDecision(
+                    kind="profile_candidate",
+                    category="response_length",
+                    canonical_value="concise",
+                    evidence_text="concise answers",
+                ),
+                ProfileCandidateDecision(
+                    kind="profile_candidate",
+                    category="example_usage",
+                    canonical_value="when_helpful",
+                    evidence_text="practical examples",
+                ),
+            ],
+        ),
+        clarification_selection=None,
+        turn_lease=None,
+    )
+    job = make_job(make_command()).model_copy(
+        update={
+            "job_id": "memory-clarification-job-1",
+            "source_turn_id": command.source_message_id,
+            "source_message_id": command.source_message_id,
+            "display_label": "Memory clarification",
+            "idempotency_key": "memory-clarification-1",
+        }
+    )
+    repository = RecordingAgentJobRepository(
+        job=job,
+        payload=memory_job_payload(command, job),
+    )
+    service = RecordingMemoryService()
+    clarification = MemoryClarificationReceipt(
+        clarification_id="memory-clarification--clarification-1",
+        choices=[
+            MemoryClarificationChoice(
+                candidate_index=0,
+                category_label="Response length",
+                value_label="concise",
+            ),
+            MemoryClarificationChoice(
+                candidate_index=1,
+                category_label="Example usage",
+                value_label="when helpful",
+            ),
+        ],
+        expires_at=NOW + timedelta(minutes=15),
+    )
+
+    async def create_clarification(
+        restored: NaturalMemoryCommand,
+    ) -> NaturalMemoryClarificationResult:
+        service.commands.append(restored)
+        return NaturalMemoryClarificationResult(
+            status="clarification_required",
+            clarification=clarification,
+        )
+
+    service.handle_natural_memory_decision = create_clarification
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=service,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    completed = await worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-1",
+    )
+
+    assert completed.status == "completed"
+    assert len(service.commands) == 1
+    assert service.commands[0].decision == command.decision
+    assert service.commands[0].source_message_id == command.source_message_id
+    assert service.commands[0].turn_lease is None
+    assert repository.completed[0]["result_refs"] == {
+        "clarification_id": clarification.clarification_id
+    }
+    assert repository.failed == []
+    assert repository.reports[0].title == (
+        "Memory clarification pending response"
+    )
 
 
 @pytest.mark.asyncio

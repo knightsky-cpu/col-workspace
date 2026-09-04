@@ -8830,6 +8830,7 @@ async def test_chat_passes_active_memory_clarification_to_turn_service(
 async def test_chat_preflights_ambiguous_memory_request_into_clarification(
     client: httpx.AsyncClient,
     service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prompt = (
         "Please remember one of these preferences, but help me choose which "
@@ -8837,17 +8838,26 @@ async def test_chat_preflights_ambiguous_memory_request_into_clarification(
         "prefer Agent Col to ask fewer follow-up questions and make "
         "reasonable assumptions."
     )
-    clarification = make_memory_clarification_receipt()
-    service_state.memory_service.natural_memory_result = (
-        NaturalMemoryClarificationResult(
-            status="clarification_required",
-            clarification=clarification,
-        )
+    queued_action = QueuedActionReceipt(
+        job_id="memory-job-preflight-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification",
+        created_at=MEMORY_NOW,
+        agent_label="Memory Analyst",
     )
     service_state.turn_service.turn_result = AgentColTurnResult(
         response="Please choose one."
     )
     service_state.database.chat_turn_result = make_chat_turn_claim()
+    memory_queue = service_state.turn_service_dependencies[0][6]
+    queued_commands: list[NaturalMemoryCommand] = []
+
+    async def queue_memory(command: NaturalMemoryCommand) -> QueuedActionReceipt:
+        queued_commands.append(command)
+        return queued_action
+
+    monkeypatch.setattr(memory_queue, "queue", queue_memory)
 
     response = await client.post(
         "/api/chat",
@@ -8861,38 +8871,39 @@ async def test_chat_preflights_ambiguous_memory_request_into_clarification(
     )
 
     assert response.status_code == 200
-    assert response.json()["memory_clarifications"] == [
-        clarification.model_dump(mode="json")
+    assert response.json()["memory_clarifications"] == []
+    assert response.json()["queued_actions"] == [
+        queued_action.model_dump(mode="json")
     ]
-    assert len(service_state.memory_service.natural_memory_calls) == 1
-    natural_call = service_state.memory_service.natural_memory_calls[0]
-    assert natural_call.user_id == "user-1"
-    assert natural_call.workspace_id == "project-1"
-    assert natural_call.session_id == "session-1"
-    assert natural_call.source_message_id == f"turn--{DEFAULT_TURN_ID}--user"
-    assert natural_call.source_message_text == prompt
-    assert natural_call.memory_decision_present is False
-    assert natural_call.turn_lease == ProposalTurnLease(
-        turn_id=DEFAULT_TURN_ID,
-        owner_token="owner-token-1",
-    )
-    assert natural_call.decision.kind == "clarify"
+    assert service_state.memory_service.natural_memory_calls == []
+    assert len(queued_commands) == 1
+    queued_command = queued_commands[0]
+    assert queued_command.user_id == "user-1"
+    assert queued_command.workspace_id == "project-1"
+    assert queued_command.session_id == "session-1"
+    assert queued_command.source_message_id == f"turn--{DEFAULT_TURN_ID}--user"
+    assert queued_command.source_message_text == prompt
+    assert queued_command.memory_decision_present is False
+    assert queued_command.turn_lease is None
+    assert queued_command.decision.kind == "clarify"
     assert [
         (candidate.category, candidate.canonical_value)
-        for candidate in natural_call.decision.candidates
+        for candidate in queued_command.decision.candidates
     ] == [
         ("example_usage", "when_helpful"),
         ("question_style", "minimal_follow_up"),
     ]
-    assert service_state.turn_service.calls[0].precompleted_memory_clarifications == (
-        clarification,
-    )
+    turn_command = service_state.turn_service.calls[0]
+    assert turn_command.precompleted_memory_clarifications == ()
+    assert turn_command.prequeued_actions == (queued_action,)
+    assert service_state.preference_learning_service.calls == []
 
 
 @pytest.mark.asyncio
 async def test_chat_preflight_clarification_returns_fallback_when_responder_fails(
     client: httpx.AsyncClient,
     service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prompt = (
         "Please remember one of these preferences, but help me choose which "
@@ -8900,18 +8911,26 @@ async def test_chat_preflight_clarification_returns_fallback_when_responder_fail
         "prefer Agent Col to ask fewer follow-up questions and make "
         "reasonable assumptions."
     )
-    clarification = make_memory_clarification_receipt()
-    claim = make_chat_turn_claim()
-    service_state.memory_service.natural_memory_result = (
-        NaturalMemoryClarificationResult(
-            status="clarification_required",
-            clarification=clarification,
-        )
+    queued_action = QueuedActionReceipt(
+        job_id="memory-job-preflight-fallback-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification",
+        created_at=MEMORY_NOW,
+        agent_label="Memory Analyst",
     )
+    claim = make_chat_turn_claim()
     service_state.database.chat_turn_result = claim
     service_state.turn_service.error = AgentColTurnResponderError(
         "private provider failure"
     )
+    memory_queue = service_state.turn_service_dependencies[0][6]
+
+    async def queue_memory(command: NaturalMemoryCommand) -> QueuedActionReceipt:
+        assert command.turn_lease is None
+        return queued_action
+
+    monkeypatch.setattr(memory_queue, "queue", queue_memory)
 
     response = await client.post(
         "/api/chat",
@@ -8926,34 +8945,15 @@ async def test_chat_preflight_clarification_returns_fallback_when_responder_fail
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 502
     assert response.json() == {
-        "response": (
-            "I found more than one possible memory preference in your "
-            "message. Please choose one option below so I can submit the "
-            "correct pending memory proposal for your approval."
-        ),
+        "detail": "Agent_Col response failed after a completed action.",
         "actions": [],
-        "artifacts": [],
-        "artifact_feedback": [],
-        "queued_actions": [],
-        "citations": [],
         "memory_proposals": [],
-        "memory_clarifications": [clarification.model_dump(mode="json")],
-        "collaborative_note_proposals": [],
-        "collaborative_note_events": [],
-        "continuity_receipts": [],
-        "continuity_choices": [],
-        "adaptations": [],
+        "queued_actions": [queued_action.model_dump(mode="json")],
     }
-    assert len(service_state.database.complete_calls) == 1
-    completed_claim, completed_response, completed_at = (
-        service_state.database.complete_calls[0]
-    )
-    assert completed_claim == claim
-    assert completed_response.model_dump(mode="json") == response.json()
-    assert completed_at.tzinfo is not None
-    assert service_state.database.release_calls == []
+    assert service_state.database.complete_calls == []
+    assert len(service_state.database.release_calls) == 1
 
 
 @pytest.mark.parametrize(
