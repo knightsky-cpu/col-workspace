@@ -644,7 +644,6 @@ async def test_memory_worker_creates_preference_confirmation_without_turn_lease(
             "project_id": "workspace-1",
             "session_id": "session-1",
             "source_message_id": "message-preference-1",
-            "turn_lease": None,
             "hypothesis": hypothesis,
             "confirmation_created_at": NOW,
         }

@@ -99,7 +99,6 @@ async def test_preference_hypothesis_confirmation_opens_unsaved_memory_choice():
         project_id="project-1",
         session_id="session-1",
         source_message_id="message-3",
-        turn_lease=None,
         hypothesis=preference_hypothesis(),
         confirmation_created_at=NOW,
     )
@@ -108,7 +107,6 @@ async def test_preference_hypothesis_confirmation_opens_unsaved_memory_choice():
         project_id="project-1",
         session_id="session-1",
         source_message_id="message-3",
-        turn_lease=None,
         hypothesis=preference_hypothesis(),
         confirmation_created_at=NOW,
     )
@@ -128,6 +126,26 @@ async def test_preference_hypothesis_confirmation_opens_unsaved_memory_choice():
     assert first_envelope.clarification_turn_id != "message-3"
     assert first_call.kwargs["turn_lease"] is None
     assert second_call.kwargs["turn_lease"] is None
+
+
+@pytest.mark.asyncio
+async def test_preference_hypothesis_confirmation_rejects_turn_lease_argument():
+    database = MagicMock()
+    database.create_memory_clarification = AsyncMock(
+        side_effect=lambda *, envelope, **kwargs: envelope
+    )
+    service = TrustedMemoryService(database=database, clock=lambda: NOW)
+
+    with pytest.raises(TypeError):
+        await service.open_preference_hypothesis_confirmation(
+            user_id="user-1",
+            project_id="project-1",
+            session_id="session-1",
+            source_message_id="message-3",
+            turn_lease=None,
+            hypothesis=preference_hypothesis(),
+            confirmation_created_at=NOW,
+        )
 
 
 @pytest.mark.asyncio
@@ -151,7 +169,6 @@ async def test_preference_confirmation_identity_separates_distinct_hypotheses():
         project_id="project-1",
         session_id="session-1",
         source_message_id="message-3",
-        turn_lease=None,
         hypothesis=first_hypothesis,
         confirmation_created_at=NOW,
     )
@@ -160,7 +177,6 @@ async def test_preference_confirmation_identity_separates_distinct_hypotheses():
         project_id="project-1",
         session_id="session-1",
         source_message_id="message-3",
-        turn_lease=None,
         hypothesis=second_hypothesis,
         confirmation_created_at=NOW,
     )
@@ -174,8 +190,6 @@ async def test_preference_confirmation_identity_separates_distinct_hypotheses():
 
 @pytest.mark.asyncio
 async def test_confirmed_hypothesis_creates_pending_proposal_not_active_memory():
-    from memory_proposals import ProposalTurnLease
-
     proposal = MemoryProposalV2(
         proposal_id="response_length--from-preference-confirmation",
         category="response_length",
@@ -210,11 +224,8 @@ async def test_confirmed_hypothesis_creates_pending_proposal_not_active_memory()
         project_id="project-1",
         session_id="session-1",
         source_message_id="message-3",
-        turn_lease=ProposalTurnLease(
-            turn_id="a" * 64,
-            owner_token="owner-1",
-        ),
         hypothesis=preference_hypothesis(),
+        confirmation_created_at=NOW,
     )
 
     result = await service.select_memory_clarification(

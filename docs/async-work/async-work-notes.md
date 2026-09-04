@@ -2980,3 +2980,39 @@ Still deferred:
 - synchronous artifact executor and artifact-feedback executor legacy effect
   behavior;
 - AgentJob retry/recovery/drainer work and Note shutdown hygiene.
+
+## Preference Confirmation Service Lease Cleanup
+
+This backend cleanup pass removes the last `turn_lease` parameter from
+`TrustedMemoryService.open_preference_hypothesis_confirmation(...)`. Preference
+confirmation is now always Memory-owned job work: the worker restores the
+persisted hypothesis payload, supplies the job `created_at` as
+`confirmation_created_at`, and the service derives the clarification source
+identity from `preference_hypothesis_confirmation_digest`.
+
+Removed:
+
+- `turn_lease` from `open_preference_hypothesis_confirmation(...)`;
+- the `ProposalTurnLease` validation branch in that method;
+- the lease-turn-id clarification identity branch;
+- the Memory worker argument that only supplied `turn_lease=None`;
+- tests and assertions that preserved the obsolete non-None service argument.
+
+Preserved:
+
+- deterministic preference-confirmation job id and idempotency key generation;
+- private persisted hypothesis payload restoration;
+- `confirmation_created_at`-based clarification creation and expiry;
+- preference confirmation choices, governance, and pending-proposal behavior;
+- the database call remains `create_memory_clarification(..., turn_lease=None)`
+  until database-side writer cleanup is handled separately.
+
+Still deferred:
+
+- database optional `turn_lease` parameters and chat-turn effect-writer branches;
+- `record_chat_turn_decision_action`;
+- `record_chat_turn_collaborative_note_decision_effect`;
+- historical replay readers/assertions;
+- synchronous artifact executor and artifact-feedback executor legacy effect
+  behavior;
+- AgentJob retry/recovery/drainer work and Note shutdown hygiene.

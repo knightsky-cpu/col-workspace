@@ -412,7 +412,6 @@ class MemoryProposalJobWorker:
                         project_id=payload.workspace_id,
                         session_id=payload.session_id,
                         source_message_id=payload.source_message_id,
-                        turn_lease=None,
                         hypothesis=hypothesis,
                         confirmation_created_at=payload.created_at,
                     )

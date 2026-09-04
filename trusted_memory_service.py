@@ -20,11 +20,7 @@ from memory_clarifications import (
     clarification_receipt,
     derive_memory_clarification_id,
 )
-from memory_proposals import (
-    ProposalTurnLease,
-    derive_proposal_origin_ids,
-    derive_proposal_origin_ids_v2,
-)
+from memory_proposals import derive_proposal_origin_ids, derive_proposal_origin_ids_v2
 from memory_policy import (
     MEMORY_CATEGORY_ORDER,
     MEMORY_CATEGORY_ORDER_V2,
@@ -493,27 +489,19 @@ class TrustedMemoryService:
         project_id: str,
         session_id: str,
         source_message_id: str,
-        turn_lease: ProposalTurnLease | None,
         hypothesis: PreferenceHypothesis,
-        confirmation_created_at: datetime | None = None,
+        confirmation_created_at: datetime,
     ) -> MemoryClarificationReceipt:
         """Ask the user before a preference hypothesis can become a proposal."""
         self._validate_identifier(user_id, "user_id")
         self._validate_identifier(project_id, "project_id")
         self._validate_identifier(session_id, "session_id")
         self._validate_identifier(source_message_id, "source_message_id")
-        if turn_lease is not None and not isinstance(
-            turn_lease,
-            ProposalTurnLease,
-        ):
-            raise ValueError(
-                "turn_lease must be valid when provided."
-            )
         if not isinstance(hypothesis, PreferenceHypothesis):
             raise ValueError("hypothesis must be a PreferenceHypothesis.")
         if hypothesis.user_id != user_id or hypothesis.project_id != project_id:
             raise ValueError("Preference hypothesis scope does not match.")
-        if turn_lease is None and not isinstance(
+        if not isinstance(
             confirmation_created_at,
             datetime,
         ):
@@ -521,20 +509,15 @@ class TrustedMemoryService:
                 "Memory-owned preference confirmation requires its accepted time."
             )
         observed_at = self._clock()
-        created_at = confirmation_created_at or observed_at
-        if turn_lease is not None:
-            clarification_source_id = turn_lease.turn_id
-        else:
-            confirmation_digest = preference_hypothesis_confirmation_digest(
-                user_id=user_id,
-                project_id=project_id,
-                session_id=session_id,
-                source_message_id=source_message_id,
-                hypothesis=hypothesis,
-            )
-            clarification_source_id = (
-                f"preference-confirmation--{confirmation_digest}"
-            )
+        created_at = confirmation_created_at
+        confirmation_digest = preference_hypothesis_confirmation_digest(
+            user_id=user_id,
+            project_id=project_id,
+            session_id=session_id,
+            source_message_id=source_message_id,
+            hypothesis=hypothesis,
+        )
+        clarification_source_id = f"preference-confirmation--{confirmation_digest}"
         envelope = MemoryClarificationEnvelope(
             clarification_id=derive_memory_clarification_id(
                 user_id=user_id,
@@ -561,7 +544,7 @@ class TrustedMemoryService:
         stored = await self._database.create_memory_clarification(
             envelope=envelope,
             observed_at=observed_at,
-            turn_lease=turn_lease,
+            turn_lease=None,
         )
         return clarification_receipt(stored)
 
