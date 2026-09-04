@@ -1140,3 +1140,101 @@ Remaining limitations:
   should be moved to a direct artifact-feedback API in a follow-up pass;
 - manual end-to-end verification remains deferred until the remaining
   direct-feedback and any uncovered drawer actions are decoupled.
+
+## Direct Memory Clarification Selection Pass
+
+This pass finished the half-completed memory clarification selection
+decoupling checkpoint from `e6c57f7`.
+
+Completed work:
+
+- added a direct Memory-owned clarification selection endpoint at
+  `/api/users/{user_id}/projects/{project_id}/memory/clarifications/{clarification_id}/select`;
+- the direct endpoint validates the idempotency key, derives a deterministic
+  direct selection source message id from that key, verifies authenticated user
+  scope, and calls `TrustedMemoryService.select_memory_clarification`;
+- `SelectMemoryClarificationCommand` and
+  `MemoryEngine.consume_memory_clarification_to_proposal_v2` now allow
+  `turn_lease=None` for direct Memory API selection;
+- direct Memory API selection skips chat-turn effect writes and does not claim,
+  renew, complete, or release a live chat turn;
+- existing chat-owned clarification selection can still pass a
+  `ProposalTurnLease` and keep the previous retry-safe chat-turn effect path;
+- direct selection preserves session ownership, workspace ownership, active
+  clarification id binding, expiry validation, candidate validation, origin
+  idempotency, pending-proposal conflict checks, and no-save consumption;
+- the frontend has a `selectMemoryClarification` API wrapper for the direct
+  endpoint with idempotency and bounded input validation;
+- the chat surface no longer routes memory clarification selection through
+  `/api/chat`;
+- active memory clarification choices remain selectable while an ordinary chat
+  stream is pending, call the direct Memory endpoint, clear the consumed
+  clarification from the UI, and refresh the Memory panel.
+
+Why this matters:
+
+Before this pass, choosing a memory clarification candidate was modeled as
+another chat turn. That meant the selection depended on chat submit readiness,
+chat-turn ownership, and a live chat-turn lease even though the selected
+clarification is already a server-owned Memory lifecycle object. After this
+pass, the user action goes to Memory directly. Chat can still ask the question,
+but Memory owns the selection lifecycle and proposal creation.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_memory_api_clarification_selection_does_not_require_turn_lease`
+  failed because the service rejected selection without `ProposalTurnLease`.
+- RED: direct route tests in `tests/test_main.py` failed because the direct
+  Memory clarification selection endpoint did not exist and no direct response
+  model was available.
+- RED: `selectMemoryClarification calls the direct clarification selection
+  path` failed at import because the frontend API wrapper did not exist.
+- RED: `chat endpoint selection streams only ordinary requests` failed because
+  `memory_clarification_selection` still forced `/api/chat`.
+- RED: `memory clarification selection during a pending chat uses direct
+  memory API` failed because the runtime path still depended on chat submit
+  readiness and chat request routing.
+- GREEN: direct backend route/schema/service/database mode, frontend API
+  wrapper, frontend request routing, and pending-chat runtime selection behavior
+  were implemented.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_service.py tests/test_main.py
+317 passed, 1 warning
+```
+
+```text
+node --test tests/frontend/api.test.mjs tests/frontend/requests.test.mjs tests/frontend/app-runtime.test.mjs tests/frontend/chat-view.test.mjs tests/frontend/state.test.mjs
+180 passed
+```
+
+```text
+git diff --check
+no output
+```
+
+Remaining direct decoupling:
+
+- direct artifact feedback still needs to move off `/api/chat` onto an
+  Artifact-owned feedback lifecycle endpoint;
+- continuity selection still routes through `/api/chat` and remains dependent
+  on chat submit readiness;
+- any remaining chat-response structured decision paths should be audited after
+  artifact feedback and continuity selection are decoupled.
+
+Next proposed pass:
+
+- move artifact feedback acceptance/rejection/edit selection out of `/api/chat`
+  and onto a direct artifact feedback API that records the decision without
+  claiming or leasing a chat turn.
+
+Work deferred until core decoupling is complete:
+
+- broad manual end-to-end browser acceptance for every drawer action;
+- UI polish that does not change ownership boundaries;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.

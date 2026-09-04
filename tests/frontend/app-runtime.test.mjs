@@ -3943,7 +3943,10 @@ test("memory clarification selection during a pending chat uses direct memory AP
     continuity_choices: [],
     adaptations: [],
   });
-  await firstSubmit;
+  await waitFor(
+    () => elements.get("[data-memory-clarification-choices]").children.length === 2,
+    () => textTree(elements.get("[data-memory-clarification-choices]")),
+  );
 
   input.value = "Keep another chat pending";
   input.oninput();
@@ -3971,6 +3974,10 @@ test("memory clarification selection during a pending chat uses direct memory AP
   );
   assert.equal(calls.some(([path]) => path === "/api/chat"), false);
   assert.equal(elements.get("[data-chat-error]").textContent, "");
+  await waitFor(
+    () => choices.hidden === true,
+    () => textTree(choices),
+  );
   assert.equal(choices.hidden, true);
   assert.match(textTree(elements.get("[data-memory-panel]")), /detailed/);
 

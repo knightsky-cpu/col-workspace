@@ -747,6 +747,45 @@ export function decideMemoryProposal(
   );
 }
 
+export function selectMemoryClarification(
+  userId,
+  projectId,
+  clarificationId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("clarification_id", clarificationId);
+  assertIdentifier("session_id", request?.session_id);
+  if (
+    typeof request?.selected_candidate_index !== "number"
+    || !Number.isInteger(request.selected_candidate_index)
+    || request.selected_candidate_index < 0
+    || request.selected_candidate_index > 4
+  ) {
+    throw new Error("selected candidate index is invalid.");
+  }
+  if (!options.idempotencyKey) {
+    throw new Error("idempotency key is required.");
+  }
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/memory/clarifications/${encodeURIComponent(clarificationId)}/select`,
+    {
+      method: "POST",
+      authToken: options.authToken,
+      idempotencyKey: options.idempotencyKey,
+      body: {
+        session_id: request.session_id,
+        selected_candidate_index: request.selected_candidate_index,
+      },
+    },
+    fetchLike,
+  );
+}
+
 export function decideNoteProposal(
   userId,
   projectId,

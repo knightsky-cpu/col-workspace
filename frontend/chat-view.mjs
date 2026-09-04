@@ -303,7 +303,7 @@ export function createChatView(elements, handlers) {
       renderMemoryClarificationChoices(
         elements.clarificationChoices,
         state.activeMemoryClarification ?? null,
-        state.pendingTurn !== null,
+        false,
         handlers.onSelectMemoryClarification ?? (() => {}),
       );
       renderContinuityChoices(

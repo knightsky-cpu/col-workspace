@@ -926,8 +926,8 @@ test("selectMemoryClarification calls the direct clarification selection path", 
 });
 
 
-test("selectMemoryClarification rejects invalid direct selection input", async () => {
-  await assert.rejects(
+test("selectMemoryClarification rejects invalid direct selection input", () => {
+  assert.throws(
     () => selectMemoryClarification(
       "bad/slash",
       "agent-col",
@@ -941,7 +941,7 @@ test("selectMemoryClarification rejects invalid direct selection input", async (
     ),
     /invalid/i,
   );
-  await assert.rejects(
+  assert.throws(
     () => selectMemoryClarification(
       "wifiknight",
       "agent-col",
@@ -955,7 +955,7 @@ test("selectMemoryClarification rejects invalid direct selection input", async (
     ),
     /candidate index/i,
   );
-  await assert.rejects(
+  assert.throws(
     () => selectMemoryClarification(
       "wifiknight",
       "agent-col",

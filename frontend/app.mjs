@@ -32,6 +32,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  selectMemoryClarification,
   streamAgentJobs,
   synthesizeSpeechAudio,
   transcribeSpeechAudio,
@@ -61,7 +62,6 @@ import { renderWorkspaceIndicator } from "./workspace-indicator.mjs";
 import {
   buildContinuitySelectionChatRequest,
   buildExactRetryRequest,
-  buildMemoryClarificationSelectionChatRequest,
   buildOrdinaryChatRequest,
   readContextForm,
   selectChatEndpoint,
@@ -1570,14 +1570,10 @@ function ensureChatView() {
         submitRequest(buildExactRetryRequest(state.lastFailure.request));
       },
       onSelectMemoryClarification(choice) {
-        if (!selectCanSubmit(state)) {
+        if (!state.context) {
           return;
         }
-        const request = buildMemoryClarificationSelectionChatRequest(
-          state.context,
-          choice,
-        );
-        submitRequest(request);
+        submitMemoryClarificationSelection(choice);
       },
       onSelectContinuityChoice(choice) {
         if (!selectCanSubmit(state)) {
@@ -2033,6 +2029,38 @@ async function submitMemoryDecision(decision) {
   } catch (error) {
     showMemoryError(error.message);
   }
+}
+
+async function submitMemoryClarificationSelection(choice) {
+  if (!state.context) {
+    return;
+  }
+  clearMemoryError();
+  try {
+    await selectMemoryClarification(
+      state.context.user_id,
+      state.context.project_id,
+      choice.clarification_id,
+      {
+        session_id: state.context.session_id,
+        selected_candidate_index: choice.candidate_index,
+      },
+      {
+        ...authOptions(),
+        idempotencyKey: `memory-clarification-selection--${crypto.randomUUID()}`,
+      },
+    );
+    state = {
+      ...state,
+      activeMemoryClarification: null,
+    };
+    await loadMemory();
+    loadAgentJobReports();
+    loadAgentJobs();
+  } catch (error) {
+    showMemoryError(error.message);
+  }
+  renderWorkspace();
 }
 
 async function submitCollaborativeNoteDecision(decision) {

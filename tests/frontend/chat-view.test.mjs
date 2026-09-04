@@ -737,7 +737,7 @@ test("createChatView renders active memory clarification choices without interna
   );
 });
 
-test("createChatView disables clarification choices while pending or expired", () => {
+test("createChatView keeps clarification choices independent of pending chat but disables expired choices", () => {
   const form = node("form");
   const input = node("textarea");
   const submitButton = node("button");
@@ -778,9 +778,9 @@ test("createChatView disables clarification choices while pending or expired", (
     },
   });
 
-  assert.equal(clarificationChoices.children[0].disabled, true);
+  assert.equal(clarificationChoices.children[0].disabled, false);
   clarificationChoices.children[0].onclick();
-  assert.equal(calls, 0);
+  assert.equal(calls, 1);
 
   view.render({
     transcript: [],
