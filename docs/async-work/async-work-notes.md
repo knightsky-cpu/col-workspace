@@ -2810,3 +2810,52 @@ Remaining closure work:
   branches, inert turn-lease/effect plumbing, and inactive frontend builders;
 - AgentJob retry/recovery/drainer work remains the next later phase, followed by
   automated boundary verification and manual break-testing.
+
+## Dead Structured Chat Execution Cleanup
+
+This uncommitted backend-only cleanup pass removes the remaining unreachable
+structured `/api/chat` execution/fallback behavior that sits behind the
+authoritative early HTTP 409 guards.
+
+Removed:
+
+- the dead Memory-decision branch that called `decide_memory_proposal(...)` from
+  `_execute_chat` and recorded a chat-turn decision action;
+- the dead collaborative-note-decision branch that called `decide_proposal(...)`
+  from `_execute_chat` and recorded a chat-turn note decision effect;
+- the dead post-guard Continuity-selection execution path by keeping ordinary
+  conversational Continuity resolution and always passing `selection=None` from
+  `_execute_chat`;
+- obsolete Memory-clarification-selection `/api/chat` idempotency/fallback
+  handling that could no longer run after the early direct-API guard;
+- structured-decision booleans in the ordinary turn command that could only have
+  been true through rejected request fields.
+
+Preserved:
+
+- all early `/api/chat` 409 guards for retired structured inputs;
+- ordinary conversational Continuity resolution, including ambiguous-choice
+  chat responses and resolved context injection;
+- deterministic ambiguous-Memory preflight and queued Memory AgentJob receipt
+  behavior;
+- responder/explicit Memory AgentJob queueing, queued natural-language
+  clarification selection, preference recognition and private capture-job
+  enqueue;
+- Note AgentJob queueing;
+- Artifact AgentJob queueing;
+- direct resource APIs for Memory, Notes, Continuity, Artifact feedback, and
+  resource mutation surfaces;
+- `ChatRequest`, historical `ChatTurnRequest` structured metadata,
+  `ProposalTurnLease` propagation, frontend structured builders, legacy
+  `TrustedMemoryService` branches, synchronous artifact executor cleanup,
+  AgentJob retry/recovery/drainer work, and Note shutdown hygiene.
+
+Remaining deferred work:
+
+- frontend structured-chat builder retirement;
+- inert turn-lease/effect plumbing cleanup outside this backend chat pass;
+- legacy TrustedMemoryService lease branch review;
+- synchronous artifact executor cleanup outside `_execute_chat`;
+- AgentJob payload-preserving retry, retry dispatch, startup/runtime draining,
+  expired running-lease recovery, terminal report/event consistency, hidden
+  working-state durability, and Note shutdown hygiene.

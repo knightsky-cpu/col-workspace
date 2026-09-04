@@ -270,7 +270,6 @@ from trusted_memory_service import (
     DeleteMemorySignalCommand,
     InspectMemoryCommand,
     MemoryDecisionCommand,
-    NaturalMemoryClarificationResult,
     NaturalMemoryCommand,
     NaturalMemoryNoEffectResult,
     RevokeMemorySignalCommand,
@@ -1787,28 +1786,6 @@ def _partial_failure_response(
     return JSONResponse(
         status_code=status_code,
         content=content,
-    )
-
-
-def _memory_clarification_preflight_fallback_response(
-    *,
-    decision_memory_clarifications: tuple[MemoryClarificationReceipt, ...],
-) -> ChatResponse | None:
-    if len(decision_memory_clarifications) != 1:
-        return None
-    return ChatResponse(
-        response=(
-            "I found more than one possible memory preference in your "
-            "message. Please choose one option below so I can submit the "
-            "correct pending memory proposal for your approval."
-        ),
-        actions=[],
-        artifacts=[],
-        artifact_feedback=[],
-        citations=[],
-        memory_proposals=[],
-        memory_clarifications=list(decision_memory_clarifications),
-        adaptations=[],
     )
 
 
@@ -4662,7 +4639,6 @@ async def _execute_chat(
     pipeline_started_at = time.monotonic()
     pipeline_route = "chat_stream" if stream_delta is not None else "chat_json"
     database = request.app.state.db
-    memory_service = request.app.state.memory_service
     continuity_service = request.app.state.continuity_service
     working_state_service = request.app.state.working_state_service
     preference_learning_service = request.app.state.preference_learning_service
@@ -4752,17 +4728,6 @@ async def _execute_chat(
             ),
         )
 
-    if (
-        payload.memory_clarification_selection is not None
-        and idempotency_key is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=(
-                "Memory clarification selection requires an idempotency key."
-            ),
-        )
-
     if idempotency_key is not None:
         try:
             validated_idempotency_key = validate_idempotency_key(
@@ -4834,56 +4799,30 @@ async def _execute_chat(
             return turn_result.response
         chat_turn_claim = turn_result
 
-    if payload.memory_decision is None:
-        try:
-            if chat_turn_claim is None:
-                history_operation = database.get_chat_history(
-                    payload.session_id,
-                    limit=20,
-                    user_id=effective_user_id,
-                    project_id=effective_project_id,
-                )
-            else:
-                history_operation = database.get_chat_history(
-                    payload.session_id,
-                    limit=20,
-                    user_id=effective_user_id,
-                    project_id=effective_project_id,
-                    exclude_message_id=(
-                        chat_turn_claim.ids.user_message_id
-                    ),
-                )
-            profile, history = await asyncio.gather(
-                database.get_collaboration_profile(effective_user_id),
-                history_operation,
+    try:
+        if chat_turn_claim is None:
+            history_operation = database.get_chat_history(
+                payload.session_id,
+                limit=20,
+                user_id=effective_user_id,
+                project_id=effective_project_id,
             )
-        except ChatSessionOwnershipError as exc:
-            _raise_chat_session_unavailable(exc)
-        except MemoryEngineError as exc:
-            _raise_database_http_error(exc)
-    else:
-        try:
-            if chat_turn_claim is None:
-                history = await database.get_chat_history(
-                    payload.session_id,
-                    limit=20,
-                    user_id=effective_user_id,
-                    project_id=effective_project_id,
-                )
-            else:
-                history = await database.get_chat_history(
-                    payload.session_id,
-                    limit=20,
-                    user_id=effective_user_id,
-                    project_id=effective_project_id,
-                    exclude_message_id=(
-                        chat_turn_claim.ids.user_message_id
-                    ),
-                )
-        except ChatSessionOwnershipError as exc:
-            _raise_chat_session_unavailable(exc)
-        except MemoryEngineError as exc:
-            _raise_database_http_error(exc)
+        else:
+            history_operation = database.get_chat_history(
+                payload.session_id,
+                limit=20,
+                user_id=effective_user_id,
+                project_id=effective_project_id,
+                exclude_message_id=chat_turn_claim.ids.user_message_id,
+            )
+        profile, history = await asyncio.gather(
+            database.get_collaboration_profile(effective_user_id),
+            history_operation,
+        )
+    except ChatSessionOwnershipError as exc:
+        _raise_chat_session_unavailable(exc)
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
 
     try:
         validated_history = _validate_chat_history(history)
@@ -4897,57 +4836,50 @@ async def _execute_chat(
             detail="Chat history is invalid.",
         ) from exc
 
-    if (
-        payload.memory_decision is None
-        and payload.memory_clarification_selection is None
-        and payload.artifact_feedback_decision is None
-        and payload.collaborative_note_decision is None
-    ):
-        try:
-            session_detail = await database.get_chat_session_detail(
-                user_id=effective_user_id,
-                project_id=effective_project_id,
-                session_id=payload.session_id,
-                limit=1,
-                observed_at=datetime.now(UTC),
-            )
-            active_memory_clarification = (
-                session_detail.active_memory_clarification
-            )
-        except ChatSessionOwnershipError as exc:
-            _raise_chat_session_unavailable(exc)
-        except MemoryClarificationStateError as exc:
-            logger.error(
-                "Stored active memory clarification is invalid (%s).",
-                type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Stored memory clarification is invalid.",
-            ) from exc
-        except MemoryEngineError as exc:
-            _raise_database_http_error(exc)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Chat session request is invalid.",
-            ) from exc
+    try:
+        session_detail = await database.get_chat_session_detail(
+            user_id=effective_user_id,
+            project_id=effective_project_id,
+            session_id=payload.session_id,
+            limit=1,
+            observed_at=datetime.now(UTC),
+        )
+        active_memory_clarification = (
+            session_detail.active_memory_clarification
+        )
+    except ChatSessionOwnershipError as exc:
+        _raise_chat_session_unavailable(exc)
+    except MemoryClarificationStateError as exc:
+        logger.error(
+            "Stored active memory clarification is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Stored memory clarification is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Chat session request is invalid.",
+        ) from exc
 
-    if payload.memory_decision is None:
-        try:
-            model_input_context, adaptations = _build_model_input_context(
-                profile,
-                validated_history,
-            )
-        except (TypeError, ValueError) as exc:
-            logger.error(
-                "Stored collaboration context is invalid (%s).",
-                type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Collaboration context is invalid.",
-            ) from exc
+    try:
+        model_input_context, adaptations = _build_model_input_context(
+            profile,
+            validated_history,
+        )
+    except (TypeError, ValueError) as exc:
+        logger.error(
+            "Stored collaboration context is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Collaboration context is invalid.",
+        ) from exc
 
     if chat_turn_claim is None:
         try:
@@ -4965,139 +4897,8 @@ async def _execute_chat(
     else:
         user_message_id = chat_turn_claim.ids.user_message_id
 
-    if payload.memory_decision is not None:
-        try:
-            decision_result = await memory_service.decide_memory_proposal(
-                MemoryDecisionCommand(
-                    user_id=effective_user_id,
-                    proposal_id=payload.memory_decision.proposal_id,
-                    decision=payload.memory_decision.decision,
-                    confirmation_channel="chat_decision",
-                    confirmation_session_id=payload.session_id,
-                    confirmation_message_id=user_message_id,
-                )
-            )
-        except MemoryEngineError as exc:
-            _raise_database_http_error(exc)
-        except MemoryProposalNotFoundError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Memory proposal was not found.",
-            ) from exc
-        except MemoryProposalConflictError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Memory proposal state conflicts with this request."
-                ),
-            ) from exc
-        except MemoryProposalExpiredError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Memory proposal has expired.",
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Memory decision is invalid.",
-            ) from exc
-        profile = decision_result.profile
-        decision_actions = (decision_result.action,)
-        if chat_turn_claim is not None:
-            try:
-                chat_turn_claim = (
-                    await database.record_chat_turn_decision_action(
-                        chat_turn_claim,
-                        decision_result.action,
-                        observed_at=datetime.now(UTC),
-                    )
-                )
-            except (
-                ChatTurnOwnershipError,
-                ChatTurnStateError,
-                MemoryEngineError,
-            ) as exc:
-                _raise_chat_turn_operation_http_error(
-                    exc,
-                    "decision action recording",
-                )
-
-    if payload.collaborative_note_decision is not None:
-        if chat_turn_claim is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Chat turn state is invalid.",
-            )
-        note_service = request.app.state.collaborative_note_service
-        note_decision = payload.collaborative_note_decision
-        try:
-            note_decision_result = await note_service.decide_proposal(
-                CollaborativeNoteDecisionCommand(
-                    user_id=effective_user_id,
-                    workspace_id=effective_project_id,
-                    proposal_id=note_decision.proposal_id,
-                    decision=note_decision.decision,
-                    observed_at=datetime.now(UTC),
-                )
-            )
-        except MemoryEngineError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            _raise_database_http_error(exc)
-        except MemoryProposalNotFoundError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Collaborative note proposal was not found.",
-            ) from exc
-        except MemoryProposalConflictError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "Collaborative note proposal state conflicts with this "
-                    "request."
-                ),
-            ) from exc
-        except MemoryProposalExpiredError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail="Collaborative note proposal has expired.",
-            ) from exc
-        except ValueError as exc:
-            await _release_chat_turn_safely(database, chat_turn_claim)
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Collaborative note decision is invalid.",
-            ) from exc
-        decision_actions = (note_decision_result.action,)
-        decision_note_events = (note_decision_result.event,)
-        try:
-            effect_result = (
-                await database
-                .record_chat_turn_collaborative_note_decision_effect(
-                    chat_turn_claim,
-                    note_decision_result.event,
-                    observed_at=datetime.now(UTC),
-                )
-            )
-        except (
-            ChatTurnOwnershipError,
-            ChatTurnStateError,
-            MemoryEngineError,
-        ) as exc:
-            _raise_chat_turn_operation_http_error(
-                exc,
-                "collaborative note decision recording",
-            )
-        chat_turn_claim = effect_result.claim
-
     if (
         chat_turn_claim is not None
-        and payload.memory_decision is None
-        and payload.memory_clarification_selection is None
-        and payload.artifact_feedback_decision is None
-        and payload.collaborative_note_decision is None
         and not chat_turn_claim.precompleted_memory_proposals
         and not chat_turn_claim.precompleted_memory_clarifications
     ):
@@ -5131,29 +4932,7 @@ async def _execute_chat(
                 await _release_chat_turn_safely(database, chat_turn_claim)
                 _raise_agent_job_http_error(exc)
 
-    if payload.memory_decision is not None:
-        try:
-            model_input_context, adaptations = _build_model_input_context(
-                profile,
-                validated_history,
-            )
-        except (TypeError, ValueError) as exc:
-            logger.error(
-                "Stored collaboration context is invalid (%s).",
-                type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Collaboration context is invalid.",
-            ) from exc
-
-    if (
-        payload.memory_decision is None
-        and payload.memory_clarification_selection is None
-        and payload.artifact_feedback_decision is None
-        and payload.collaborative_note_decision is None
-        and not has_explicit_memory_clause(payload.message)
-    ) or payload.continuity_selection is not None:
+    if not has_explicit_memory_clause(payload.message):
         try:
             continuity_resolution = await continuity_service.resolve(
                 ContinuityResolutionCommand(
@@ -5161,7 +4940,7 @@ async def _execute_chat(
                     workspace_id=effective_project_id,
                     session_id=payload.session_id,
                     message=payload.message,
-                    selection=payload.continuity_selection,
+                    selection=None,
                 )
             )
         except MemoryEngineError as exc:
@@ -5267,40 +5046,30 @@ async def _execute_chat(
             ),
         )
 
-    ordinary_chat_turn = (
-        payload.memory_decision is None
-        and payload.memory_clarification_selection is None
-        and payload.artifact_feedback_decision is None
-        and payload.collaborative_note_decision is None
-    )
-    working_state_context_enabled = (
-        ordinary_chat_turn or payload.continuity_selection is not None
-    )
     working_state_update_enabled = (
         should_update_working_state(payload.message)
         or continuity_resolution.status == "resolved"
     )
-    if working_state_context_enabled:
-        try:
-            working_state_snapshot = await database.get_working_state(
-                user_id=effective_user_id,
-                project_id=effective_project_id,
-                session_id=payload.session_id,
+    try:
+        working_state_snapshot = await database.get_working_state(
+            user_id=effective_user_id,
+            project_id=effective_project_id,
+            session_id=payload.session_id,
+        )
+        if working_state_snapshot is not None:
+            working_state_context = build_working_state_context(
+                working_state_snapshot
             )
-            if working_state_snapshot is not None:
-                working_state_context = build_working_state_context(
-                    working_state_snapshot
-                )
-        except (
-            ChatSessionOwnershipError,
-            MemoryEngineError,
-            TypeError,
-            ValueError,
-        ) as exc:
-            logger.error(
-                "Hidden working state context unavailable (%s).",
-                type(exc).__name__,
-            )
+    except (
+        ChatSessionOwnershipError,
+        MemoryEngineError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        logger.error(
+            "Hidden working state context unavailable (%s).",
+            type(exc).__name__,
+        )
 
     if chat_turn_claim is not None:
         try:
@@ -5338,17 +5107,9 @@ async def _execute_chat(
         model_input_context=model_input_context,
         working_state_context=working_state_context,
         source_message_id=user_message_id,
-        memory_decision_present=(
-            payload.memory_decision is not None
-            or payload.memory_clarification_selection is not None
-            or bool(precompleted_memory_clarifications)
-        ),
-        artifact_feedback_decision_present=(
-            payload.artifact_feedback_decision is not None
-        ),
-        collaborative_note_decision_present=(
-            payload.collaborative_note_decision is not None
-        ),
+        memory_decision_present=bool(precompleted_memory_clarifications),
+        artifact_feedback_decision_present=False,
+        collaborative_note_decision_present=False,
         turn_lease=(
             ProposalTurnLease(
                 turn_id=chat_turn_claim.ids.turn_id,
@@ -5429,21 +5190,7 @@ async def _execute_chat(
             runtime_error=exc,
         )
         _log_chat_turn_timeout(exc)
-        fallback_response = _memory_clarification_preflight_fallback_response(
-            decision_memory_clarifications=decision_memory_clarifications,
-        )
         failure_claim = exc.chat_turn_claim or chat_turn_claim
-        if fallback_response is not None and failure_claim is not None:
-            if await _complete_chat_turn_safely(
-                database,
-                failure_claim,
-                fallback_response,
-            ):
-                return _public_chat_response(
-                    response=fallback_response,
-                    effective_user_id=effective_user_id,
-                    public_user_id=payload.user_id,
-                )
         released_claim = None
         if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
@@ -5485,21 +5232,7 @@ async def _execute_chat(
             "Agent_Col response failed (%s).",
             type(exc).__name__,
         )
-        fallback_response = _memory_clarification_preflight_fallback_response(
-            decision_memory_clarifications=decision_memory_clarifications,
-        )
         failure_claim = exc.chat_turn_claim or chat_turn_claim
-        if fallback_response is not None and failure_claim is not None:
-            if await _complete_chat_turn_safely(
-                database,
-                failure_claim,
-                fallback_response,
-            ):
-                return _public_chat_response(
-                    response=fallback_response,
-                    effective_user_id=effective_user_id,
-                    public_user_id=payload.user_id,
-                )
         released_claim = None
         if failure_claim is not None:
             released_claim = await _release_chat_turn_safely(
@@ -5600,11 +5333,6 @@ async def _execute_chat(
     )
     if (
         chat_turn_claim is not None
-        and payload.memory_decision is None
-        and payload.memory_clarification_selection is None
-        and payload.artifact_feedback_decision is None
-        and payload.collaborative_note_decision is None
-        and payload.continuity_selection is None
         and not chat_response.memory_proposals
         and not chat_response.memory_clarifications
         and not chat_response.collaborative_note_proposals
