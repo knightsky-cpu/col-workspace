@@ -4622,6 +4622,7 @@ async def _execute_chat(
     continuity_resolution = ContinuityResolution(status="none")
     working_state_snapshot: WorkingStateSnapshot | None = None
     working_state_context: str | None = None
+    active_memory_clarification: MemoryClarificationReceipt | None = None
     chat_turn_claim: ChatTurnClaim | None = None
     _log_chat_pipeline(
         "start",
@@ -4830,6 +4831,42 @@ async def _execute_chat(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Chat history is invalid.",
         ) from exc
+
+    if (
+        payload.memory_decision is None
+        and payload.memory_clarification_selection is None
+        and payload.artifact_feedback_decision is None
+        and payload.collaborative_note_decision is None
+    ):
+        try:
+            session_detail = await database.get_chat_session_detail(
+                user_id=effective_user_id,
+                project_id=effective_project_id,
+                session_id=payload.session_id,
+                limit=1,
+                observed_at=datetime.now(UTC),
+            )
+            active_memory_clarification = (
+                session_detail.active_memory_clarification
+            )
+        except ChatSessionOwnershipError as exc:
+            _raise_chat_session_unavailable(exc)
+        except MemoryClarificationStateError as exc:
+            logger.error(
+                "Stored active memory clarification is invalid (%s).",
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Stored memory clarification is invalid.",
+            ) from exc
+        except MemoryEngineError as exc:
+            _raise_database_http_error(exc)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Chat session request is invalid.",
+            ) from exc
 
     if payload.memory_decision is None:
         try:
@@ -5397,6 +5434,7 @@ async def _execute_chat(
             else decision_memory_proposals
         ),
         precompleted_memory_clarifications=precompleted_memory_clarifications,
+        active_memory_clarification=active_memory_clarification,
         precompleted_artifact_feedback=(
             chat_turn_claim.precompleted_artifact_feedback
             if chat_turn_claim is not None

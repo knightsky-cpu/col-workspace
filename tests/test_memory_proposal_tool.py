@@ -201,11 +201,10 @@ def test_proposal_tool_exposes_only_natural_decision_fields_to_model() -> None:
     assert declaration is not None
     schema = declaration.parameters_json_schema
     assert schema is not None
-    assert set(schema["properties"]) == {
-        "decision",
-        "clarification_selection",
-    }
+    assert set(schema["properties"]) == {"decision"}
     assert schema["required"] == ["decision"]
+    rendered = declaration.model_dump_json(exclude_none=True)
+    assert "clarification_selection" not in rendered
     rendered = declaration.model_dump_json(exclude_none=True)
     for server_owned_name in (
         "user_id",
@@ -219,6 +218,32 @@ def test_proposal_tool_exposes_only_natural_decision_fields_to_model() -> None:
         "tool_context",
     ):
         assert server_owned_name not in rendered
+
+
+@pytest.mark.filterwarnings(
+    "ignore:\\[EXPERIMENTAL\\].*JSON_SCHEMA_FOR_FUNC_DECL.*:UserWarning"
+)
+def test_clarification_selection_tool_exposes_only_candidate_index_to_model(
+) -> None:
+    from memory_proposal_tool import create_select_memory_clarification_tool
+
+    tool = create_select_memory_clarification_tool(
+        NoopMemoryService(),
+        agent_job_repository=RecordingAgentJobRepository(),
+    )
+    declaration = tool._get_declaration()
+
+    assert isinstance(tool, FunctionTool)
+    assert tool.name == "select_memory_clarification_candidate"
+    assert declaration is not None
+    schema = declaration.parameters_json_schema
+    assert schema is not None
+    assert set(schema["properties"]) == {"selected_candidate_index"}
+    assert schema["required"] == ["selected_candidate_index"]
+    rendered = declaration.model_dump_json(exclude_none=True)
+    assert "clarification_id" not in rendered
+    assert "turn_lease" not in rendered
+    assert "owner_token" not in rendered
 
 
 @pytest.mark.filterwarnings(
@@ -406,6 +431,77 @@ async def test_proposal_tool_records_memory_agent_job_queue_receipt() -> None:
     assert repository.leased == []
     assert repository.completed == []
     assert repository.failed == []
+
+
+@pytest.mark.asyncio
+async def test_clarification_selection_tool_queues_memory_work_without_service_call(
+) -> None:
+    from memory_proposal_tool import create_select_memory_clarification_tool
+
+    state = tool_context_state()
+    state["active_memory_clarification_id"] = (
+        "memory-clarification--clarification-1"
+    )
+    service = RecordingMemoryService()
+    repository = RecordingAgentJobRepository()
+    dispatched = []
+    tool = create_select_memory_clarification_tool(
+        service,
+        agent_job_repository=repository,
+        memory_job_dispatcher=dispatched.append,
+    )
+
+    result = await tool.run_async(
+        args={"selected_candidate_index": 0},
+        tool_context=SimpleNamespace(
+            state=State(value=state, delta={})
+        ),
+    )
+
+    assert result["status"] == "queued"
+    assert result["queued_action"]["action_kind"] == "propose_memory_signal"
+    assert result["queued_action"]["display_label"] == (
+        "Memory clarification selection"
+    )
+    assert service.commands == []
+    assert len(repository.enqueued) == 1
+    assert dispatched == [repository.enqueued[0]]
+    payload = repository.payloads[0]
+    assert payload.payload == {
+        "work_type": "memory_clarification_selection",
+        "clarification_id": "memory-clarification--clarification-1",
+        "selected_candidate_index": 0,
+    }
+    assert "turn_lease" not in str(payload.payload)
+    assert "owner_token" not in str(payload.payload)
+
+
+@pytest.mark.asyncio
+async def test_clarification_selection_tool_requires_server_active_clarification(
+) -> None:
+    from memory_proposal_tool import create_select_memory_clarification_tool
+
+    service = RecordingMemoryService()
+    repository = RecordingAgentJobRepository()
+    tool = create_select_memory_clarification_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={"selected_candidate_index": 0},
+        tool_context=SimpleNamespace(
+            state=State(value=tool_context_state(), delta={})
+        ),
+    )
+
+    assert result == {
+        "status": "rejected",
+        "error_code": "memory_clarification_unavailable",
+    }
+    assert service.commands == []
+    assert repository.enqueued == []
+    assert repository.payloads == []
 
 
 @pytest.mark.asyncio
@@ -691,20 +787,24 @@ async def test_proposal_tool_rejects_live_malformed_clarification_before_service
 
 
 @pytest.mark.asyncio
-async def test_proposal_tool_rejects_malformed_selection_before_service() -> None:
-    from memory_proposal_tool import create_propose_memory_signal_tool
+async def test_clarification_selection_tool_rejects_malformed_index_before_queue(
+) -> None:
+    from memory_proposal_tool import create_select_memory_clarification_tool
 
+    state = tool_context_state()
+    state["active_memory_clarification_id"] = (
+        "memory-clarification--clarification-1"
+    )
     service = RecordingMemoryService()
-    tool = create_propose_memory_signal_tool(service)
+    repository = RecordingAgentJobRepository()
+    tool = create_select_memory_clarification_tool(
+        service,
+        agent_job_repository=repository,
+    )
 
     result = await tool.run_async(
-        args={
-            "decision": {"kind": "no_memory"},
-            "clarification_selection": {
-                "selected_candidate_index": "first",
-            },
-        },
-        tool_context=SimpleNamespace(state=tool_context_state()),
+        args={"selected_candidate_index": "first"},
+        tool_context=SimpleNamespace(state=state),
     )
 
     assert result == {
@@ -712,6 +812,7 @@ async def test_proposal_tool_rejects_malformed_selection_before_service() -> Non
         "error_code": "invalid_memory_candidate",
     }
     assert service.commands == []
+    assert repository.enqueued == []
 
 
 @pytest.mark.asyncio

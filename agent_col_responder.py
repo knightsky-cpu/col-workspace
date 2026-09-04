@@ -8,7 +8,10 @@ from agent_col_agent_jobs import AgentJob
 from collaborative_note_service import CollaborativeNoteService
 from collaborative_note_tool import create_propose_collaborative_note_tool
 from agent_job_repository import AgentJobRepository
-from memory_proposal_tool import create_propose_memory_signal_tool
+from memory_proposal_tool import (
+    create_propose_memory_signal_tool,
+    create_select_memory_clarification_tool,
+)
 from trusted_memory_service import TrustedMemoryService
 from vertex_config import VertexAISettings
 
@@ -271,10 +274,12 @@ candidate, submit a clarify decision and do not choose between them. Multiple
 values in one list-valued category are one list-valued candidate, not separate
 clarification choices. For example, macOS and Linux development environments
 are one profile candidate with canonical value ["macos", "linux"].
-When the user answers a prior clarification, their semantic selection
-does not need to restate the exact value; call propose_memory_signal with the
-clarification_selection represented by that answer. Make at most one memory
-proposal call per turn. After a completed proposal receipt, explain that it is
+When the user answers a server-validated active memory clarification, use the
+semantic selection represented by that answer to call
+select_memory_clarification_candidate with only the selected candidate index.
+Do not infer a clarification identity from chat text, and do not use
+propose_memory_signal for clarification selection. Make at most one memory
+proposal or clarification-selection call per turn. After a completed proposal receipt, explain that it is
 pending and ask the user to approve or reject it. A pending proposal is never
 active until the application provides a completed approval receipt. If no
 completed proposal receipt is present, never say the preference was saved,
@@ -325,6 +330,13 @@ def create_responder_app(
     if memory_service is not None:
         tools.append(
             create_propose_memory_signal_tool(
+                memory_service,
+                agent_job_repository=agent_job_repository,
+                memory_job_dispatcher=memory_job_dispatcher,
+            )
+        )
+        tools.append(
+            create_select_memory_clarification_tool(
                 memory_service,
                 agent_job_repository=agent_job_repository,
                 memory_job_dispatcher=memory_job_dispatcher,

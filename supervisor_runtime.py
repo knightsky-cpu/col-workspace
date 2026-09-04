@@ -272,6 +272,7 @@ class SupervisorTurnContext:
     precompleted_memory_clarifications: tuple[
         MemoryClarificationReceipt, ...
     ] = ()
+    active_memory_clarification: MemoryClarificationReceipt | None = None
     precompleted_collaborative_note_proposals: tuple[
         CollaborativeNoteProposal, ...
     ] = ()
@@ -475,6 +476,17 @@ class SupervisorRuntime:
                             "memory_prequeued_for_turn": (
                                 _has_queued_memory_work(queued_actions)
                             ),
+                            **(
+                                {
+                                    "active_memory_clarification_id": (
+                                        context.active_memory_clarification
+                                        .clarification_id
+                                    )
+                                }
+                                if context.active_memory_clarification
+                                is not None
+                                else {}
+                            ),
                             "artifact_feedback_decision_present": (
                                 context.artifact_feedback_decision_present
                             ),
@@ -517,6 +529,13 @@ class SupervisorRuntime:
                 )
                 if operational_context is not None:
                     model_input_context.append(operational_context)
+                active_clarification_context = (
+                    self._active_memory_clarification_context(
+                        context.active_memory_clarification
+                    )
+                )
+                if active_clarification_context is not None:
+                    model_input_context.append(active_clarification_context)
                 config = RunConfig(
                     max_llm_calls=SUPERVISOR_MAX_LLM_CALLS,
                     model_input_context=model_input_context,
@@ -604,7 +623,10 @@ class SupervisorRuntime:
                                     ),
                                 )
                             continue
-                        if function_response.name != "propose_memory_signal":
+                        if function_response.name not in {
+                            "propose_memory_signal",
+                            "select_memory_clarification_candidate",
+                        }:
                             continue
                         parsed = parse_memory_proposal_tool_response(
                             function_response.response
@@ -988,6 +1010,28 @@ class SupervisorRuntime:
             "[SERVER_VALIDATED_PRECOMPLETED_ACTIONS]\n"
             f"{json.dumps(payload, ensure_ascii=False)}\n"
             "[/SERVER_VALIDATED_PRECOMPLETED_ACTIONS]"
+        )
+        return types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=text)],
+        )
+
+    @staticmethod
+    def _active_memory_clarification_context(
+        clarification: MemoryClarificationReceipt | None,
+    ) -> types.Content | None:
+        if clarification is None:
+            return None
+        payload = clarification.model_dump(mode="json")
+        text = (
+            "The following memory clarification is the only active "
+            "server-validated clarification for this chat session. If the user "
+            "answers it naturally, select exactly one listed candidate by "
+            "calling select_memory_clarification_candidate with only the "
+            "candidate index. Do not infer or supply a clarification id.\n"
+            "[SERVER_VALIDATED_ACTIVE_MEMORY_CLARIFICATION]\n"
+            f"{json.dumps(payload, ensure_ascii=False)}\n"
+            "[/SERVER_VALIDATED_ACTIVE_MEMORY_CLARIFICATION]"
         )
         return types.Content(
             role="user",

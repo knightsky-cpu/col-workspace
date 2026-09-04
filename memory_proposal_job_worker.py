@@ -18,6 +18,8 @@ from agent_job_payloads import AgentJobPayload
 from agent_job_repository import AgentJobRepository
 from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
 from database import (
+    MemoryClarificationSelectionError,
+    MemoryClarificationStateError,
     MemoryProposalConflictError,
     MemoryProposalOriginConflictError,
     MemorySignalAlreadyActiveError,
@@ -32,6 +34,7 @@ from trusted_memory_service import (
     NaturalMemoryCommand,
     NaturalMemoryNoEffectResult,
     NaturalMemoryProposalResult,
+    SelectMemoryClarificationCommand,
     TrustedMemoryService,
 )
 
@@ -97,6 +100,31 @@ def raw_memory_job_payload(
     )
 
 
+def memory_clarification_selection_job_payload(
+    *,
+    job: AgentJob,
+    clarification_id: str,
+    selected_candidate_index: int,
+) -> AgentJobPayload:
+    """Build a private job payload for Memory-owned clarification selection."""
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "memory_clarification_selection",
+            "clarification_id": clarification_id,
+            "selected_candidate_index": selected_candidate_index,
+        },
+    )
+
+
 def memory_command_from_payload(payload: AgentJobPayload) -> NaturalMemoryCommand:
     """Restore a governed memory command from a private AgentJob payload."""
     if payload.action_kind != "propose_memory_signal":
@@ -124,6 +152,32 @@ def memory_command_from_payload(payload: AgentJobPayload) -> NaturalMemoryComman
         memory_decision_present=memory_decision_present,
         decision=decision,
         clarification_selection=selection,
+        turn_lease=None,
+    )
+
+
+def memory_clarification_selection_command_from_payload(
+    payload: AgentJobPayload,
+) -> SelectMemoryClarificationCommand:
+    """Restore a Memory-owned clarification selection command."""
+    if payload.action_kind != "propose_memory_signal":
+        raise ValueError("AgentJobPayload is not for memory proposal work.")
+    data = payload.payload
+    if data.get("work_type") != "memory_clarification_selection":
+        raise ValueError("Memory job payload is not a clarification selection.")
+    clarification_id = data.get("clarification_id")
+    selected_candidate_index = data.get("selected_candidate_index")
+    if not isinstance(clarification_id, str):
+        raise ValueError("Memory clarification id is invalid.")
+    if type(selected_candidate_index) is not int:
+        raise ValueError("Memory clarification selection index is invalid.")
+    return SelectMemoryClarificationCommand(
+        user_id=payload.user_id,
+        workspace_id=payload.workspace_id,
+        session_id=payload.session_id,
+        source_message_id=payload.source_message_id,
+        clarification_id=clarification_id,
+        selected_candidate_index=selected_candidate_index,
         turn_lease=None,
     )
 
@@ -246,9 +300,17 @@ class MemoryProposalJobWorker:
                 workspace_id=job.workspace_id,
                 job_id=job.job_id,
             )
-            result = await self._memory_service.handle_natural_memory_decision(
-                memory_command_from_payload(payload)
-            )
+            if (
+                payload.payload.get("work_type")
+                == "memory_clarification_selection"
+            ):
+                result = await self._memory_service.select_memory_clarification(
+                    memory_clarification_selection_command_from_payload(payload)
+                )
+            else:
+                result = await self._memory_service.handle_natural_memory_decision(
+                    memory_command_from_payload(payload)
+                )
         except ValueError:
             return await self._fail_job(
                 job=job,
@@ -256,6 +318,8 @@ class MemoryProposalJobWorker:
                 error_code="invalid_memory_candidate",
             )
         except (
+            MemoryClarificationSelectionError,
+            MemoryClarificationStateError,
             MemoryProposalConflictError,
             MemoryProposalOriginConflictError,
         ):

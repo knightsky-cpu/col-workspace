@@ -8,6 +8,8 @@ import pytest
 from google.adk.events import Event
 from google.genai import types
 
+from schemas import MemoryClarificationReceipt
+
 
 @dataclass
 class FakeSessionService:
@@ -168,6 +170,23 @@ def queued_note_function_response() -> types.FunctionResponse:
     )
 
 
+def queued_memory_clarification_selection_response() -> types.FunctionResponse:
+    return types.FunctionResponse(
+        name="select_memory_clarification_candidate",
+        response={
+            "status": "queued",
+            "queued_action": {
+                "job_id": "memory-selection-job-1",
+                "action_kind": "propose_memory_signal",
+                "status": "queued",
+                "display_label": "Memory clarification selection",
+                "created_at": "2026-08-26T16:00:00Z",
+                "agent_label": "Memory Analyst",
+            },
+        },
+    )
+
+
 def queued_artifact_receipt_payload() -> dict[str, object]:
     return {
         "job_id": "artifact-job-1",
@@ -177,6 +196,25 @@ def queued_artifact_receipt_payload() -> dict[str, object]:
         "created_at": "2026-08-26T16:00:00Z",
         "agent_label": "Artifact Builder",
     }
+
+
+def active_memory_clarification() -> MemoryClarificationReceipt:
+    return MemoryClarificationReceipt(
+        clarification_id="memory-clarification--clarification-1",
+        choices=[
+            {
+                "candidate_index": 0,
+                "category_label": "Response length",
+                "value_label": "detailed",
+            },
+            {
+                "candidate_index": 1,
+                "category_label": "Question style",
+                "value_label": "minimal follow-up",
+            },
+        ],
+        expires_at=datetime(2026, 8, 26, 16, 15, tzinfo=UTC),
+    )
 
 
 @dataclass
@@ -932,6 +970,92 @@ async def test_run_turn_collects_memory_clarification_receipt_truthfully(
         ],
         "expires_at": "2026-08-25T16:15:00Z",
     }
+
+
+@pytest.mark.asyncio
+async def test_run_turn_provides_active_memory_clarification_context_to_tool(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runner = FakeRunner(
+        [
+            FakeEvent("I queued the selection.", True),
+        ]
+    )
+    session_service = FakeSessionService()
+    runtime = SupervisorRuntime(
+        runner=runner,
+        session_service=session_service,
+    )
+    clarification = active_memory_clarification()
+
+    await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="The first one.",
+            source_message_id="message-2",
+            active_memory_clarification=clarification,
+        )
+    )
+
+    state = session_service.created[0]["state"]
+    assert state["active_memory_clarification_id"] == (
+        "memory-clarification--clarification-1"
+    )
+    operational_context = runner.calls[0][
+        "run_config"
+    ].model_input_context[-1].parts[0].text
+    assert "[SERVER_VALIDATED_ACTIVE_MEMORY_CLARIFICATION]" in (
+        operational_context
+    )
+    assert "memory-clarification--clarification-1" in operational_context
+    assert "Response length" in operational_context
+    assert "detailed" in operational_context
+
+
+@pytest.mark.asyncio
+async def test_run_turn_collects_queued_memory_clarification_selection_only(
+) -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runner = FakeRunner(
+        [
+            FakeEvent(
+                None,
+                False,
+                function_responses=[
+                    queued_memory_clarification_selection_response()
+                ],
+            ),
+            FakeEvent("Memory selection queued.", True),
+        ]
+    )
+    runtime = SupervisorRuntime(
+        runner=runner,
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="The first one.",
+            source_message_id="message-2",
+            active_memory_clarification=active_memory_clarification(),
+        )
+    )
+
+    assert result.response == "Memory selection queued."
+    assert result.queued_actions[0].action_kind == "propose_memory_signal"
+    assert result.queued_actions[0].display_label == (
+        "Memory clarification selection"
+    )
+    assert result.actions == ()
+    assert result.memory_proposals == ()
+    assert result.memory_clarifications == ()
 
 
 @pytest.mark.asyncio

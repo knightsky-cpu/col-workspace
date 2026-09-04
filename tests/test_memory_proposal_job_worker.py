@@ -4,13 +4,17 @@ import pytest
 
 from agent_col_agent_jobs import AgentJob
 from agent_job_payloads import AgentJobPayload
-from database import MemoryProposalConflictError
+from database import (
+    MemoryClarificationSelectionError,
+    MemoryProposalConflictError,
+)
 from memory_candidate_decisions import ProfileCandidateDecision
 from memory_proposals import ProposalTurnLease
 from schemas import AgentActionReceipt, MemoryProposalReceiptV2, MemoryProposalV2
 from trusted_memory_service import (
     NaturalMemoryCommand,
     NaturalMemoryProposalResult,
+    SelectMemoryClarificationCommand,
 )
 
 
@@ -21,6 +25,7 @@ class RecordingMemoryService:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
         self.commands: list[NaturalMemoryCommand] = []
+        self.selection_commands: list[SelectMemoryClarificationCommand] = []
 
     async def handle_natural_memory_decision(self, command):
         self.commands.append(command)
@@ -38,6 +43,26 @@ class RecordingMemoryService:
                 ),
                 category="response_length",
                 proposed_value="concise",
+                expires_at=NOW + timedelta(hours=1),
+            ),
+        )
+
+    async def select_memory_clarification(self, command):
+        self.selection_commands.append(command)
+        if self.error is not None:
+            raise self.error
+        return NaturalMemoryProposalResult(
+            status="pending",
+            action=AgentActionReceipt(
+                action_name="propose_memory_signal",
+                status="completed",
+            ),
+            proposal=MemoryProposalReceiptV2(
+                proposal_id=(
+                    "response_length--clarified-proposal-1"
+                ),
+                category="response_length",
+                proposed_value="detailed",
                 expires_at=NOW + timedelta(hours=1),
             ),
         )
@@ -228,6 +253,44 @@ def make_job(command: NaturalMemoryCommand) -> AgentJob:
     )
 
 
+def make_clarification_selection_job() -> AgentJob:
+    return AgentJob(
+        job_id="memory-clarification-selection-job-1",
+        user_id="user-1",
+        project_id="workspace-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_turn_id="message-2",
+        source_message_id="message-2",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification selection",
+        agent_label="Memory Analyst",
+        created_at=NOW,
+        updated_at=NOW,
+        idempotency_key="memory-clarification-selection-1",
+    )
+
+
+def make_clarification_selection_payload(job: AgentJob) -> AgentJobPayload:
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "memory_clarification_selection",
+            "clarification_id": "memory-clarification--clarification-1",
+            "selected_candidate_index": 0,
+        },
+    )
+
+
 def exact_failed_user_requested_memory_payload(job: AgentJob) -> AgentJobPayload:
     return AgentJobPayload(
         job_id=job.job_id,
@@ -390,6 +453,84 @@ async def test_memory_worker_completes_queued_memory_proposal_from_private_paylo
         "A memory proposal was created and is pending your review."
     )
     assert report.public_resource_label == "concise"
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_completes_queued_clarification_selection_without_turn_lease(
+) -> None:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+
+    job = make_clarification_selection_job()
+    repository = RecordingAgentJobRepository(
+        job=job,
+        payload=make_clarification_selection_payload(job),
+    )
+    service = RecordingMemoryService()
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=service,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    completed = await worker.run_one(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="memory-worker-1",
+    )
+
+    assert completed.status == "completed"
+    assert service.commands == []
+    assert service.selection_commands == [
+        SelectMemoryClarificationCommand(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            session_id="session-1",
+            source_message_id="message-2",
+            clarification_id="memory-clarification--clarification-1",
+            selected_candidate_index=0,
+            turn_lease=None,
+        )
+    ]
+    assert repository.completed[0]["result_refs"] == {
+        "proposal_id": "response_length--clarified-proposal-1"
+    }
+    assert repository.failed == []
+    assert repository.reports[0].status == "completed"
+    assert repository.reports[0].title == "Memory proposal pending review"
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_records_clarification_selection_conflict_failure(
+) -> None:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+
+    job = make_clarification_selection_job()
+    repository = RecordingAgentJobRepository(
+        job=job,
+        payload=make_clarification_selection_payload(job),
+    )
+    service = RecordingMemoryService(
+        error=MemoryClarificationSelectionError("private stale selection")
+    )
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=service,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    failed = await worker.run_one(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="memory-worker-1",
+    )
+
+    assert failed.status == "failed"
+    assert repository.completed == []
+    assert repository.failed[0]["failure"].code == "memory_proposal_conflict"
+    assert "private stale selection" not in repository.failed[0][
+        "failure"
+    ].summary
+    assert repository.reports[0].status == "failed"
 
 
 @pytest.mark.asyncio

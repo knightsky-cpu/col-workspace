@@ -56,10 +56,29 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool(
         captured["memory_job_dispatcher"] = memory_job_dispatcher
         return FunctionTool(memory_tool)
 
+    async def clarification_tool() -> dict[str, object]:
+        return {"status": "no_memory"}
+
+    def fake_create_select_memory_clarification_tool(
+        memory_service,
+        *,
+        agent_job_repository=None,
+        memory_job_dispatcher=None,
+    ):
+        captured["clarification_memory_service"] = memory_service
+        captured["clarification_agent_job_repository"] = agent_job_repository
+        captured["clarification_memory_job_dispatcher"] = memory_job_dispatcher
+        return FunctionTool(clarification_tool)
+
     monkeypatch.setattr(
         agent_col_responder,
         "create_propose_memory_signal_tool",
         fake_create_propose_memory_signal_tool,
+    )
+    monkeypatch.setattr(
+        agent_col_responder,
+        "create_select_memory_clarification_tool",
+        fake_create_select_memory_clarification_tool,
     )
 
     service = object()
@@ -74,11 +93,15 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool(
 
     assert tuple(tool.name for tool in app.root_agent.tools) == (
         "memory_tool",
+        "clarification_tool",
     )
     assert captured == {
         "memory_service": service,
         "agent_job_repository": repository,
         "memory_job_dispatcher": dispatcher,
+        "clarification_memory_service": service,
+        "clarification_agent_job_repository": repository,
+        "clarification_memory_job_dispatcher": dispatcher,
     }
     assert tuple(agent.name for agent in app.root_agent.sub_agents) == ()
     cognitive_names = {
@@ -90,6 +113,19 @@ def test_responder_app_catalog_exposes_only_governed_memory_tool(
     assert cognitive_names.isdisjoint(
         tool.name for tool in app.root_agent.tools
     )
+
+
+def test_responder_instruction_routes_natural_clarification_to_memory_owned_tool(
+) -> None:
+    import agent_col_responder
+
+    instruction = agent_col_responder.RESPONDER_INSTRUCTION
+
+    assert "select_memory_clarification_candidate" in instruction
+    assert "call propose_memory_signal with the\nclarification_selection" not in (
+        instruction
+    )
+    assert "turn_lease" not in instruction
 
 
 def test_responder_app_catalog_exposes_governed_note_tool_separately(

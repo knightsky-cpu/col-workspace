@@ -37,6 +37,7 @@ from memory_clarifications import (
     MemoryClarificationSelection,
 )
 from memory_proposals import ProposalTurnLease
+from memory_proposal_job_worker import memory_clarification_selection_job_payload
 from memory_proposal_job_worker import memory_job_payload
 from memory_proposal_job_worker import raw_memory_job_payload
 from schemas import (
@@ -99,6 +100,7 @@ class RejectedMemoryProposalToolResponse(_StrictToolResponse):
     status: Literal["rejected"]
     error_code: Literal[
         "invalid_memory_candidate",
+        "memory_clarification_unavailable",
         "memory_proposal_conflict",
         "memory_signal_already_active",
         "memory_job_unavailable",
@@ -325,6 +327,55 @@ def _raw_memory_job_display_label(decision: dict[str, object]) -> str:
     return "Memory request"[:160]
 
 
+def _clarification_selection_job_digest(
+    *,
+    context: _MemoryToolServerContext,
+    clarification_id: str,
+    selected_candidate_index: int,
+) -> str:
+    material = json_dumps_compact(
+        {
+            "user_id": context.user_id,
+            "workspace_id": context.workspace_id,
+            "session_id": context.session_id,
+            "source_message_id": context.source_message_id,
+            "clarification_id": clarification_id,
+            "selected_candidate_index": selected_candidate_index,
+        }
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def _clarification_selection_job(
+    *,
+    context: _MemoryToolServerContext,
+    clarification_id: str,
+    selected_candidate_index: int,
+) -> AgentJob:
+    digest = _clarification_selection_job_digest(
+        context=context,
+        clarification_id=clarification_id,
+        selected_candidate_index=selected_candidate_index,
+    )
+    observed_at = datetime.now(UTC)
+    return AgentJob(
+        job_id=f"memory-selection-job-{digest}",
+        user_id=context.user_id,
+        project_id=context.workspace_id,
+        workspace_id=context.workspace_id,
+        session_id=context.session_id,
+        source_turn_id=context.source_message_id,
+        source_message_id=context.source_message_id,
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory clarification selection",
+        agent_label=_MEMORY_AGENT_LABEL,
+        created_at=observed_at,
+        updated_at=observed_at,
+        idempotency_key=f"memory-clarification-selection-{digest}",
+    )
+
+
 def _raw_memory_job(
     *,
     context: _MemoryToolServerContext,
@@ -525,6 +576,117 @@ async def _queue_raw_memory_agent_job(
     return queued
 
 
+async def _queue_clarification_selection_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    context: _MemoryToolServerContext,
+    clarification_id: str,
+    selected_candidate_index: int,
+) -> AgentJob:
+    job = _clarification_selection_job(
+        context=context,
+        clarification_id=clarification_id,
+        selected_candidate_index=selected_candidate_index,
+    )
+    queued = await agent_job_repository.enqueue_job_with_payload(
+        job,
+        memory_clarification_selection_job_payload(
+            job=job,
+            clarification_id=clarification_id,
+            selected_candidate_index=selected_candidate_index,
+        ),
+    )
+    await _append_memory_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        event=_memory_job_event(
+            job=queued,
+            event_type="queued",
+            message="Memory clarification selection queued.",
+            observed_at=queued.created_at,
+        ),
+    )
+    return queued
+
+
+def _active_memory_clarification_id(tool_context: ToolContext) -> str | None:
+    state = getattr(tool_context, "state", None)
+    if not callable(getattr(state, "get", None)):
+        raise MemoryProposalToolConfigurationError(
+            "Memory proposal tool context is invalid."
+        )
+    value = state.get("active_memory_clarification_id")
+    if value is None:
+        return None
+    if not isinstance(value, str) or _IDENTIFIER_PATTERN.fullmatch(value) is None:
+        raise MemoryProposalToolConfigurationError(
+            "Memory proposal tool context is invalid."
+        )
+    return value
+
+
+def create_select_memory_clarification_tool(
+    memory_service: TrustedMemoryService,
+    *,
+    agent_job_repository: AgentJobRepository | None = None,
+    memory_job_dispatcher: Callable[[AgentJob], None] | None = None,
+) -> FunctionTool:
+    """Create a tool that queues Memory-owned clarification selection."""
+
+    async def select_memory_clarification_candidate(
+        selected_candidate_index: int,
+        tool_context: ToolContext,
+    ) -> dict[str, object]:
+        """Queue selection of a server-validated active clarification."""
+        try:
+            context = _server_context(tool_context)
+            clarification_id = _active_memory_clarification_id(tool_context)
+            if clarification_id is None or agent_job_repository is None:
+                return {
+                    "status": "rejected",
+                    "error_code": "memory_clarification_unavailable",
+                }
+            if (
+                type(selected_candidate_index) is not int
+                or not 0 <= selected_candidate_index <= 4
+            ):
+                return {
+                    "status": "rejected",
+                    "error_code": "invalid_memory_candidate",
+                }
+            queued_job = await _queue_clarification_selection_agent_job(
+                agent_job_repository=agent_job_repository,
+                context=context,
+                clarification_id=clarification_id,
+                selected_candidate_index=selected_candidate_index,
+            )
+            if memory_job_dispatcher is not None:
+                memory_job_dispatcher(queued_job)
+            return {
+                "status": "queued",
+                "queued_action": queued_job.to_queued_action_receipt().model_dump(
+                    mode="json"
+                ),
+            }
+        except AgentJobConflictError:
+            logger.exception(
+                "Agent Col memory clarification job queue conflicted."
+            )
+            return {
+                "status": "rejected",
+                "error_code": "memory_proposal_conflict",
+            }
+        except (AgentJobRepositoryError, AgentJobStateError):
+            logger.exception("Agent Col memory clarification job queue failed.")
+            return {
+                "status": "rejected",
+                "error_code": "memory_job_unavailable",
+            }
+
+    return FunctionTool(select_memory_clarification_candidate)
+
+
 def create_propose_memory_signal_tool(
     memory_service: TrustedMemoryService,
     *,
@@ -536,12 +698,11 @@ def create_propose_memory_signal_tool(
     async def propose_memory_signal(
         decision: dict[str, object],
         tool_context: ToolContext,
-        clarification_selection: dict[str, object] | None = None,
     ) -> dict[str, object]:
         """Create a pending user-reviewable proposal; never activate memory."""
         try:
             raw_decision = _raw_tool_mapping(decision)
-            raw_selection = _raw_optional_mapping(clarification_selection)
+            raw_selection = None
             context = _server_context(tool_context)
             if context.memory_prequeued_for_turn:
                 return {"status": "no_memory"}

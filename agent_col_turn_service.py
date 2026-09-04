@@ -247,6 +247,7 @@ class AgentColTurnCommand:
     precompleted_memory_clarifications: tuple[
         MemoryClarificationReceipt, ...
     ] = ()
+    active_memory_clarification: MemoryClarificationReceipt | None = None
     precompleted_artifact_feedback: tuple[
         ArtifactFeedbackReference, ...
     ] = ()
@@ -811,6 +812,9 @@ class AgentColTurnService:
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
                         ),
+                        active_memory_clarification=(
+                            command.active_memory_clarification
+                        ),
                         precompleted_collaborative_note_proposals=(
                             command.precompleted_collaborative_note_proposals
                         ),
@@ -1248,6 +1252,9 @@ class AgentColTurnService:
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
                         ),
+                        active_memory_clarification=(
+                            command.active_memory_clarification
+                        ),
                         prequeued_actions=queue_result.queued_actions,
                     ),
                     on_delta=on_delta,
@@ -1424,6 +1431,9 @@ class AgentColTurnService:
                         ),
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
+                        ),
+                        active_memory_clarification=(
+                            command.active_memory_clarification
                         ),
                         precompleted_collaborative_note_proposals=(
                             command.precompleted_collaborative_note_proposals
@@ -1934,6 +1944,9 @@ class AgentColTurnService:
                         ),
                         precompleted_memory_clarifications=(
                             command.precompleted_memory_clarifications
+                        ),
+                        active_memory_clarification=(
+                            command.active_memory_clarification
                         ),
                         precompleted_collaborative_note_proposals=(
                             command.precompleted_collaborative_note_proposals

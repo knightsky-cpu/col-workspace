@@ -1690,6 +1690,119 @@ Work deferred until core decoupling is complete:
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
 
+## Memory-Owned Natural Clarification Selection Pass
+
+This pass preserved natural chat answers to active Memory clarifications while
+moving execution fully behind Memory-owned queued work.
+
+Behavioral change:
+
+- Agent Col can still recognize natural answers such as "the first one" when a
+  server-validated active Memory clarification exists;
+- the responder now uses a narrow `select_memory_clarification_candidate` tool
+  for that lifecycle instead of `propose_memory_signal` with
+  `clarification_selection`;
+- the narrow tool exposes only `selected_candidate_index` to the model;
+- the clarification id comes only from server-injected active clarification
+  context and tool state;
+- the narrow tool queues a Memory Analyst job with a private
+  `memory_clarification_selection` payload;
+- the Memory Analyst worker consumes that payload by calling
+  `TrustedMemoryService.select_memory_clarification(..., turn_lease=None)`;
+- chat receives only the queued action receipt for this lifecycle;
+- chat does not receive or persist a completed memory proposal/effect from the
+  natural clarification-selection path.
+
+Why this boundary matters:
+
+The direct Memory clarification API already supported `turn_lease=None`, but
+the responder/tool natural path still pointed at the old
+`propose_memory_signal(... clarification_selection ...)` route. That old route
+was actively reachable from responder instructions and was broken after
+chat-turn leases were removed from memory tool context. A direct synchronous
+repair would have conflicted with chat-turn completion because Memory-owned
+selection intentionally does not write chat-turn memory proposal effects. The
+queued selection boundary preserves natural conversation while keeping the
+Memory UI, Memory service, worker, and job reports authoritative for the final
+result.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_memory_worker_completes_queued_clarification_selection_without_turn_lease`
+  failed because the worker treated every memory job payload as a natural
+  memory decision and failed the clarification-selection payload.
+- GREEN: `memory_proposal_job_worker.py` now restores
+  `SelectMemoryClarificationCommand` from a private selection payload and calls
+  `select_memory_clarification` with `turn_lease=None`.
+- RED: selection-tool tests failed because
+  `create_select_memory_clarification_tool` did not exist.
+- GREEN: `memory_proposal_tool.py` now exposes
+  `select_memory_clarification_candidate`, queues a Memory Analyst job, and
+  requires `active_memory_clarification_id` from server-owned tool state.
+- RED: responder tests failed because the app did not wire the new tool and the
+  instruction still routed natural clarification answers through
+  `propose_memory_signal`.
+- GREEN: `agent_col_responder.py` wires the new tool and instructs Agent Col to
+  use it only with server-validated active clarification context.
+- RED: runtime tests failed because `SupervisorTurnContext` had no active
+  clarification field and did not collect the new tool response.
+- GREEN: `supervisor_runtime.py` now injects active clarification context into
+  tool state and model context, and collects the new tool's queued action
+  without adding memory proposals.
+- RED: the main chat boundary test failed because `AgentColTurnCommand` had no
+  active clarification context.
+- GREEN: `main.py` reads the active Memory clarification from authoritative
+  chat-session detail for ordinary chat turns and passes it through
+  `agent_col_turn_service.py`.
+- RED: the `propose_memory_signal` declaration test failed because
+  `clarification_selection` was still model-visible.
+- GREEN: `propose_memory_signal` no longer exposes `clarification_selection`;
+  natural selection is available only through the narrow queued tool.
+- REFACTOR: replaced stale malformed-selection coverage with invalid-index
+  coverage on the new selection tool.
+
+Focused verification after implementation:
+
+```text
+venv/bin/python -m pytest tests/test_memory_proposal_tool.py tests/test_memory_proposal_job_worker.py tests/test_agent_col_responder.py tests/test_supervisor_runtime.py -k "memory or clarification" -q
+52 passed, 63 deselected, 1 warning
+```
+
+```text
+venv/bin/python -m pytest tests/test_agent_col_turn_service.py tests/test_main.py -k "clarification_selection or active_memory_clarification or queued" -q
+9 passed, 345 deselected, 1 warning
+```
+
+```text
+venv/bin/python -m py_compile agent_col_responder.py memory_proposal_tool.py memory_proposal_job_worker.py supervisor_runtime.py agent_col_turn_service.py main.py
+passed
+```
+
+```text
+git diff --check
+passed
+```
+
+Remaining direct decoupling:
+
+- preference-hypothesis confirmation can still open a Memory clarification from
+  the ordinary chat path with a live `ProposalTurnLease`;
+- deterministic ambiguous Memory clarification preflight still creates
+  clarification receipts in the chat path with a live `ProposalTurnLease`;
+- legacy structured `/api/chat` Memory clarification-selection compatibility
+  still exists, but current active frontend selection and natural responder
+  selection no longer need it;
+- ambiguous artifact requests still require chat-time routing.
+
+Next proposed pass:
+
+- inspect and decouple the next smallest live chat-ownership dependency:
+  Memory clarification creation that still requires a live `ProposalTurnLease`
+  for preference-hypothesis confirmation or deterministic ambiguous-memory
+  preflight. Preserve governed clarification receipts, but move creation behind
+  a Memory-owned queued or direct lifecycle only if the source evidence can be
+  kept authoritative without chat-turn effects.
+
 ## Read-Only Clarification-Selection Reachability Investigation
 
 This was a read-only investigation only. No source behavior was changed.

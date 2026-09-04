@@ -8784,6 +8784,49 @@ async def test_chat_returns_authoritative_memory_clarification_receipt(
 
 
 @pytest.mark.asyncio
+async def test_chat_passes_active_memory_clarification_to_turn_service(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    clarification = make_memory_clarification_receipt()
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.database.chat_session_detail_result = (
+        ChatSessionDetailResponse(
+            session_id="session-1",
+            project_id="project-1",
+            user_id="user-1",
+            messages=[],
+            active_memory_clarification=clarification,
+        )
+    )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "active-clarification-context-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "The first one.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert service_state.turn_service.calls[0].active_memory_clarification == (
+        clarification
+    )
+    assert service_state.database.chat_session_detail_calls == [
+        (
+            "user-1",
+            "project-1",
+            "session-1",
+            1,
+            service_state.database.chat_session_detail_calls[0][4],
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_chat_preflights_ambiguous_memory_request_into_clarification(
     client: httpx.AsyncClient,
     service_state: ServiceState,

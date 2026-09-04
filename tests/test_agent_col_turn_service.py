@@ -2347,6 +2347,54 @@ async def test_turn_service_preserves_memory_clarification_receipt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turn_service_passes_active_memory_clarification_to_responder(
+) -> None:
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+
+    clarification = memory_clarification_receipt()
+    responder = RecordingResponder(
+        SupervisorTurnResult(
+            response="I queued the memory clarification selection.",
+            queued_actions=(
+                QueuedActionReceipt(
+                    job_id="memory-selection-job-1",
+                    action_kind="propose_memory_signal",
+                    status="queued",
+                    display_label="Memory clarification selection",
+                    created_at=datetime(2026, 8, 25, 12, 20, tzinfo=UTC),
+                    agent_label="Memory Analyst",
+                ),
+            ),
+        )
+    )
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=responder,
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route=AgentColRoute.DIRECT)
+        ),
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="The first one.",
+            source_message_id="message-2",
+            active_memory_clarification=clarification,
+        )
+    )
+
+    assert result.queued_actions[0].display_label == (
+        "Memory clarification selection"
+    )
+    assert result.memory_proposals == ()
+    assert responder.contexts[0].active_memory_clarification == clarification
+
+
+@pytest.mark.asyncio
 async def test_failed_expert_context_adds_no_cognitive_receipt() -> None:
     from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
 
