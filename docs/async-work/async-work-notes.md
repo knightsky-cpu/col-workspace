@@ -1689,3 +1689,81 @@ Work deferred until core decoupling is complete:
   queued action receipts;
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
+
+## Explicit Note/Memory Prequeue Lease Decoupling Pass
+
+This pass removed chat-turn lease ownership from deterministic explicit
+workspace-note and memory prequeue commands.
+
+Completed work:
+
+- explicit workspace-note prequeue commands now use `turn_lease=None`;
+- explicit memory prequeue commands now use `turn_lease=None`;
+- mixed-intent prompts still route/respond normally after durable note/memory
+  work is queued, so conversational work in the same user message is preserved;
+- existing queue code continues to use `source_message_id` as `source_turn_id`
+  whenever a queued note or memory command has no turn lease.
+
+Why this matters:
+
+The prior proposed symmetry pass would have skipped routing for explicit
+note-only and memory-only turns. Re-inspection showed that would be too broad:
+prequeued note/memory work can be only one clause in a mixed-intent prompt, and
+the remaining request still needs routed conversational handling. The smaller
+correct boundary was the live lease dependency. Explicit note and memory
+prequeue no longer carry a chat-turn owner token into durable work that can
+already be identified by source message provenance and queued-action receipts.
+
+TDD evidence recorded during the pass:
+
+- RED: `venv/bin/pytest -q tests/test_agent_col_turn_service.py -k "prequeue or note or memory"`
+  failed in six explicit prequeue cases because note and memory commands still
+  contained `ProposalTurnLease`.
+- GREEN: `_explicit_workspace_note_command` and `_explicit_memory_command` now
+  set `turn_lease=None` for deterministic prequeue commands.
+- REFACTOR: none.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_agent_col_turn_service.py -k "prequeue or note or memory"
+13 passed, 45 deselected, 1 warning
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_tool.py tests/test_collaborative_note_tool.py -k "queued or turn_lease or owner_token"
+2 passed, 41 deselected
+```
+
+```text
+venv/bin/pytest -q tests/test_memory_proposal_job_worker.py -k "payload or turn_lease or queued"
+3 passed, 2 deselected
+```
+
+Remaining direct decoupling:
+
+- responder tool state still exposes `memory_turn_owner_token` and
+  `note_turn_owner_token`, allowing model-invoked memory/note tools to
+  reconstruct `ProposalTurnLease` even though queued jobs do not serialize owner
+  tokens and workers restore commands with `turn_lease=None`;
+- ambiguous artifact requests still require chat-time routing;
+- legacy structured-decision schemas, frontend request helpers, and unreachable
+  backend branches remain as deferred cleanup.
+
+Next proposed pass:
+
+- remove chat-turn owner-token exposure from responder memory/note tool state
+  and make model-invoked queued memory/note proposal jobs use source-message
+  provenance instead of a live chat-turn lease, while preserving prequeued-action
+  duplicate suppression.
+
+Work deferred until core decoupling is complete:
+
+- structured-decision cleanup: remove retired frontend request builders,
+  retired structured chat fields, and unreachable backend execution branches
+  only after the active lifecycle dependencies are gone;
+- broad manual end-to-end browser acceptance for every drawer action;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.
