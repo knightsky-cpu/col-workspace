@@ -2859,3 +2859,43 @@ Remaining deferred work:
 - AgentJob payload-preserving retry, retry dispatch, startup/runtime draining,
   expired running-lease recovery, terminal report/event consistency, hidden
   working-state durability, and Note shutdown hygiene.
+
+## Inactive Frontend Structured-Chat Builder Cleanup
+
+This uncommitted frontend-only cleanup pass removes stale request-builder
+exports for structured `/api/chat` resource decisions after the active UI moved
+those actions to direct resource APIs.
+
+Removed:
+
+- `buildMemoryDecisionChatRequest`;
+- `buildMemoryClarificationSelectionChatRequest`;
+- `buildCollaborativeNoteDecisionChatRequest`;
+- `buildContinuitySelectionChatRequest`;
+- `buildArtifactFeedbackChatRequest`;
+- obsolete frontend request tests that only validated those retired chat
+  builders.
+- generic `buildChatRequest(...)` construction of retired structured resource
+  fields and stale `/api/chat` endpoint selection for frontend resource actions.
+
+Preserved:
+
+- ordinary chat request construction, exact retry construction, and chat
+  streaming helpers used by `frontend/app.mjs`;
+- active direct resource APIs for Memory decisions, Memory clarification
+  selections, Note decisions, Continuity selections, and Artifact feedback;
+- frontend state/recovery compatibility fixtures that still handle historical
+  structured request bodies without constructing new structured chat requests;
+- backend `ChatRequest`, persisted `ChatTurnRequest` metadata,
+  `ProposalTurnLease`, `_execute_chat`, supervisor/turn effect plumbing,
+  `TrustedMemoryService`, artifact executor legacy execution, AgentJob
+  recovery, and Note worker shutdown behavior.
+
+Remaining deferred work:
+
+- inert turn-lease/effect plumbing cleanup;
+- legacy TrustedMemoryService lease branch review;
+- synchronous artifact executor cleanup outside `_execute_chat`;
+- AgentJob payload-preserving retry, retry dispatch, startup/runtime draining,
+  expired running-lease recovery, terminal report/event consistency, hidden
+  working-state durability, and Note shutdown hygiene.
