@@ -124,7 +124,7 @@ class SelectMemoryClarificationCommand:
     source_message_id: str
     clarification_id: str
     selected_candidate_index: int
-    turn_lease: ProposalTurnLease
+    turn_lease: ProposalTurnLease | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,11 +455,6 @@ class TrustedMemoryService:
             command.clarification_id,
             "clarification_id",
         )
-        if not isinstance(command.turn_lease, ProposalTurnLease):
-            raise ValueError(
-                "A clarification selection requires retry-safe turn "
-                "ownership."
-            )
         if (
             type(command.selected_candidate_index) is not int
             or not 0 <= command.selected_candidate_index <= 4

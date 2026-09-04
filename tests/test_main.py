@@ -5733,6 +5733,105 @@ async def test_reject_memory_proposal_uses_memory_api_without_chat_turn(
 
 
 @pytest.mark.asyncio
+async def test_select_memory_clarification_uses_memory_api_without_chat_turn(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/memory/clarifications/"
+        "memory-clarification--clarification-1/select",
+        headers={"Idempotency-Key": "clarification-direct-key-1"},
+        json={
+            "session_id": "session-1",
+            "selected_candidate_index": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "action": {
+            "action_name": "propose_memory_signal",
+            "status": "completed",
+        },
+        "memory_proposal": {
+            "proposal_id": "response_length--clarified-proposal-1",
+            "category": "response_length",
+            "proposed_value": "detailed",
+            "policy_version": "2.0",
+            "expires_at": "2026-08-21T23:00:00Z",
+        },
+    }
+    assert service_state.memory_service.selection_calls == [
+        SelectMemoryClarificationCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            session_id="session-1",
+            source_message_id=(
+                "memory-clarification-selection--"
+                "08b422f1d5ea705b44f8630690bfdfa5982a030147d17e3b1cb2ea366fda6672"
+            ),
+            clarification_id="memory-clarification--clarification-1",
+            selected_candidate_index=0,
+            turn_lease=None,
+        )
+    ]
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.events == [("memory_clarification_selection",)]
+
+
+@pytest.mark.asyncio
+async def test_select_memory_clarification_memory_api_requires_idempotency_key(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/memory/clarifications/"
+        "memory-clarification--clarification-1/select",
+        json={
+            "session_id": "session-1",
+            "selected_candidate_index": 0,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Memory clarification selection requires an idempotency key."
+    }
+    assert service_state.memory_service.selection_calls == []
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_select_memory_clarification_memory_api_maps_stale_state_to_conflict(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.memory_service.error = MemoryClarificationSelectionError(
+        "private stale selection"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/memory/clarifications/"
+        "memory-clarification--clarification-1/select",
+        headers={"Idempotency-Key": "clarification-direct-key-2"},
+        json={
+            "session_id": "session-1",
+            "selected_candidate_index": 0,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Memory clarification cannot be selected."
+    }
+    assert "private stale selection" not in response.text
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_revoke_memory_signal_maps_unknown_signal_to_not_found(
     client: httpx.AsyncClient,
     service_state: ServiceState,

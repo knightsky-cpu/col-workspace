@@ -3799,6 +3799,196 @@ test("memory proposal approval during a pending chat uses direct memory API", as
   });
 });
 
+test("memory clarification selection during a pending chat uses direct memory API", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const firstChatStream = createControlledSseResponse();
+  const pendingChatStream = createControlledSseResponse();
+  const calls = [];
+  let chatStreamCount = 0;
+  let clarificationSelected = false;
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (
+      path === "/api/users/wifiknight/projects/agent-col/memory/clarifications/memory-clarification--clarify-1/select"
+      && init.method === "POST"
+    ) {
+      clarificationSelected = true;
+      return jsonResponse(200, {
+        action: { action_name: "propose_memory_signal", status: "completed" },
+        memory_proposal: {
+          proposal_id: "response_length--proposal-1",
+          category: "response_length",
+          proposed_value: "detailed",
+          policy_version: "2.0",
+          expires_at: "2026-09-02T12:00:01Z",
+        },
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: clarificationSelected
+          ? [{
+            proposal_id: "response_length--proposal-1",
+            category: "response_length",
+            proposed_value: "detailed",
+            status: "pending",
+            expires_at: "2026-09-02T12:00:01Z",
+          }]
+          : [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/reports")) {
+      return jsonResponse(200, {
+        agent_job_report_contract_version: "1.0",
+        reports: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      chatStreamCount += 1;
+      return chatStreamCount === 1
+        ? firstChatStream.response
+        : pendingChatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-memory-clarification-direct-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  const input = elements.get("[data-chat-input]");
+  input.value = "Clarify a memory";
+  input.oninput();
+  const firstSubmit = elements.get("[data-chat-form]").onsubmit({
+    preventDefault() {},
+  });
+  await waitFor(
+    () => chatStreamCount === 1,
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  firstChatStream.complete({
+    response: "Which memory should I save?",
+    actions: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [{
+      clarification_id: "memory-clarification--clarify-1",
+      choices: [
+        {
+          candidate_index: 0,
+          category_label: "Response length",
+          value_label: "detailed",
+        },
+        {
+          candidate_index: 1,
+          category_label: "Do not save",
+          value_label: "skip",
+        },
+      ],
+      expires_at: "2099-01-01T00:00:00Z",
+    }],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    continuity_choices: [],
+    adaptations: [],
+  });
+  await firstSubmit;
+
+  input.value = "Keep another chat pending";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => chatStreamCount === 2,
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  const choices = elements.get("[data-memory-clarification-choices]");
+  const detailedChoice = choices.children[0];
+  assert.equal(detailedChoice.disabled, false);
+  detailedChoice.onclick();
+
+  await waitFor(
+    () => calls.some(([path, init]) => (
+      path === "/api/users/wifiknight/projects/agent-col/memory/clarifications/memory-clarification--clarify-1/select"
+      && init.method === "POST"
+    )),
+    () => JSON.stringify(calls.map(([path, init]) => [path, init.method])),
+  );
+  assert.equal(
+    calls.filter(([path]) => path === "/api/chat/stream").length,
+    2,
+  );
+  assert.equal(calls.some(([path]) => path === "/api/chat"), false);
+  assert.equal(elements.get("[data-chat-error]").textContent, "");
+  assert.equal(choices.hidden, true);
+  assert.match(textTree(elements.get("[data-memory-panel]")), /detailed/);
+
+  pendingChatStream.complete({
+    response: "Done",
+    actions: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    continuity_choices: [],
+    adaptations: [],
+  });
+});
+
 test("note proposal approval during a pending chat uses direct note API", async () => {
   const { contextForm, elements } = installOrdinaryChatRuntimeDom();
   globalThis.sessionStorage = memoryStorage();

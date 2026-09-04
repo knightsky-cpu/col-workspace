@@ -109,7 +109,6 @@ test("chat endpoint selection streams only ordinary requests", () => {
 
   for (const field of [
     "memory_decision",
-    "memory_clarification_selection",
     "artifact_feedback_decision",
     "collaborative_note_decision",
     "continuity_selection",
@@ -119,6 +118,15 @@ test("chat endpoint selection streams only ordinary requests", () => {
       "/api/chat",
     );
   }
+  assert.equal(
+    selectChatEndpoint({
+      body: {
+        ...ordinary.body,
+        memory_clarification_selection: {},
+      },
+    }),
+    "/api/chat/stream",
+  );
 });
 
 test("ordinary multi-intent request does not inherit stale continuity payload", () => {

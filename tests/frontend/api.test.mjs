@@ -36,6 +36,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  selectMemoryClarification,
   streamAgentJobs,
   synthesizeSpeechAudio,
   transcribeSpeechAudio,
@@ -872,6 +873,102 @@ test("decideMemoryProposal calls the direct proposal decision path", async () =>
   assert.equal(calls[0][1].method, "POST");
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
   assert.equal(calls[0][1].body, undefined);
+});
+
+
+test("selectMemoryClarification calls the direct clarification selection path", async () => {
+  const calls = [];
+  const result = await selectMemoryClarification(
+    "wifiknight",
+    "agent-col",
+    "memory-clarification--clarification-1",
+    {
+      session_id: "session-1",
+      selected_candidate_index: 0,
+    },
+    {
+      authToken: "google-id-token",
+      idempotencyKey: "clarification-direct-key-1",
+    },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        action: { action_name: "propose_memory_signal", status: "completed" },
+        memory_proposal: {
+          proposal_id: "response_length--proposal-1",
+          category: "response_length",
+          proposed_value: "detailed",
+          policy_version: "2.0",
+          expires_at: "2026-08-21T23:00:00Z",
+        },
+      });
+    },
+  );
+
+  assert.deepEqual(result.memory_proposal, {
+    proposal_id: "response_length--proposal-1",
+    category: "response_length",
+    proposed_value: "detailed",
+    policy_version: "2.0",
+    expires_at: "2026-08-21T23:00:00Z",
+  });
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/projects/agent-col/memory/clarifications/memory-clarification--clarification-1/select",
+  );
+  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+  assert.equal(calls[0][1].headers["Idempotency-Key"], "clarification-direct-key-1");
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    session_id: "session-1",
+    selected_candidate_index: 0,
+  });
+});
+
+
+test("selectMemoryClarification rejects invalid direct selection input", async () => {
+  await assert.rejects(
+    () => selectMemoryClarification(
+      "bad/slash",
+      "agent-col",
+      "memory-clarification--clarification-1",
+      {
+        session_id: "session-1",
+        selected_candidate_index: 0,
+      },
+      { idempotencyKey: "clarification-direct-key-1" },
+      async () => jsonResponse(200, {}),
+    ),
+    /invalid/i,
+  );
+  await assert.rejects(
+    () => selectMemoryClarification(
+      "wifiknight",
+      "agent-col",
+      "memory-clarification--clarification-1",
+      {
+        session_id: "session-1",
+        selected_candidate_index: true,
+      },
+      { idempotencyKey: "clarification-direct-key-1" },
+      async () => jsonResponse(200, {}),
+    ),
+    /candidate index/i,
+  );
+  await assert.rejects(
+    () => selectMemoryClarification(
+      "wifiknight",
+      "agent-col",
+      "memory-clarification--clarification-1",
+      {
+        session_id: "session-1",
+        selected_candidate_index: 0,
+      },
+      {},
+      async () => jsonResponse(200, {}),
+    ),
+    /idempotency/i,
+  );
 });
 
 test("revokeMemorySignal calls the canonical active memory revoke path", async () => {

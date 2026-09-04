@@ -600,6 +600,16 @@ class MemoryClarificationSelectionRequest(StrictModel):
     selected_candidate_index: int = Field(strict=True, ge=0, le=4)
 
 
+class DirectMemoryClarificationSelectionRequest(StrictModel):
+    session_id: IdentifierStr
+    selected_candidate_index: int = Field(strict=True, ge=0, le=4)
+
+
+class MemoryClarificationSelectionResponse(StrictModel):
+    action: AgentActionReceipt | None
+    memory_proposal: VersionedMemoryProposalReceipt | None
+
+
 class CollaborativeNoteProposal(StrictModel):
     note_contract_version: Literal["1.0"] = COLLABORATIVE_NOTE_CONTRACT_VERSION
     proposal_id: IdentifierStr

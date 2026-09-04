@@ -214,8 +214,10 @@ from schemas import (
     CollaborativeNoteMutationRequest,
     CollaborativeNoteProposalRequest,
     CollaborativeNoteProposalResponse,
+    DirectMemoryClarificationSelectionRequest,
     DisplayLabelStr,
     IdentifierStr,
+    MemoryClarificationSelectionResponse,
     MemoryClarificationReceipt,
     MemoryInspectionResponse,
     MemoryMutationResponse,
@@ -320,6 +322,13 @@ def _log_speech_provider_failure(operation: str, error: BaseException) -> None:
         type(cause).__name__,
         _provider_code_label(cause),
     )
+
+
+def _direct_memory_clarification_source_message_id(
+    idempotency_key: str,
+) -> str:
+    digest = hashlib.sha256(idempotency_key.encode("ascii")).hexdigest()
+    return f"memory-clarification-selection--{digest}"
 
 
 FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
@@ -3593,6 +3602,111 @@ async def decide_memory_proposal(
     return MemoryMutationResponse(
         action=result.action,
         profile=result.profile,
+    )
+
+
+@app.post(
+    "/api/users/{user_id}/projects/{project_id}/memory/clarifications/"
+    "{clarification_id}/select",
+    response_model=MemoryClarificationSelectionResponse,
+)
+async def select_memory_clarification(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    clarification_id: IdentifierStr,
+    payload: DirectMemoryClarificationSelectionRequest,
+    request: Request,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> MemoryClarificationSelectionResponse:
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Memory clarification selection requires an idempotency key.",
+        )
+    try:
+        validated_idempotency_key = validate_idempotency_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Memory clarification selection idempotency key is invalid.",
+        ) from exc
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    try:
+        result = await request.app.state.memory_service.select_memory_clarification(
+            SelectMemoryClarificationCommand(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                session_id=payload.session_id,
+                source_message_id=(
+                    _direct_memory_clarification_source_message_id(
+                        validated_idempotency_key
+                    )
+                ),
+                clarification_id=clarification_id,
+                selected_candidate_index=payload.selected_candidate_index,
+                turn_lease=None,
+            )
+        )
+    except MemoryClarificationSelectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Memory clarification cannot be selected.",
+        ) from exc
+    except (
+        MemoryProposalConflictError,
+        MemoryProposalOriginConflictError,
+        MemorySignalAlreadyActiveError,
+    ) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Memory proposal state conflicts with this request.",
+        ) from exc
+    except (
+        ChatTurnOwnershipError,
+        ChatTurnStateError,
+        ChatSessionOwnershipError,
+        MemoryClarificationStateError,
+        MemoryProposalStateError,
+    ) as exc:
+        logger.error(
+            "Memory clarification selection state is invalid (%s).",
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Memory clarification state is invalid.",
+        ) from exc
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Memory clarification selection request is invalid.",
+        ) from exc
+    if isinstance(result, NaturalMemoryNoEffectResult):
+        return MemoryClarificationSelectionResponse(
+            action=None,
+            memory_proposal=None,
+        )
+    return MemoryClarificationSelectionResponse(
+        action=result.action,
+        memory_proposal=result.proposal,
     )
 
 

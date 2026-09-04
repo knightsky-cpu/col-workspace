@@ -6425,7 +6425,7 @@ class MemoryEngine:
         source_message_id: str,
         selection: MemoryClarificationSelection,
         observed_at: datetime,
-        turn_lease: ProposalTurnLease,
+        turn_lease: ProposalTurnLease | None,
         expected_clarification_id: str | None = None,
     ) -> MemoryProposalV2 | None:
         """Consume the first subsequent clarification turn into one proposal."""
@@ -6440,7 +6440,7 @@ class MemoryEngine:
             raise ValueError("selection must be a memory clarification selection.")
         if not self._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
-        if not isinstance(turn_lease, ProposalTurnLease):
+        if turn_lease is not None and not isinstance(turn_lease, ProposalTurnLease):
             raise ValueError("turn_lease must be valid.")
         if expected_clarification_id is not None:
             self._validate_memory_identifier(
@@ -6450,7 +6450,9 @@ class MemoryEngine:
 
         session_ref = self._client.collection("sessions").document(session_id)
         clarifications_ref = session_ref.collection("memory_clarifications")
-        turn_ref = session_ref.collection("turns").document(turn_lease.turn_id)
+        consuming_turn_id = (
+            turn_lease.turn_id if turn_lease is not None else source_message_id
+        )
         user_ref = self._client.collection("users").document(user_id)
         transaction = self._client.transaction()
 
@@ -6482,7 +6484,7 @@ class MemoryEngine:
                 if (
                     clarification_id is None
                     or session_document.get("last_consuming_memory_turn_id")
-                    != turn_lease.turn_id
+                    != consuming_turn_id
                 ):
                     error_type = (
                         MemoryClarificationSelectionError
@@ -6526,7 +6528,7 @@ class MemoryEngine:
 
             is_exact_retry = (
                 envelope.status == "consumed"
-                and envelope.consuming_turn_id == turn_lease.turn_id
+                and envelope.consuming_turn_id == consuming_turn_id
                 and envelope.consuming_message_id == source_message_id
                 and envelope.selected_candidate_index
                 == selection.selected_candidate_index
@@ -6543,11 +6545,15 @@ class MemoryEngine:
                         user_id=user_id,
                         session_id=session_id,
                         workspace_id=workspace_id,
-                        selecting_turn_id=turn_lease.turn_id,
+                        selecting_turn_id=consuming_turn_id,
                         selecting_message_id=source_message_id,
                         is_first_subsequent_turn=(
-                            session_document.get("last_completed_turn_id")
-                            == envelope.clarification_turn_id
+                            True
+                            if turn_lease is None
+                            else (
+                                session_document.get("last_completed_turn_id")
+                                == envelope.clarification_turn_id
+                            )
                         ),
                         observed_at=observed_at,
                     )
@@ -6564,7 +6570,7 @@ class MemoryEngine:
                     clarification_ref,
                     {
                         "status": "consumed",
-                        "consuming_turn_id": turn_lease.turn_id,
+                        "consuming_turn_id": consuming_turn_id,
                         "consuming_message_id": source_message_id,
                         "selected_candidate_index": (
                             selection.selected_candidate_index
@@ -6581,7 +6587,7 @@ class MemoryEngine:
                         "last_consumed_memory_clarification_id": (
                             envelope.clarification_id
                         ),
-                        "last_consuming_memory_turn_id": turn_lease.turn_id,
+                        "last_consuming_memory_turn_id": consuming_turn_id,
                         "updated_at": firestore.SERVER_TIMESTAMP,
                     },
                     merge=True,
@@ -6607,7 +6613,15 @@ class MemoryEngine:
             origin_snapshot = await origin_ref.get(transaction=transaction)
             proposal_snapshot = await proposal_ref.get(transaction=transaction)
             profile_snapshot = await user_ref.get(transaction=transaction)
-            turn_snapshot = await turn_ref.get(transaction=transaction)
+            turn_snapshot = (
+                await (
+                    session_ref.collection("turns")
+                    .document(turn_lease.turn_id)
+                    .get(transaction=transaction)
+                )
+                if turn_lease is not None
+                else None
+            )
 
             profile = (
                 self._versioned_profile_from_document(profile_snapshot.to_dict())
@@ -6670,15 +6684,23 @@ class MemoryEngine:
                     raise MemoryProposalOriginConflictError(
                         "Stored proposal conflicts with this selection."
                     )
-                effect = self._proposal_turn_effect_update(
-                    turn_snapshot=turn_snapshot,
-                    user_id=user_id,
-                    source_message_id=source_message_id,
-                    turn_lease=turn_lease,
-                    observed_at=observed_at,
-                    proposal=stored,
+                effect = (
+                    self._proposal_turn_effect_update(
+                        turn_snapshot=turn_snapshot,
+                        user_id=user_id,
+                        source_message_id=source_message_id,
+                        turn_lease=turn_lease,
+                        observed_at=observed_at,
+                        proposal=stored,
+                    )
+                    if turn_lease is not None
+                    else None
                 )
                 if effect is not None:
+                    turn_ref = (
+                        session_ref.collection("turns")
+                        .document(turn_lease.turn_id)
+                    )
                     transaction.set(turn_ref, effect, merge=True)
                 return stored
 
@@ -6710,13 +6732,17 @@ class MemoryEngine:
                 created_at=observed_at,
                 expires_at=observed_at + timedelta(hours=24),
             )
-            effect = self._proposal_turn_effect_update(
-                turn_snapshot=turn_snapshot,
-                user_id=user_id,
-                source_message_id=source_message_id,
-                turn_lease=turn_lease,
-                observed_at=observed_at,
-                proposal=proposal,
+            effect = (
+                self._proposal_turn_effect_update(
+                    turn_snapshot=turn_snapshot,
+                    user_id=user_id,
+                    source_message_id=source_message_id,
+                    turn_lease=turn_lease,
+                    observed_at=observed_at,
+                    proposal=proposal,
+                )
+                if turn_lease is not None
+                else None
             )
             proposal_document = proposal.model_dump(mode="python")
             proposal_document["created_at"] = firestore.SERVER_TIMESTAMP
@@ -6735,12 +6761,16 @@ class MemoryEngine:
                 },
             )
             if effect is not None:
+                turn_ref = (
+                    session_ref.collection("turns")
+                    .document(turn_lease.turn_id)
+                )
                 transaction.set(turn_ref, effect, merge=True)
             transaction.set(
                 clarification_ref,
                 {
                     "status": "consumed",
-                    "consuming_turn_id": turn_lease.turn_id,
+                    "consuming_turn_id": consuming_turn_id,
                     "consuming_message_id": source_message_id,
                     "selected_candidate_index": (
                         selection.selected_candidate_index
@@ -6755,7 +6785,7 @@ class MemoryEngine:
                     "last_consumed_memory_clarification_id": (
                         envelope.clarification_id
                     ),
-                    "last_consuming_memory_turn_id": turn_lease.turn_id,
+                    "last_consuming_memory_turn_id": consuming_turn_id,
                     "updated_at": firestore.SERVER_TIMESTAMP,
                 },
                 merge=True,
