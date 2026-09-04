@@ -29,6 +29,7 @@ from memory_candidate_decisions import (
 )
 from memory_clarifications import MemoryClarificationSelection
 from pydantic import TypeAdapter
+from preference_learning import PreferenceHypothesis
 from trusted_memory_service import (
     NaturalMemoryClarificationResult,
     NaturalMemoryCommand,
@@ -125,6 +126,29 @@ def memory_clarification_selection_job_payload(
     )
 
 
+def preference_hypothesis_confirmation_job_payload(
+    *,
+    job: AgentJob,
+    hypothesis: PreferenceHypothesis,
+) -> AgentJobPayload:
+    """Build the private payload for one preference confirmation."""
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "preference_hypothesis_confirmation",
+            "hypothesis": hypothesis.model_dump(mode="json"),
+        },
+    )
+
+
 def memory_command_from_payload(payload: AgentJobPayload) -> NaturalMemoryCommand:
     """Restore a governed memory command from a private AgentJob payload."""
     if payload.action_kind != "propose_memory_signal":
@@ -180,6 +204,17 @@ def memory_clarification_selection_command_from_payload(
         selected_candidate_index=selected_candidate_index,
         turn_lease=None,
     )
+
+
+def preference_hypothesis_from_payload(
+    payload: AgentJobPayload,
+) -> PreferenceHypothesis:
+    """Restore a validated preference hypothesis from private job state."""
+    if payload.action_kind != "propose_memory_signal":
+        raise ValueError("AgentJobPayload is not for memory proposal work.")
+    if payload.payload.get("work_type") != "preference_hypothesis_confirmation":
+        raise ValueError("Memory job payload is not a preference confirmation.")
+    return PreferenceHypothesis.model_validate(payload.payload.get("hypothesis"))
 
 
 def _memory_job_event(
@@ -306,6 +341,26 @@ class MemoryProposalJobWorker:
             ):
                 result = await self._memory_service.select_memory_clarification(
                     memory_clarification_selection_command_from_payload(payload)
+                )
+            elif (
+                payload.payload.get("work_type")
+                == "preference_hypothesis_confirmation"
+            ):
+                hypothesis = preference_hypothesis_from_payload(payload)
+                clarification = (
+                    await self._memory_service.open_preference_hypothesis_confirmation(
+                        user_id=payload.user_id,
+                        project_id=payload.workspace_id,
+                        session_id=payload.session_id,
+                        source_message_id=payload.source_message_id,
+                        turn_lease=None,
+                        hypothesis=hypothesis,
+                        confirmation_created_at=payload.created_at,
+                    )
+                )
+                result = NaturalMemoryClarificationResult(
+                    status="clarification_required",
+                    clarification=clarification,
                 )
             else:
                 result = await self._memory_service.handle_natural_memory_decision(

@@ -1690,6 +1690,82 @@ Work deferred until core decoupling is complete:
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
 
+## Memory-Owned Preference-Hypothesis Confirmation Pass
+
+This uncommitted review pass moved surfaced preference-hypothesis confirmation
+out of synchronous chat-turn effect ownership.
+
+Completed work:
+
+- preference observation and hypothesis capture still run after a normal
+  conversational response;
+- a surfaced, validated hypothesis now queues private Memory Analyst work;
+- chat returns and persists only the queued receipt, not a completed Memory
+  clarification effect;
+- the Memory worker restores the validated private hypothesis and calls
+  `open_preference_hypothesis_confirmation` with `turn_lease=None`;
+- the worker records the clarification id and terminal Memory job report;
+- the clarification still presents the governed candidate and explicit
+  `no_save` choice, so confirmation creates no active memory;
+- suppression remains limited to the existing deterministic ambiguous-memory
+  preflight receipt, preventing a competing clarification while allowing
+  unrelated queued note work and preference capture in the same turn.
+
+Retry and provenance guarantees:
+
+- queue and clarification identity use a SHA-256 digest over the user,
+  workspace, session, source message, and the complete validated hypothesis;
+- distinct hypotheses accepted from the same source message derive distinct
+  clarification ids;
+- the source user message remains the clarification evidence message;
+- the hypothesis's durable last-observed timestamp makes repeated queue
+  acceptance byte-for-byte identical, including private payload timestamps;
+- the worker uses the persisted job creation time for the clarification
+  creation window, so repeated execution builds the same envelope;
+- the existing no-lease clarification transaction returns an exact stored
+  retry without another write.
+
+TDD evidence:
+
+- RED: five focused tests failed because the service rejected no-lease
+  confirmation, the worker did not recognize the private work type, no queue
+  helper existed, and chat still attempted synchronous clarification creation.
+- GREEN: those tests passed after queue, worker, service, and chat ownership
+  moved to the Memory lifecycle.
+- REFACTOR: clarification identity construction was simplified after GREEN;
+  no unrelated production behavior changed.
+
+Focused verification:
+
+```text
+venv/bin/pytest -q tests/test_trusted_memory_service.py tests/test_memory_proposal_job_worker.py tests/test_memory_proposal_tool.py tests/test_memory_clarification_database.py::test_clarification_exact_retry_without_turn_lease_returns_existing
+56 passed
+```
+
+```text
+venv/bin/pytest -q tests/test_main.py::test_chat_records_preference_observation_without_active_memory tests/test_main.py::test_chat_surfaces_preference_confirmation_without_saving_memory tests/test_main.py::test_chat_does_not_capture_preference_on_replay_or_structured_decision tests/test_main.py::test_chat_preflights_ambiguous_memory_request_into_clarification tests/test_main.py::test_chat_passes_preflight_receipt_tuple_through_real_turn_service tests/test_main.py::test_chat_preflight_still_captures_unrelated_preference_feedback
+6 passed, 1 warning
+```
+
+```text
+venv/bin/python -m py_compile main.py preference_learning.py trusted_memory_service.py memory_proposal_job_worker.py memory_proposal_tool.py
+passed
+```
+
+Next remaining live chat-ownership dependency:
+
+- responder tool state still exposes Memory and Notes turn-owner tokens even
+  though queued workers restore those commands with `turn_lease=None`; that
+  exposure should be removed in a separately approved pass without changing
+  mixed-intent routing or prequeued-action duplicate suppression.
+
+Work still deferred:
+
+- preference policy and memory category policy changes;
+- legacy structured `/api/chat` and old chat-turn effect-helper cleanup;
+- ambiguous artifact routing changes;
+- UI hardening and broad manual testing.
+
 ## Deterministic Ambiguous-Memory Preflight Decoupling Pass
 
 This test-branch pass moved deterministic ambiguous-memory clarification

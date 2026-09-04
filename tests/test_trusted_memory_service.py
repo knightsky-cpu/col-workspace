@@ -88,32 +88,88 @@ def approved_event() -> MemoryEvent:
 
 @pytest.mark.asyncio
 async def test_preference_hypothesis_confirmation_opens_unsaved_memory_choice():
-    from memory_proposals import ProposalTurnLease
-
     database = MagicMock()
     database.create_memory_clarification = AsyncMock(
         side_effect=lambda *, envelope, **kwargs: envelope
     )
     service = TrustedMemoryService(database=database, clock=lambda: NOW)
 
-    receipt = await service.open_preference_hypothesis_confirmation(
+    first = await service.open_preference_hypothesis_confirmation(
         user_id="user-1",
         project_id="project-1",
         session_id="session-1",
         source_message_id="message-3",
-        turn_lease=ProposalTurnLease(
-            turn_id="a" * 64,
-            owner_token="owner-1",
-        ),
+        turn_lease=None,
         hypothesis=preference_hypothesis(),
+        confirmation_created_at=NOW,
+    )
+    second = await service.open_preference_hypothesis_confirmation(
+        user_id="user-1",
+        project_id="project-1",
+        session_id="session-1",
+        source_message_id="message-3",
+        turn_lease=None,
+        hypothesis=preference_hypothesis(),
+        confirmation_created_at=NOW,
     )
 
-    assert receipt.choices[0].category_label == "Response length"
-    assert receipt.choices[0].value_label == "concise"
-    assert receipt.choices[1].category_label == "Do not save"
-    assert "feedback only" in receipt.choices[1].value_label
-    assert "saved" not in receipt.choices[0].value_label.lower()
-    database.create_memory_clarification.assert_awaited_once()
+    assert first == second
+    assert first.choices[0].category_label == "Response length"
+    assert first.choices[0].value_label == "concise"
+    assert first.choices[1].category_label == "Do not save"
+    assert "feedback only" in first.choices[1].value_label
+    assert "saved" not in first.choices[0].value_label.lower()
+    assert database.create_memory_clarification.await_count == 2
+    first_call, second_call = database.create_memory_clarification.await_args_list
+    first_envelope = first_call.kwargs["envelope"]
+    second_envelope = second_call.kwargs["envelope"]
+    assert first_envelope == second_envelope
+    assert first_envelope.evidence_message_id == "message-3"
+    assert first_envelope.clarification_turn_id != "message-3"
+    assert first_call.kwargs["turn_lease"] is None
+    assert second_call.kwargs["turn_lease"] is None
+
+
+@pytest.mark.asyncio
+async def test_preference_confirmation_identity_separates_distinct_hypotheses():
+    database = MagicMock()
+    database.create_memory_clarification = AsyncMock(
+        side_effect=lambda *, envelope, **kwargs: envelope
+    )
+    service = TrustedMemoryService(database=database, clock=lambda: NOW)
+    first_hypothesis = preference_hypothesis()
+    second_hypothesis = first_hypothesis.model_copy(
+        update={
+            "hypothesis_id": "pref-hyp--user-1--project-1--example_usage",
+            "category": "example_usage",
+            "canonical_value": "when_helpful",
+        }
+    )
+
+    await service.open_preference_hypothesis_confirmation(
+        user_id="user-1",
+        project_id="project-1",
+        session_id="session-1",
+        source_message_id="message-3",
+        turn_lease=None,
+        hypothesis=first_hypothesis,
+        confirmation_created_at=NOW,
+    )
+    await service.open_preference_hypothesis_confirmation(
+        user_id="user-1",
+        project_id="project-1",
+        session_id="session-1",
+        source_message_id="message-3",
+        turn_lease=None,
+        hypothesis=second_hypothesis,
+        confirmation_created_at=NOW,
+    )
+
+    first_call, second_call = database.create_memory_clarification.await_args_list
+    assert (
+        first_call.kwargs["envelope"].clarification_id
+        != second_call.kwargs["envelope"].clarification_id
+    )
 
 
 @pytest.mark.asyncio

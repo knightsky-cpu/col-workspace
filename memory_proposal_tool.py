@@ -39,7 +39,14 @@ from memory_clarifications import (
 from memory_proposals import ProposalTurnLease
 from memory_proposal_job_worker import memory_clarification_selection_job_payload
 from memory_proposal_job_worker import memory_job_payload
+from memory_proposal_job_worker import (
+    preference_hypothesis_confirmation_job_payload,
+)
 from memory_proposal_job_worker import raw_memory_job_payload
+from preference_learning import (
+    PreferenceHypothesis,
+    preference_hypothesis_confirmation_digest,
+)
 from schemas import (
     AgentActionReceipt,
     MemoryProposalReceiptV2,
@@ -435,6 +442,42 @@ def _memory_job(command: NaturalMemoryCommand) -> AgentJob:
     )
 
 
+def _preference_hypothesis_confirmation_job(
+    *,
+    user_id: str,
+    workspace_id: str,
+    session_id: str,
+    source_message_id: str,
+    hypothesis: PreferenceHypothesis,
+) -> AgentJob:
+    if hypothesis.user_id != user_id or hypothesis.project_id != workspace_id:
+        raise ValueError("Preference hypothesis scope does not match.")
+    digest = preference_hypothesis_confirmation_digest(
+        user_id=user_id,
+        project_id=workspace_id,
+        session_id=session_id,
+        source_message_id=source_message_id,
+        hypothesis=hypothesis,
+    )
+    observed_at = hypothesis.last_observed_at
+    return AgentJob(
+        job_id=f"memory-preference-confirmation-job-{digest}",
+        user_id=user_id,
+        project_id=workspace_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        source_turn_id=source_message_id,
+        source_message_id=source_message_id,
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory preference confirmation",
+        agent_label=_MEMORY_AGENT_LABEL,
+        created_at=observed_at,
+        updated_at=observed_at,
+        idempotency_key=f"memory-preference-confirmation-{digest}",
+    )
+
+
 def _memory_job_event(
     *,
     job: AgentJob,
@@ -518,6 +561,44 @@ async def queue_memory_agent_job(
         command=command,
     )
     return job.to_queued_action_receipt()
+
+
+async def queue_preference_hypothesis_confirmation_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    user_id: str,
+    workspace_id: str,
+    session_id: str,
+    source_message_id: str,
+    hypothesis: PreferenceHypothesis,
+) -> QueuedActionReceipt:
+    """Queue one Memory-owned preference confirmation."""
+    job = _preference_hypothesis_confirmation_job(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        source_message_id=source_message_id,
+        hypothesis=hypothesis,
+    )
+    queued = await agent_job_repository.enqueue_job_with_payload(
+        job,
+        preference_hypothesis_confirmation_job_payload(
+            job=job,
+            hypothesis=hypothesis,
+        ),
+    )
+    await _append_memory_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        event=_memory_job_event(
+            job=queued,
+            event_type="queued",
+            message="Memory preference confirmation queued.",
+            observed_at=queued.created_at,
+        ),
+    )
+    return queued.to_queued_action_receipt()
 
 
 def _raw_tool_mapping(value: object) -> dict[str, object]:

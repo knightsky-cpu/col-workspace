@@ -8535,6 +8535,7 @@ async def test_chat_records_preference_observation_without_active_memory(
 async def test_chat_surfaces_preference_confirmation_without_saving_memory(
     client: httpx.AsyncClient,
     service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from preference_learning import PreferenceHypothesis
     from preference_learning_service import PreferenceLearningResult
@@ -8553,26 +8554,44 @@ async def test_chat_surfaces_preference_confirmation_without_saving_memory(
         first_observed_at=MEMORY_NOW,
         last_observed_at=MEMORY_NOW,
     )
-    clarification = MemoryClarificationReceipt(
-        clarification_id="memory-clarification--pref-hyp-1",
-        choices=[
-            MemoryClarificationChoice(
-                candidate_index=0,
-                category_label="Response length",
-                value_label="concise",
-            ),
-            MemoryClarificationChoice(
-                candidate_index=1,
-                category_label="Do not save",
-                value_label="Keep this as feedback only",
-            ),
-        ],
-        expires_at=MEMORY_NOW + timedelta(minutes=15),
+    note_action = QueuedActionReceipt(
+        job_id="note-job-mixed-preference-1",
+        action_kind="propose_collaborative_note",
+        status="queued",
+        display_label="Update project note",
+        created_at=MEMORY_NOW,
+        agent_label="Notes Analyst",
+    )
+    preference_action = QueuedActionReceipt(
+        job_id="memory-job-preference-confirmation-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Memory preference confirmation",
+        created_at=MEMORY_NOW,
+        agent_label="Memory Analyst",
     )
     service_state.preference_learning_service.result = (
         PreferenceLearningResult(surfaced_hypothesis=hypothesis)
     )
-    service_state.memory_service.preference_confirmation_result = clarification
+    service_state.turn_service.turn_result = AgentColTurnResult(
+        response="Generated answer",
+        queued_actions=(note_action,),
+    )
+    memory_queue = service_state.turn_service_dependencies[0][6]
+    confirmation_calls: list[dict[str, object]] = []
+
+    async def queue_preference_confirmation(
+        **kwargs: object,
+    ) -> QueuedActionReceipt:
+        confirmation_calls.append(kwargs)
+        return preference_action
+
+    monkeypatch.setattr(
+        memory_queue,
+        "queue_preference_confirmation",
+        queue_preference_confirmation,
+        raising=False,
+    )
 
     response = await client.post(
         "/api/chat",
@@ -8587,17 +8606,24 @@ async def test_chat_surfaces_preference_confirmation_without_saving_memory(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["memory_clarifications"] == [
-        clarification.model_dump(mode="json")
+    assert body["memory_clarifications"] == []
+    assert body["queued_actions"] == [
+        note_action.model_dump(mode="json"),
+        preference_action.model_dump(mode="json"),
     ]
     assert body["memory_proposals"] == []
     assert body["adaptations"] == []
-    assert len(service_state.memory_service.preference_confirmation_calls) == 1
-    confirmation_call = (
-        service_state.memory_service.preference_confirmation_calls[0]
-    )
+    assert service_state.memory_service.preference_confirmation_calls == []
+    completed_response = service_state.database.complete_calls[-1][1]
+    assert completed_response.memory_clarifications == []
+    assert completed_response.queued_actions == [
+        note_action,
+        preference_action,
+    ]
+    assert len(confirmation_calls) == 1
+    confirmation_call = confirmation_calls[0]
     assert confirmation_call["user_id"] == "user-1"
-    assert confirmation_call["project_id"] == "project-1"
+    assert confirmation_call["workspace_id"] == "project-1"
     assert confirmation_call["session_id"] == "session-1"
     assert confirmation_call["source_message_id"] == (
         f"turn--{DEFAULT_TURN_ID}--user"

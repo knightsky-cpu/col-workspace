@@ -185,8 +185,12 @@ from database import (
 from memory_context import MemoryContextRenderer
 from memory_candidate_decisions import ClarifyDecision, ProfileCandidateDecision
 from memory_proposal_job_worker import MemoryProposalJobWorker
-from memory_proposal_tool import queue_memory_agent_job
+from memory_proposal_tool import (
+    queue_memory_agent_job,
+    queue_preference_hypothesis_confirmation_agent_job,
+)
 from memory_proposals import ProposalTurnLease
+from preference_learning import PreferenceHypothesis
 from preference_learning_service import (
     PreferenceLearningCommand,
     PreferenceLearningService,
@@ -2074,6 +2078,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 queued_job = await agent_job_repository.get_job(
                     user_id=command.user_id,
                     workspace_id=command.workspace_id,
+                    job_id=queued_action.job_id,
+                )
+                if queued_job is not None:
+                    dispatch_memory_job(queued_job)
+                return queued_action
+
+            async def queue_preference_confirmation(
+                self,
+                *,
+                user_id: str,
+                workspace_id: str,
+                session_id: str,
+                source_message_id: str,
+                hypothesis: PreferenceHypothesis,
+            ) -> QueuedActionReceipt:
+                queued_action = (
+                    await queue_preference_hypothesis_confirmation_agent_job(
+                        agent_job_repository=agent_job_repository,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        session_id=session_id,
+                        source_message_id=source_message_id,
+                        hypothesis=hypothesis,
+                    )
+                )
+                queued_job = await agent_job_repository.get_job(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
                     job_id=queued_action.job_id,
                 )
                 if queued_job is not None:
@@ -5675,21 +5707,22 @@ async def _execute_chat(
                 and not chat_response.memory_clarifications
                 and not decision_queued_actions
             ):
-                confirmation = (
-                    await memory_service.open_preference_hypothesis_confirmation(
+                confirmation_queued_action = (
+                    await request.app.state.memory_queue.queue_preference_confirmation(
                         user_id=effective_user_id,
-                        project_id=effective_project_id,
+                        workspace_id=effective_project_id,
                         session_id=payload.session_id,
                         source_message_id=user_message_id,
-                        turn_lease=ProposalTurnLease(
-                            turn_id=chat_turn_claim.ids.turn_id,
-                            owner_token=chat_turn_claim.owner_token,
-                        ),
                         hypothesis=preference_result.surfaced_hypothesis,
                     )
                 )
                 chat_response = chat_response.model_copy(
-                    update={"memory_clarifications": [confirmation]}
+                    update={
+                        "queued_actions": [
+                            *chat_response.queued_actions,
+                            confirmation_queued_action,
+                        ]
+                    }
                 )
         except Exception as exc:
             logger.error(

@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 
@@ -76,6 +78,31 @@ class PreferenceHypothesis(StrictModel):
         )
         object.__setattr__(self, "canonical_value", normalized)
         return self
+
+
+def preference_hypothesis_confirmation_digest(
+    *,
+    user_id: str,
+    project_id: str,
+    session_id: str,
+    source_message_id: str,
+    hypothesis: PreferenceHypothesis,
+) -> str:
+    """Derive retry-safe identity for one accepted preference hypothesis."""
+    material = json.dumps(
+        {
+            "namespace": "agent-col-preference-confirmation-v1",
+            "user_id": user_id,
+            "project_id": project_id,
+            "session_id": session_id,
+            "source_message_id": source_message_id,
+            "hypothesis": hypothesis.model_dump(mode="json"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(material).hexdigest()
 
 
 def validate_preference_observation(value: object) -> PreferenceObservation:

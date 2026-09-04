@@ -434,6 +434,82 @@ async def test_proposal_tool_records_memory_agent_job_queue_receipt() -> None:
 
 
 @pytest.mark.asyncio
+async def test_preference_confirmation_queue_is_deterministic_and_private() -> None:
+    from preference_learning import PreferenceHypothesis
+    from memory_proposal_tool import (
+        queue_preference_hypothesis_confirmation_agent_job,
+    )
+
+    hypothesis = PreferenceHypothesis(
+        hypothesis_id="pref-hyp--user-1--workspace-1--response_length",
+        user_id="user-1",
+        project_id="workspace-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_count=2,
+        contradiction_count=0,
+        confidence=0.75,
+        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-2"),
+        first_observed_at=NOW,
+        last_observed_at=NOW,
+    )
+    repository = RecordingAgentJobRepository()
+
+    first = await queue_preference_hypothesis_confirmation_agent_job(
+        agent_job_repository=repository,
+        user_id="user-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_message_id="message-1",
+        hypothesis=hypothesis,
+    )
+    second = await queue_preference_hypothesis_confirmation_agent_job(
+        agent_job_repository=repository,
+        user_id="user-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_message_id="message-1",
+        hypothesis=hypothesis,
+    )
+    distinct_hypothesis = hypothesis.model_copy(
+        update={
+            "hypothesis_id": "pref-hyp--user-1--workspace-1--example_usage",
+            "category": "example_usage",
+            "canonical_value": "when_helpful",
+        }
+    )
+    distinct = await queue_preference_hypothesis_confirmation_agent_job(
+        agent_job_repository=repository,
+        user_id="user-1",
+        workspace_id="workspace-1",
+        session_id="session-1",
+        source_message_id="message-1",
+        hypothesis=distinct_hypothesis,
+    )
+
+    assert first.job_id == second.job_id
+    assert distinct.job_id != first.job_id
+    assert first.action_kind == "propose_memory_signal"
+    assert first.display_label == "Memory preference confirmation"
+    assert repository.enqueued[0] == repository.enqueued[1]
+    assert repository.enqueued[0].idempotency_key == (
+        repository.enqueued[1].idempotency_key
+    )
+    assert (
+        repository.enqueued[2].idempotency_key
+        != repository.enqueued[0].idempotency_key
+    )
+    assert repository.payloads[0] == repository.payloads[1]
+    assert repository.enqueued[0].source_turn_id == "message-1"
+    assert repository.payloads[0].payload == {
+        "work_type": "preference_hypothesis_confirmation",
+        "hypothesis": hypothesis.model_dump(mode="json"),
+    }
+    assert "turn_lease" not in str(repository.payloads[0].payload)
+    assert "owner_token" not in str(repository.payloads[0].payload)
+
+
+@pytest.mark.asyncio
 async def test_clarification_selection_tool_queues_memory_work_without_service_call(
 ) -> None:
     from memory_proposal_tool import create_select_memory_clarification_tool

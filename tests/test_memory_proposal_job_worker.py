@@ -32,6 +32,7 @@ class RecordingMemoryService:
         self.error = error
         self.commands: list[NaturalMemoryCommand] = []
         self.selection_commands: list[SelectMemoryClarificationCommand] = []
+        self.preference_confirmation_calls: list[dict[str, object]] = []
 
     async def handle_natural_memory_decision(self, command):
         self.commands.append(command)
@@ -71,6 +72,27 @@ class RecordingMemoryService:
                 proposed_value="detailed",
                 expires_at=NOW + timedelta(hours=1),
             ),
+        )
+
+    async def open_preference_hypothesis_confirmation(self, **kwargs):
+        self.preference_confirmation_calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return MemoryClarificationReceipt(
+            clarification_id="memory-clarification--preference-1",
+            choices=[
+                MemoryClarificationChoice(
+                    candidate_index=0,
+                    category_label="Response length",
+                    value_label="concise",
+                ),
+                MemoryClarificationChoice(
+                    candidate_index=1,
+                    category_label="Do not save",
+                    value_label="Keep this as feedback only",
+                ),
+            ],
+            expires_at=NOW + timedelta(minutes=15),
         )
 
 
@@ -559,6 +581,84 @@ async def test_memory_worker_creates_queued_clarification_without_turn_lease(
     assert service.commands[0].turn_lease is None
     assert repository.completed[0]["result_refs"] == {
         "clarification_id": clarification.clarification_id
+    }
+    assert repository.failed == []
+    assert repository.reports[0].title == (
+        "Memory clarification pending response"
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_creates_preference_confirmation_without_turn_lease(
+) -> None:
+    from preference_learning import PreferenceHypothesis
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+
+    hypothesis = PreferenceHypothesis(
+        hypothesis_id="pref-hyp--user-1--workspace-1--response_length",
+        user_id="user-1",
+        project_id="workspace-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_count=2,
+        contradiction_count=0,
+        confidence=0.75,
+        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-2"),
+        first_observed_at=NOW - timedelta(minutes=5),
+        last_observed_at=NOW,
+    )
+    job = make_job(make_command()).model_copy(
+        update={
+            "job_id": "memory-preference-confirmation-job-1",
+            "source_turn_id": "message-preference-1",
+            "source_message_id": "message-preference-1",
+            "display_label": "Memory preference confirmation",
+            "idempotency_key": "memory-preference-confirmation-1",
+        }
+    )
+    payload = AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "preference_hypothesis_confirmation",
+            "hypothesis": hypothesis.model_dump(mode="json"),
+        },
+    )
+    repository = RecordingAgentJobRepository(job=job, payload=payload)
+    service = RecordingMemoryService()
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=service,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    completed = await worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-1",
+    )
+
+    assert completed.status == "completed"
+    assert service.preference_confirmation_calls == [
+        {
+            "user_id": "user-1",
+            "project_id": "workspace-1",
+            "session_id": "session-1",
+            "source_message_id": "message-preference-1",
+            "turn_lease": None,
+            "hypothesis": hypothesis,
+            "confirmation_created_at": NOW,
+        }
+    ]
+    assert repository.completed[0]["result_refs"] == {
+        "clarification_id": "memory-clarification--preference-1"
     }
     assert repository.failed == []
     assert repository.reports[0].title == (
