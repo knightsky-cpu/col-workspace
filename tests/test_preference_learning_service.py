@@ -83,6 +83,56 @@ def command(**updates: object):
 
 
 @pytest.mark.asyncio
+async def test_recognize_is_deterministic_and_does_not_persist() -> None:
+    from preference_learning_service import PreferenceLearningService
+
+    database = FakeDatabase()
+    service = PreferenceLearningService(
+        database=database,
+        extractor=FakeExtractor(),
+        clock=lambda: datetime(2026, 8, 28, tzinfo=UTC),
+    )
+
+    recognized = await service.recognize(command())
+
+    assert recognized is not None
+    assert recognized.observation_id == "pref-obs--turn-1"
+    assert recognized.category == "response_length"
+    assert database.saved_observations == []
+    assert database.saved_hypotheses == []
+
+
+@pytest.mark.asyncio
+async def test_recognized_evidence_persists_without_running_extractor_again() -> None:
+    from preference_learning_service import PreferenceLearningService
+
+    class CountingExtractor(FakeExtractor):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def extract(self, capture_command):
+            self.calls += 1
+            if self.calls > 1:
+                raise AssertionError("accepted evidence must not be re-extracted")
+            return await super().extract(capture_command)
+
+    database = FakeDatabase()
+    extractor = CountingExtractor()
+    service = PreferenceLearningService(
+        database=database,
+        extractor=extractor,
+        clock=lambda: datetime(2026, 8, 28, tzinfo=UTC),
+    )
+
+    recognized = await service.recognize(command())
+    result = await service.capture_observation_strict(recognized)
+
+    assert extractor.calls == 1
+    assert result.observation == recognized
+    assert database.saved_observations == [recognized]
+
+
+@pytest.mark.asyncio
 async def test_capture_stores_validated_observation_without_active_memory():
     from preference_learning_service import PreferenceLearningService
 

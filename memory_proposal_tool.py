@@ -41,10 +41,12 @@ from memory_proposal_job_worker import memory_clarification_selection_job_payloa
 from memory_proposal_job_worker import memory_job_payload
 from memory_proposal_job_worker import (
     preference_hypothesis_confirmation_job_payload,
+    preference_learning_capture_job_payload,
 )
 from memory_proposal_job_worker import raw_memory_job_payload
 from preference_learning import (
     PreferenceHypothesis,
+    PreferenceObservation,
     preference_hypothesis_confirmation_digest,
 )
 from schemas import (
@@ -478,6 +480,38 @@ def _preference_hypothesis_confirmation_job(
     )
 
 
+def _preference_learning_capture_job(
+    *,
+    observation: PreferenceObservation,
+) -> AgentJob:
+    material = json_dumps_compact(
+        {
+            "user_id": observation.user_id,
+            "project_id": observation.project_id,
+            "session_id": observation.session_id,
+            "turn_id": observation.source_turn_id,
+            "source_message_id": observation.source_message_id,
+        }
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+    return AgentJob(
+        job_id=f"memory-preference-capture-job-{digest}",
+        user_id=observation.user_id,
+        project_id=observation.project_id,
+        workspace_id=observation.project_id,
+        session_id=observation.session_id,
+        source_turn_id=observation.source_turn_id,
+        source_message_id=observation.source_message_id,
+        action_kind="propose_memory_signal",
+        status="queued",
+        display_label="Preference learning capture",
+        agent_label=_MEMORY_AGENT_LABEL,
+        created_at=observation.created_at,
+        updated_at=observation.created_at,
+        idempotency_key=f"memory-preference-capture-{digest}",
+    )
+
+
 def _memory_job_event(
     *,
     job: AgentJob,
@@ -595,6 +629,38 @@ async def queue_preference_hypothesis_confirmation_agent_job(
             job=queued,
             event_type="queued",
             message="Memory preference confirmation queued.",
+            observed_at=queued.created_at,
+        ),
+    )
+    return queued.to_queued_action_receipt()
+
+
+async def queue_preference_learning_capture_agent_job(
+    *,
+    agent_job_repository: AgentJobRepository,
+    observation: PreferenceObservation,
+    suppress_confirmation: bool,
+) -> QueuedActionReceipt:
+    """Queue private non-authoritative preference capture work."""
+    job = _preference_learning_capture_job(
+        observation=observation,
+    )
+    queued = await agent_job_repository.enqueue_job_with_payload(
+        job,
+        preference_learning_capture_job_payload(
+            job=job,
+            observation=observation,
+            suppress_confirmation=suppress_confirmation,
+        ),
+    )
+    await _append_memory_job_event(
+        agent_job_repository=agent_job_repository,
+        user_id=queued.user_id,
+        workspace_id=queued.workspace_id,
+        event=_memory_job_event(
+            job=queued,
+            event_type="queued",
+            message="Preference learning capture queued.",
             observed_at=queued.created_at,
         ),
     )

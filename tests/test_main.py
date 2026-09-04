@@ -1312,20 +1312,38 @@ class FakeWorkingStateService:
 @dataclass
 class FakePreferenceLearningService:
     events: list[tuple[Any, ...]]
-    result: object | None = None
     calls: list[object] = field(default_factory=list)
+    capture_calls: list[object] = field(default_factory=list)
+    recognition_result: bool = False
     error: Exception | None = None
 
-    async def capture(self, command: object) -> object:
+    async def recognize(self, command: object) -> object | None:
         self.calls.append(command)
-        self.events.append(("preference_learning",))
+        self.events.append(("preference_recognition",))
         if self.error is not None:
             raise self.error
-        if self.result is not None:
-            return self.result
-        from preference_learning_service import PreferenceLearningResult
+        if not self.recognition_result:
+            return None
+        from preference_learning import PreferenceObservation
 
-        return PreferenceLearningResult()
+        return PreferenceObservation(
+            observation_id=f"pref-obs--{command.turn_id}",
+            user_id=command.user_id,
+            project_id=command.project_id,
+            session_id=command.session_id,
+            source_turn_id=command.turn_id,
+            source_message_id=command.source_message_id,
+            category="response_length",
+            canonical_value="concise",
+            evidence_kind="user_correction",
+            evidence_summary="User requested a shorter response.",
+            confidence_delta=0.35,
+            created_at=MEMORY_NOW,
+        )
+
+    async def capture(self, command: object) -> object:
+        self.capture_calls.append(command)
+        raise AssertionError("Chat must not capture preferences synchronously.")
 
 
 @dataclass
@@ -8243,30 +8261,24 @@ async def test_chat_uses_hidden_working_state_without_public_response_fields(
 
 
 @pytest.mark.asyncio
-async def test_chat_records_preference_observation_without_active_memory(
+async def test_chat_queues_internal_preference_capture_without_chat_receipt(
     client: httpx.AsyncClient,
     service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from preference_learning import PreferenceObservation
-    from preference_learning_service import PreferenceLearningResult
-
     service_state.database.chat_turn_result = make_chat_turn_claim()
-    observation = PreferenceObservation(
-        observation_id=f"pref-obs--{DEFAULT_TURN_ID}",
-        user_id="user-1",
-        project_id="project-1",
-        session_id="session-1",
-        source_turn_id=DEFAULT_TURN_ID,
-        source_message_id=f"turn--{DEFAULT_TURN_ID}--user",
-        category="response_length",
-        canonical_value="concise",
-        evidence_kind="user_correction",
-        evidence_summary="User corrected the response to be shorter.",
-        confidence_delta=0.35,
-        created_at=MEMORY_NOW,
-    )
-    service_state.preference_learning_service.result = (
-        PreferenceLearningResult(observation=observation)
+    service_state.preference_learning_service.recognition_result = True
+    memory_queue = service_state.turn_service_dependencies[0][6]
+    queued_calls: list[dict[str, object]] = []
+
+    async def queue_preference_capture(**kwargs: object) -> None:
+        queued_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        memory_queue,
+        "queue_preference_capture",
+        queue_preference_capture,
+        raising=False,
     )
 
     response = await client.post(
@@ -8285,6 +8297,7 @@ async def test_chat_records_preference_observation_without_active_memory(
     assert body["memory_proposals"] == []
     assert body["memory_clarifications"] == []
     assert body["adaptations"] == []
+    assert body["queued_actions"] == []
     assert len(service_state.preference_learning_service.calls) == 1
     command = service_state.preference_learning_service.calls[0]
     assert command.user_id == "user-1"
@@ -8294,31 +8307,62 @@ async def test_chat_records_preference_observation_without_active_memory(
     assert command.source_message_id == f"turn--{DEFAULT_TURN_ID}--user"
     assert command.user_message == "That was too long; be shorter here."
     assert command.model_response == "Generated answer"
+    assert service_state.preference_learning_service.capture_calls == []
+    assert len(queued_calls) == 1
+    assert queued_calls[0]["suppress_confirmation"] is False
+    queued_observation = queued_calls[0]["observation"]
+    assert queued_observation.source_turn_id == command.turn_id
+    assert queued_observation.source_message_id == command.source_message_id
+    assert queued_observation.category == "response_length"
+    assert service_state.database.complete_calls[-1][1].queued_actions == []
 
 
 @pytest.mark.asyncio
-async def test_chat_surfaces_preference_confirmation_without_saving_memory(
+async def test_chat_without_recognized_preference_queues_no_capture_job(
     client: httpx.AsyncClient,
     service_state: ServiceState,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from preference_learning import PreferenceHypothesis
-    from preference_learning_service import PreferenceLearningResult
-
     service_state.database.chat_turn_result = make_chat_turn_claim()
-    hypothesis = PreferenceHypothesis(
-        hypothesis_id="pref-hyp--user-1--project-1--response_length",
-        user_id="user-1",
-        project_id="project-1",
-        category="response_length",
-        canonical_value="concise",
-        evidence_count=2,
-        contradiction_count=0,
-        confidence=0.75,
-        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-2"),
-        first_observed_at=MEMORY_NOW,
-        last_observed_at=MEMORY_NOW,
+    memory_queue = service_state.turn_service_dependencies[0][6]
+    capture_calls = []
+
+    async def queue_preference_capture(**kwargs: object) -> None:
+        capture_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        memory_queue,
+        "queue_preference_capture",
+        queue_preference_capture,
+        raising=False,
     )
+
+    response = await client.post(
+        "/api/chat",
+        headers={"Idempotency-Key": "pref-chat-no-evidence-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "Explain the deployment architecture.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(service_state.preference_learning_service.calls) == 1
+    assert service_state.preference_learning_service.capture_calls == []
+    assert capture_calls == []
+    assert response.json()["queued_actions"] == []
+
+
+@pytest.mark.asyncio
+async def test_chat_keeps_internal_preference_capture_out_of_mixed_response(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+    service_state.preference_learning_service.recognition_result = True
     note_action = QueuedActionReceipt(
         job_id="note-job-mixed-preference-1",
         action_kind="propose_collaborative_note",
@@ -8327,34 +8371,22 @@ async def test_chat_surfaces_preference_confirmation_without_saving_memory(
         created_at=MEMORY_NOW,
         agent_label="Notes Analyst",
     )
-    preference_action = QueuedActionReceipt(
-        job_id="memory-job-preference-confirmation-1",
-        action_kind="propose_memory_signal",
-        status="queued",
-        display_label="Memory preference confirmation",
-        created_at=MEMORY_NOW,
-        agent_label="Memory Analyst",
-    )
-    service_state.preference_learning_service.result = (
-        PreferenceLearningResult(surfaced_hypothesis=hypothesis)
-    )
     service_state.turn_service.turn_result = AgentColTurnResult(
         response="Generated answer",
         queued_actions=(note_action,),
     )
     memory_queue = service_state.turn_service_dependencies[0][6]
-    confirmation_calls: list[dict[str, object]] = []
+    capture_calls: list[dict[str, object]] = []
 
-    async def queue_preference_confirmation(
+    async def queue_preference_capture(
         **kwargs: object,
-    ) -> QueuedActionReceipt:
-        confirmation_calls.append(kwargs)
-        return preference_action
+    ) -> None:
+        capture_calls.append(kwargs)
 
     monkeypatch.setattr(
         memory_queue,
-        "queue_preference_confirmation",
-        queue_preference_confirmation,
+        "queue_preference_capture",
+        queue_preference_capture,
         raising=False,
     )
 
@@ -8374,26 +8406,16 @@ async def test_chat_surfaces_preference_confirmation_without_saving_memory(
     assert body["memory_clarifications"] == []
     assert body["queued_actions"] == [
         note_action.model_dump(mode="json"),
-        preference_action.model_dump(mode="json"),
     ]
     assert body["memory_proposals"] == []
     assert body["adaptations"] == []
     assert service_state.memory_service.preference_confirmation_calls == []
     completed_response = service_state.database.complete_calls[-1][1]
     assert completed_response.memory_clarifications == []
-    assert completed_response.queued_actions == [
-        note_action,
-        preference_action,
-    ]
-    assert len(confirmation_calls) == 1
-    confirmation_call = confirmation_calls[0]
-    assert confirmation_call["user_id"] == "user-1"
-    assert confirmation_call["workspace_id"] == "project-1"
-    assert confirmation_call["session_id"] == "session-1"
-    assert confirmation_call["source_message_id"] == (
-        f"turn--{DEFAULT_TURN_ID}--user"
-    )
-    assert confirmation_call["hypothesis"] == hypothesis
+    assert completed_response.queued_actions == [note_action]
+    assert len(capture_calls) == 1
+    assert capture_calls[0]["suppress_confirmation"] is False
+    assert service_state.preference_learning_service.capture_calls == []
 
 
 @pytest.mark.asyncio
@@ -8838,9 +8860,6 @@ async def test_chat_preflight_still_captures_unrelated_preference_feedback(
     service_state: ServiceState,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from preference_learning import PreferenceHypothesis
-    from preference_learning_service import PreferenceLearningResult
-
     prompt = (
         "Concise please. Also remember one of these preferences, but help me "
         "choose which one to save: I prefer practical examples whenever "
@@ -8855,32 +8874,27 @@ async def test_chat_preflight_still_captures_unrelated_preference_feedback(
         created_at=MEMORY_NOW,
         agent_label="Memory Analyst",
     )
-    hypothesis = PreferenceHypothesis(
-        hypothesis_id="pref-hyp--user-1--project-1--response_length",
-        user_id="user-1",
-        project_id="project-1",
-        category="response_length",
-        canonical_value="concise",
-        evidence_count=2,
-        contradiction_count=0,
-        confidence=0.75,
-        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-2"),
-        first_observed_at=MEMORY_NOW,
-        last_observed_at=MEMORY_NOW,
-    )
-    service_state.preference_learning_service.result = (
-        PreferenceLearningResult(surfaced_hypothesis=hypothesis)
-    )
+    service_state.preference_learning_service.recognition_result = True
     service_state.turn_service.turn_result = AgentColTurnResult(
         response="Please choose one."
     )
     service_state.database.chat_turn_result = make_chat_turn_claim()
     memory_queue = service_state.turn_service_dependencies[0][6]
+    capture_calls: list[dict[str, object]] = []
 
     async def queue_memory(command: NaturalMemoryCommand) -> QueuedActionReceipt:
         return queued_action
 
+    async def queue_preference_capture(**kwargs: object) -> None:
+        capture_calls.append(kwargs)
+
     monkeypatch.setattr(memory_queue, "queue", queue_memory)
+    monkeypatch.setattr(
+        memory_queue,
+        "queue_preference_capture",
+        queue_preference_capture,
+        raising=False,
+    )
 
     response = await client.post(
         "/api/chat",
@@ -8899,6 +8913,9 @@ async def test_chat_preflight_still_captures_unrelated_preference_feedback(
         service_state.preference_learning_service.calls[0].user_message
         == prompt
     )
+    assert service_state.preference_learning_service.capture_calls == []
+    assert len(capture_calls) == 1
+    assert capture_calls[0]["suppress_confirmation"] is True
     assert service_state.memory_service.preference_confirmation_calls == []
     assert response.json()["memory_clarifications"] == []
     assert response.json()["queued_actions"] == [

@@ -86,6 +86,27 @@ class PreferenceLearningService:
         )
         self._clock = clock
 
+    async def recognize(
+        self,
+        command: PreferenceLearningCommand,
+    ) -> PreferenceObservation | None:
+        """Recognize bounded preference evidence without persisting it."""
+        try:
+            extracted = await self._extractor.extract(command)
+            if extracted is None:
+                return None
+            return self._observation_from_extracted(
+                command,
+                extracted,
+                observed_at=self._clock(),
+            )
+        except Exception as exc:
+            logger.error(
+                "Preference learning extraction failed (%s).",
+                type(exc).__name__,
+            )
+            return None
+
     async def capture(
         self,
         command: PreferenceLearningCommand,
@@ -125,7 +146,36 @@ class PreferenceLearningService:
         extracted: object,
     ) -> PreferenceLearningResult:
         now = self._clock()
-        observation = PreferenceObservation.model_validate(
+        observation = self._observation_from_extracted(
+            command,
+            extracted,
+            observed_at=now,
+        )
+        return await self.capture_observation_strict(observation)
+
+    async def capture_observation_strict(
+        self,
+        observation: PreferenceObservation,
+    ) -> PreferenceLearningResult:
+        """Persist one already-accepted observation without re-extraction."""
+        outcome = await self._database.capture_preference_observation(
+            observation,
+            observed_at=observation.created_at,
+        )
+        return PreferenceLearningResult(
+            observation=outcome.observation,
+            hypothesis=outcome.hypothesis,
+            surfaced_hypothesis=outcome.surfaced_hypothesis,
+        )
+
+    @staticmethod
+    def _observation_from_extracted(
+        command: PreferenceLearningCommand,
+        extracted: object,
+        *,
+        observed_at: datetime,
+    ) -> PreferenceObservation:
+        return PreferenceObservation.model_validate(
             {
                 "observation_id": f"pref-obs--{command.turn_id}",
                 "user_id": command.user_id,
@@ -133,16 +183,7 @@ class PreferenceLearningService:
                 "session_id": command.session_id,
                 "source_turn_id": command.turn_id,
                 "source_message_id": command.source_message_id,
-                "created_at": now,
+                "created_at": observed_at,
             }
             | dict(extracted)
-        )
-        outcome = await self._database.capture_preference_observation(
-            observation,
-            observed_at=now,
-        )
-        return PreferenceLearningResult(
-            observation=outcome.observation,
-            hypothesis=outcome.hypothesis,
-            surfaced_hypothesis=outcome.surfaced_hypothesis,
         )

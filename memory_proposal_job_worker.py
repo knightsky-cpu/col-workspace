@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -29,7 +29,12 @@ from memory_candidate_decisions import (
 )
 from memory_clarifications import MemoryClarificationSelection
 from pydantic import TypeAdapter
-from preference_learning import PreferenceHypothesis
+from preference_learning import PreferenceHypothesis, PreferenceObservation
+from preference_learning_service import (
+    PreferenceLearningResult,
+    PreferenceLearningService,
+)
+from schemas import QueuedActionReceipt
 from trusted_memory_service import (
     NaturalMemoryClarificationResult,
     NaturalMemoryCommand,
@@ -149,6 +154,31 @@ def preference_hypothesis_confirmation_job_payload(
     )
 
 
+def preference_learning_capture_job_payload(
+    *,
+    job: AgentJob,
+    observation: PreferenceObservation,
+    suppress_confirmation: bool,
+) -> AgentJobPayload:
+    """Build private payload for deterministic preference capture."""
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "preference_learning_capture",
+            "observation": observation.model_dump(mode="json"),
+            "suppress_confirmation": suppress_confirmation,
+        },
+    )
+
+
 def memory_command_from_payload(payload: AgentJobPayload) -> NaturalMemoryCommand:
     """Restore a governed memory command from a private AgentJob payload."""
     if payload.action_kind != "propose_memory_signal":
@@ -217,6 +247,31 @@ def preference_hypothesis_from_payload(
     return PreferenceHypothesis.model_validate(payload.payload.get("hypothesis"))
 
 
+def preference_learning_capture_from_payload(
+    payload: AgentJobPayload,
+) -> tuple[PreferenceObservation, bool]:
+    """Restore one validated private preference-capture request."""
+    if payload.action_kind != "propose_memory_signal":
+        raise ValueError("AgentJobPayload is not for memory proposal work.")
+    if payload.payload.get("work_type") != "preference_learning_capture":
+        raise ValueError("Memory job payload is not preference capture work.")
+    observation = PreferenceObservation.model_validate(
+        payload.payload.get("observation")
+    )
+    suppress_confirmation = payload.payload.get("suppress_confirmation")
+    if type(suppress_confirmation) is not bool:
+        raise ValueError("Preference confirmation suppression flag is invalid.")
+    if (
+        observation.user_id != payload.user_id
+        or observation.project_id != payload.workspace_id
+        or observation.session_id != payload.session_id
+        or observation.source_turn_id != payload.source_turn_id
+        or observation.source_message_id != payload.source_message_id
+    ):
+        raise ValueError("Preference capture provenance does not match its job.")
+    return observation, suppress_confirmation
+
+
 def _memory_job_event(
     *,
     job: AgentJob,
@@ -242,11 +297,17 @@ class MemoryProposalJobWorker:
         *,
         agent_job_repository: AgentJobRepository,
         memory_service: TrustedMemoryService,
+        preference_learning_service: PreferenceLearningService | None = None,
+        preference_confirmation_queue: (
+            Callable[..., Awaitable[QueuedActionReceipt]] | None
+        ) = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         lease_seconds: int = _MEMORY_JOB_LEASE_SECONDS,
     ) -> None:
         self._agent_job_repository = agent_job_repository
         self._memory_service = memory_service
+        self._preference_learning_service = preference_learning_service
+        self._preference_confirmation_queue = preference_confirmation_queue
         self._clock = clock
         self._lease_seconds = lease_seconds
 
@@ -362,6 +423,37 @@ class MemoryProposalJobWorker:
                     status="clarification_required",
                     clarification=clarification,
                 )
+            elif (
+                payload.payload.get("work_type")
+                == "preference_learning_capture"
+            ):
+                observation, suppress_confirmation = (
+                    preference_learning_capture_from_payload(payload)
+                )
+                if self._preference_learning_service is None:
+                    raise ValueError(
+                        "Preference learning service is not configured."
+                    )
+                try:
+                    preference_result = (
+                        await self._preference_learning_service.capture_observation_strict(
+                            observation
+                        )
+                    )
+                    return await self._complete_preference_capture(
+                        job=job,
+                        lease_owner=lease_owner,
+                        observation=observation,
+                        result=preference_result,
+                        suppress_confirmation=suppress_confirmation,
+                    )
+                except Exception:
+                    return await self._fail_job(
+                        job=job,
+                        lease_owner=lease_owner,
+                        error_code="preference_capture_failed",
+                        retryable=True,
+                    )
             else:
                 result = await self._memory_service.handle_natural_memory_decision(
                     memory_command_from_payload(payload)
@@ -473,12 +565,53 @@ class MemoryProposalJobWorker:
         )
         return completed
 
+    async def _complete_preference_capture(
+        self,
+        *,
+        job: AgentJob,
+        lease_owner: str,
+        observation: PreferenceObservation,
+        result: PreferenceLearningResult,
+        suppress_confirmation: bool,
+    ) -> AgentJob:
+        result_refs = {"observation_status": "captured"}
+        if result.hypothesis is not None:
+            result_refs["hypothesis_id"] = result.hypothesis.hypothesis_id
+        if (
+            result.surfaced_hypothesis is not None
+            and not suppress_confirmation
+        ):
+            if self._preference_confirmation_queue is None:
+                raise RuntimeError(
+                    "Preference confirmation queue is not configured."
+                )
+            queued = await self._preference_confirmation_queue(
+                user_id=observation.user_id,
+                workspace_id=observation.project_id,
+                session_id=observation.session_id,
+                source_message_id=observation.source_message_id,
+                hypothesis=result.surfaced_hypothesis,
+            )
+            result_refs["confirmation_job_id"] = queued.job_id
+        return await self._complete_job(
+            job=job,
+            lease_owner=lease_owner,
+            result_refs=result_refs,
+            message="Preference learning capture completed.",
+            report_title="Preference evidence captured",
+            report_summary=(
+                "Non-authoritative collaboration preference evidence was captured."
+            ),
+            public_resource_label=None,
+        )
+
     async def _fail_job(
         self,
         *,
         job: AgentJob,
         lease_owner: str,
         error_code: str,
+        retryable: bool = False,
     ) -> AgentJob:
         observed_at = self._clock()
         failure_title, failure_summary = _memory_failure_report(error_code)
@@ -491,7 +624,7 @@ class MemoryProposalJobWorker:
             failure=AgentJobFailure(
                 code=error_code,
                 summary=failure_summary,
-                retryable=False,
+                retryable=retryable,
             ),
         )
         await self._append_event(
@@ -572,6 +705,11 @@ def _memory_report_id(job: AgentJob) -> str:
 
 
 def _memory_failure_report(error_code: str) -> tuple[str, str]:
+    if error_code == "preference_capture_failed":
+        return (
+            "Preference evidence not captured",
+            "Preference learning could not be completed.",
+        )
     if error_code == "memory_proposal_conflict":
         return (
             "Memory proposal not created",

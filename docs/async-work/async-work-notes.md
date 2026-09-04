@@ -2685,3 +2685,59 @@ Pass B — next approved dependency:
 - keep surfaced hypotheses flowing into the existing Memory-owned
   preference-confirmation job, preserving provenance, thresholds, governance,
   and duplicate suppression.
+
+## Queued Preference-Capture Decoupling (Pass B)
+
+This uncommitted review pass moves non-authoritative preference capture off the
+synchronous chat lifecycle and onto the existing durable Memory AgentJob
+domain.
+
+Completed work:
+
+- chat performs deterministic extraction and validates the resulting
+  `PreferenceObservation` without persisting it;
+- the exact accepted observation queues in a private
+  `preference_learning_capture` payload with deterministic identity and source
+  turn/message provenance;
+- chat does not call synchronous `PreferenceLearningService.capture()`, wait
+  for observation/hypothesis persistence, or append the internal capture
+  receipt to `ChatResponse`;
+- the Memory worker restores and provenance-validates the accepted observation,
+  then calls `capture_observation_strict()` without rerunning extraction, using
+  Pass A's atomic/idempotent persistence primitive;
+- persistence or downstream queue failures produce a sanitized, retryable
+  AgentJob failure and report without changing the already-completed chat;
+- a surfaced hypothesis queues the existing deterministic
+  preference-confirmation AgentJob;
+- deterministic ambiguous-memory preflight records suppression only in the
+  capture job's downstream-confirmation flag: preference capture still runs,
+  but competing confirmation work is not queued;
+- turns without recognized preference evidence do not create capture jobs.
+
+TDD evidence:
+
+- RED: focused service, queue, worker, and chat tests failed because
+  recognition, the private capture work type, worker dependencies, and chat
+  enqueue behavior did not yet exist;
+- GREEN: recognition queues one private job, exact enqueue retries reuse its
+  deterministic identity, worker capture and sanitized failure paths pass, and
+  chat responses remain independent of the internal job receipt;
+- REFACTOR: preference-confirmation queue/dispatch is shared by the existing
+  Memory queue facade and the new worker path.
+
+Corrective durability follow-up:
+
+- the initial implementation stored the raw learning command and reran
+  extraction in the worker, which could reinterpret accepted work after a
+  restart or code change;
+- recognition now returns the fully validated observation, the private payload
+  stores that exact evidence, and recovery execution persists it directly;
+- focused coverage proves extraction runs once during acceptance and is not
+  invoked when the worker restores the durable payload.
+
+Preserved behavior:
+
+- Pass A confidence, contradiction, age, evidence-count, and surfacing policy;
+- Memory confirmation governance and deterministic duplicate suppression;
+- direct Memory APIs, deterministic memory preflight, clarification selection,
+  mixed-intent routing, and ordinary chat response contracts.

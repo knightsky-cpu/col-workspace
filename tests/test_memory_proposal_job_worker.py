@@ -16,6 +16,7 @@ from schemas import (
     MemoryClarificationReceipt,
     MemoryProposalReceiptV2,
     MemoryProposalV2,
+    QueuedActionReceipt,
 )
 from trusted_memory_service import (
     NaturalMemoryCommand,
@@ -664,6 +665,266 @@ async def test_memory_worker_creates_preference_confirmation_without_turn_lease(
     assert repository.reports[0].title == (
         "Memory clarification pending response"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("suppress_confirmation", "confirmation_expected"),
+    [(False, True), (True, False)],
+)
+async def test_memory_worker_captures_preference_and_conditionally_queues_confirmation(
+    suppress_confirmation: bool,
+    confirmation_expected: bool,
+) -> None:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+    from preference_learning import PreferenceHypothesis, PreferenceObservation
+    from preference_learning_service import (
+        PreferenceLearningCommand,
+        PreferenceLearningResult,
+    )
+
+    command = PreferenceLearningCommand(
+        user_id="user-1",
+        project_id="workspace-1",
+        session_id="session-1",
+        turn_id="turn-preference-1",
+        source_message_id="message-preference-1",
+        user_message="Concise please.",
+        model_response="Generated answer.",
+    )
+    observation = PreferenceObservation(
+        observation_id="pref-obs--turn-preference-1",
+        user_id=command.user_id,
+        project_id=command.project_id,
+        session_id=command.session_id,
+        source_turn_id=command.turn_id,
+        source_message_id=command.source_message_id,
+        category="response_length",
+        canonical_value="concise",
+        evidence_kind="repeated_collaboration_preference",
+        evidence_summary="User requested concise responses.",
+        confidence_delta=0.35,
+        created_at=NOW,
+    )
+    hypothesis = PreferenceHypothesis(
+        hypothesis_id="pref-hyp--user-1--workspace-1--response_length",
+        user_id="user-1",
+        project_id="workspace-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_count=2,
+        contradiction_count=0,
+        confidence=0.75,
+        source_observation_ids=("pref-obs--turn-1", "pref-obs--turn-preference-1"),
+        first_observed_at=NOW - timedelta(minutes=5),
+        last_observed_at=NOW,
+    )
+    job = make_job(make_command()).model_copy(
+        update={
+            "job_id": "memory-preference-capture-job-1",
+            "source_turn_id": command.turn_id,
+            "source_message_id": command.source_message_id,
+            "display_label": "Preference learning capture",
+            "idempotency_key": "memory-preference-capture-1",
+        }
+    )
+    payload = AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "preference_learning_capture",
+            "observation": observation.model_dump(mode="json"),
+            "suppress_confirmation": suppress_confirmation,
+        },
+    )
+
+    class RecordingPreferenceService:
+        def __init__(self) -> None:
+            self.commands = []
+
+        async def capture_strict(self, captured_command):
+            raise AssertionError("worker must not rerun preference extraction")
+
+        async def capture_observation_strict(self, captured_observation):
+            self.commands.append(captured_observation)
+            return PreferenceLearningResult(
+                hypothesis=hypothesis,
+                surfaced_hypothesis=hypothesis,
+            )
+
+    preference_service = RecordingPreferenceService()
+    confirmation_calls = []
+
+    async def queue_confirmation(**kwargs):
+        confirmation_calls.append(kwargs)
+        return QueuedActionReceipt(
+            job_id="memory-preference-confirmation-job-1",
+            action_kind="propose_memory_signal",
+            status="queued",
+            display_label="Memory preference confirmation",
+            created_at=NOW,
+            agent_label="Memory Analyst",
+        )
+
+    repository = RecordingAgentJobRepository(job=job, payload=payload)
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=RecordingMemoryService(),
+        preference_learning_service=preference_service,
+        preference_confirmation_queue=queue_confirmation,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    completed = await worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-1",
+    )
+
+    assert completed.status == "completed"
+    assert preference_service.commands == [observation]
+    expected_confirmation_call = {
+        "user_id": command.user_id,
+        "workspace_id": command.project_id,
+        "session_id": command.session_id,
+        "source_message_id": command.source_message_id,
+        "hypothesis": hypothesis,
+    }
+    assert confirmation_calls == (
+        [expected_confirmation_call] if confirmation_expected else []
+    )
+    expected_refs = {
+        "observation_status": "captured",
+        "hypothesis_id": hypothesis.hypothesis_id,
+    }
+    if confirmation_expected:
+        expected_refs["confirmation_job_id"] = (
+            "memory-preference-confirmation-job-1"
+        )
+    assert repository.completed[0]["result_refs"] == expected_refs
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_fails_preference_capture_safely() -> None:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+    from preference_learning import PreferenceObservation
+    from preference_learning_service import PreferenceLearningCommand
+
+    command = PreferenceLearningCommand(
+        user_id="user-1",
+        project_id="workspace-1",
+        session_id="session-1",
+        turn_id="turn-preference-1",
+        source_message_id="message-preference-1",
+        user_message="Concise please.",
+        model_response="Generated answer.",
+    )
+    observation = PreferenceObservation(
+        observation_id="pref-obs--turn-preference-1",
+        user_id=command.user_id,
+        project_id=command.project_id,
+        session_id=command.session_id,
+        source_turn_id=command.turn_id,
+        source_message_id=command.source_message_id,
+        category="response_length",
+        canonical_value="concise",
+        evidence_kind="repeated_collaboration_preference",
+        evidence_summary="User requested concise responses.",
+        confidence_delta=0.35,
+        created_at=NOW,
+    )
+    job = make_job(make_command()).model_copy(
+        update={
+            "job_id": "memory-preference-capture-job-1",
+            "source_turn_id": command.turn_id,
+            "source_message_id": command.source_message_id,
+            "display_label": "Preference learning capture",
+            "idempotency_key": "memory-preference-capture-1",
+        }
+    )
+    payload = AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "work_type": "preference_learning_capture",
+            "observation": observation.model_dump(mode="json"),
+            "suppress_confirmation": False,
+        },
+    )
+
+    class FailingPreferenceService:
+        async def capture_observation_strict(self, captured_observation):
+            raise RuntimeError("private persistence failure")
+
+    repository = RecordingAgentJobRepository(job=job, payload=payload)
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=RecordingMemoryService(),
+        preference_learning_service=FailingPreferenceService(),
+        preference_confirmation_queue=None,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    failed = await worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-1",
+    )
+
+    assert failed.status == "failed"
+    assert repository.completed == []
+    assert repository.failed[0]["failure"].code == "preference_capture_failed"
+    assert repository.failed[0]["failure"].retryable is True
+    assert "private persistence failure" not in repository.reports[0].summary
+
+    class RecoveredPreferenceService:
+        def __init__(self) -> None:
+            self.observations = []
+
+        async def capture_strict(self, captured_command):
+            raise AssertionError("recovery must not rerun preference extraction")
+
+        async def capture_observation_strict(self, captured_observation):
+            from preference_learning_service import PreferenceLearningResult
+
+            self.observations.append(captured_observation)
+            return PreferenceLearningResult(observation=captured_observation)
+
+    recovered_service = RecoveredPreferenceService()
+    recovered_repository = RecordingAgentJobRepository(
+        job=job,
+        payload=payload,
+    )
+    recovered_worker = MemoryProposalJobWorker(
+        agent_job_repository=recovered_repository,
+        memory_service=RecordingMemoryService(),
+        preference_learning_service=recovered_service,
+        preference_confirmation_queue=None,
+        clock=lambda: NOW + timedelta(minutes=2),
+    )
+
+    recovered = await recovered_worker.run_one(
+        user_id=job.user_id,
+        workspace_id=job.workspace_id,
+        lease_owner="memory-worker-recovery",
+    )
+
+    assert recovered.status == "completed"
+    assert recovered_service.observations == [observation]
 
 
 @pytest.mark.asyncio

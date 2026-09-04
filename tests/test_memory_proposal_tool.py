@@ -510,6 +510,52 @@ async def test_preference_confirmation_queue_is_deterministic_and_private() -> N
 
 
 @pytest.mark.asyncio
+async def test_preference_capture_queue_is_deterministic_and_private() -> None:
+    from memory_proposal_tool import queue_preference_learning_capture_agent_job
+    from preference_learning import PreferenceObservation
+
+    observation = PreferenceObservation(
+        observation_id="pref-obs--turn-1",
+        user_id="user-1",
+        project_id="workspace-1",
+        session_id="session-1",
+        source_turn_id="turn-1",
+        source_message_id="message-1",
+        category="response_length",
+        canonical_value="concise",
+        evidence_kind="user_correction",
+        evidence_summary="User requested a shorter response.",
+        confidence_delta=0.35,
+        created_at=NOW,
+    )
+    repository = RecordingAgentJobRepository()
+
+    first = await queue_preference_learning_capture_agent_job(
+        agent_job_repository=repository,
+        observation=observation,
+        suppress_confirmation=False,
+    )
+    second = await queue_preference_learning_capture_agent_job(
+        agent_job_repository=repository,
+        observation=observation,
+        suppress_confirmation=False,
+    )
+
+    assert first.job_id == second.job_id
+    assert repository.enqueued[0] == repository.enqueued[1]
+    assert repository.payloads[0] == repository.payloads[1]
+    assert repository.enqueued[0].source_turn_id == "turn-1"
+    assert repository.enqueued[0].source_message_id == "message-1"
+    assert repository.payloads[0].payload == {
+        "work_type": "preference_learning_capture",
+        "observation": observation.model_dump(mode="json"),
+        "suppress_confirmation": False,
+    }
+    assert "turn_lease" not in str(repository.payloads[0].payload)
+    assert "owner_token" not in str(repository.payloads[0].payload)
+
+
+@pytest.mark.asyncio
 async def test_clarification_selection_tool_queues_memory_work_without_service_call(
 ) -> None:
     from memory_proposal_tool import create_select_memory_clarification_tool

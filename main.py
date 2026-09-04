@@ -188,9 +188,10 @@ from memory_proposal_job_worker import MemoryProposalJobWorker
 from memory_proposal_tool import (
     queue_memory_agent_job,
     queue_preference_hypothesis_confirmation_agent_job,
+    queue_preference_learning_capture_agent_job,
 )
 from memory_proposals import ProposalTurnLease
-from preference_learning import PreferenceHypothesis
+from preference_learning import PreferenceHypothesis, PreferenceObservation
 from preference_learning_service import (
     PreferenceLearningCommand,
     PreferenceLearningService,
@@ -2057,17 +2058,52 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             feedback_ledger=database,
         )
         memory_service = TrustedMemoryService(database=database)
-        memory_job_worker = MemoryProposalJobWorker(
-            agent_job_repository=agent_job_repository,
-            memory_service=memory_service,
+        preference_learning_service = PreferenceLearningService(
+            database=database,
+            clock=lambda: datetime.now(UTC),
         )
         memory_job_background_tasks: set[asyncio.Task[AgentJob | None]] = set()
+        memory_job_worker: MemoryProposalJobWorker
 
         def dispatch_memory_job(job: AgentJob) -> None:
             memory_job_worker.dispatch(
                 job,
                 task_set=memory_job_background_tasks,
             )
+
+        async def queue_preference_confirmation(
+            *,
+            user_id: str,
+            workspace_id: str,
+            session_id: str,
+            source_message_id: str,
+            hypothesis: PreferenceHypothesis,
+        ) -> QueuedActionReceipt:
+            queued_action = (
+                await queue_preference_hypothesis_confirmation_agent_job(
+                    agent_job_repository=agent_job_repository,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    source_message_id=source_message_id,
+                    hypothesis=hypothesis,
+                )
+            )
+            queued_job = await agent_job_repository.get_job(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                job_id=queued_action.job_id,
+            )
+            if queued_job is not None:
+                dispatch_memory_job(queued_job)
+            return queued_action
+
+        memory_job_worker = MemoryProposalJobWorker(
+            agent_job_repository=agent_job_repository,
+            memory_service=memory_service,
+            preference_learning_service=preference_learning_service,
+            preference_confirmation_queue=queue_preference_confirmation,
+        )
 
         class MemoryQueue:
             async def queue(self, command: object) -> QueuedActionReceipt:
@@ -2093,24 +2129,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 source_message_id: str,
                 hypothesis: PreferenceHypothesis,
             ) -> QueuedActionReceipt:
+                return await queue_preference_confirmation(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    source_message_id=source_message_id,
+                    hypothesis=hypothesis,
+                )
+
+            async def queue_preference_capture(
+                self,
+                *,
+                observation: PreferenceObservation,
+                suppress_confirmation: bool,
+            ) -> None:
                 queued_action = (
-                    await queue_preference_hypothesis_confirmation_agent_job(
+                    await queue_preference_learning_capture_agent_job(
                         agent_job_repository=agent_job_repository,
-                        user_id=user_id,
-                        workspace_id=workspace_id,
-                        session_id=session_id,
-                        source_message_id=source_message_id,
-                        hypothesis=hypothesis,
+                        observation=observation,
+                        suppress_confirmation=suppress_confirmation,
                     )
                 )
                 queued_job = await agent_job_repository.get_job(
-                    user_id=user_id,
-                    workspace_id=workspace_id,
+                    user_id=observation.user_id,
+                    workspace_id=observation.project_id,
                     job_id=queued_action.job_id,
                 )
                 if queued_job is not None:
                     dispatch_memory_job(queued_job)
-                return queued_action
 
         memory_queue = MemoryQueue()
         collaborative_note_service = CollaborativeNoteService(
@@ -2148,10 +2194,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             term_expander=GeminiContinuityTermExpander(client=client),
         )
         working_state_service = WorkingStateService(client=client)
-        preference_learning_service = PreferenceLearningService(
-            database=database,
-            clock=lambda: datetime.now(UTC),
-        )
         speech_transcription_service = CloudSpeechTranscriptionService()
         speech_synthesis_service = CloudTextToSpeechSynthesisService()
         source_service = SourceExpertService(client=client)
@@ -5697,43 +5739,26 @@ async def _execute_chat(
         and not chat_response.continuity_choices
     ):
         try:
-            preference_result = await preference_learning_service.capture(
-                PreferenceLearningCommand(
-                    user_id=effective_user_id,
-                    project_id=effective_project_id,
-                    session_id=payload.session_id,
-                    turn_id=chat_turn_claim.ids.turn_id,
-                    source_message_id=user_message_id,
-                    user_message=payload.message,
-                    model_response=result.response,
-                )
+            preference_command = PreferenceLearningCommand(
+                user_id=effective_user_id,
+                project_id=effective_project_id,
+                session_id=payload.session_id,
+                turn_id=chat_turn_claim.ids.turn_id,
+                source_message_id=user_message_id,
+                user_message=payload.message,
+                model_response=result.response,
             )
-            if (
-                preference_result.surfaced_hypothesis is not None
-                and not chat_response.memory_proposals
-                and not chat_response.memory_clarifications
-                and not decision_queued_actions
-            ):
-                confirmation_queued_action = (
-                    await request.app.state.memory_queue.queue_preference_confirmation(
-                        user_id=effective_user_id,
-                        workspace_id=effective_project_id,
-                        session_id=payload.session_id,
-                        source_message_id=user_message_id,
-                        hypothesis=preference_result.surfaced_hypothesis,
-                    )
-                )
-                chat_response = chat_response.model_copy(
-                    update={
-                        "queued_actions": [
-                            *chat_response.queued_actions,
-                            confirmation_queued_action,
-                        ]
-                    }
+            preference_observation = (
+                await preference_learning_service.recognize(preference_command)
+            )
+            if preference_observation is not None:
+                await request.app.state.memory_queue.queue_preference_capture(
+                    observation=preference_observation,
+                    suppress_confirmation=bool(decision_queued_actions),
                 )
         except Exception as exc:
             logger.error(
-                "Preference learning failed (%s).",
+                "Preference learning queue failed (%s).",
                 type(exc).__name__,
             )
     if chat_turn_claim is None:
