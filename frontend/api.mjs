@@ -786,6 +786,42 @@ export function selectMemoryClarification(
   );
 }
 
+export function selectContinuityChoice(
+  userId,
+  projectId,
+  choiceId,
+  request,
+  options = {},
+  fetchLike = globalThis.fetch,
+) {
+  [options, fetchLike] = normalizeOptionsAndFetch(options, fetchLike);
+  assertIdentifier("user_id", userId);
+  assertIdentifier("project_id", projectId);
+  assertIdentifier("choice_id", choiceId);
+  assertIdentifier("session_id", request?.session_id);
+  if (!["collaborative_note", "chat_session"].includes(request?.source_kind)) {
+    throw new Error("Continuity source kind is invalid.");
+  }
+  assertIdentifier("source_id", request?.source_id);
+  if (!options.idempotencyKey) {
+    throw new Error("idempotency key is required.");
+  }
+  return apiFetchJson(
+    `/api/users/${encodeURIComponent(userId)}/projects/${encodeURIComponent(projectId)}/continuity/choices/${encodeURIComponent(choiceId)}/select`,
+    {
+      method: "POST",
+      authToken: options.authToken,
+      idempotencyKey: options.idempotencyKey,
+      body: {
+        session_id: request.session_id,
+        source_kind: request.source_kind,
+        source_id: request.source_id,
+      },
+    },
+    fetchLike,
+  );
+}
+
 export function decideNoteProposal(
   userId,
   projectId,

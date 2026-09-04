@@ -432,6 +432,32 @@ test("createChatView renders continuity choices as buttons without bodies or raw
     display_label: "API version",
     match_reason: "bounded_relevance",
   }]);
+
+  view.render({
+    transcript: [],
+    lastFailure: null,
+    pendingTurn: { key: "chat--1", body: { message: "pending" } },
+    activeMemoryClarification: null,
+    activeContinuityChoices: [
+      {
+        choice_id: "choice-2",
+        source_kind: "chat_session",
+        source_id: "session-2",
+        display_label: "Prior chat",
+        match_reason: "previous_chat",
+      },
+    ],
+  });
+
+  assert.equal(continuityChoices.children[0].disabled, false);
+  continuityChoices.children[0].onclick();
+  assert.deepEqual(selections.at(-1), {
+    choice_id: "choice-2",
+    source_kind: "chat_session",
+    source_id: "session-2",
+    display_label: "Prior chat",
+    match_reason: "previous_chat",
+  });
 });
 
 test("createChatView updates the character counter from prompt input", () => {

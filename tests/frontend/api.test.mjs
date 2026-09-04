@@ -36,6 +36,7 @@ import {
   restoreNote,
   restoreArtifact,
   revokeMemorySignal,
+  selectContinuityChoice,
   selectMemoryClarification,
   streamAgentJobs,
   synthesizeSpeechAudio,
@@ -192,6 +193,57 @@ test("apiFetchJson attaches bearer token when supplied", async () => {
   );
 
   assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+});
+
+test("selectContinuityChoice calls the direct continuity selection path", async () => {
+  const calls = [];
+  const result = await selectContinuityChoice(
+    "wifiknight",
+    "agent-col",
+    "choice-1",
+    {
+      session_id: "session-1",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+    },
+    {
+      authToken: "google-id-token",
+      idempotencyKey: "continuity-selection--123",
+    },
+    async (path, init) => {
+      calls.push([path, init]);
+      return jsonResponse(200, {
+        continuity_receipts: [{
+          receipt_id: "continuity--note-1--rev-2",
+          source_kind: "collaborative_note",
+          source_id: "note-1",
+          display_label: "Used note: API version",
+          match_reason: "user_selected",
+          source_updated_at: "2026-09-02T12:00:00Z",
+        }],
+      });
+    },
+  );
+
+  assert.equal(
+    calls[0][0],
+    "/api/users/wifiknight/projects/agent-col/continuity/choices/choice-1/select",
+  );
+  assert.equal(calls[0][1].method, "POST");
+  assert.equal(calls[0][1].headers.Authorization, "Bearer google-id-token");
+  assert.equal(
+    calls[0][1].headers["Idempotency-Key"],
+    "continuity-selection--123",
+  );
+  assert.equal(
+    calls[0][1].body,
+    JSON.stringify({
+      session_id: "session-1",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+    }),
+  );
+  assert.equal(result.continuity_receipts[0].source_id, "note-1");
 });
 
 test("listAgentJobs fetches the public agent job projection for a workspace", async () => {

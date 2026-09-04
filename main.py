@@ -215,8 +215,11 @@ from schemas import (
     CollaborativeNoteProposalRequest,
     CollaborativeNoteProposalResponse,
     DirectMemoryClarificationSelectionRequest,
+    DirectContinuitySelectionRequest,
     DisplayLabelStr,
     IdentifierStr,
+    ContinuitySelectionResponse,
+    ContinuitySelectionRequest,
     MemoryClarificationSelectionResponse,
     MemoryClarificationReceipt,
     MemoryInspectionResponse,
@@ -3606,6 +3609,100 @@ async def decide_memory_proposal(
 
 
 @app.post(
+    "/api/users/{user_id}/projects/{project_id}/continuity/choices/"
+    "{choice_id}/select",
+    response_model=ContinuitySelectionResponse,
+)
+async def select_continuity_choice(
+    user_id: IdentifierStr,
+    project_id: IdentifierStr,
+    choice_id: IdentifierStr,
+    payload: DirectContinuitySelectionRequest,
+    request: Request,
+    idempotency_key: Annotated[
+        str | None,
+        Header(alias="Idempotency-Key"),
+    ] = None,
+    authorization: Annotated[
+        str | None,
+        Header(alias="Authorization"),
+    ] = None,
+) -> ContinuitySelectionResponse:
+    if idempotency_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Continuity selection requires an idempotency key.",
+        )
+    try:
+        validate_idempotency_key(idempotency_key)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Continuity selection idempotency key is invalid.",
+        ) from exc
+    effective_user_id = _resolve_effective_user_id(
+        request=request,
+        supplied_user_id=user_id,
+        authorization_header=authorization,
+    )
+    effective_project_id = _resolve_effective_project_id(
+        request=request,
+        supplied_project_id=project_id,
+        authorization_header=authorization,
+    )
+    selection = ContinuitySelectionRequest(
+        choice_id=choice_id,
+        source_kind=payload.source_kind,
+        source_id=payload.source_id,
+    )
+    try:
+        resolution = await request.app.state.continuity_service.resolve(
+            ContinuityResolutionCommand(
+                user_id=effective_user_id,
+                workspace_id=effective_project_id,
+                session_id=payload.session_id,
+                message="",
+                selection=selection,
+            )
+        )
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Continuity selection request is invalid.",
+        ) from exc
+    if resolution.status != "resolved" or not resolution.receipts:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Continuity selection cannot be resolved.",
+        )
+    database: MemoryEngine = request.app.state.db
+    observed_at = datetime.now(UTC)
+    try:
+        for receipt in resolution.receipts:
+            await database.record_continuity_selection(
+                user_id=effective_user_id,
+                project_id=effective_project_id,
+                session_id=payload.session_id,
+                receipt=receipt,
+                observed_at=observed_at,
+            )
+    except ChatSessionOwnershipError as exc:
+        _raise_chat_session_unavailable(exc)
+    except MemoryEngineError as exc:
+        _raise_database_http_error(exc)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Continuity selection receipt is invalid.",
+        ) from exc
+    return ContinuitySelectionResponse(
+        continuity_receipts=list(resolution.receipts)
+    )
+
+
+@app.post(
     "/api/users/{user_id}/projects/{project_id}/memory/clarifications/"
     "{clarification_id}/select",
     response_model=MemoryClarificationSelectionResponse,
@@ -4550,6 +4647,13 @@ async def _execute_chat(
                 "feedback API."
             ),
         )
+    if payload.continuity_selection is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Continuity selection must use the direct continuity API."
+            ),
+        )
 
     if ordinary_only and _chat_request_requires_json(payload):
         raise HTTPException(
@@ -4577,15 +4681,6 @@ async def _execute_chat(
             detail=(
                 "Memory clarification selection requires an idempotency key."
             ),
-        )
-
-    if (
-        payload.continuity_selection is not None
-        and idempotency_key is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Continuity selection requires an idempotency key.",
         )
 
     if (

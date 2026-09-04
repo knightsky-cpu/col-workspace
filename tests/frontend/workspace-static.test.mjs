@@ -95,7 +95,8 @@ test("workspace provides a separate notes drawer and continuity choice region", 
   assert.match(styles, /\.notes-card/);
   assert.match(styles, /\.continuity-choices/);
   assert.match(app, /createNotesView/);
-  assert.match(app, /buildContinuitySelectionChatRequest/);
+  assert.match(app, /selectContinuityChoice/);
+  assert.doesNotMatch(app, /buildContinuitySelectionChatRequest/);
 });
 
 test("workspace shell provides persistent non-emoji icon hooks for primary navigation", () => {

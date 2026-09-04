@@ -114,7 +114,6 @@ export function selectChatEndpoint(request) {
     "memory_decision",
     "artifact_feedback_decision",
     "collaborative_note_decision",
-    "continuity_selection",
   ];
   return structuredFields.some((field) => body[field] != null)
     ? "/api/chat"

@@ -584,6 +584,9 @@ class FakeMemoryEngine:
     working_state_save_calls: list[
         tuple[WorkingStateSnapshot, datetime]
     ] = field(default_factory=list)
+    continuity_selection_calls: list[
+        tuple[str, str, str, ContinuitySourceReceipt, datetime]
+    ] = field(default_factory=list)
     closed: bool = False
     agent_job_repository: object | None = None
 
@@ -656,6 +659,22 @@ class FakeMemoryEngine:
         self.events.append(("save_working_state", snapshot.session_id))
         if self.working_state_error is not None:
             raise self.working_state_error
+
+    async def record_continuity_selection(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        receipt: ContinuitySourceReceipt,
+        observed_at: datetime,
+    ) -> None:
+        self.continuity_selection_calls.append(
+            (user_id, project_id, session_id, receipt, observed_at)
+        )
+        self.events.append(("record_continuity_selection", session_id))
+        if self.chat_session_error is not None:
+            raise self.chat_session_error
 
     async def save_message(
         self,
@@ -7405,12 +7424,13 @@ async def test_chat_clarification_selection_requires_idempotency_key(
 
 
 @pytest.mark.asyncio
-async def test_chat_continuity_selection_requires_idempotency_key(
+async def test_chat_rejects_continuity_selection_without_claiming_turn(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
     response = await client.post(
         "/api/chat",
+        headers={"Idempotency-Key": "continuity-selection-key-1"},
         json={
             "project_id": "project-1",
             "session_id": "session-1",
@@ -7424,10 +7444,15 @@ async def test_chat_continuity_selection_requires_idempotency_key(
         },
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 409
     assert response.json() == {
-        "detail": "Continuity selection requires an idempotency key."
+        "detail": (
+            "Continuity selection must use the direct continuity API."
+        )
     }
+    assert service_state.database.claim_calls == []
+    assert service_state.continuity_service.calls == []
+    assert service_state.database.continuity_selection_calls == []
     assert service_state.events == []
 
 
@@ -7962,17 +7987,10 @@ async def test_chat_labels_ambiguous_prior_chat_choices(
 
 
 @pytest.mark.asyncio
-async def test_chat_continuity_selection_is_claimed_and_resolved(
+async def test_select_continuity_choice_uses_direct_api_without_chat_turn(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
-    selection = ContinuitySelectionRequest(
-        choice_id="choice-0",
-        source_kind="collaborative_note",
-        source_id="note-export",
-    )
-    claim = make_chat_turn_claim(continuity_selection=selection)
-    service_state.database.chat_turn_result = claim
     receipt = make_continuity_receipt()
     source_text = ContinuitySourceText(
         source_kind="collaborative_note",
@@ -7988,25 +8006,80 @@ async def test_chat_continuity_selection_is_claimed_and_resolved(
     )
 
     response = await client.post(
-        "/api/chat",
+        "/api/users/user-1/projects/project-1/continuity/choices/"
+        "choice-0/select",
         headers={"Idempotency-Key": "continuity-selection-key-1"},
         json={
-            "project_id": "project-1",
             "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "Use that export note.",
-            "continuity_selection": selection.model_dump(mode="json"),
+            "source_kind": "collaborative_note",
+            "source_id": "note-export",
         },
     )
 
     assert response.status_code == 200
-    assert service_state.database.claim_calls[0][0].continuity_selection == (
-        selection
+    assert response.json() == {
+        "continuity_receipts": [receipt.model_dump(mode="json")]
+    }
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+    assert service_state.database.complete_calls == []
+    assert service_state.continuity_service.calls == [
+        ContinuityResolutionCommand(
+            user_id="user-1",
+            workspace_id="project-1",
+            session_id="session-1",
+            message="",
+            selection=ContinuitySelectionRequest(
+                choice_id="choice-0",
+                source_kind="collaborative_note",
+                source_id="note-export",
+            ),
+        )
+    ]
+    assert service_state.database.continuity_selection_calls == [
+        (
+            "user-1",
+            "project-1",
+            "session-1",
+            receipt,
+            service_state.database.continuity_selection_calls[0][4],
+        )
+    ]
+    assert (
+        service_state.database.continuity_selection_calls[0][4].tzinfo
+        is not None
     )
-    assert service_state.continuity_service.calls[0].selection == selection
     assert response.json()["continuity_receipts"] == [
         receipt.model_dump(mode="json")
     ]
+
+
+@pytest.mark.asyncio
+async def test_select_continuity_choice_maps_unresolved_selection_to_conflict(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.continuity_service.resolution = ContinuityResolution(
+        status="none"
+    )
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/continuity/choices/"
+        "choice-0/select",
+        headers={"Idempotency-Key": "continuity-selection-key-2"},
+        json={
+            "session_id": "session-1",
+            "source_kind": "collaborative_note",
+            "source_id": "note-missing",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Continuity selection cannot be resolved."
+    }
+    assert service_state.database.claim_calls == []
+    assert service_state.database.continuity_selection_calls == []
 
 
 @pytest.mark.asyncio

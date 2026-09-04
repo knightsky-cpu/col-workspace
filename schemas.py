@@ -860,6 +860,19 @@ class ContinuitySelectionRequest(StrictModel):
     source_id: IdentifierStr
 
 
+class DirectContinuitySelectionRequest(StrictModel):
+    session_id: IdentifierStr
+    source_kind: ContinuitySourceKind
+    source_id: IdentifierStr
+
+
+class ContinuitySelectionResponse(StrictModel):
+    continuity_receipts: list[ContinuitySourceReceipt] = Field(
+        default_factory=list,
+        max_length=4,
+    )
+
+
 QueuedActionKind = Literal[
     "create_artifact",
     "propose_collaborative_note",

@@ -5411,6 +5411,30 @@ class MemoryEngine:
                 user_id=user_id,
                 project_id=project_id,
             )
+            direct_query = (
+                session_ref.collection("continuity_selections")
+                .order_by(
+                    "selected_at",
+                    direction=firestore.Query.DESCENDING,
+                )
+                .limit(limit)
+            )
+            receipts: list[ContinuitySourceReceipt] = []
+            async for snapshot in direct_query.stream():
+                data = snapshot.to_dict()
+                if not isinstance(data, Mapping):
+                    raise ValueError("Stored continuity receipts are invalid.")
+                receipt_data = {
+                    key: value
+                    for key, value in data.items()
+                    if key in ContinuitySourceReceipt.model_fields
+                }
+                receipts.append(
+                    ContinuitySourceReceipt.model_validate(receipt_data)
+                )
+                if len(receipts) >= limit:
+                    return tuple(receipts)
+
             query = (
                 session_ref.collection("turns")
                 .order_by(
@@ -5419,7 +5443,6 @@ class MemoryEngine:
                 )
                 .limit(limit)
             )
-            receipts: list[ContinuitySourceReceipt] = []
             async for snapshot in query.stream():
                 data = snapshot.to_dict()
                 if not isinstance(data, Mapping):
@@ -5445,6 +5468,56 @@ class MemoryEngine:
                 "list_recent_session_continuity_receipts",
                 exc,
             )
+
+    async def record_continuity_selection(
+        self,
+        *,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        receipt: ContinuitySourceReceipt,
+        observed_at: datetime,
+    ) -> None:
+        """Record a direct continuity selection outside the chat-turn lease."""
+        self._validate_string(user_id, "user_id")
+        self._validate_string(project_id, "project_id")
+        self._validate_string(session_id, "session_id")
+        if not isinstance(receipt, ContinuitySourceReceipt):
+            raise ValueError("receipt must be a continuity receipt.")
+        if observed_at.tzinfo is None:
+            raise ValueError("observed_at must be a timezone-aware datetime.")
+
+        try:
+            session_ref = self._client.collection("sessions").document(
+                session_id
+            )
+            session_snapshot = await session_ref.get()
+            if not session_snapshot.exists:
+                raise ChatSessionOwnershipError("Chat session was not found.")
+            self._validate_chat_session_owner(
+                session_snapshot.to_dict(),
+                user_id=user_id,
+                project_id=project_id,
+            )
+            document = {
+                **receipt.model_dump(mode="python"),
+                "schema_version": "1.0",
+                "user_id": user_id,
+                "project_id": project_id,
+                "session_id": session_id,
+                "selected_at": observed_at,
+            }
+            selection_ref = (
+                session_ref.collection("continuity_selections")
+                .document(receipt.receipt_id)
+            )
+            await selection_ref.set(document)
+        except ChatSessionOwnershipError:
+            raise
+        except (ValidationError, TypeError, ValueError) as exc:
+            raise ValueError("Continuity selection receipt is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("record_continuity_selection", exc)
 
     async def get_working_state(
         self,

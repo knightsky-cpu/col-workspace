@@ -2249,7 +2249,9 @@ async def test_list_recent_session_continuity_receipts_returns_completed_turn_re
     sessions = MagicMock()
     session = MagicMock()
     turns = MagicMock()
+    selections = MagicMock()
     query = MagicMock()
+    selection_query = MagicMock()
     client.collection.return_value = sessions
     sessions.document.return_value = session
     session.get = AsyncMock(
@@ -2258,7 +2260,18 @@ async def test_list_recent_session_continuity_receipts_returns_completed_turn_re
             data={"project_id": "agent-col", "user_id": "user-1"},
         )
     )
-    session.collection.return_value = turns
+
+    def session_collection(name: str) -> MagicMock:
+        if name == "continuity_selections":
+            return selections
+        if name == "turns":
+            return turns
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    session.collection.side_effect = session_collection
+    selections.order_by.return_value = selection_query
+    selection_query.limit.return_value = selection_query
+    selection_query.stream.return_value = snapshot_stream_from([])
     turns.order_by.return_value = query
     query.limit.return_value = query
     completed_with_receipt = turn_document(
@@ -2299,12 +2312,133 @@ async def test_list_recent_session_continuity_receipts_returns_completed_turn_re
     assert receipts == (
         ContinuitySourceReceipt.model_validate(continuity_receipt_document()),
     )
-    session.collection.assert_called_once_with("turns")
+    assert session.collection.call_args_list == [
+        call("continuity_selections"),
+        call("turns"),
+    ]
     turns.order_by.assert_called_once_with(
         "completed_at",
         direction=firestore.Query.DESCENDING,
     )
     query.limit.assert_called_once_with(5)
+
+
+@pytest.mark.asyncio
+async def test_record_continuity_selection_writes_direct_session_receipt() -> None:
+    client = MagicMock()
+    sessions = MagicMock()
+    session = MagicMock()
+    selections = MagicMock()
+    selection_ref = MagicMock()
+    client.collection.return_value = sessions
+    sessions.document.return_value = session
+    session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"project_id": "agent-col", "user_id": "user-1"},
+        )
+    )
+    session.collection.return_value = selections
+    selections.document.return_value = selection_ref
+    selection_ref.set = AsyncMock()
+
+    receipt = ContinuitySourceReceipt.model_validate(
+        continuity_receipt_document()
+    )
+
+    await MemoryEngine(client).record_continuity_selection(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+        receipt=receipt,
+        observed_at=NOW,
+    )
+
+    session.collection.assert_called_once_with("continuity_selections")
+    selections.document.assert_called_once_with(receipt.receipt_id)
+    selection_ref.set.assert_awaited_once()
+    written = selection_ref.set.await_args.args[0]
+    assert written == {
+        **receipt.model_dump(mode="python"),
+        "schema_version": "1.0",
+        "user_id": "user-1",
+        "project_id": "agent-col",
+        "session_id": "session-1",
+        "selected_at": NOW,
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_recent_session_continuity_receipts_includes_direct_selections() -> None:
+    client = MagicMock()
+    sessions = MagicMock()
+    session = MagicMock()
+    turns = MagicMock()
+    turn_query = MagicMock()
+    selections = MagicMock()
+    selection_query = MagicMock()
+    client.collection.return_value = sessions
+    sessions.document.return_value = session
+    session.get = AsyncMock(
+        return_value=snapshot(
+            exists=True,
+            data={"project_id": "agent-col", "user_id": "user-1"},
+        )
+    )
+
+    def session_collection(name: str) -> MagicMock:
+        if name == "continuity_selections":
+            return selections
+        if name == "turns":
+            return turns
+        raise AssertionError(f"Unexpected collection: {name}")
+
+    session.collection.side_effect = session_collection
+    selections.order_by.return_value = selection_query
+    selection_query.limit.return_value = selection_query
+    direct_receipt = {
+        **continuity_receipt_document(),
+        "receipt_id": "continuity--note-direct--rev-1",
+        "source_id": "note-direct",
+        "selected_at": NOW + timedelta(seconds=1),
+    }
+    selection_query.stream.return_value = snapshot_stream_from(
+        [direct_receipt]
+    )
+    turns.order_by.return_value = turn_query
+    turn_query.limit.return_value = turn_query
+    completed_with_receipt = turn_document(
+        derive_chat_turn_ids("request-1"),
+        status="completed",
+    )
+    completed_with_receipt["continuity_receipts"] = [
+        continuity_receipt_document()
+    ]
+    turn_query.stream.return_value = snapshot_stream_from(
+        [completed_with_receipt]
+    )
+
+    receipts = await MemoryEngine(
+        client
+    ).list_recent_session_continuity_receipts(
+        user_id="user-1",
+        project_id="agent-col",
+        session_id="session-1",
+        limit=5,
+    )
+
+    assert [receipt.source_id for receipt in receipts] == [
+        "note-direct",
+        "note-1",
+    ]
+    selections.order_by.assert_called_once_with(
+        "selected_at",
+        direction=firestore.Query.DESCENDING,
+    )
+    turns.order_by.assert_called_once_with(
+        "completed_at",
+        direction=firestore.Query.DESCENDING,
+    )
 
 
 @pytest.mark.asyncio

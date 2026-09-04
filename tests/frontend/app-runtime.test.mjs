@@ -3996,6 +3996,180 @@ test("memory clarification selection during a pending chat uses direct memory AP
   });
 });
 
+test("continuity choice selection during a pending chat uses direct continuity API", async () => {
+  const { contextForm, elements } = installOrdinaryChatRuntimeDom();
+  globalThis.sessionStorage = memoryStorage();
+  const firstChatStream = createControlledSseResponse();
+  const pendingChatStream = createControlledSseResponse();
+  const calls = [];
+  let chatStreamCount = 0;
+  let continuitySelected = false;
+  globalThis.fetch = async (path, init = {}) => {
+    calls.push([path, init]);
+    if (path === "/api/auth/config") {
+      return jsonResponse(200, {
+        auth_mode: "local_dev",
+        google_signin_required: false,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/workspaces")) {
+      return jsonResponse(200, {
+        workspace_contract_version: "1.0",
+        workspaces: [{
+          workspace_id: "agent-col",
+          display_name: "Agent Col",
+          is_default: true,
+        }],
+      });
+    }
+    if (path.startsWith("/api/projects/agent-col/artifacts")) {
+      return jsonResponse(200, {
+        artifact_contract_version: "1.0",
+        artifacts: [],
+        next_before: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/memory")) {
+      return jsonResponse(200, {
+        memory_contract_version: "1.0",
+        profile: null,
+        unresolved_proposals: [],
+        events: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/notes")) {
+      return jsonResponse(200, {
+        note_contract_version: "1.0",
+        notes: [],
+        pending_proposals: [],
+        next_cursor: null,
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/chat-sessions")) {
+      return jsonResponse(200, {
+        chat_contract_version: "1.0",
+        sessions: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/reports")) {
+      return jsonResponse(200, {
+        agent_job_report_contract_version: "1.0",
+        reports: [],
+      });
+    }
+    if (path.startsWith("/api/users/wifiknight/projects/agent-col/agent/jobs")) {
+      return jsonResponse(200, {
+        agent_job_contract_version: "1.0",
+        jobs: [],
+      });
+    }
+    if (
+      path === "/api/users/wifiknight/projects/agent-col/continuity/choices/choice-1/select"
+      && init.method === "POST"
+    ) {
+      continuitySelected = true;
+      return jsonResponse(200, {
+        continuity_receipts: [{
+          receipt_id: "continuity--note-1--rev-1",
+          source_kind: "collaborative_note",
+          source_id: "note-1",
+          display_label: "Used note: API version",
+          match_reason: "user_selected",
+          source_updated_at: "2026-09-02T12:00:00Z",
+        }],
+      });
+    }
+    if (path === "/api/chat/stream") {
+      chatStreamCount += 1;
+      return chatStreamCount === 1
+        ? firstChatStream.response
+        : pendingChatStream.response;
+    }
+    throw new Error(`Unexpected fetch: ${path}`);
+  };
+
+  await import(`../../frontend/app.mjs?runtime-continuity-direct-${Date.now()}`);
+  await waitFor(
+    () => calls.some(([path]) => path === "/api/auth/config"),
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  await contextForm.onsubmit({ preventDefault() {}, currentTarget: contextForm });
+  const input = elements.get("[data-chat-input]");
+  input.value = "Which saved context?";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => chatStreamCount === 1,
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+  firstChatStream.complete({
+    response: "Which source should I use?",
+    actions: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    continuity_choices: [{
+      choice_id: "choice-1",
+      source_kind: "collaborative_note",
+      source_id: "note-1",
+      display_label: "API version",
+      match_reason: "bounded_relevance",
+    }],
+    adaptations: [],
+  });
+  await waitFor(
+    () => elements.get("[data-continuity-choices]").children.length === 1,
+    () => textTree(elements.get("[data-continuity-choices]")),
+  );
+
+  input.value = "Keep another chat pending";
+  input.oninput();
+  elements.get("[data-chat-form]").onsubmit({ preventDefault() {} });
+  await waitFor(
+    () => chatStreamCount === 2,
+    () => JSON.stringify(calls.map(([path]) => path)),
+  );
+
+  const choices = elements.get("[data-continuity-choices]");
+  const continuityChoice = choices.children[0];
+  assert.equal(continuityChoice.disabled, false);
+  continuityChoice.onclick();
+
+  await waitFor(
+    () => continuitySelected,
+    () => JSON.stringify(calls.map(([path, init]) => [path, init.method])),
+  );
+  assert.equal(
+    calls.filter(([path]) => path === "/api/chat/stream").length,
+    2,
+  );
+  assert.equal(calls.some(([path]) => path === "/api/chat"), false);
+  assert.equal(elements.get("[data-chat-error]").textContent, "");
+  await waitFor(
+    () => choices.hidden === true,
+    () => textTree(choices),
+  );
+  assert.equal(choices.hidden, true);
+
+  pendingChatStream.complete({
+    response: "Done",
+    actions: [],
+    artifacts: [],
+    artifact_feedback: [],
+    memory_proposals: [],
+    memory_clarifications: [],
+    collaborative_note_proposals: [],
+    collaborative_note_events: [],
+    continuity_receipts: [],
+    continuity_choices: [],
+    adaptations: [],
+  });
+});
+
 test("note proposal approval during a pending chat uses direct note API", async () => {
   const { contextForm, elements } = installOrdinaryChatRuntimeDom();
   globalThis.sessionStorage = memoryStorage();

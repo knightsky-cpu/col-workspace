@@ -1323,3 +1323,99 @@ Work deferred until core decoupling is complete:
   queued action receipts;
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
+
+## Direct Continuity Selection Pass
+
+This pass moved explicit continuity choice selection off `/api/chat`. Chat still
+discovers ambiguous continuity and returns bounded server-owned choices, but the
+user's selected choice is now resolved and recorded through a direct continuity
+lifecycle endpoint.
+
+Completed work:
+
+- added
+  `/api/users/{user_id}/projects/{project_id}/continuity/choices/{choice_id}/select`
+  as the direct continuity selection API;
+- `/api/chat` now rejects `continuity_selection` immediately with a safe
+  conflict response telling callers to use the direct continuity API;
+- the rejection happens before chat-turn claim, turn service dispatch,
+  chat-turn completion, or release;
+- direct continuity selections resolve the server-owned choice through
+  `ContinuityService.resolve(selection=...)`;
+- selected continuity receipts are persisted under the owned session in the
+  `continuity_selections` subcollection rather than relying on a completed chat
+  turn;
+- recent continuity-anchor reads now include direct selections before completed
+  chat-turn receipts;
+- the frontend selects continuity choices with the direct API and keeps choice
+  buttons usable while an ordinary chat stream is pending;
+- static frontend coverage now rejects reintroducing the old app import of
+  `buildContinuitySelectionChatRequest`.
+
+Why this matters:
+
+Before this pass, continuity selection was still a chat turn. A user could only
+select an ambiguous source by submitting another `/api/chat` request, which
+claimed a live chat turn and recorded the selected continuity receipt only as
+part of that completed turn. After this pass, the Continuity lifecycle owns
+explicit selection and persistence.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_chat_rejects_continuity_selection_without_claiming_turn` failed
+  because `/api/chat` still reached `claim_chat_turn` and returned the old
+  chat-owned behavior.
+- RED: `test_select_continuity_choice_uses_direct_api_without_chat_turn` and
+  `test_select_continuity_choice_maps_unresolved_selection_to_conflict` failed
+  because the direct continuity endpoint did not exist.
+- RED: `test_record_continuity_selection_writes_direct_session_receipt` failed
+  because `MemoryEngine.record_continuity_selection` did not exist.
+- RED: `test_list_recent_session_continuity_receipts_includes_direct_selections`
+  failed because recent anchors only came from completed chat turns.
+- RED: frontend API/request/view/runtime tests failed because there was no
+  `selectContinuityChoice` export, endpoint routing still selected `/api/chat`,
+  continuity choice buttons were disabled during pending chat, and the app still
+  used the chat request builder.
+- GREEN: direct route, schema, database persistence/readback, API wrapper,
+  request routing, chat-view enablement, and app direct selection wiring were
+  implemented.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_main.py tests/test_chat_turn_database.py tests/test_continuity_service.py
+455 passed, 1 warning
+```
+
+```text
+node --test tests/frontend/api.test.mjs tests/frontend/requests.test.mjs tests/frontend/chat-view.test.mjs tests/frontend/app-runtime.test.mjs tests/frontend/workspace-static.test.mjs
+144 passed
+```
+
+```text
+git diff --check
+no output
+```
+
+Remaining direct decoupling:
+
+- `/api/chat` still accepts and executes `memory_decision`;
+- `/api/chat` still accepts and executes `collaborative_note_decision`;
+- legacy schema/request-builder compatibility still allows parsing retired
+  structured chat decisions, even when the app now uses direct APIs for those
+  user actions.
+
+Next proposed pass:
+
+- reject `memory_decision` in `/api/chat` and make the direct Memory proposal
+  approve/reject API the only execution path for memory proposal decisions.
+
+Work deferred until core decoupling is complete:
+
+- remove legacy frontend request helpers and schema fields for retired chat
+  structured decisions after all direct lifecycle routes are in place;
+- broad manual end-to-end browser acceptance for every drawer action;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.

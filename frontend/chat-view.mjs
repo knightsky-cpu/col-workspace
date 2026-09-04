@@ -309,7 +309,7 @@ export function createChatView(elements, handlers) {
       renderContinuityChoices(
         elements.continuityChoices,
         state.activeContinuityChoices ?? [],
-        state.pendingTurn !== null,
+        false,
         handlers.onSelectContinuityChoice ?? (() => {}),
       );
       updateCharacterCount();
