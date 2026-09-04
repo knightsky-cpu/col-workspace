@@ -83,7 +83,7 @@ test("workspace provides a bounded memory clarification choice region", () => {
   assert.match(styles, /\.memory-clarification-choices/);
   assert.match(styles, /\.memory-clarification-choice/);
   assert.match(styles, /overflow-wrap:\s*anywhere/);
-  assert.match(app, /buildMemoryClarificationSelectionChatRequest/);
+  assert.match(app, /selectMemoryClarification/);
   assert.match(app, /onSelectMemoryClarification/);
 });
 

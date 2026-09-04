@@ -1238,3 +1238,88 @@ Work deferred until core decoupling is complete:
   queued action receipts;
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
+
+## Direct Artifact Feedback Enforcement Pass
+
+This pass finished the direct artifact feedback boundary. The direct feedback
+recording endpoint already existed, and the frontend work surface already used
+it. The remaining defect was that `/api/chat` still accepted
+`artifact_feedback_decision`, claimed a chat turn, and could execute feedback
+through the chat turn service.
+
+Completed work:
+
+- `/api/chat` now rejects `artifact_feedback_decision` immediately with a safe
+  conflict response telling callers to use the direct artifact feedback API;
+- the rejection happens before idempotency-specific artifact feedback handling,
+  chat-turn claim, turn service dispatch, chat-turn completion, or release;
+- the direct endpoint at
+  `/api/projects/{project_id}/blueprints/{blueprint_id}/feedback` remains the
+  Artifact-owned lifecycle API for acceptance, rejection, and edited feedback;
+- direct endpoint safe-error mapping now also covers feedback ledger
+  conflict/state exceptions, not only feedback service exceptions;
+- stale backend tests for chat-owned feedback execution/error handling were
+  converted to the direct route or removed when they only proved the retired
+  responder path;
+- a stale static frontend assertion from the prior memory clarification pass
+  was corrected so the static suite reflects the current direct Memory API
+  wiring.
+
+Why this matters:
+
+Before this pass, normal UI feedback already used the direct artifact API, but
+`/api/chat` still carried a second, chat-turn-owned execution path. That meant
+artifact feedback had two authorities: the direct Artifact lifecycle route and
+the chat turn claim path. After this pass, chat is no longer an artifact
+feedback execution surface.
+
+TDD evidence recorded during the pass:
+
+- RED: `test_chat_rejects_artifact_feedback_without_claiming_turn` failed
+  because `/api/chat` still reached `claim_chat_turn` and returned the old
+  execution behavior.
+- RED: `test_chat_rejects_artifact_feedback_even_without_idempotency_key`
+  failed because the old artifact-feedback idempotency check still fired before
+  direct-route enforcement.
+- GREEN: `_execute_chat` now rejects artifact feedback decisions before any
+  chat-owned lifecycle work.
+- Follow-up focused feedback tests exposed stale old-chat safe-error coverage;
+  those tests were moved to the direct endpoint, and missing direct ledger
+  error mappings were added.
+
+Focused verification after implementation:
+
+```text
+venv/bin/pytest -q tests/test_main.py -k "feedback"
+11 passed, 284 deselected, 1 warning
+```
+
+```text
+node --test tests/frontend/workspace-static.test.mjs
+22 passed
+```
+
+Remaining direct decoupling:
+
+- continuity selection still routes through `/api/chat` and depends on chat
+  submit readiness;
+- legacy schema/request-builder compatibility still allows parsing
+  `artifact_feedback_decision`, but `/api/chat` no longer executes it;
+- the internal artifact feedback executor remains covered by its unit tests but
+  is no longer the public chat route for feedback.
+
+Next proposed pass:
+
+- move continuity selection out of `/api/chat` and onto a direct
+  continuity-owned selection endpoint that records the selected server-owned
+  source without claiming or leasing a chat turn.
+
+Work deferred until core decoupling is complete:
+
+- remove legacy frontend request helpers and schema fields for retired chat
+  structured decisions after all direct lifecycle routes are in place;
+- broad manual end-to-end browser acceptance for every drawer action;
+- public receipt contract cleanup such as removing internal job ids from chat
+  queued action receipts;
+- larger worker/runtime architecture changes unrelated to direct lifecycle
+  ownership.

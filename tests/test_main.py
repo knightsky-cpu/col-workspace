@@ -9577,36 +9577,7 @@ async def test_artifact_responder_failure_releases_refreshed_claim_and_receipts(
 
 
 @pytest.mark.asyncio
-async def test_chat_requires_idempotency_key_for_artifact_feedback(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    response = await client.post(
-        "/api/chat",
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "I accept this blueprint boundary.",
-            "artifact_feedback_decision": {
-                "artifact_id": "blueprint-1",
-                "target_id": "target--0123456789abcdef01234567",
-                "decision": "accepted",
-                "feedback_text": "This boundary is correct.",
-                "expected_schema_version": "2.0",
-            },
-        },
-    )
-
-    assert response.status_code == 422
-    assert response.json() == {
-        "detail": "Artifact feedback requires an idempotency key."
-    }
-    assert service_state.events == []
-
-
-@pytest.mark.asyncio
-async def test_chat_completes_structured_artifact_feedback_turn(
+async def test_chat_rejects_artifact_feedback_without_claiming_turn(
     client: httpx.AsyncClient,
     service_state: ServiceState,
 ) -> None:
@@ -9617,41 +9588,42 @@ async def test_chat_completes_structured_artifact_feedback_turn(
         feedback_text="This boundary is correct.",
         expected_schema_version="2.0",
     )
-    claim = make_chat_turn_claim(artifact_feedback_decision=decision)
-    renewed_claim = replace(
-        claim,
-        lease_expires_at=MEMORY_NOW + timedelta(seconds=240),
-    )
-    action = AgentActionReceipt(
-        action_name="record_blueprint_feedback",
-        status="completed",
-    )
-    feedback = ArtifactFeedbackReference(
-        feedback_id=f"feedback--{claim.ids.turn_id}",
-        artifact_id="blueprint-1",
-        target_id="target--0123456789abcdef01234567",
-        target_kind="whole_blueprint",
-        decision="accepted",
-        schema_version="2.0",
-        created_at=MEMORY_NOW,
-    )
-    effect_claim = replace(
-        renewed_claim,
-        precompleted_actions=(action,),
-        precompleted_artifact_feedback=(feedback,),
-    )
-    service_state.database.chat_turn_result = claim
-    service_state.database.renewed_claim = renewed_claim
-    service_state.turn_service.turn_result = AgentColTurnResult(
-        response="I recorded your artifact feedback.",
-        actions=(action,),
-        artifact_feedback=(feedback,),
-        chat_turn_claim=effect_claim,
-    )
 
     response = await client.post(
         "/api/chat",
         headers={"Idempotency-Key": "artifact-feedback-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": "I accept this blueprint boundary.",
+            "artifact_feedback_decision": decision.model_dump(mode="json"),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Artifact feedback decisions must use the direct artifact feedback API."
+    }
+    assert service_state.events == []
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_rejects_artifact_feedback_even_without_idempotency_key(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    decision = ArtifactFeedbackDecisionRequest(
+        artifact_id="blueprint-1",
+        target_id="target--0123456789abcdef01234567",
+        decision="accepted",
+        feedback_text="This boundary is correct.",
+        expected_schema_version="2.0",
+    )
+    response = await client.post(
+        "/api/chat",
         json={
             "project_id": "project-1",
             "session_id": "session-1",
@@ -9661,20 +9633,12 @@ async def test_chat_completes_structured_artifact_feedback_turn(
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["actions"] == [action.model_dump(mode="json")]
-    assert response.json()["artifact_feedback"] == [
-        feedback.model_dump(mode="json")
-    ]
-    turn_request = service_state.database.claim_calls[0][0]
-    assert turn_request.artifact_feedback_decision == decision
-    command = service_state.turn_service.calls[0]
-    assert command.artifact_feedback_decision_present is True
-    assert command.chat_turn_claim is renewed_claim
-    assert service_state.database.complete_calls[0][0] is effect_claim
-    assert service_state.database.complete_calls[0][1].artifact_feedback == [
-        feedback
-    ]
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Artifact feedback decisions must use the direct artifact feedback API."
+    }
+    assert service_state.database.claim_calls == []
+    assert service_state.turn_service.calls == []
 
 
 @pytest.mark.asyncio
@@ -9735,66 +9699,6 @@ async def test_direct_artifact_feedback_does_not_use_chat_turn(
     ]
     assert service_state.database.claim_calls == []
     assert service_state.turn_service.calls == []
-    assert service_state.database.complete_calls == []
-
-
-@pytest.mark.asyncio
-async def test_feedback_responder_failure_returns_completed_receipt(
-    client: httpx.AsyncClient,
-    service_state: ServiceState,
-) -> None:
-    decision = ArtifactFeedbackDecisionRequest(
-        artifact_id="blueprint-1",
-        target_id="target--0123456789abcdef01234567",
-        decision="accepted",
-        feedback_text="This boundary is correct.",
-        expected_schema_version="2.0",
-    )
-    claim = make_chat_turn_claim(artifact_feedback_decision=decision)
-    action = AgentActionReceipt(
-        action_name="record_blueprint_feedback",
-        status="completed",
-    )
-    feedback = ArtifactFeedbackReference(
-        feedback_id=f"feedback--{claim.ids.turn_id}",
-        artifact_id="blueprint-1",
-        target_id="target--0123456789abcdef01234567",
-        target_kind="whole_blueprint",
-        decision="accepted",
-        schema_version="2.0",
-        created_at=MEMORY_NOW,
-    )
-    effect_claim = replace(
-        claim,
-        precompleted_actions=(action,),
-        precompleted_artifact_feedback=(feedback,),
-    )
-    service_state.database.chat_turn_result = claim
-    service_state.database.released_claim = effect_claim
-    service_state.turn_service.error = AgentColTurnResponderError(
-        "private responder failure",
-        actions=(action,),
-        artifact_feedback=(feedback,),
-        chat_turn_claim=effect_claim,
-    )
-
-    response = await client.post(
-        "/api/chat",
-        headers={"Idempotency-Key": "artifact-feedback-failure-key-1"},
-        json={
-            "project_id": "project-1",
-            "session_id": "session-1",
-            "user_id": "user-1",
-            "message": "New question",
-            "artifact_feedback_decision": decision.model_dump(mode="json"),
-        },
-    )
-
-    assert response.status_code == 502
-    assert response.json()["actions"] == [action.model_dump(mode="json")]
-    assert response.json()["artifact_feedback"] == [
-        feedback.model_dump(mode="json")
-    ]
     assert service_state.database.complete_calls == []
 
 
@@ -10137,25 +10041,17 @@ async def test_feedback_missing_target_returns_safe_not_found(
         feedback_text="This boundary is correct.",
         expected_schema_version="2.0",
     )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        artifact_feedback_decision=decision
+    service_state.artifact_feedback_service.error = (
+        ArtifactFeedbackTargetNotFoundError("private target locator")
     )
-    cause = ArtifactFeedbackTargetNotFoundError("private target locator")
-    error = AgentColTurnServiceError(
-        "Agent_Col artifact feedback execution failed."
-    )
-    error.__cause__ = cause
-    service_state.turn_service.error = error
 
     response = await client.post(
-        "/api/chat",
+        "/api/projects/project-1/blueprints/blueprint-1/feedback",
         headers={"Idempotency-Key": "artifact-feedback-missing-key-1"},
         json={
-            "project_id": "project-1",
             "session_id": "session-1",
             "user_id": "user-1",
-            "message": "New question",
-            "artifact_feedback_decision": decision.model_dump(mode="json"),
+            **decision.model_dump(mode="json"),
         },
     )
 
@@ -10178,25 +10074,17 @@ async def test_feedback_stale_schema_returns_safe_conflict(
         feedback_text="This boundary is correct.",
         expected_schema_version="2.0",
     )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        artifact_feedback_decision=decision
+    service_state.artifact_feedback_service.error = (
+        ArtifactFeedbackSchemaConflictError("private schema state")
     )
-    cause = ArtifactFeedbackSchemaConflictError("private schema state")
-    error = AgentColTurnServiceError(
-        "Agent_Col artifact feedback execution failed."
-    )
-    error.__cause__ = cause
-    service_state.turn_service.error = error
 
     response = await client.post(
-        "/api/chat",
+        "/api/projects/project-1/blueprints/blueprint-1/feedback",
         headers={"Idempotency-Key": "artifact-feedback-conflict-key-1"},
         json={
-            "project_id": "project-1",
             "session_id": "session-1",
             "user_id": "user-1",
-            "message": "New question",
-            "artifact_feedback_decision": decision.model_dump(mode="json"),
+            **decision.model_dump(mode="json"),
         },
     )
 
@@ -10219,25 +10107,17 @@ async def test_feedback_ledger_conflict_returns_safe_conflict(
         feedback_text="This boundary is correct.",
         expected_schema_version="2.0",
     )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        artifact_feedback_decision=decision
+    service_state.artifact_feedback_service.error = (
+        BlueprintFeedbackConflictError("private ledger state")
     )
-    cause = BlueprintFeedbackConflictError("private ledger state")
-    error = AgentColTurnServiceError(
-        "Agent_Col artifact feedback execution failed."
-    )
-    error.__cause__ = cause
-    service_state.turn_service.error = error
 
     response = await client.post(
-        "/api/chat",
+        "/api/projects/project-1/blueprints/blueprint-1/feedback",
         headers={"Idempotency-Key": "artifact-feedback-ledger-conflict-key-1"},
         json={
-            "project_id": "project-1",
             "session_id": "session-1",
             "user_id": "user-1",
-            "message": "New question",
-            "artifact_feedback_decision": decision.model_dump(mode="json"),
+            **decision.model_dump(mode="json"),
         },
     )
 
@@ -10260,30 +10140,22 @@ async def test_feedback_invalid_state_returns_safe_internal_error(
         feedback_text="This boundary is correct.",
         expected_schema_version="2.0",
     )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        artifact_feedback_decision=decision
+    service_state.artifact_feedback_service.error = (
+        ArtifactFeedbackStateError("private inconsistent receipt")
     )
-    cause = ArtifactFeedbackStateError("private inconsistent receipt")
-    error = AgentColTurnServiceError(
-        "Agent_Col artifact feedback execution failed."
-    )
-    error.__cause__ = cause
-    service_state.turn_service.error = error
 
     response = await client.post(
-        "/api/chat",
+        "/api/projects/project-1/blueprints/blueprint-1/feedback",
         headers={"Idempotency-Key": "artifact-feedback-state-key-1"},
         json={
-            "project_id": "project-1",
             "session_id": "session-1",
             "user_id": "user-1",
-            "message": "New question",
-            "artifact_feedback_decision": decision.model_dump(mode="json"),
+            **decision.model_dump(mode="json"),
         },
     )
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Artifact feedback state is invalid."}
+    assert response.json() == {"detail": "Stored artifact feedback is invalid."}
     assert "private inconsistent receipt" not in response.text
 
 
@@ -10299,30 +10171,22 @@ async def test_feedback_ledger_invalid_state_returns_safe_internal_error(
         feedback_text="This boundary is correct.",
         expected_schema_version="2.0",
     )
-    service_state.database.chat_turn_result = make_chat_turn_claim(
-        artifact_feedback_decision=decision
+    service_state.artifact_feedback_service.error = (
+        BlueprintFeedbackStateError("private ledger receipt")
     )
-    cause = BlueprintFeedbackStateError("private ledger receipt")
-    error = AgentColTurnServiceError(
-        "Agent_Col artifact feedback execution failed."
-    )
-    error.__cause__ = cause
-    service_state.turn_service.error = error
 
     response = await client.post(
-        "/api/chat",
+        "/api/projects/project-1/blueprints/blueprint-1/feedback",
         headers={"Idempotency-Key": "artifact-feedback-ledger-state-key-1"},
         json={
-            "project_id": "project-1",
             "session_id": "session-1",
             "user_id": "user-1",
-            "message": "New question",
-            "artifact_feedback_decision": decision.model_dump(mode="json"),
+            **decision.model_dump(mode="json"),
         },
     )
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Artifact feedback state is invalid."}
+    assert response.json() == {"detail": "Stored artifact feedback is invalid."}
     assert "private ledger receipt" not in response.text
 
 

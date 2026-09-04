@@ -4456,12 +4456,18 @@ async def record_blueprint_feedback(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Blueprint artifact or feedback target was not found.",
         ) from exc
-    except ArtifactFeedbackSchemaConflictError as exc:
+    except (
+        ArtifactFeedbackSchemaConflictError,
+        BlueprintFeedbackConflictError,
+    ) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Artifact feedback conflicts with the current artifact state.",
         ) from exc
-    except ArtifactFeedbackStateError as exc:
+    except (
+        ArtifactFeedbackStateError,
+        BlueprintFeedbackStateError,
+    ) as exc:
         logger.error(
             "Stored artifact feedback state is invalid (%s).",
             type(exc).__name__,
@@ -4536,6 +4542,15 @@ async def _execute_chat(
         supplied_project_id=payload.project_id,
         authorization_header=authorization,
     )
+    if payload.artifact_feedback_decision is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Artifact feedback decisions must use the direct artifact "
+                "feedback API."
+            ),
+        )
+
     if ordinary_only and _chat_request_requires_json(payload):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -4551,15 +4566,6 @@ async def _execute_chat(
             detail=(
                 "Google-authenticated chat requires an idempotency key."
             ),
-        )
-
-    if (
-        payload.artifact_feedback_decision is not None
-        and idempotency_key is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Artifact feedback requires an idempotency key.",
         )
 
     if (
