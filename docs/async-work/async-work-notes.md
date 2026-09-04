@@ -1690,6 +1690,82 @@ Work deferred until core decoupling is complete:
 - larger worker/runtime architecture changes unrelated to direct lifecycle
   ownership.
 
+## Read-Only Clarification-Selection Reachability Investigation
+
+This was a read-only investigation only. No source behavior was changed.
+
+Investigation result:
+
+- the legacy natural Memory clarification-selection branch in
+  `TrustedMemoryService.handle_natural_memory_decision` is still reachable from
+  an active responder/tool path;
+- it is no longer reachable with a valid `ProposalTurnLease`, because the
+  responder memory tool context no longer carries chat-turn ids or owner tokens;
+- this is active remaining chat/responder coupling, not deferred dead-code
+  cleanup.
+
+Exact live responder/tool path:
+
+1. An ordinary chat request reaches `/api/chat/stream` or `/api/chat`.
+2. `main.py` builds an `AgentColTurnCommand` and calls the turn service.
+3. `SupervisorRuntime.run_turn` creates ADK session state with Memory context,
+   but no longer exposes `memory_turn_id` or `memory_turn_owner_token`.
+4. `agent_col_responder.py` and `supervisor.py` still instruct the model that
+   when the user answers a prior Memory clarification, it should call
+   `propose_memory_signal` with `clarification_selection`.
+5. `memory_proposal_tool.py::propose_memory_signal(...)` still accepts
+   `clarification_selection`.
+6. `_server_context()` returns `turn_lease=None`.
+7. `_server_command()` builds
+   `NaturalMemoryCommand(..., clarification_selection=..., turn_lease=None)`.
+8. `TrustedMemoryService.handle_natural_memory_decision()` enters its
+   `command.clarification_selection is not None` branch and raises
+   `ValueError("A clarification selection requires retry-safe turn ownership.")`.
+9. The tool catches that `ValueError` and returns
+   `{"status": "rejected", "error_code": "invalid_memory_candidate"}`.
+
+Separate deferred compatibility cleanup:
+
+- the legacy structured `/api/chat` `memory_clarification_selection` path still
+  exists in backend code and tests;
+- current frontend click behavior does not use that path: `frontend/app.mjs`
+  calls the direct `selectMemoryClarification(...)` wrapper, and
+  `frontend/requests.mjs::selectChatEndpoint()` no longer routes
+  `memory_clarification_selection` to `/api/chat`;
+- keep the structured `/api/chat` compatibility path separate and deferred
+  unless later source inspection proves it is still part of an active live
+  dependency.
+
+Current active decoupling focus:
+
+- retire the responder/tool natural clarification-selection path so the direct
+  Memory clarification API is the only active selection lifecycle;
+- preserve already-direct selection through
+  `/api/users/{user_id}/projects/{project_id}/memory/clarifications/{clarification_id}/select`;
+- preserve Memory governance, duplicate suppression, mixed-intent routing, and
+  source-message provenance from the prior completed pass;
+- do not start structured-decision cleanup yet.
+
+Next proposed pass:
+
+- remove responder/supervisor instructions that advertise
+  `clarification_selection` through `propose_memory_signal`;
+- make `memory_proposal_tool.py` reject or ignore `clarification_selection`
+  before it can call `TrustedMemoryService.handle_natural_memory_decision`;
+- add focused RED tests proving the responder/tool path no longer calls the
+  natural service branch for clarification selection and that direct selection
+  remains the active lifecycle;
+- update this notes file after implementation, then checkpoint.
+
+Resume notes for the next machine:
+
+- start from clean `main` after the documentation checkpoint;
+- do not implement this pass until explicitly approved again;
+- inspect current source before editing in case another machine has changed the
+  branch;
+- keep the legacy structured `/api/chat` clarification-selection cleanup
+  separate unless live source inspection proves it belongs in the same pass.
+
 ## Responder Memory/Note Owner-Token And Clarification Creation Decoupling Pass
 
 This pass removed the remaining live responder owner-token dependency for
