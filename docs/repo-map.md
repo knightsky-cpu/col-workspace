@@ -1,6 +1,6 @@
 # Repository Map
 
-This map was re-derived from the repository source and tests on 2026-09-02.
+This map was re-derived from the repository source and tests on 2026-09-05.
 Treat historical plans under `docs/legacy/` as implementation history, not as
 authority for current behavior.
 
@@ -24,6 +24,10 @@ authority for current behavior.
   users, workspaces, governed memory, memory clarifications, collaborative
   notes, preference-learning records, blueprints, generic artifacts, artifact
   feedback, and working state.
+- `agent_col_agent_jobs.py`, `agent_job_payloads.py`,
+  `agent_job_repository.py`, `agent_job_worker_heartbeat.py`: Firestore-backed
+  AgentJob models, private payload records, repository transitions, leases,
+  retry/cancel support, events, reports, and worker heartbeat helpers.
 - `auth.py`: local development auth and Google OIDC verification helpers. On
   Cloud Run, `K_SERVICE` requires `AGENT_COL_AUTH_MODE=google_oidc` and a Google
   OAuth client ID.
@@ -34,7 +38,8 @@ authority for current behavior.
   the repository, runs as `appuser`, and starts `uvicorn main:app` on
   `${PORT:-8080}`.
 - `requirements.txt`: runtime dependencies: FastAPI, Google ADK, Google Cloud
-  Firestore, Google GenAI SDK, Pydantic, python-dotenv, and Uvicorn.
+  Firestore, Google Cloud Speech-to-Text, Google Cloud Text-to-Speech, Google
+  GenAI SDK, Pydantic, python-dotenv, and Uvicorn.
 - `requirements-dev.txt`: test/runtime development dependencies layered on
   `requirements.txt`.
 - `firestore.indexes.json`: Firestore index configuration; currently disables
@@ -95,7 +100,7 @@ Runtime composition details:
 
 ### Public HTTP Surface
 
-Current route handlers in `main.py` expose 46 active decorated HTTP routes.
+Current route handlers in `main.py` expose 48 active decorated HTTP routes.
 This table is derived from the active FastAPI decorators and handler
 annotations, not from historical route inventories. `/static/agent-col` is
 documented below as a `StaticFiles` mount rather than as a decorated API route.
@@ -107,7 +112,7 @@ documented below as a `StaticFiles` mount rather than as a decorated API route.
 | `GET` | `/` | Shallow service health check. | N/A. Plain GET. | `dict[str, str]` containing `{"status": "online"}`. | Public route; no principal resolution. | N/A. | `health_check`. | Only proves the FastAPI process can answer. It does not prove Firestore, Vertex AI, Gemini, or ADK access. |
 | `GET` | `/api/auth/config` | Report browser auth configuration. | N/A. Plain GET. | `dict[str, object]` with auth contract version, mode, public Google client ID, sign-in requirement, and local-dev flag. | Public route; reads configured auth mode. | N/A. | `auth_config`; `Authenticator` settings. | Exposes only browser-safe auth settings, not secrets. |
 | `POST` | `/api/speech/transcribe` | Transcribe uploaded speech audio. | Raw request body; supported audio `Content-Type`; optional `Authorization` header. | `dict[str, str]` with transcript text. | Requires a valid session in the configured auth mode. | Principal-scoped request; no path user/project locator. | `speech_transcribe`; speech transcription service. | Empty audio returns `400`; unsupported media returns `415`; provider/config failures return bounded `5xx`. |
-| `POST` | `/api/users/{user_id}/speech/synthesize` | Synthesize speech for the latest completed model message in a session. | Path `user_id`; body `SpeechSynthesizeRequest`. | `Response` with synthesized audio bytes and provider content type. | Resolves `{user_id}` and body project locator through auth. | Effective user/project/session scope. | `speech_synthesize`; `MemoryEngine.get_completed_model_message`; speech synthesis service. | Does not accept arbitrary text; it reads the last completed model message for the resolved session. |
+| `POST` | `/api/users/{user_id}/speech/synthesize` | Synthesize speech for a completed assistant message in a session. | Path `user_id`; body `SpeechSynthesizeRequest`. | `Response` with synthesized audio bytes, provider content type, and speech chunk headers. | Resolves `{user_id}` and body project locator through auth. | Effective user/project/session/message scope. | `speech_synthesize`; `MemoryEngine.get_completed_model_message`; speech synthesis service. | Does not accept arbitrary text; it reads the completed model message identified by session/message locators and rejects missing, non-owned, or incomplete messages. |
 | `GET` | `/api/auth/session` | Project the current local-dev or Google OIDC session. | Optional `Authorization: Bearer ...` header. | `principal.public_dict()`. | `local_dev` returns a local-development principal without a bearer token. `google_oidc` requires and verifies a Google ID token. | Google mode resolves the opaque public user locator from the verified Google subject; path/body IDs are not involved. | `auth_session`; `Authenticator.session`. | Missing Google bearer token returns `401`; invalid token returns `403`; auth configuration failure returns `500`. |
 | `GET` | `/api/users/{user_id}/memory` | Inspect governed memory profile, unresolved proposals, clarifications, and events. | Path `user_id`; optional `after_event_id` query cursor. | `MemoryInspectionResponse`. | Resolves `{user_id}` with `_resolve_effective_user_id`. `local_dev` accepts the supplied locator; `google_oidc` requires the public locator to match the verified subject. | Effective internal user ID is authoritative; supplied user ID is only a locator in Google mode. | `inspect_memory`; `TrustedMemoryService.inspect_memory`. | Invalid event cursor returns `404`; storage failures map to bounded `500` errors. |
 | `GET` | `/api/users/{user_id}/workspaces` | List visible workspaces for a user. | Path `user_id`; `limit` query. | `WorkspaceListResponse`. | Resolves `{user_id}` and request workspace defaults. | User-scoped. Google mode derives subject-owned default workspace/project identifiers. | `list_user_workspaces`; `MemoryEngine.list_workspaces`. | Synthesizes/defaults the current workspace projection when needed unless the default workspace has been deleted. |
@@ -129,8 +134,10 @@ documented below as a `StaticFiles` mount rather than as a decorated API route.
 | `GET` | `/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}` | Load one AgentJob by raw internal job ID. | Path `user_id`, `project_id`, raw `job_id`. | `AgentJobDetailResponse`. | Resolves `{user_id}` and `{project_id}`. | Effective user/workspace-project scope; job lookup uses raw `job_id`. | `get_agent_job`; `AgentJobRepository.get_job`. | Contrasts with list projections: this route still requires raw `job_id`; there is no public `job_ref` resolver in this route. |
 | `GET` | `/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}/events` | List public-visible events for one AgentJob. | Path `user_id`, `project_id`, raw `job_id`; `limit`. | `AgentJobEventListResponse`. | Resolves `{user_id}` and `{project_id}`. | Effective user/workspace-project scope; event lookup uses raw `job_id`. | `list_agent_job_events`; `AgentJobRepository.list_events`. | Filters to `public_visibility` events and assigns public ordinals. |
 | `POST` | `/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}/cancel` | Request persisted cancellation of one AgentJob. | Path `user_id`, `project_id`, raw `job_id`; no request body. | `AgentJobDetailResponse`. | Resolves `{user_id}` and `{project_id}`. | Effective user/workspace-project scope; mutation uses raw `job_id`. | `cancel_agent_job`; `AgentJobRepository.cancel_job`. | Mutates persisted job status; current source does not cancel an already-created in-process asyncio worker task. |
-| `POST` | `/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}/retry` | Create a queued retry job record from a failed AgentJob. | Path `user_id`, `project_id`, raw `job_id`; required `Idempotency-Key` header. | `AgentJobDetailResponse`. | Validates idempotency key, then resolves `{user_id}` and `{project_id}`. | Effective user/workspace-project scope; retry lookup uses raw `job_id`. | `retry_agent_job`; `AgentJobRepository.retry_job`. | Current route creates a retry job document; source does not clone private payload or dispatch a worker from this path. |
+| `POST` | `/api/users/{user_id}/projects/{project_id}/agent/jobs/{job_id}/retry` | Create and dispatch a queued retry job record from a failed retryable AgentJob. | Path `user_id`, `project_id`, raw `job_id`; required `Idempotency-Key` header. | `AgentJobDetailResponse`. | Validates idempotency key, then resolves `{user_id}` and `{project_id}`. | Effective user/workspace-project scope; retry lookup uses raw `job_id`. | `retry_agent_job`; `AgentJobRepository.retry_job`; `_dispatch_retry_agent_job`. | Clones the private payload to the retry job, increments attempt count, requires retryable failed source state, and dispatches the retry through the registered process-local dispatcher when available. |
 | `POST` | `/api/users/{user_id}/memory/proposals/{proposal_id}/{decision}` | Approve or reject a governed-memory proposal through the direct Memory API. | Path `user_id`, `proposal_id`, `decision` where decision is `approve` or `reject`; no request body. | `MemoryMutationResponse`. | Resolves `{user_id}` with `_resolve_effective_user_id`. | Effective user scope; proposal must belong to the resolved user. | `decide_memory_proposal`; `TrustedMemoryService.decide_memory_proposal`. | Direct memory decision path independent of active chat; expired proposals return `410`, conflicts return `409`. |
+| `POST` | `/api/users/{user_id}/projects/{project_id}/continuity/choices/{choice_id}/select` | Select one direct continuity choice. | Path `user_id`, `project_id`, `choice_id`; body `DirectContinuitySelectionRequest`; required `Idempotency-Key` header. | `ContinuitySelectionResponse`. | Validates idempotency key, then resolves `{user_id}` and `{project_id}`. | Effective user/workspace-project/session scope. | `select_continuity_choice`; `ContinuityService.resolve`; `MemoryEngine.record_continuity_selection`. | Direct continuity path independent of `/api/chat`; records resolved continuity receipts against the session and returns `409` if the selected choice cannot resolve. |
+| `POST` | `/api/users/{user_id}/projects/{project_id}/memory/clarifications/{clarification_id}/select` | Select a memory clarification candidate through the direct Memory API. | Path `user_id`, `project_id`, `clarification_id`; body `DirectMemoryClarificationSelectionRequest`; required `Idempotency-Key` header. | `MemoryClarificationSelectionResponse`. | Validates idempotency key, then resolves `{user_id}` and `{project_id}`. | Effective user/workspace-project/session scope; selection targets a durable clarification envelope. | `select_memory_clarification`; `TrustedMemoryService.select_memory_clarification`. | Direct clarification path independent of active chat; may return no effect or a memory proposal, and conflicts/invalid state map to bounded HTTP errors. |
 | `POST` | `/api/users/{user_id}/memory/signals/{signal_id}/revoke` | Revoke an active governed-memory signal. | Path `user_id`, `signal_id`; no request body. | `MemoryMutationResponse`. | Resolves `{user_id}` with `_resolve_effective_user_id`. | Effective user scope; memory service validates the signal locator under the resolved user. | `revoke_memory_signal`; `TrustedMemoryService.revoke_memory_signal`. | Writes revocation event/profile update; missing signal returns `404`; lifecycle conflict returns `409`. |
 | `DELETE` | `/api/users/{user_id}/memory/signals/{signal_id}` | Hard-delete a governed-memory signal/provenance chain. | Path `user_id`, `signal_id`; no request body. | `204 No Content`. | Resolves `{user_id}` with `_resolve_effective_user_id`. | Effective user scope; memory service validates the signal locator under the resolved user. | `delete_memory_signal`; `TrustedMemoryService.delete_memory_signal`. | Destructive operation; validation errors return `422`; storage failures are bounded. |
 | `POST` | `/api/synthesize` | Generate and persist a blueprint artifact from source text. | Body `SynthesisRequest`. | `SynthesisResponse`. | Resolves `payload.user_id` and `payload.project_id`. | User/project scope from authenticated context; body IDs are locators, not authority, in Google mode. | `synthesize`; `SynthesisApplicationService.synthesize`. | Request-bound generation; synthesis timeout returns `504`; provider/service failure returns `502`. |
@@ -146,8 +153,8 @@ documented below as a `StaticFiles` mount rather than as a decorated API route.
 | `POST` | `/api/projects/{project_id}/artifacts/{artifact_id}/versions` | Create a child version of a generic artifact. | Path `project_id`, `artifact_id`; body `SingleFileArtifactEditRequest`. | `SingleFileArtifactCreateResponse`. | Resolves `payload.user_id` and path `project_id`. | Effective user/project scope; parent artifact is located under the effective project. | `create_generic_artifact_version`; `GenericArtifactReadService.create_artifact_version`. | Creates a new version linked to the parent artifact; generation/storage failures are bounded. |
 | `GET` | `/api/projects/{project_id}/blueprints/{blueprint_id}/feedback` | List feedback for one blueprint artifact. | Path `project_id`, `blueprint_id`; query `limit`, `before`. | `BlueprintArtifactFeedbackListResponse`. | Resolves `{project_id}` with `_resolve_effective_project_id`. | Project scope; feedback is listed under the effective project and blueprint. | `list_blueprint_feedback`; `ArtifactFeedbackService.list_feedback`. | Missing blueprint/cursor returns `404`; invalid stored feedback maps to bounded `500`. |
 | `POST` | `/api/projects/{project_id}/blueprints/{blueprint_id}/feedback` | Record direct artifact feedback for one blueprint artifact. | Path `project_id`, `blueprint_id`; body `ArtifactFeedbackRecordRequest`; required `Idempotency-Key` header. | `BlueprintArtifactFeedbackRecordResponse`. | Validates idempotency key, resolves path project, and resolves body user locator. | Effective user/project/session scope; path blueprint must match body artifact ID. | `record_blueprint_feedback`; `ArtifactFeedbackService.record_feedback`. | Direct feedback API independent of active chat; malformed artifact/body mismatch returns `422`; conflicts return `409`. |
-| `POST` | `/api/chat` | Canonical JSON chat path for ordinary chat and structured decision turns. | Body `ChatRequest`; `Idempotency-Key` header is optional for ordinary local-dev turns, required in Google OIDC, and required for structured/effect decisions. | `ChatResponse`; typed partial-failure/error JSON when implemented failure branches preserve completed effects. | Resolves `payload.user_id` and `payload.project_id`; Google mode verifies the bearer token and requires subject-owned locators. | Effective user/project/session scope. `_ensure_visible_workspace_for_chat` checks workspace visibility before execution; supplied IDs are locators, not authority, in Google mode. | `chat`; `_execute_chat`; `AgentColTurnService.run_turn`. | Handles ordinary chat plus memory decisions, memory clarification selections, collaborative-note decisions, continuity selections, and artifact-feedback decisions. Claims/replays/resumes durable idempotent turns, routes through v3/v4, executes specialists/tools, persists canonical messages/effects, and returns the authoritative validated response. |
-| `POST` | `/api/chat/stream` | SSE transport for ordinary conversational chat turns only. | Body `ChatRequest`; same idempotency header rules as `/api/chat`; response transport is `text/event-stream`. | SSE `delta`, `final`, and `error` events; `final` carries a validated `ChatResponse`. | Same user/project/session/workspace boundary as `/api/chat`, then `_execute_chat(..., ordinary_only=True)`. | Same effective user/project/session scope as `/api/chat`. Structured decision payload fields are rejected on this endpoint. | `chat_stream`; `_execute_chat`; `AgentColTurnService.stream_turn`; `StreamingResponse`. | Streamed `delta` events are provisional and not independently durable truth. Structured decisions return `409` with `Structured chat decisions must use /api/chat.` The `final` event is the authoritative response projection. |
+| `POST` | `/api/chat` | Canonical JSON chat path for ordinary non-streaming chat; legacy structured decision payloads are rejected in favor of direct APIs. | Body `ChatRequest`; `Idempotency-Key` header is optional for ordinary local-dev turns and required in Google OIDC. | `ChatResponse`; typed partial-failure/error JSON when implemented failure branches preserve completed effects. | Resolves `payload.user_id` and `payload.project_id`; Google mode verifies the bearer token and requires subject-owned locators. | Effective user/project/session scope. `_ensure_visible_workspace_for_chat` checks workspace visibility before execution; supplied IDs are locators, not authority, in Google mode. | `chat`; `_execute_chat`; `AgentColTurnService.run_turn`. | Rejects artifact feedback, continuity selection, memory proposal decision, memory clarification selection, and collaborative-note decision payloads with direct-API guidance. For ordinary chat it claims/replays/resumes durable idempotent turns, routes through v3/v4, executes specialists/tools, persists canonical messages/effects, and returns the authoritative validated response. |
+| `POST` | `/api/chat/stream` | SSE transport for ordinary conversational chat turns only. | Body `ChatRequest`; same idempotency header rules as `/api/chat`; response transport is `text/event-stream`. | SSE `delta`, `final`, and `error` events; `final` carries a validated `ChatResponse`. | Same user/project/session/workspace boundary as `/api/chat`, then `_execute_chat(..., ordinary_only=True)`. | Same effective user/project/session scope as `/api/chat`. Structured decision payload fields are rejected on this endpoint. | `chat_stream`; `_execute_chat`; `AgentColTurnService.stream_turn`; `StreamingResponse`. | Streamed `delta` events are provisional and not independently durable truth. Structured decision fields return `409` with direct-API guidance before ordinary streaming begins. The `final` event is the authoritative response projection. |
 
 Route families and transport boundaries:
 
@@ -158,7 +165,12 @@ Route families and transport boundaries:
 - `/api/users/{user_id}/projects/{project_id}/notes/*` endpoints are
   workspace-scoped collaborative-note read/proposal/lifecycle endpoints.
 - `/api/users/{user_id}/memory/*` endpoints expose governed-memory inspection
-  and destructive signal actions for the resolved effective user.
+  and governed proposal/signal actions for the resolved effective user.
+- `/api/users/{user_id}/projects/{project_id}/memory/clarifications/*`
+  endpoints select durable memory clarification candidates independently of
+  active chat turns.
+- `/api/users/{user_id}/projects/{project_id}/continuity/choices/*` endpoints
+  select resolved continuity choices independently of active chat turns.
 - `/api/users/{user_id}/projects/{project_id}/agent/*` endpoints expose
   AgentJob list, short SSE snapshots, reports, detail, events, cancel, and
   retry surfaces for the resolved workspace/project.
@@ -169,8 +181,11 @@ Route families and transport boundaries:
   single-file artifact read/create/lifecycle/metadata/versioning surfaces.
 - `/api/synthesize` is a request-bound blueprint generation endpoint separate
   from chat-routed artifact creation.
-- `/api/chat` is the canonical JSON path for ordinary turns and all structured
-  decisions. `/api/chat/stream` is SSE for ordinary conversational turns only.
+- `/api/chat` is the canonical JSON path for ordinary non-streaming turns.
+  Structured decision payloads are legacy-compatible request fields but current
+  source rejects them and directs clients to the direct Memory, Notes,
+  continuity, or artifact-feedback APIs. `/api/chat/stream` is SSE for
+  ordinary conversational turns only.
 - `/static/agent-col` is mounted with `StaticFiles(directory="frontend")`; it
   is public static serving, not a decorated API route.
 
@@ -209,29 +224,32 @@ or migration coverage. They are not the primary production path imported by
 
 ### Chat-Turn Lifecycle
 
-The production chat lifecycle is owned by `_execute_chat` in `main.py` and
-`AgentColTurnService`.
+The production ordinary-chat lifecycle is owned by `_execute_chat` in `main.py`
+and `AgentColTurnService`. Direct governance decisions now live on their
+resource APIs; the `ChatRequest` structured-decision fields remain in schemas
+for compatibility but current source rejects them from `/api/chat` and
+`/api/chat/stream`.
 
 1. The handler resolves the effective user ID and project ID from the supplied
    `ChatRequest` locators plus the configured auth mode.
-2. Structured decision requests are detected before streaming starts. If the
-   caller used `/api/chat/stream`, the request is rejected with `409`.
-3. Google OIDC chat requires an `Idempotency-Key`. Structured/effect decisions
-   also require an idempotency key because they can mutate governed state.
+2. Structured decision request fields are rejected before streaming starts with
+   direct-API guidance for Memory proposal decisions, Memory clarification
+   selections, collaborative-note decisions, continuity selections, and
+   artifact-feedback decisions.
+3. Google OIDC chat requires an `Idempotency-Key`.
 4. When an idempotency key is present, the backend validates the key, verifies
    workspace visibility for the effective user/project, and claims or replays a
    durable chat turn through `MemoryEngine.claim_chat_turn`.
-5. Pre-flight structured decisions can approve/reject governed memory,
-   resolve memory clarifications, resolve continuity choices, approve/reject
-   collaborative-note proposals, or submit artifact feedback decisions before
-   the ordinary response is generated.
+5. Ordinary-chat preflight can still enqueue deterministic memory
+   clarification/proposal work when the bounded memory classifier identifies an
+   explicit memory creation clause. Other governed decisions are no longer
+   chat-owned.
 6. The backend loads validated chat history, governed memory context,
    continuity context, and hidden working-state context. These inputs are
    server-owned context, not authority for identity or ownership.
 7. `AgentColTurnService` constructs a turn command. Claimed/idempotent turns
    with artifact-capable routing use the v4 provider; claimless local-dev turns
-   remain v3-routed. Structured artifact feedback bypasses ordinary model
-   routing and executes through the feedback path.
+   remain v3-routed.
 8. `/api/chat` waits for `run_turn`; `/api/chat/stream` iterates
    `stream_turn`, emits provisional `delta` events, and waits for
    `AgentColTurnCompleted`.
@@ -255,9 +273,10 @@ Reliability behavior in this lifecycle:
 - Live in-progress turns return conflict behavior with retry guidance.
 - Expired/resumable turns can carry precompleted effects forward.
 - Queue-first acceptance is intentionally narrow: claimed turns can accept
-  explicit blueprint-artifact directives and explicit workspace-note requests
-  before ordinary model routing. It does not deterministically queue arbitrary
-  artifacts, memory, or general actions before routing.
+  explicit blueprint-artifact directives, explicit workspace-note requests, and
+  deterministic explicit memory/clarification work before ordinary model
+  routing. It does not deterministically queue arbitrary artifacts, memory, or
+  general actions before routing.
 - Timeout and service-error branches attempt to release or complete turn claims
   safely and can return typed partial-failure payloads when effects were already
   persisted or when a pre-routing queued receipt was durably accepted.
@@ -291,8 +310,12 @@ Reliability behavior in this lifecycle:
   projections.
 - Current worker execution is process-local. Artifact, collaborative-note, and
   profile-memory proposal jobs are scheduled with `asyncio.create_task` from
-  the accepting process; source inspection did not find a startup drain,
-  external queue consumer, or expired-running reclaim worker.
+  the accepting FastAPI process.
+- Lifespan startup runs `_drain_queued_agent_jobs`, which recovers expired
+  running jobs and dispatches queued jobs for registered action kinds. Runtime
+  also starts `_run_queued_agent_job_drain_loop`, a process-local polling drain
+  loop for queued/expired work. Source inspection did not find an external
+  Cloud Tasks/Pub/Sub/private-worker consumer.
 - `job_ref` is a deterministic public projection derived from the raw job ID
   for list/report projections. Raw `job_id` is not fully private today:
   `QueuedActionReceipt` carries `job_id`, and the detail/events/cancel/retry
@@ -303,9 +326,10 @@ Reliability behavior in this lifecycle:
   normal UI paths do not use the raw-ID detail/events/cancel/retry routes.
 - Cancel mutates persisted job status but does not cancel an already-running
   in-process asyncio task.
-- Retry creates a queued job document from the failed job and requires an
-  idempotency key; current source does not clone the private payload or dispatch
-  a worker from the retry route.
+- Retry requires an idempotency key, requires a failed retryable source job,
+  clones the source private payload to the retry job, increments
+  `attempt_count`, and dispatches the retry through the registered process-local
+  dispatcher when one exists.
 - Worker failures currently mark jobs as non-retryable. Terminal status,
   terminal event, and report writes are separate persistence operations.
 
@@ -344,9 +368,11 @@ Specialist execution boundary:
 
 - `trusted_memory_service.py`: governed memory lifecycle service.
 - `memory_policy.py`, `memory_proposals.py`, `memory_proposal_tool.py`,
+  `memory_proposal_exclusions.py`,
   `memory_candidate_decisions.py`, `memory_candidate_normalization.py`,
   `memory_clarifications.py`, `memory_context.py`: memory policy, proposal,
-  clarification, projection, and model-context helpers.
+  deterministic proposal eligibility, clarification, projection, and
+  model-context helpers.
 - `collaborative_notes.py`, `collaborative_note_policy.py`,
   `collaborative_note_candidates.py`, `collaborative_note_service.py`,
   `collaborative_note_tool.py`: collaborative note models, validation, proposal
@@ -362,13 +388,24 @@ Governed-memory lifecycle:
 
 - Memory proposal generation is governed by `memory_policy.py` and normalized
   by candidate/proposal helpers before it can become user-visible.
+- `memory_proposal_exclusions.py` is the shared deterministic eligibility
+  boundary for user-requested memory proposal candidates. It excludes
+  retrieval/history-only clauses, social/phatic-only clauses,
+  external-topic/assistant-opinion/informational inquiry-only clauses, and
+  narrowly defined current-turn-only requests. After those exclusions, it uses
+  a low user/future-collaboration context floor rather than a memory-worthiness
+  score.
+- The same eligibility boundary is used by the deterministic turn-service
+  fallback and by `memory_proposal_tool.py` before raw model-proposed memory
+  evidence can enqueue an AgentJob. This prevents model tool calls from
+  bypassing deterministic non-memory exclusions.
 - Natural chat can surface proposals or clarification choices, but active
   memory changes require explicit user approval or clarified selection.
 - Profile-memory proposal work can be queued as background-owned AgentJob work.
   Non-profile memory decisions may still execute synchronously in the request
-  path. Approval/rejection decisions can use direct Memory API routes or
-  structured chat turns through `/api/chat`, not free-form text handled by the
-  streaming endpoint.
+  path. Approval/rejection decisions use the direct Memory API, and
+  clarification selections use the direct memory-clarification route; current
+  `/api/chat` rejects these structured decision payloads.
 - Revocation and deletion are explicit HTTP mutations under
   `/api/users/{user_id}/memory/signals/{signal_id}`.
 - Memory inspection projects active profile state, unresolved proposals,
@@ -384,16 +421,15 @@ Collaborative-note lifecycle:
   work through the turn service when the production queue dependencies are
   wired. The synchronous collaborative-note tool path remains as fallback when
   queue wiring is unavailable.
-- Note approve/reject decisions can use the direct Notes API or structured chat
-  turns through `/api/chat`.
+- Note approve/reject decisions use the direct Notes API. Current `/api/chat`
+  rejects collaborative-note decision payloads with direct-API guidance.
 - Archive, restore, and delete are HTTP lifecycle operations protected by the
   expected revision in `CollaborativeNoteMutationRequest`.
 - Note list/detail responses include public owner projection and event
   provenance suitable for the browser notes drawer.
-- Current lifespan shutdown cleanup cancels/gathers artifact, memory, and
-  working-state task sets. The collaborative-note task set is created during
-  startup but source inspection found it is not stored on `app.state` for the
-  same shutdown cleanup path.
+- Current lifespan shutdown cleanup cancels/gathers artifact, memory,
+  collaborative-note, working-state, and queued-AgentJob drain tasks stored on
+  `app.state`.
 
 Continuity behavior:
 
@@ -461,8 +497,10 @@ Artifact lifecycle details:
   `GenericArtifactReadService`.
 - Generic artifact versions are new artifact records linked to a parent
   artifact, not in-place overwrites.
-- Artifact feedback is project/blueprint-scoped. Feedback can be submitted
-  through chat decisions and listed through the blueprint feedback endpoint.
+- Artifact feedback is project/blueprint-scoped. Feedback is submitted through
+  the direct blueprint feedback endpoint and listed through the blueprint
+  feedback endpoint; current `/api/chat` rejects artifact-feedback decision
+  payloads with direct-API guidance.
 - Direct `/api/synthesize` and direct generic artifact creation are
   request-bound GenAI generation paths. Chat-routed blueprint artifact work is
   background-owned after queue acceptance; there is no separate public
@@ -578,11 +616,12 @@ frontend package manager, bundler, or build step in this repository.
 | --- | --- | --- |
 | `frontend/auth-view.mjs`, `frontend/api.mjs` auth helpers | `/api/auth/config`, `/api/auth/session` | Loads auth mode, renders Google Sign-In when required, and maps session context to public user/project/workspace locators. |
 | Workspace panel in `frontend/app.mjs` and workspace view modules | `/api/users/{user_id}/workspaces` | Lists, creates, deletes, and switches visible workspaces; switching resets scoped conversation/panel state. |
-| Chat submit/retry in `frontend/app.mjs` | `/api/chat` or `/api/chat/stream` selected by `frontend/requests.mjs` | Ordinary chat uses SSE streaming; structured decisions and retries with structured payloads use canonical JSON. Retry preserves the saved request and idempotency key. |
+| Chat submit/retry in `frontend/app.mjs` | `/api/chat` or `/api/chat/stream` selected by `frontend/requests.mjs` | Ordinary chat uses SSE streaming; non-streaming ordinary requests can use canonical JSON. Legacy structured request fields still force JSON selection in `frontend/requests.mjs`, but current backend source rejects those fields in favor of direct APIs. Retry preserves the saved request and idempotency key. |
 | Chat transcript in `frontend/chat-view.mjs` and `frontend/state.mjs` | `/api/users/{user_id}/projects/{project_id}/chat-sessions` | Lists and loads durable chat sessions and rebuilds transcript state from stored messages/receipts. |
-| Memory drawer in `frontend/memory-view.mjs` | `/api/users/{user_id}/memory`, memory signal revoke/delete routes, structured `/api/chat` decisions | Displays active memory/proposals/events; revoke/delete call direct HTTP mutations; approve/reject/clarification selections use structured chat. |
-| Notes drawer in `frontend/notes-view.mjs` | `/api/users/{user_id}/projects/{project_id}/notes/*`, structured `/api/chat` decisions | Lists notes, loads detail/events, creates proposals/corrections, applies archive/restore/delete, and routes proposal decisions through JSON chat. |
-| Work/artifacts surface in `frontend/work-view.mjs` | `/api/projects/{project_id}/blueprints/*`, `/api/projects/{project_id}/artifacts/*` | Lists blueprint and generic artifacts, loads details, creates generic artifacts, archives/restores/deletes generic artifacts, edits metadata, creates versions, exports content, and lists blueprint feedback. |
+| Memory drawer in `frontend/memory-view.mjs` | `/api/users/{user_id}/memory`, `/api/users/{user_id}/memory/proposals/*`, memory clarification select, memory signal revoke/delete routes | Displays active memory/proposals/events; approve/reject, clarification selections, revoke, and delete call direct HTTP mutations and then refresh Memory plus AgentJob data. |
+| Notes drawer in `frontend/notes-view.mjs` | `/api/users/{user_id}/projects/{project_id}/notes/*` | Lists notes, loads detail/events, creates proposals/corrections, applies archive/restore/delete, and routes proposal decisions through the direct Notes API. |
+| Work/artifacts surface in `frontend/work-view.mjs` | `/api/projects/{project_id}/blueprints/*`, `/api/projects/{project_id}/artifacts/*` | Lists blueprint and generic artifacts, loads details, creates generic artifacts, archives/restores/deletes generic artifacts, edits metadata, creates versions, exports content, lists blueprint feedback, and records blueprint feedback through the direct feedback API. |
+| Continuity choices in `frontend/chat-view.mjs` and `frontend/app.mjs` | `/api/users/{user_id}/projects/{project_id}/continuity/choices/{choice_id}/select` | Renders ambiguity choices returned by chat, submits the selected source through the direct continuity API, records the receipt server-side, and refreshes chat sessions. |
 | Activity and receipts rendering | Primarily `/api/chat` and `/api/chat/stream` response receipts | Refreshes affected panels after authoritative receipts arrive from the backend. |
 
 Frontend trust and rendering:
@@ -593,15 +632,14 @@ Frontend trust and rendering:
   payloads mutually exclusive before transport selection.
 - `frontend/state.mjs` treats streamed deltas as pending UI state; final server
   responses and refreshed resource fetches are authoritative.
-- Normal UI paths for Memory decisions, Note decisions, artifact feedback, Work
-  lifecycle, Agents, and authoritative panel refreshes use direct APIs and do
-  not depend on active chat submission/completion. Legacy structured
-  `ChatRequest` support remains for backend chat decision routes.
+- Normal UI paths for Memory decisions, Memory clarification selections, Note
+  decisions, continuity selections, artifact feedback, Work lifecycle, Agents,
+  and authoritative panel refreshes use direct APIs and do not depend on active
+  chat submission/completion. Legacy structured `ChatRequest` fields remain in
+  schemas but current backend chat routes reject them with direct-API guidance.
 - Completed AgentJob refresh currently updates authoritative Work data for
-  `create_artifact` jobs and Notes data for `propose_collaborative_note` jobs.
-  Source inspection found no completed-job refresh hook for
-  `propose_memory_signal`; Memory refreshes come from direct memory operations,
-  chat responses, and explicit memory fetches instead.
+  `create_artifact` jobs, Notes data for `propose_collaborative_note` jobs,
+  and Memory data for `propose_memory_signal` jobs.
 - `frontend/render.mjs` uses text-node helpers, and
   `frontend/markdown-renderer.mjs` implements a bounded Markdown subset with
   safe link protocols.
@@ -612,14 +650,14 @@ Frontend trust and rendering:
 
 - `tests/`: pytest suite for backend models, services, FastAPI behavior,
   Firestore persistence boundaries, routing/evaluation utilities, deployment
-  packaging, and smoke-test wrappers. Current source inspection found 139 Python
+  packaging, and smoke-test wrappers. Current source inspection found 143 Python
   test files under `tests/`.
 - `tests/frontend/`: Node test files for browser ES modules. Current source
-  inspection found 16 `.mjs` test files.
+  inspection found 18 `.mjs` test files.
 - `tests/fixtures/`: JSON routing, memory, research, source, tool-belt, and
   synthesis-quality fixtures.
 - `live-tests/`: manually run smoke checks and provider-backed checks. Current
-  source inspection found 25 Python files. These may require live Google
+  source inspection found 24 Python files. These may require live Google
   credentials or deployed/local services depending on the script.
 - Root `*_check.py` and `*_evaluation.py` files: evaluation and live-check
   utilities used by tests or manual verification; they are not imported by
@@ -676,6 +714,13 @@ focused checks rather than encouraging a full-suite habit.
   - `GOOGLE_CLOUD_PROJECT`
   - `GOOGLE_CLOUD_LOCATION=global`
   - `GOOGLE_GENAI_USE_ENTERPRISE=true`
+- Speech runtime environment:
+  - `GOOGLE_CLOUD_PROJECT`
+  - `GOOGLE_CLOUD_LOCATION` for Speech-to-Text recognizer location, defaulting
+    to `global`.
+  - `AGENT_COL_STT_LANGUAGE_CODES`, defaulting to `en-US`.
+  - `AGENT_COL_STT_MODEL`, defaulting to `latest_short`.
+  - `AGENT_COL_SPEECH_MAX_AUDIO_BYTES`, optional request body limit override.
 - Auth modes:
   - `AGENT_COL_AUTH_MODE=local_dev` for local development.
   - `AGENT_COL_AUTH_MODE=google_oidc` for Cloud Run or Google-authenticated
@@ -685,6 +730,13 @@ focused checks rather than encouraging a full-suite habit.
   - service identity or application default credentials must have Firestore
     access.
   - indexes/config live in `firestore.indexes.json`.
+- Google service dependencies:
+  - Vertex AI / Gemini Enterprise through `aiplatform.googleapis.com`.
+  - Firestore Native mode.
+  - Speech-to-Text through `speech.googleapis.com`.
+  - Text-to-Speech through `texttospeech.googleapis.com`.
+  - Artifact Registry and Cloud Run for the documented container deployment
+    path.
 
 Deployment docs live in `docs/deployment/`.
 
@@ -699,6 +751,10 @@ Runtime/deployment integration details:
   Application Default Credentials or service identity.
 - Firestore access is through the configured Google credentials/service
   identity, with index configuration kept in `firestore.indexes.json`.
+- STT/TTS access is through backend Google credentials/service identity. The
+  browser only sends microphone audio to same-origin backend routes and only
+  receives synthesized audio for persisted completed model messages it is
+  authorized to access.
 - Rate limiting and body-size/security middleware are implemented in `main.py`
   before route handlers run.
 
@@ -747,12 +803,13 @@ Compatibility/test-retained code:
 - Rate limiting is in-process and per running instance, not a distributed Cloud
   Run-wide limiter.
 - AgentJob acceptance is persisted in Firestore, but current execution is
-  process-local through `asyncio.create_task`; no startup drain, external queue
-  consumer, or expired-running reclaim worker was found in source.
+  process-local through `asyncio.create_task`, startup/runtime drain loops, and
+  expired-running recovery. No external Cloud Tasks/Pub/Sub/private-worker
+  consumer was found in source.
 - AgentJob cancel updates persisted status but does not cancel an already
-  running process-local worker task. AgentJob retry creates a queued job record
-  and requires an idempotency key, but current source does not clone private
-  payloads or dispatch retry execution from that route.
+  running process-local worker task. AgentJob retry creates a queued retry job,
+  clones private payload data, and dispatches it through the registered
+  process-local dispatcher when possible.
 - Worker failure handling currently marks failures as non-retryable, and final
   status/event/report writes are separate operations.
 - Workspace and chat-session listings use bounded application-side listing and
@@ -764,9 +821,9 @@ Compatibility/test-retained code:
   implemented.
 - Hidden working-state update failure is non-fatal; when enabled, the update is
   scheduled asynchronously after canonical chat persistence.
-- Collaborative-note background task tracking is not cleaned up through the same
-  lifespan shutdown path used for artifact, memory, and working-state task
-  sets.
+- Lifespan shutdown cancels/gathers queued-AgentJob drain, artifact-job,
+  memory-job, collaborative-note-job, and working-state task sets; it is still
+  process-local cleanup rather than distributed worker coordination.
 - Generic artifacts have archive/restore/delete/metadata/version APIs.
   Blueprint artifacts expose list/detail/feedback routes in `main.py`; matching
   blueprint lifecycle mutation routes are not registered.
