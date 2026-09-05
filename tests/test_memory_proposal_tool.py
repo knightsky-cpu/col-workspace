@@ -433,6 +433,125 @@ async def test_proposal_tool_records_memory_agent_job_queue_receipt() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "What do you think of Gemini?",
+        "What are your thoughts on the new Google GenAI frameworks?",
+        "what is your thoughts on the new Google GenAI frameworks?",
+        "what's your take on the new Google GenAI frameworks?",
+        "What do you think of the implementation?",
+        "How does PostgreSQL indexing work?",
+        "can you explain dependency injection?",
+        "tell me about the new framework",
+        "Thanks.",
+        "Hey Col, how's it going?",
+        "What do you remember about my preferences?",
+    ],
+)
+async def test_proposal_tool_rejects_excluded_model_evidence_before_queueing(
+    message: str,
+) -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    state = tool_context_state()
+    state["memory_source_message_text"] = message
+    service = RecordingMemoryService()
+    repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "user_requested_memory",
+                "canonical_value": message.strip(" .?"),
+                "evidence_text": message,
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=state, delta={})
+        ),
+    )
+
+    assert result == {"status": "no_memory"}
+    assert repository.enqueued == []
+    assert repository.payloads == []
+    assert service.commands == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "evidence"),
+    [
+        (
+            "What do you think of Gemini? I prefer OpenAI SDKs.",
+            "I prefer OpenAI SDKs",
+        ),
+        (
+            "Can you review this module? Review this with concise findings first.",
+            "Review this with concise findings first",
+        ),
+        (
+            "Can you fix this? Fix this by keeping future explanations source-backed.",
+            "Fix this by keeping future explanations source-backed",
+        ),
+        (
+            (
+                "How does PostgreSQL indexing work? I usually prefer "
+                "explicit indexes."
+            ),
+            "I usually prefer explicit indexes",
+        ),
+        (
+            (
+                "I think source-backed plans work better for me. What do "
+                "you think?"
+            ),
+            "I think source-backed plans work better for me",
+        ),
+    ],
+)
+async def test_proposal_tool_allows_valid_mixed_turn_evidence_to_queue(
+    message: str,
+    evidence: str,
+) -> None:
+    from memory_proposal_tool import create_propose_memory_signal_tool
+
+    state = tool_context_state()
+    state["memory_source_message_text"] = message
+    service = RecordingMemoryService()
+    repository = RecordingAgentJobRepository()
+    tool = create_propose_memory_signal_tool(
+        service,
+        agent_job_repository=repository,
+    )
+
+    result = await tool.run_async(
+        args={
+            "decision": {
+                "kind": "profile_candidate",
+                "category": "user_requested_memory",
+                "canonical_value": evidence,
+                "evidence_text": evidence,
+            },
+        },
+        tool_context=SimpleNamespace(
+            state=State(value=state, delta={})
+        ),
+    )
+
+    assert result["status"] == "queued"
+    assert result["queued_action"]["action_kind"] == "propose_memory_signal"
+    assert len(repository.enqueued) == 1
+    assert repository.payloads[0].payload["decision"]["evidence_text"] == evidence
+    assert service.commands == []
+
+
+@pytest.mark.asyncio
 async def test_preference_confirmation_queue_is_deterministic_and_private() -> None:
     from preference_learning import PreferenceHypothesis
     from memory_proposal_tool import (

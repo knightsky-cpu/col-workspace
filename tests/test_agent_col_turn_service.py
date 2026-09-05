@@ -849,31 +849,45 @@ async def test_turn_service_routes_broad_prospective_memory_intent(
         "hey agent col how is it going this afternoon?",
         "hey agent col how are you this afternoon?",
         "hey",
+        "yo",
+        "sup",
         "hello Agent Col",
         "good morning",
+        "morning!",
         "how's your day going?",
         "hows your day going?",
         "how is your day going?",
+        "how's everything?",
         "how are you doing this morning?",
         "hope you're doing well",
         "hope you are doing well today",
+        "hope all is well",
         "thanks",
         "thank you!",
         "appreciate it.",
+        "much appreciated",
         "that's hilarious",
         "that's funny",
         "okay",
         "ok",
         "got it",
         "sounds good",
+        "sure",
+        "yep",
         "fair enough",
         "alright",
+        "all good",
         "no worries",
+        "no problem",
         "that makes sense",
         "lol",
+        "haha",
         "nice",
         "cool",
+        "awesome",
+        "perfect",
         "good to hear",
+        "glad to hear it",
         "Can you review this code?",
         "Fix the failing tests.",
         "Explain this function.",
@@ -897,6 +911,76 @@ async def test_turn_service_does_not_queue_filler_or_ephemeral_tasks_as_memory(
             message=message,
         ),
         ids=derive_chat_turn_ids("memory-filler-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert memory_queue.calls == []
+    assert result.queued_actions == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        (
+            "what are your thoughts on the new google genai frameworks? "
+            "what do you think of the implementation?"
+        ),
+        "what is your thoughts on the new google genai frameworks?",
+        "what's your take on the new google genai frameworks?",
+        "What are your thoughts on Gemini?",
+        "What do you think of the implementation?",
+        "What do you think?",
+        "How does PostgreSQL indexing work?",
+        "can you explain dependency injection?",
+        "tell me about the new framework",
+    ],
+)
+async def test_turn_service_does_not_queue_external_topic_inquiries_as_memory(
+    message: str,
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-external-inquiry-key"),
         owner_token="owner-token",
         lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
         resumed=False,
@@ -1419,6 +1503,24 @@ async def test_turn_service_excludes_memory_retrieval_from_new_memory_routing(
         (
             "Review this with concise findings first.",
             "Review this with concise findings first",
+        ),
+        (
+            "What do you think of Gemini? I prefer OpenAI SDKs.",
+            "I prefer OpenAI SDKs",
+        ),
+        (
+            (
+                "How does PostgreSQL indexing work? I usually prefer "
+                "explicit indexes."
+            ),
+            "I usually prefer explicit indexes",
+        ),
+        (
+            (
+                "I think source-backed plans work better for me. What do "
+                "you think?"
+            ),
+            "I think source-backed plans work better for me",
         ),
     ],
 )

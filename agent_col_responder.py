@@ -255,6 +255,10 @@ policy decides whether it is approvable. Durable profile candidates must be
 grounded in explicit, reusable user requests about the user, their
 collaboration with Agent Col, their goals, preferences, interests, standing
 instructions, relevant working context, or allowed light identity details.
+Pure external-topic, assistant-opinion, informational questions,
+retrieval/history-only requests, social/phatic-only messages, and clearly
+current-turn-only requests are no_memory; do not call propose_memory_signal for
+those clauses.
 Use existing structured categories when they fit; otherwise use
 user_requested_memory for safe explicit user-requested memory. Failure to
 match a predefined category is not by itself unsupported. Do not infer memory

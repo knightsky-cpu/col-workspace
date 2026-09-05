@@ -36,6 +36,7 @@ from memory_clarifications import (
     MemoryClarificationReceipt,
     MemoryClarificationSelection,
 )
+from memory_proposal_exclusions import memory_decision_evidence_is_ineligible
 from memory_proposal_job_worker import memory_clarification_selection_job_payload
 from memory_proposal_job_worker import memory_job_payload
 from memory_proposal_job_worker import (
@@ -835,6 +836,8 @@ def create_propose_memory_signal_tool(
             raw_selection = None
             context = _server_context(tool_context)
             if context.memory_prequeued_for_turn:
+                return {"status": "no_memory"}
+            if memory_decision_evidence_is_ineligible(raw_decision):
                 return {"status": "no_memory"}
             if (
                 agent_job_repository is not None
