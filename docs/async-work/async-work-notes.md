@@ -70,9 +70,11 @@ Reason: this prevents hallucinated action claims. A model response cannot be tre
 
 ### Working State Is Not Authorization
 
-Decision: working state can support continuity, but it must not authorize durable writes.
+Decision: working state can support continuity, but it must not authorize durable writes or become part of the AgentJob/resource/chat correctness contract.
 
-Reason: working state is short-lived cognitive context. It may contain hypotheses, plans, or previous task context, but those are not the same as user authorization or application-approved durable state.
+Reason: working state is hidden, same-session, non-authoritative responder context. It may contain hypotheses, plans, or previous task context, but those are not the same as user authorization or application-approved durable state.
+
+Durability boundary: working state is Firestore-backed once successfully written, but generation and persistence are best-effort background maintenance. AgentJob, resource, and chat correctness must never depend on working-state persistence. A crash may lose an in-flight working-state update without violating correctness because the authoritative chat turn, AgentJob, and resource lifecycles do not read working state to decide completion, recovery, or durable resource state. Existing tests already enforce that working-state generation/persistence failure does not block chat completion, that slow working-state updates do not delay stream or JSON responses, that failed chat completion does not schedule a working-state update, and that working state remains hidden from public responses. No runtime code change is required for this boundary.
 
 ### Workspace Notes, Memory, Artifacts, And Chat History Are Separate Surfaces
 
@@ -3414,7 +3416,12 @@ Preserved:
 - queued and expired-running recovery behavior;
 - AgentJob lease renewal, heartbeat fencing, and shutdown ownership.
 
+Closed by audit:
+
+- working-state durability boundary decision. Working state remains
+  Firestore-backed when written, but best-effort, non-authoritative, and outside
+  the AgentJob/resource/chat correctness contract.
+
 Still deferred:
 
-- working-state durability boundary decision;
 - permanent poison-dispatch starvation/backoff hardening.
