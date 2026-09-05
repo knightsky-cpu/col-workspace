@@ -775,7 +775,7 @@ async def test_cancel_job_only_marks_non_terminal_jobs(
 async def test_retry_job_links_to_failed_retryable_source(
     repository: AgentJobRepository,
 ) -> None:
-    await repository.enqueue_job(make_job())
+    await repository.enqueue_job_with_payload(make_job(), make_payload())
     await repository.lease_next_queued_job(
         user_id="user-1",
         workspace_id="workspace-1",
@@ -808,6 +808,431 @@ async def test_retry_job_links_to_failed_retryable_source(
     assert retry.status == "queued"
     assert retry.retry_of_job_id == "job-1"
     assert retry.attempt_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action_kind", "private_payload"),
+    (
+        (
+            "propose_memory_signal",
+            {
+                "work_type": "natural_memory_decision",
+                "source_message_text": "Remember that I prefer terse answers.",
+                "decision": {
+                    "category": "response_length",
+                    "action": "set",
+                    "value": "terse",
+                    "confidence": 0.92,
+                    "reason": "User explicitly asked for terse answers.",
+                },
+                "memory_decision_present": False,
+            },
+        ),
+        (
+            "propose_collaborative_note",
+            {
+                "source_message_text": "Draft a deployment checklist note.",
+                "decision": {
+                    "note_kind": "project_plan",
+                    "title": "Deployment checklist",
+                    "body": "Verify build, deploy, and smoke tests.",
+                    "confidence": 0.88,
+                    "reason": "User asked for a checklist note.",
+                },
+                "memory_decision_present": False,
+                "collaborative_note_decision_present": False,
+                "artifact_feedback_decision_present": False,
+            },
+        ),
+        (
+            "create_artifact",
+            {
+                "artifact_family": "script",
+                "artifact_format": "single_file",
+                "filename": "deploy_check.sh",
+                "source_text": "Create a deployment check script.",
+                "display_label": "Create deploy_check.sh",
+            },
+        ),
+    ),
+)
+async def test_retry_job_preserves_private_payload_for_worker_load(
+    repository: AgentJobRepository,
+    action_kind: str,
+    private_payload: dict[str, object],
+) -> None:
+    source_job = make_job(action_kind=action_kind)
+    source_payload = make_payload(
+        action_kind=action_kind,
+        payload=private_payload,
+    )
+    await repository.enqueue_job_with_payload(source_job, source_payload)
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.fail_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=2),
+        failure=AgentJobFailure(
+            code="provider_timeout",
+            summary="Worker timed out.",
+            retryable=True,
+        ),
+    )
+
+    retry = await repository.retry_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        source_job_id="job-1",
+        retry_job_id="job-1-retry",
+        idempotency_key="idem-1-retry",
+        observed_at=NOW + timedelta(seconds=5),
+    )
+
+    retry_payload = await repository.get_job_payload(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id=retry.job_id,
+    )
+    original_payload = await repository.get_job_payload(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id=source_job.job_id,
+    )
+    assert retry_payload.job_id == retry.job_id
+    assert retry_payload.created_at == source_payload.created_at
+    assert retry_payload.payload == source_payload.payload
+    assert original_payload == source_payload
+
+
+@pytest.mark.asyncio
+async def test_retry_job_replays_existing_retry_with_exact_private_payload(
+    repository: AgentJobRepository,
+) -> None:
+    source_payload = make_payload(
+        payload={
+            "artifact_family": "script",
+            "artifact_format": "single_file",
+            "filename": "deploy_check.sh",
+            "source_text": "Create a deployment check script.",
+            "display_label": "Create deploy_check.sh",
+        },
+    )
+    await repository.enqueue_job_with_payload(make_job(), source_payload)
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.fail_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=2),
+        failure=AgentJobFailure(
+            code="provider_timeout",
+            summary="Worker timed out.",
+            retryable=True,
+        ),
+    )
+    first = await repository.retry_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        source_job_id="job-1",
+        retry_job_id="job-1-retry",
+        idempotency_key="idem-1-retry",
+        observed_at=NOW + timedelta(seconds=5),
+    )
+
+    replay = await repository.retry_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        source_job_id="job-1",
+        retry_job_id="job-1-retry",
+        idempotency_key="idem-1-retry",
+        observed_at=NOW + timedelta(seconds=10),
+    )
+
+    assert replay == first
+
+
+@pytest.mark.asyncio
+async def test_retry_job_rejects_existing_retry_with_changed_payload_body(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job_with_payload(make_job(), make_payload())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.fail_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=2),
+        failure=AgentJobFailure(
+            code="provider_timeout",
+            summary="Worker timed out.",
+            retryable=True,
+        ),
+    )
+    await repository.retry_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        source_job_id="job-1",
+        retry_job_id="job-1-retry",
+        idempotency_key="idem-1-retry",
+        observed_at=NOW + timedelta(seconds=5),
+    )
+    repository._client.documents[
+        (
+            "users",
+            "user-1",
+            "workspaces",
+            "workspace-1",
+            "agent_jobs",
+            "job-1-retry",
+            "private_payloads",
+            "payload",
+        )
+    ]["payload"] = {
+        "artifact_family": "script",
+        "filename": "different.sh",
+        "source_text": "Different private instructions.",
+    }
+
+    with pytest.raises(AgentJobConflictError):
+        await repository.retry_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_job_id="job-1",
+            retry_job_id="job-1-retry",
+            idempotency_key="idem-1-retry",
+            observed_at=NOW + timedelta(seconds=10),
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_job_rejects_existing_retry_with_missing_private_payload(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job_with_payload(make_job(), make_payload())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.fail_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=2),
+        failure=AgentJobFailure(
+            code="provider_timeout",
+            summary="Worker timed out.",
+            retryable=True,
+        ),
+    )
+    await repository.retry_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        source_job_id="job-1",
+        retry_job_id="job-1-retry",
+        idempotency_key="idem-1-retry",
+        observed_at=NOW + timedelta(seconds=5),
+    )
+    del repository._client.documents[
+        (
+            "users",
+            "user-1",
+            "workspaces",
+            "workspace-1",
+            "agent_jobs",
+            "job-1-retry",
+            "private_payloads",
+            "payload",
+        )
+    ]
+
+    with pytest.raises(AgentJobNotFoundError):
+        await repository.retry_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_job_id="job-1",
+            retry_job_id="job-1-retry",
+            idempotency_key="idem-1-retry",
+            observed_at=NOW + timedelta(seconds=10),
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_job_rejects_existing_retry_with_corrupt_private_payload(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job_with_payload(make_job(), make_payload())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.fail_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=2),
+        failure=AgentJobFailure(
+            code="provider_timeout",
+            summary="Worker timed out.",
+            retryable=True,
+        ),
+    )
+    await repository.retry_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        source_job_id="job-1",
+        retry_job_id="job-1-retry",
+        idempotency_key="idem-1-retry",
+        observed_at=NOW + timedelta(seconds=5),
+    )
+    repository._client.documents[
+        (
+            "users",
+            "user-1",
+            "workspaces",
+            "workspace-1",
+            "agent_jobs",
+            "job-1-retry",
+            "private_payloads",
+            "payload",
+        )
+    ]["job_id"] = "different-job"
+
+    with pytest.raises(AgentJobStateError):
+        await repository.retry_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_job_id="job-1",
+            retry_job_id="job-1-retry",
+            idempotency_key="idem-1-retry",
+            observed_at=NOW + timedelta(seconds=10),
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_job_rejects_missing_private_payload_without_retry_document(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(make_job())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.fail_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=2),
+        failure=AgentJobFailure(
+            code="provider_timeout",
+            summary="Worker timed out.",
+            retryable=True,
+        ),
+    )
+
+    with pytest.raises(AgentJobNotFoundError):
+        await repository.retry_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_job_id="job-1",
+            retry_job_id="job-1-retry",
+            idempotency_key="idem-1-retry",
+            observed_at=NOW + timedelta(seconds=5),
+        )
+    with pytest.raises(AgentJobNotFoundError):
+        await repository.get_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1-retry",
+        )
+
+
+@pytest.mark.asyncio
+async def test_retry_job_rejects_corrupt_private_payload_without_retry_document(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job_with_payload(make_job(), make_payload())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.fail_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=2),
+        failure=AgentJobFailure(
+            code="provider_timeout",
+            summary="Worker timed out.",
+            retryable=True,
+        ),
+    )
+    repository._client.documents[
+        (
+            "users",
+            "user-1",
+            "workspaces",
+            "workspace-1",
+            "agent_jobs",
+            "job-1",
+            "private_payloads",
+            "payload",
+        )
+    ]["job_id"] = "different-job"
+
+    with pytest.raises(AgentJobStateError):
+        await repository.retry_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_job_id="job-1",
+            retry_job_id="job-1-retry",
+            idempotency_key="idem-1-retry",
+            observed_at=NOW + timedelta(seconds=5),
+        )
+    with pytest.raises(AgentJobNotFoundError):
+        await repository.get_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1-retry",
+        )
 
 
 @pytest.mark.asyncio

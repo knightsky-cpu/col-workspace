@@ -3162,3 +3162,44 @@ recovery/reliability work: AgentJob payload-preserving retry, retry dispatch,
 startup/runtime draining, expired running-lease recovery, shutdown hygiene,
 terminal event/report consistency, hidden working-state durability, stale
 frontend compatibility cleanup, and stale documentation cleanup.
+
+## AgentJob Retry Payload Preservation
+
+This pass starts the recovery/reliability phase after resource/chat ownership
+decoupling closure. The retry endpoint already derived deterministic retry job
+IDs and preserved public retry lineage, but `AgentJobRepository.retry_job(...)`
+created only the retry job document. It did not create the retry job's private
+payload document, while Memory, Note, and Artifact workers all load private
+payload by the queued job's own `job_id`.
+
+Fixed:
+
+- retry creation now reads and validates the failed source job's private
+  `AgentJobPayload` before creating the retry job;
+- retry creation writes a private payload document under the retry job id in the
+  same transaction;
+- the copied payload preserves the original accepted private evidence/content,
+  source turn/message identity, original payload creation timestamp, user,
+  project, workspace, session, and action kind; only `job_id` is changed so the
+  existing worker payload loader can resolve the retry job;
+- missing or corrupt source payloads fail closed instead of fabricating or
+  re-extracting replacement data;
+- idempotent retry replays still return the existing retry job only after the
+  retry payload is present, scope-valid, and exactly equals the validated source
+  payload copy with only `job_id` changed for the retry job.
+
+Preserved:
+
+- retry lineage and idempotency semantics: retry job id remains derived from
+  user/workspace/source job/idempotency key, `retry_of_job_id` still points at
+  the failed source job, and `attempt_count` still increments from the source;
+- payload privacy: retry payloads remain in the same private payload
+  subcollection and are not projected in public job responses;
+- worker execution boundaries for Memory, Notes, and Artifacts.
+
+Not included:
+
+- retry dispatch after creating the retry job;
+- startup/runtime queued-job draining;
+- expired running-lease recovery;
+- shutdown hygiene or terminal report consistency cleanup.

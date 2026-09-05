@@ -488,6 +488,16 @@ class AgentJobRepository:
         try:
             source_ref = self._job_ref(user_id, workspace_id, source_job_id)
             retry_ref = self._job_ref(user_id, workspace_id, retry_job_id)
+            source_payload_ref = self._payload_ref(
+                user_id,
+                workspace_id,
+                source_job_id,
+            )
+            retry_payload_ref = self._payload_ref(
+                user_id,
+                workspace_id,
+                retry_job_id,
+            )
             jobs_ref = self._jobs_collection(user_id, workspace_id)
             transaction = self._client.transaction()
 
@@ -505,6 +515,13 @@ class AgentJobRepository:
                     and source.failure_summary.retryable
                 ):
                     raise AgentJobStateError("AgentJob is not retryable.")
+                source_payload_snapshot = await source_payload_ref.get(
+                    transaction=transaction
+                )
+                source_payload = self._payload_from_snapshot(
+                    source_payload_snapshot
+                )
+                self._validate_payload_matches_job(source_payload, source)
 
                 retry_snapshot = await retry_ref.get(transaction=transaction)
                 if retry_snapshot.exists:
@@ -515,6 +532,20 @@ class AgentJobRepository:
                     ):
                         raise AgentJobConflictError(
                             "Retry AgentJob conflicts with existing state."
+                        )
+                    retry_payload_snapshot = await retry_payload_ref.get(
+                        transaction=transaction
+                    )
+                    retry_payload = self._payload_from_snapshot(
+                        retry_payload_snapshot
+                    )
+                    self._validate_payload_matches_job(retry_payload, stored)
+                    expected_retry_payload = source_payload.model_copy(
+                        update={"job_id": stored.job_id}
+                    )
+                    if retry_payload != expected_retry_payload:
+                        raise AgentJobConflictError(
+                            "Retry AgentJobPayload conflicts with source payload."
                         )
                     return stored
 
@@ -550,7 +581,15 @@ class AgentJobRepository:
                     attempt_count=source.attempt_count + 1,
                     retry_of_job_id=source.job_id,
                 )
+                retry_payload = source_payload.model_copy(
+                    update={"job_id": retry.job_id}
+                )
+                self._validate_payload_matches_job(retry_payload, retry)
                 transaction.set(retry_ref, self._job_document(retry))
+                transaction.set(
+                    retry_payload_ref,
+                    self._payload_document(retry_payload),
+                )
                 return retry
 
             run_transaction = firestore.async_transactional(retry_in_transaction)
