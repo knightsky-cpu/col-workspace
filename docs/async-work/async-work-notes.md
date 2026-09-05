@@ -3315,3 +3315,42 @@ Still deferred:
 - expired running-job requeue/recovery;
 - worker shutdown hygiene beyond the heartbeat task lifetime;
 - permanent poison-dispatch starvation/backoff hardening.
+
+## Expired Running AgentJob Recovery
+
+This pass recovers dispatch-eligible AgentJobs that are still `running` after
+their worker lease expires. It reuses the existing bounded startup/runtime
+queued-job drain loop rather than adding a second scheduler.
+
+Fixed:
+
+- `AgentJobRepository.list_expired_running_jobs(...)` enumerates only Memory,
+  Note, and Artifact action kinds whose `status == "running"` and
+  `lease_expires_at <= observed_at`;
+- `AgentJobRepository.recover_expired_running_job(...)` transactionally
+  revalidates that the same job is still running and expired before mutating;
+- recovery requeues the same AgentJob row, clears `lease_owner` and
+  `lease_expires_at`, and preserves job identity, payload, idempotency key,
+  attempt count, retry lineage, source metadata, and resource scope;
+- the existing startup/runtime drain first requeues eligible expired running
+  jobs, then uses the existing queued-job listing and dispatcher path;
+- duplicate recovery sweeps are safe because a job already recovered to
+  `queued` is ignored by the transactional revalidation;
+- dispatch failure after recovery leaves the durable job queued for a later
+  drain.
+- `firestore.indexes.json` now declares the required `agent_jobs`
+  collection-group composite index for `status`, `action_kind`, and
+  `lease_expires_at`.
+
+Preserved:
+
+- retry private-payload preservation, retry dispatch, lineage, and idempotency;
+- worker lease acquisition and heartbeat fencing;
+- active Memory, Note, and Artifact private payload loading and resource
+  mutation semantics.
+
+Still deferred:
+
+- permanent poison-dispatch starvation/backoff hardening;
+- broader worker shutdown hygiene;
+- terminal report/event consistency cleanup.

@@ -1177,6 +1177,25 @@ async def _drain_queued_agent_jobs(
     log_context: str = "queued drain",
 ) -> None:
     try:
+        observed_at = datetime.now(UTC)
+        async for job in repository.list_expired_running_jobs(
+            action_kinds=action_kinds,
+            observed_at=observed_at,
+            limit=limit,
+        ):
+            try:
+                await repository.recover_expired_running_job(
+                    user_id=job.user_id,
+                    workspace_id=job.workspace_id,
+                    job_id=job.job_id,
+                    observed_at=observed_at,
+                )
+            except (AgentJobNotFoundError, AgentJobStateError):
+                logger.exception(
+                    "AgentJob %s expired-running recovery skipped job %s.",
+                    log_context,
+                    job.job_id,
+                )
         async for job in repository.list_queued_jobs(
             action_kinds=action_kinds,
             limit=limit,

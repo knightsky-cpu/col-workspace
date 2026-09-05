@@ -216,9 +216,12 @@ class FakeQuery:
         op_string: str,
         value: object,
     ) -> bool:
-        if op_string != "==":
-            raise AssertionError(f"Unsupported fake query op: {op_string}")
-        return data.get(field_path) == value
+        if op_string == "==":
+            return data.get(field_path) == value
+        if op_string == "<=":
+            stored = data.get(field_path)
+            return stored is not None and stored <= value
+        raise AssertionError(f"Unsupported fake query op: {op_string}")
 
 
 class FakeCollectionGroupQuery(FakeQuery):
@@ -356,6 +359,16 @@ def make_payload(**overrides: object) -> AgentJobPayload:
     }
     values.update(overrides)
     return AgentJobPayload(**values)
+
+
+def store_job(repository: AgentJobRepository, job: AgentJob) -> None:
+    repository._client.documents[
+        repository._job_ref(
+            job.user_id,
+            job.workspace_id,
+            job.job_id,
+        ).path
+    ] = job.model_dump(mode="python")
 
 
 def make_report(**overrides: object) -> AgentJobReport:
@@ -642,6 +655,82 @@ async def test_list_queued_jobs_enumerates_only_queued_jobs_globally_with_limit(
     )
 
     assert [job.job_id for job in jobs] == ["job-user-2", "job-user-1"]
+
+
+@pytest.mark.asyncio
+async def test_list_expired_running_jobs_enumerates_only_eligible_expired_jobs(
+    repository: AgentJobRepository,
+) -> None:
+    supported_action_kinds = (
+        "create_artifact",
+        "propose_memory_signal",
+        "propose_collaborative_note",
+    )
+    expired_memory = make_job(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        idempotency_key="idem-memory",
+        status="running",
+        created_at=NOW - timedelta(minutes=5),
+        updated_at=NOW - timedelta(minutes=3),
+        lease_owner="memory-worker-1",
+        lease_expires_at=NOW - timedelta(seconds=5),
+    )
+    expired_note = make_job(
+        job_id="note-job-1",
+        action_kind="propose_collaborative_note",
+        idempotency_key="idem-note",
+        status="running",
+        created_at=NOW - timedelta(minutes=6),
+        updated_at=NOW - timedelta(minutes=4),
+        lease_owner="note-worker-1",
+        lease_expires_at=NOW - timedelta(seconds=10),
+    )
+    unexpired_artifact = make_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        idempotency_key="idem-artifact",
+        status="running",
+        created_at=NOW - timedelta(minutes=7),
+        updated_at=NOW - timedelta(minutes=1),
+        lease_owner="artifact-worker-1",
+        lease_expires_at=NOW + timedelta(seconds=10),
+    )
+    unsupported = make_job(
+        job_id="unsupported-job-1",
+        action_kind="retrieve_chat_context",
+        idempotency_key="idem-unsupported",
+        status="running",
+        created_at=NOW - timedelta(minutes=8),
+        updated_at=NOW - timedelta(minutes=4),
+        lease_owner="context-worker-1",
+        lease_expires_at=NOW - timedelta(seconds=20),
+    )
+    queued = make_job(
+        job_id="queued-job-1",
+        action_kind="propose_memory_signal",
+        idempotency_key="idem-queued",
+        created_at=NOW - timedelta(minutes=9),
+        updated_at=NOW - timedelta(minutes=9),
+    )
+    for job in (
+        expired_memory,
+        expired_note,
+        unexpired_artifact,
+        unsupported,
+        queued,
+    ):
+        store_job(repository, job)
+
+    jobs = await collect(
+        repository.list_expired_running_jobs(
+            action_kinds=supported_action_kinds,
+            observed_at=NOW,
+            limit=2,
+        )
+    )
+
+    assert [job.job_id for job in jobs] == ["note-job-1", "memory-job-1"]
 
 
 @pytest.mark.asyncio
@@ -1066,6 +1155,164 @@ async def test_renew_job_lease_rejects_terminal_job(
             lease_expires_at=NOW + timedelta(minutes=4),
             observed_at=NOW + timedelta(seconds=30),
         )
+
+
+@pytest.mark.asyncio
+async def test_recover_expired_running_job_requeues_same_job_and_payload(
+    repository: AgentJobRepository,
+) -> None:
+    job = make_job(
+        status="running",
+        created_at=NOW - timedelta(minutes=3),
+        lease_owner="worker-1",
+        lease_expires_at=NOW - timedelta(seconds=1),
+        attempt_count=3,
+        retry_of_job_id="source-job-1",
+        updated_at=NOW - timedelta(minutes=2),
+    )
+    payload = make_payload()
+    store_job(repository, job)
+    repository._client.documents[
+        repository._payload_ref(
+            job.user_id,
+            job.workspace_id,
+            job.job_id,
+        ).path
+    ] = payload.model_dump(mode="python")
+
+    recovered = await repository.recover_expired_running_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        observed_at=NOW,
+    )
+
+    assert recovered is not None
+    assert recovered.status == "queued"
+    assert recovered.job_id == job.job_id
+    assert recovered.user_id == job.user_id
+    assert recovered.workspace_id == job.workspace_id
+    assert recovered.project_id == job.project_id
+    assert recovered.session_id == job.session_id
+    assert recovered.source_turn_id == job.source_turn_id
+    assert recovered.source_message_id == job.source_message_id
+    assert recovered.action_kind == job.action_kind
+    assert recovered.idempotency_key == job.idempotency_key
+    assert recovered.attempt_count == job.attempt_count
+    assert recovered.retry_of_job_id == job.retry_of_job_id
+    assert recovered.lease_owner is None
+    assert recovered.lease_expires_at is None
+    assert recovered.updated_at == NOW
+    assert await repository.get_job_payload(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    ) == payload
+
+
+@pytest.mark.asyncio
+async def test_recover_expired_running_job_leaves_unexpired_job_running(
+    repository: AgentJobRepository,
+) -> None:
+    job = make_job(
+        status="running",
+        created_at=NOW - timedelta(minutes=3),
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(seconds=1),
+        updated_at=NOW - timedelta(minutes=2),
+    )
+    store_job(repository, job)
+
+    recovered = await repository.recover_expired_running_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        observed_at=NOW,
+    )
+
+    assert recovered is None
+    stored = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    )
+    assert stored == job
+
+
+@pytest.mark.asyncio
+async def test_recover_expired_running_job_revalidates_renewed_stale_candidate(
+    repository: AgentJobRepository,
+) -> None:
+    job = make_job(
+        status="running",
+        created_at=NOW - timedelta(minutes=3),
+        lease_owner="worker-1",
+        lease_expires_at=NOW - timedelta(seconds=1),
+        updated_at=NOW - timedelta(minutes=2),
+    )
+    store_job(repository, job)
+    await repository.renew_job_lease(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW - timedelta(seconds=2),
+    )
+
+    recovered = await repository.recover_expired_running_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        observed_at=NOW,
+    )
+
+    assert recovered is None
+    stored = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    )
+    assert stored.status == "running"
+    assert stored.lease_owner == "worker-1"
+    assert stored.lease_expires_at == NOW + timedelta(minutes=2)
+
+
+@pytest.mark.asyncio
+async def test_recover_expired_running_job_is_safe_when_repeated(
+    repository: AgentJobRepository,
+) -> None:
+    job = make_job(
+        status="running",
+        created_at=NOW - timedelta(minutes=3),
+        lease_owner="worker-1",
+        lease_expires_at=NOW - timedelta(seconds=1),
+        updated_at=NOW - timedelta(minutes=2),
+    )
+    store_job(repository, job)
+
+    first = await repository.recover_expired_running_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        observed_at=NOW,
+    )
+    second = await repository.recover_expired_running_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        observed_at=NOW + timedelta(seconds=1),
+    )
+
+    assert first is not None
+    assert first.status == "queued"
+    assert second is None
+    stored = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    )
+    assert stored == first
 
 
 @pytest.mark.asyncio

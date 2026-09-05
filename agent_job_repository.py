@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import NoReturn
 
 from google.api_core.exceptions import GoogleAPIError
@@ -312,6 +312,46 @@ class AgentJobRepository:
         except GoogleAPIError as exc:
             self._raise_firestore_error("list_queued_jobs", exc)
 
+    async def list_expired_running_jobs(
+        self,
+        *,
+        action_kinds: tuple[AgentJobKind, ...],
+        observed_at: datetime,
+        limit: int = 20,
+    ) -> AsyncIterator[AgentJob]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+        if action_kinds == ():
+            return
+        try:
+            jobs = []
+            queries = [
+                self._client.collection_group("agent_jobs")
+                .where("status", "==", "running")
+                .where("action_kind", "==", action_kind)
+                .where("lease_expires_at", "<=", observed_at)
+                .order_by("lease_expires_at")
+                .limit(limit)
+                for action_kind in action_kinds
+            ]
+            for query in queries:
+                async for snapshot in query.stream():
+                    jobs.append(self._job_from_snapshot(snapshot))
+            jobs.sort(
+                key=lambda job: (
+                    job.lease_expires_at or datetime.min.replace(tzinfo=UTC),
+                    job.created_at,
+                )
+            )
+            for job in jobs[:limit]:
+                yield job
+        except (AgentJobStateError, ValueError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_expired_running_jobs", exc)
+
     async def lease_next_queued_job(
         self,
         *,
@@ -494,6 +534,60 @@ class AgentJobRepository:
             raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
         except GoogleAPIError as exc:
             self._raise_firestore_error("renew_job_lease", exc)
+
+    async def recover_expired_running_job(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+        observed_at: datetime,
+    ) -> AgentJob | None:
+        try:
+            job_ref = self._job_ref(user_id, workspace_id, job_id)
+            transaction = self._client.transaction()
+
+            async def recover_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> AgentJob | None:
+                snapshot = await job_ref.get(transaction=transaction)
+                job = self._available_scoped_job(
+                    snapshot,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+                if job.status != "running":
+                    return None
+                if (
+                    job.lease_expires_at is None
+                    or job.lease_expires_at > observed_at
+                ):
+                    return None
+                recovered = job.model_copy(
+                    update={
+                        "status": "queued",
+                        "updated_at": observed_at,
+                        "lease_owner": None,
+                        "lease_expires_at": None,
+                    }
+                )
+                transaction.set(
+                    job_ref,
+                    self._job_document(recovered),
+                    merge=True,
+                )
+                return recovered
+
+            run_transaction = firestore.async_transactional(
+                recover_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (AgentJobNotFoundError, AgentJobStateError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("recover_expired_running_job", exc)
 
     async def complete_job(
         self,

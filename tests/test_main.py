@@ -937,6 +937,14 @@ class FakeAgentJobRepository:
     queued_job_drain_calls: list[dict[str, object]] = field(
         default_factory=list
     )
+    expired_running_jobs: list[AgentJob] = field(default_factory=list)
+    expired_running_job_batches: list[list[AgentJob]] = field(
+        default_factory=list
+    )
+    expired_running_recovery_calls: list[dict[str, object]] = field(
+        default_factory=list
+    )
+    recovered_running_jobs: list[AgentJob] = field(default_factory=list)
 
     async def list_jobs(
         self,
@@ -994,6 +1002,82 @@ class FakeAgentJobRepository:
             if yielded > limit:
                 return
             yield job
+
+    async def list_expired_running_jobs(
+        self,
+        *,
+        action_kinds: tuple[str, ...],
+        observed_at: datetime,
+        limit: int = 20,
+    ):
+        self.expired_running_recovery_calls.append(
+            {
+                "action_kinds": action_kinds,
+                "observed_at": observed_at,
+                "limit": limit,
+                "kind": "list_expired",
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        jobs = self.expired_running_jobs
+        if self.expired_running_job_batches:
+            jobs = self.expired_running_job_batches.pop(0)
+        yielded = 0
+        for job in jobs:
+            if job.action_kind not in action_kinds:
+                continue
+            if job.status != "running":
+                continue
+            if job.lease_expires_at is None or job.lease_expires_at > observed_at:
+                continue
+            yielded += 1
+            if yielded > limit:
+                return
+            yield job
+
+    async def recover_expired_running_job(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+        observed_at: datetime,
+    ) -> AgentJob | None:
+        self.expired_running_recovery_calls.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "observed_at": observed_at,
+                "kind": "recover_expired",
+            }
+        )
+        for index, job in enumerate(self.expired_running_jobs):
+            if (
+                job.user_id == user_id
+                and job.workspace_id == workspace_id
+                and job.job_id == job_id
+            ):
+                if (
+                    job.status != "running"
+                    or job.lease_expires_at is None
+                    or job.lease_expires_at > observed_at
+                ):
+                    return None
+                recovered = job.model_copy(
+                    update={
+                        "status": "queued",
+                        "updated_at": observed_at,
+                        "lease_owner": None,
+                        "lease_expires_at": None,
+                    }
+                )
+                self.expired_running_jobs[index] = recovered
+                self.queued_jobs.append(recovered)
+                self.recovered_running_jobs.append(recovered)
+                return recovered
+        return None
 
     async def list_reports(
         self,
@@ -6523,6 +6607,96 @@ async def test_queued_job_dispatch_failure_can_retry_on_later_sweep(
 
     assert artifact_job.status == "queued"
     assert service_state.artifact_job_dispatches == [artifact_job]
+
+
+@pytest.mark.asyncio
+async def test_queued_job_drain_recovers_expired_running_jobs_then_dispatches(
+    service_state: ServiceState,
+) -> None:
+    memory_job = make_agent_job(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        status="running",
+        lease_owner="memory-worker-1",
+        lease_expires_at=MEMORY_NOW - timedelta(seconds=1),
+    )
+    note_job = make_agent_job(
+        job_id="note-job-1",
+        action_kind="propose_collaborative_note",
+        status="running",
+        lease_owner="note-worker-1",
+        lease_expires_at=MEMORY_NOW - timedelta(seconds=1),
+    )
+    artifact_job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="running",
+        lease_owner="artifact-worker-1",
+        lease_expires_at=MEMORY_NOW - timedelta(seconds=1),
+    )
+
+    async with main.lifespan(main.app):
+        service_state.agent_job_repository.expired_running_jobs = [
+            memory_job,
+            note_job,
+            artifact_job,
+        ]
+        service_state.memory_job_dispatches.clear()
+        service_state.note_job_dispatches.clear()
+        service_state.artifact_job_dispatches.clear()
+        await main._drain_queued_agent_jobs(
+            repository=service_state.agent_job_repository,
+            app_state=main.app.state,
+            limit=3,
+        )
+
+    assert [job.status for job in service_state.memory_job_dispatches] == [
+        "queued"
+    ]
+    assert [job.status for job in service_state.note_job_dispatches] == [
+        "queued"
+    ]
+    assert [job.status for job in service_state.artifact_job_dispatches] == [
+        "queued"
+    ]
+    recovered_jobs = service_state.agent_job_repository.recovered_running_jobs
+    assert [job.job_id for job in recovered_jobs] == [
+        "memory-job-1",
+        "note-job-1",
+        "artifact-job-1",
+    ]
+    assert all(job.lease_owner is None for job in recovered_jobs)
+    assert all(job.lease_expires_at is None for job in recovered_jobs)
+
+
+@pytest.mark.asyncio
+async def test_expired_running_recovery_dispatch_failure_leaves_job_queued(
+    service_state: ServiceState,
+) -> None:
+    artifact_job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="running",
+        lease_owner="artifact-worker-1",
+        lease_expires_at=MEMORY_NOW - timedelta(seconds=1),
+    )
+
+    async with main.lifespan(main.app):
+        service_state.agent_job_repository.expired_running_jobs = [artifact_job]
+        service_state.agent_job_dispatch_errors["create_artifact"] = RuntimeError(
+            "dispatch failed"
+        )
+        await main._drain_queued_agent_jobs(
+            repository=service_state.agent_job_repository,
+            app_state=main.app.state,
+            limit=1,
+        )
+
+    assert service_state.artifact_job_dispatches == []
+    recovered = service_state.agent_job_repository.recovered_running_jobs[-1]
+    assert recovered.status == "queued"
+    assert recovered.lease_owner is None
+    assert recovered.lease_expires_at is None
 
 
 @pytest.mark.asyncio
