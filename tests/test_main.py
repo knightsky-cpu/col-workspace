@@ -932,6 +932,11 @@ class FakeAgentJobRepository:
     cancel_calls: list[dict[str, object]] = field(default_factory=list)
     retry_calls: list[dict[str, object]] = field(default_factory=list)
     retry_action_kind: str = "create_artifact"
+    queued_jobs: list[AgentJob] = field(default_factory=list)
+    queued_job_batches: list[list[AgentJob]] = field(default_factory=list)
+    queued_job_drain_calls: list[dict[str, object]] = field(
+        default_factory=list
+    )
 
     async def list_jobs(
         self,
@@ -961,6 +966,29 @@ class FakeAgentJobRepository:
             if project_id is not None and job.project_id != project_id:
                 continue
             if session_id is not None and job.session_id != session_id:
+                continue
+            yielded += 1
+            if yielded > limit:
+                return
+            yield job
+
+    async def list_queued_jobs(
+        self,
+        *,
+        action_kinds: tuple[str, ...] | None = None,
+        limit: int = 20,
+    ):
+        self.queued_job_drain_calls.append(
+            {"action_kinds": action_kinds, "limit": limit}
+        )
+        if self.error is not None:
+            raise self.error
+        jobs = self.queued_jobs
+        if self.queued_job_batches:
+            jobs = self.queued_job_batches.pop(0)
+        yielded = 0
+        for job in jobs:
+            if action_kinds is not None and job.action_kind not in action_kinds:
                 continue
             yielded += 1
             if yielded > limit:
@@ -1890,6 +1918,10 @@ class ServiceState:
     artifact_executor: object
     artifact_feedback_service: FakeArtifactFeedbackService
     agent_job_repository: FakeAgentJobRepository
+    memory_job_dispatches: list[AgentJob]
+    note_job_dispatches: list[AgentJob]
+    artifact_job_dispatches: list[AgentJob]
+    agent_job_dispatch_errors: dict[str, Exception]
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
     research_vertex_settings: list[VertexAISettings]
@@ -2143,6 +2175,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             next_before=None,
         )
     )
+    memory_job_dispatches: list[AgentJob] = []
+    note_job_dispatches: list[AgentJob] = []
+    artifact_job_dispatches: list[AgentJob] = []
+    agent_job_dispatch_errors: dict[str, Exception] = {}
     genai_client_kwargs: list[dict[str, object]] = []
     responder_vertex_settings: list[VertexAISettings] = []
     research_vertex_settings: list[VertexAISettings] = []
@@ -2191,6 +2227,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         artifact_executor=artifact_executor,
         artifact_feedback_service=artifact_feedback_service,
         agent_job_repository=agent_job_repository,
+        memory_job_dispatches=memory_job_dispatches,
+        note_job_dispatches=note_job_dispatches,
+        artifact_job_dispatches=artifact_job_dispatches,
+        agent_job_dispatch_errors=agent_job_dispatch_errors,
         genai_client_kwargs=genai_client_kwargs,
         responder_vertex_settings=responder_vertex_settings,
         research_vertex_settings=research_vertex_settings,
@@ -2511,6 +2551,74 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         main,
         "AgentColArtifactExecutor",
         create_artifact_executor,
+        raising=False,
+    )
+
+    class FakeArtifactJobWorker:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def dispatch(
+            self,
+            job: AgentJob,
+            *,
+            task_set: set[object] | None = None,
+        ) -> None:
+            error = state.agent_job_dispatch_errors.get("create_artifact")
+            if error is not None:
+                raise error
+            state.artifact_job_dispatches.append(job)
+
+    class FakeMemoryJobWorker:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def dispatch(
+            self,
+            job: AgentJob,
+            *,
+            task_set: set[object] | None = None,
+        ) -> None:
+            error = state.agent_job_dispatch_errors.get(
+                "propose_memory_signal"
+            )
+            if error is not None:
+                raise error
+            state.memory_job_dispatches.append(job)
+
+    class FakeNoteJobWorker:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def dispatch(
+            self,
+            job: AgentJob,
+            *,
+            task_set: set[object] | None = None,
+        ) -> None:
+            error = state.agent_job_dispatch_errors.get(
+                "propose_collaborative_note"
+            )
+            if error is not None:
+                raise error
+            state.note_job_dispatches.append(job)
+
+    monkeypatch.setattr(
+        main,
+        "AgentColArtifactCreationJobWorker",
+        FakeArtifactJobWorker,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "MemoryProposalJobWorker",
+        FakeMemoryJobWorker,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        main,
+        "CollaborativeNoteProposalJobWorker",
+        FakeNoteJobWorker,
         raising=False,
     )
 
@@ -6167,6 +6275,265 @@ async def test_lifespan_injects_memory_and_notes_into_responder_app(
         ]
         assert len(service_state.responder_note_job_dispatchers) == 1
         assert callable(service_state.responder_note_job_dispatchers[0])
+
+
+@pytest.mark.asyncio
+async def test_lifespan_drains_queued_memory_job_after_restart(
+    service_state: ServiceState,
+) -> None:
+    job = make_agent_job(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [job]
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert service_state.agent_job_repository.queued_job_drain_calls == [
+        {
+            "action_kinds": main.AGENT_JOB_DISPATCH_ACTION_KINDS,
+            "limit": main.AGENT_JOB_STARTUP_DRAIN_LIMIT,
+        }
+    ]
+    assert service_state.memory_job_dispatches == [job]
+    assert service_state.note_job_dispatches == []
+    assert service_state.artifact_job_dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_lifespan_drains_queued_note_job_after_restart(
+    service_state: ServiceState,
+) -> None:
+    job = make_agent_job(
+        job_id="note-job-1",
+        action_kind="propose_collaborative_note",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [job]
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert service_state.note_job_dispatches == [job]
+    assert service_state.memory_job_dispatches == []
+    assert service_state.artifact_job_dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_lifespan_drains_queued_artifact_job_after_restart(
+    service_state: ServiceState,
+) -> None:
+    job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [job]
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert service_state.artifact_job_dispatches == [job]
+    assert service_state.memory_job_dispatches == []
+    assert service_state.note_job_dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_lifespan_drains_multiple_queued_jobs_within_bound(
+    service_state: ServiceState,
+) -> None:
+    memory_job = make_agent_job(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+    )
+    note_job = make_agent_job(
+        job_id="note-job-1",
+        action_kind="propose_collaborative_note",
+        status="queued",
+    )
+    artifact_job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [
+        memory_job,
+        note_job,
+        artifact_job,
+    ]
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert service_state.agent_job_repository.queued_job_drain_calls == [
+        {
+            "action_kinds": main.AGENT_JOB_DISPATCH_ACTION_KINDS,
+            "limit": main.AGENT_JOB_STARTUP_DRAIN_LIMIT,
+        }
+    ]
+    assert service_state.memory_job_dispatches == [memory_job]
+    assert service_state.note_job_dispatches == [note_job]
+    assert service_state.artifact_job_dispatches == [artifact_job]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_leaves_unsupported_queued_job_unchanged(
+    service_state: ServiceState,
+) -> None:
+    job = make_agent_job(
+        job_id="unsupported-job-1",
+        action_kind="retrieve_chat_context",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [job]
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert job.status == "queued"
+    assert service_state.memory_job_dispatches == []
+    assert service_state.note_job_dispatches == []
+    assert service_state.artifact_job_dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_lifespan_dispatch_failure_leaves_queued_job_recoverable(
+    service_state: ServiceState,
+) -> None:
+    job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [job]
+    service_state.agent_job_dispatch_errors["create_artifact"] = RuntimeError(
+        "dispatch failed"
+    )
+
+    async with main.lifespan(main.app):
+        pass
+
+    assert job.status == "queued"
+    assert service_state.artifact_job_dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_queued_job_drain_ignores_unsupported_jobs_for_scan_budget(
+    service_state: ServiceState,
+) -> None:
+    unsupported_job = make_agent_job(
+        job_id="unsupported-job-1",
+        action_kind="retrieve_chat_context",
+        status="queued",
+    )
+    memory_job = make_agent_job(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+    )
+
+    async with main.lifespan(main.app):
+        service_state.agent_job_repository.queued_jobs = [
+            unsupported_job,
+            memory_job,
+        ]
+        service_state.memory_job_dispatches.clear()
+        await main._drain_queued_agent_jobs(
+            repository=service_state.agent_job_repository,
+            app_state=main.app.state,
+            limit=1,
+        )
+
+    assert service_state.memory_job_dispatches == [memory_job]
+    assert service_state.note_job_dispatches == []
+    assert service_state.artifact_job_dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_queued_job_runtime_sweep_revisits_jobs_beyond_one_batch(
+    service_state: ServiceState,
+) -> None:
+    memory_job = make_agent_job(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+    )
+    artifact_job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+    )
+    async with main.lifespan(main.app):
+        service_state.agent_job_repository.queued_job_batches = [
+            [memory_job],
+            [artifact_job],
+            [],
+        ]
+        service_state.memory_job_dispatches.clear()
+        service_state.artifact_job_dispatches.clear()
+        service_state.agent_job_repository.queued_job_drain_calls.clear()
+        task = asyncio.create_task(
+            main._run_queued_agent_job_drain_loop(
+                repository=service_state.agent_job_repository,
+                app_state=main.app.state,
+                interval_seconds=0,
+                limit=1,
+            )
+        )
+        while len(service_state.agent_job_repository.queued_job_drain_calls) < 2:
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert service_state.memory_job_dispatches == [memory_job]
+    assert service_state.artifact_job_dispatches == [artifact_job]
+
+
+@pytest.mark.asyncio
+async def test_queued_job_dispatch_failure_can_retry_on_later_sweep(
+    service_state: ServiceState,
+) -> None:
+    artifact_job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+    )
+
+    async with main.lifespan(main.app):
+        service_state.agent_job_repository.queued_jobs = [artifact_job]
+        service_state.artifact_job_dispatches.clear()
+        service_state.agent_job_dispatch_errors["create_artifact"] = RuntimeError(
+            "dispatch failed"
+        )
+        await main._drain_queued_agent_jobs(
+            repository=service_state.agent_job_repository,
+            app_state=main.app.state,
+            limit=1,
+        )
+        service_state.agent_job_dispatch_errors.clear()
+        await main._drain_queued_agent_jobs(
+            repository=service_state.agent_job_repository,
+            app_state=main.app.state,
+            limit=1,
+        )
+
+    assert artifact_job.status == "queued"
+    assert service_state.artifact_job_dispatches == [artifact_job]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_owns_queued_job_runtime_drain_task(
+    service_state: ServiceState,
+) -> None:
+    async with main.lifespan(main.app):
+        task = main.app.state.queued_agent_job_drain_task
+        assert not task.done()
+
+    assert task.done()
 
 
 @pytest.mark.asyncio

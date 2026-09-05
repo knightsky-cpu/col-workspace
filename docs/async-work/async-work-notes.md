@@ -3235,3 +3235,47 @@ Not included:
 - expired running-lease recovery;
 - retry dispatch recovery across process restart;
 - shutdown hygiene or terminal report consistency cleanup.
+
+## Queued AgentJob Startup Draining
+
+This pass recovers queued AgentJobs that were durably persisted but missed
+dispatch because of process restart, crash, or post-queue dispatch failure.
+The recovery uses a bounded startup drain plus a lightweight bounded runtime
+sweep. It does not introduce a general scheduler and it does not reclaim expired
+running leases.
+
+Fixed:
+
+- `AgentJobRepository.list_queued_jobs(...)` now enumerates globally persisted
+  queued jobs by `created_at` through the `agent_jobs` collection group;
+- FastAPI lifespan startup drains up to `AGENT_JOB_STARTUP_DRAIN_LIMIT` queued
+  jobs after Memory, Note, and Artifact worker dispatchers are registered;
+- FastAPI lifespan also owns a lightweight runtime sweep task that reruns the
+  bounded drain at `AGENT_JOB_RUNTIME_DRAIN_INTERVAL_SECONDS` and is cancelled
+  and gathered during shutdown;
+- drained jobs route through the same `action_kind` dispatcher map used by
+  normal queueing and retry dispatch;
+- only Memory, Note, and Artifact action kinds are eligible for the recovery
+  scan, so unsupported queued jobs do not consume the recoverable-job budget or
+  starve supported jobs;
+- unsupported action kinds and dispatcher failures are logged and leave the
+  durable job queued for a later drain;
+- duplicate drain attempts remain safe because Memory, Note, and Artifact
+  workers still call `lease_queued_job(...)` before reading private payloads or
+  mutating resources.
+- `firestore.indexes.json` now declares the required `agent_jobs`
+  collection-group composite index for `status`, `action_kind`, and
+  `created_at`.
+
+Preserved:
+
+- retry private-payload preservation, lineage, and idempotency semantics;
+- live Memory, Note, and Artifact worker dispatch boundaries;
+- worker-specific private payload loading;
+- active direct resource APIs and queued chat receipts.
+
+Still deferred:
+
+- expired running-lease recovery;
+- permanent poison-dispatch starvation/backoff hardening;
+- shutdown hygiene and terminal report/event consistency cleanup.

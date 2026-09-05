@@ -81,6 +81,9 @@ class FakeFirestoreClient:
     def collection(self, name: str) -> FakeCollection:
         return FakeCollection(self, (name,))
 
+    def collection_group(self, name: str) -> FakeCollectionGroupQuery:
+        return FakeCollectionGroupQuery(self, name)
+
     def transaction(self) -> FakeTransaction:
         return self.transaction_obj
 
@@ -216,6 +219,82 @@ class FakeQuery:
         if op_string != "==":
             raise AssertionError(f"Unsupported fake query op: {op_string}")
         return data.get(field_path) == value
+
+
+class FakeCollectionGroupQuery(FakeQuery):
+    def __init__(
+        self,
+        store: FakeFirestoreClient,
+        collection_id: str,
+        filters: tuple[tuple[str, str, object], ...] = (),
+        order_field: str | None = None,
+        row_limit: int | None = None,
+    ) -> None:
+        super().__init__(
+            store,
+            (collection_id,),
+            filters,
+            order_field,
+            row_limit,
+        )
+        self._collection_id = collection_id
+
+    def where(
+        self,
+        field_path: str,
+        op_string: str,
+        value: object,
+    ) -> FakeCollectionGroupQuery:
+        return FakeCollectionGroupQuery(
+            self._store,
+            self._collection_id,
+            (*self._filters, (field_path, op_string, value)),
+            self._order_field,
+            self._row_limit,
+        )
+
+    def order_by(self, field_path: str) -> FakeCollectionGroupQuery:
+        return FakeCollectionGroupQuery(
+            self._store,
+            self._collection_id,
+            self._filters,
+            field_path,
+            self._row_limit,
+        )
+
+    def limit(self, limit: int) -> FakeCollectionGroupQuery:
+        return FakeCollectionGroupQuery(
+            self._store,
+            self._collection_id,
+            self._filters,
+            self._order_field,
+            limit,
+        )
+
+    async def stream(
+        self,
+        *,
+        transaction: FakeTransaction | None = None,
+    ):
+        rows = []
+        for path, data in self._store.documents.items():
+            if len(path) < 2 or path[-2] != self._collection_id:
+                continue
+            if all(
+                self._matches(data, field, op, value)
+                for field, op, value in self._filters
+            ):
+                rows.append((path, data))
+        if self._order_field is not None:
+            rows.sort(key=lambda item: item[1].get(self._order_field))
+        if self._row_limit is not None:
+            rows = rows[: self._row_limit]
+        for path, data in rows:
+            yield FakeSnapshot(
+                exists=True,
+                data=dict(data),
+                reference=FakeDocument(self._store, path),
+            )
 
 
 @pytest.fixture
@@ -503,6 +582,69 @@ async def test_list_jobs_filters_by_project_and_session(
 
 
 @pytest.mark.asyncio
+async def test_list_queued_jobs_enumerates_only_queued_jobs_globally_with_limit(
+    repository: AgentJobRepository,
+) -> None:
+    supported_action_kinds = (
+        "create_artifact",
+        "propose_memory_signal",
+        "propose_collaborative_note",
+    )
+    await repository.enqueue_job(
+        make_job(
+            job_id="job-unsupported",
+            action_kind="retrieve_chat_context",
+            idempotency_key="idem-unsupported",
+            created_at=NOW - timedelta(seconds=10),
+            updated_at=NOW - timedelta(seconds=10),
+        )
+    )
+    await repository.enqueue_job(
+        make_job(
+            job_id="job-user-1",
+            idempotency_key="idem-user-1",
+            created_at=NOW + timedelta(seconds=10),
+            updated_at=NOW + timedelta(seconds=10),
+        )
+    )
+    await repository.enqueue_job(
+        make_job(
+            job_id="job-user-2",
+            user_id="user-2",
+            workspace_id="workspace-2",
+            idempotency_key="idem-user-2",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    await repository.enqueue_job(
+        make_job(
+            job_id="job-running",
+            idempotency_key="idem-running",
+            created_at=NOW + timedelta(seconds=5),
+            updated_at=NOW + timedelta(seconds=5),
+        )
+    )
+    await repository.lease_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-running",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW + timedelta(seconds=20),
+    )
+
+    jobs = await collect(
+        repository.list_queued_jobs(
+            action_kinds=supported_action_kinds,
+            limit=2,
+        )
+    )
+
+    assert [job.job_id for job in jobs] == ["job-user-2", "job-user-1"]
+
+
+@pytest.mark.asyncio
 async def test_reports_are_idempotent_and_listed_chronologically(
     repository: AgentJobRepository,
 ) -> None:
@@ -678,6 +820,39 @@ async def test_lease_queued_job_moves_specific_job_to_running(
         job_id="job-older",
     )
     assert older.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_lease_queued_job_rejects_second_concurrent_owner(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(make_job())
+    await repository.lease_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+
+    with pytest.raises(AgentJobStateError):
+        await repository.lease_queued_job(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1",
+            lease_owner="worker-2",
+            lease_expires_at=NOW + timedelta(minutes=2),
+            observed_at=NOW + timedelta(seconds=1),
+        )
+
+    job = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    )
+    assert job.status == "running"
+    assert job.lease_owner == "worker-1"
 
 
 @pytest.mark.asyncio

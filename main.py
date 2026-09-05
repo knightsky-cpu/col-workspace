@@ -947,6 +947,13 @@ def _public_ordinal(index: int) -> str:
 AGENT_JOB_STREAM_POLL_SECONDS = 0.25
 AGENT_JOB_STREAM_MAX_CYCLES = 2
 AGENT_JOB_STREAM_ACTIVE_STATUSES = {"queued", "running"}
+AGENT_JOB_STARTUP_DRAIN_LIMIT = 20
+AGENT_JOB_RUNTIME_DRAIN_INTERVAL_SECONDS = 60.0
+AGENT_JOB_DISPATCH_ACTION_KINDS: tuple[AgentJobKind, ...] = (
+    "create_artifact",
+    "propose_memory_signal",
+    "propose_collaborative_note",
+)
 
 
 async def _public_agent_job_list_response(
@@ -1115,32 +1122,89 @@ def _agent_job_retry_id(
     return f"agent-job-retry-{digest}"
 
 
-def _dispatch_retry_agent_job(app_state: object, job: AgentJob) -> None:
+def _dispatch_queued_agent_job(
+    app_state: object,
+    job: AgentJob,
+    *,
+    log_context: str,
+) -> bool:
     if job.status != "queued":
-        return
+        return False
+    dispatchers = getattr(app_state, "agent_job_dispatchers", {})
+    dispatcher = dispatchers.get(job.action_kind)
+    if dispatcher is None:
+        logger.warning(
+            "No AgentJob dispatcher registered for %s action_kind=%s.",
+            log_context,
+            job.action_kind,
+        )
+        return False
+    try:
+        dispatcher(job)
+    except Exception:
+        logger.exception(
+            "AgentJob %s dispatch failed for action_kind=%s.",
+            log_context,
+            job.action_kind,
+        )
+        return False
+    return True
+
+
+def _dispatch_retry_agent_job(app_state: object, job: AgentJob) -> None:
     dispatched_job_ids = getattr(app_state, "agent_job_retry_dispatches", None)
     if dispatched_job_ids is None:
         dispatched_job_ids = set()
         setattr(app_state, "agent_job_retry_dispatches", dispatched_job_ids)
     if job.job_id in dispatched_job_ids:
         return
-    dispatchers = getattr(app_state, "agent_job_dispatchers", {})
-    dispatcher = dispatchers.get(job.action_kind)
-    if dispatcher is None:
-        logger.warning(
-            "No AgentJob dispatcher registered for retry action_kind=%s.",
-            job.action_kind,
-        )
-        return
-    try:
-        dispatcher(job)
-    except Exception:
-        logger.exception(
-            "AgentJob retry dispatch failed for action_kind=%s.",
-            job.action_kind,
-        )
+    dispatched = _dispatch_queued_agent_job(
+        app_state,
+        job,
+        log_context="retry",
+    )
+    if not dispatched:
         return
     dispatched_job_ids.add(job.job_id)
+
+
+async def _drain_queued_agent_jobs(
+    *,
+    repository: object,
+    app_state: object,
+    limit: int = AGENT_JOB_STARTUP_DRAIN_LIMIT,
+    action_kinds: tuple[AgentJobKind, ...] = AGENT_JOB_DISPATCH_ACTION_KINDS,
+    log_context: str = "queued drain",
+) -> None:
+    try:
+        async for job in repository.list_queued_jobs(
+            action_kinds=action_kinds,
+            limit=limit,
+        ):
+            _dispatch_queued_agent_job(
+                app_state,
+                job,
+                log_context=log_context,
+            )
+    except (AgentJobRepositoryError, AgentJobStateError, ValueError):
+        logger.exception("AgentJob %s failed.", log_context)
+
+
+async def _run_queued_agent_job_drain_loop(
+    *,
+    repository: object,
+    app_state: object,
+    interval_seconds: float = AGENT_JOB_RUNTIME_DRAIN_INTERVAL_SECONDS,
+    limit: int = AGENT_JOB_STARTUP_DRAIN_LIMIT,
+) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        await _drain_queued_agent_jobs(
+            repository=repository,
+            app_state=app_state,
+            limit=limit,
+            log_context="runtime drain",
+        )
 
 
 def _public_collaborative_note(
@@ -2247,9 +2311,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     app.state.working_state_background_tasks = set()
 
+    await _drain_queued_agent_jobs(
+        repository=agent_job_repository,
+        app_state=app.state,
+        limit=AGENT_JOB_STARTUP_DRAIN_LIMIT,
+        log_context="startup drain",
+    )
+    queued_agent_job_drain_task = asyncio.create_task(
+        _run_queued_agent_job_drain_loop(
+            repository=agent_job_repository,
+            app_state=app.state,
+        )
+    )
+    app.state.queued_agent_job_drain_task = queued_agent_job_drain_task
+
     try:
         yield
     finally:
+        queued_agent_job_drain_task = getattr(
+            app.state,
+            "queued_agent_job_drain_task",
+            None,
+        )
         working_state_background_tasks = tuple(
             getattr(app.state, "working_state_background_tasks", set())
         )
@@ -2265,6 +2348,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             task.cancel()
         for task in memory_job_background_tasks:
             task.cancel()
+        if queued_agent_job_drain_task is not None:
+            queued_agent_job_drain_task.cancel()
         if working_state_background_tasks:
             await asyncio.gather(
                 *working_state_background_tasks,
@@ -2278,6 +2363,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if memory_job_background_tasks:
             await asyncio.gather(
                 *memory_job_background_tasks,
+                return_exceptions=True,
+            )
+        if queued_agent_job_drain_task is not None:
+            await asyncio.gather(
+                queued_agent_job_drain_task,
                 return_exceptions=True,
             )
         try:

@@ -15,6 +15,7 @@ from agent_col_agent_jobs import (
     AgentJob,
     AgentJobEvent,
     AgentJobFailure,
+    AgentJobKind,
     AgentJobReport,
     AgentJobStatus,
     transition_agent_job,
@@ -269,6 +270,47 @@ class AgentJobRepository:
             raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
         except GoogleAPIError as exc:
             self._raise_firestore_error("list_jobs", exc)
+
+    async def list_queued_jobs(
+        self,
+        *,
+        action_kinds: tuple[AgentJobKind, ...] | None = None,
+        limit: int = 20,
+    ) -> AsyncIterator[AgentJob]:
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100.")
+        if action_kinds == ():
+            return
+        try:
+            jobs = []
+            if action_kinds is None:
+                queries = [
+                    self._client.collection_group("agent_jobs")
+                    .where("status", "==", "queued")
+                    .order_by("created_at")
+                    .limit(limit)
+                ]
+            else:
+                queries = [
+                    self._client.collection_group("agent_jobs")
+                    .where("status", "==", "queued")
+                    .where("action_kind", "==", action_kind)
+                    .order_by("created_at")
+                    .limit(limit)
+                    for action_kind in action_kinds
+                ]
+            for query in queries:
+                async for snapshot in query.stream():
+                    jobs.append(self._job_from_snapshot(snapshot))
+            jobs.sort(key=lambda job: job.created_at)
+            for job in jobs[:limit]:
+                yield job
+        except (AgentJobStateError, ValueError):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("list_queued_jobs", exc)
 
     async def lease_next_queued_job(
         self,
