@@ -1,238 +1,207 @@
 # Agent Col Current State
 
-Last reconciled: August 30, 2026.
+Last reconciled: September 5, 2026.
 
-This document describes what Agent Col can do in the current checkout. Source
-code, tests, and [Repository map](repo-map.md) are the authority for these
-claims; historical files under `docs/legacy/` and forward plans under
-`docs/forward/` are not implementation truth.
+This document describes what Agent Col implements in the current checkout.
+Source code and [Repository map](repo-map.md) are the authority for these
+claims. Historical files under `docs/legacy/`, future plans under
+`docs/forward/`, and migration research under migration-specific directories
+are provenance or planning records unless current source still matches them.
 
 ## Current Product State
 
 Agent Col is implemented as a persistent collaborative partner: a FastAPI
-backend, same-origin browser workspace, Gemini/ADK specialist execution,
-Firestore persistence, governed memory, collaborative notes, continuity,
-working state, preference learning, and artifacts.
+backend, same-origin browser workspace, Google OIDC or local-development auth,
+Gemini/ADK responder execution, bounded specialists, Firestore persistence,
+governed memory, collaborative notes, continuity, hidden working state,
+artifacts, queued AgentJobs, and browser speech.
 
-Repository deployment notes identify an accepted Cloud Run deployment in
-`us-east4`. Remaining submission work is final hosted re-verification, demo
-evidence, and freeze rather than initial deployment.
+The current production deployment model is one Cloud Run FastAPI container.
+That container serves the static UI, same-origin APIs, model/provider calls,
+Firestore access, STT/TTS routes, and process-local AgentJob workers.
 
-## Status Classification
+## Implemented
 
-Implemented:
-
-- Same-origin browser workspace served by FastAPI.
+- Same-origin browser workspace served at `/workspace`.
 - Local-development auth and Google OIDC auth modes.
-- User/workspace/project ownership checks.
-- Workspace-scoped chat sessions and idempotent chat turns.
-- Ordinary-turn SSE chat streaming plus JSON structured-decision chat.
-- Governed profile memory.
-- Governed collaborative notes.
-- Bounded continuity from active notes and prior chat sessions.
-- Hidden same-session working state.
-- Narrow preference learning for explicit concise/shorter-response feedback.
-- Routed Research, Source, Computation, and Requirements Verification
+- User-owned workspaces with workspace-scoped chat, notes, artifacts, and
+  AgentJob state.
+- Persisted chat sessions with retry-safe idempotent turn records.
+- Ordinary-turn SSE chat streaming through `/api/chat/stream`.
+- Ordinary non-streaming JSON chat through `/api/chat`.
+- Direct governed resource APIs for memory proposal decisions, memory
+  clarification selection, collaborative-note decisions, continuity choices,
+  artifact feedback, note lifecycle, memory signal revocation/deletion, and
+  artifact lifecycle actions.
+- Firestore-backed `AgentJob` records, private payloads, public events,
+  completion reports, retry/cancel routes, startup/runtime drain loops, and
+  process-local workers.
+- Queue-backed chat-routed work for supported explicit memory, collaborative
+  note, and blueprint artifact requests.
+- Governed profile memory with proposal, clarification, approval, rejection,
+  correction, revocation, deletion, inspection, provenance, lifecycle events,
+  and adaptation receipts.
+- Shared memory-proposal eligibility exclusions for deterministic routing and
+  model/tool-proposed evidence.
+- Governed collaborative notes with proposal, correction, decision, archive,
+  restore, delete, active projection, event history, and workspace scoping.
+- Bounded continuity from active notes and prior chat sessions/messages, with
+  direct continuity-choice selection.
+- Hidden same-session working state used as non-authoritative collaboration
+  context after canonical response persistence.
+- Narrow preference-learning observations and hypotheses from explicit
+  concise/shorter-response feedback.
+- Bounded Research, Source, Computation, and Requirements Verification
   specialists.
-- Synchronous blueprint synthesis and generic single-file artifact workflows.
-- Artifact detail, lifecycle, metadata update, versioning, feedback, and export
-  surfaces.
+- Synthesis blueprints and generic single-file artifacts with lifecycle,
+  metadata, versioning, feedback, detail, and export surfaces.
+- Browser voice input through Google Cloud Speech-to-Text.
+- Spoken assistant responses through Google Cloud Text-to-Speech for completed
+  assistant messages.
+- Offline Python and frontend test coverage plus live smoke runners for
+  configured local or hosted services.
 
-Implemented with limitation:
+## Implemented With Limits
 
-- Working state is hidden, same-session, best-effort maintenance and
+- AgentJob execution is persisted and drainable, but worker execution is
+  process-local inside the FastAPI/Cloud Run instance. There is no Cloud Tasks,
+  Pub/Sub, or separate private worker service in the current runtime.
+- AgentJob cancel mutates persisted job status but does not cancel an already
+  running in-process asyncio task.
+- AgentJob retry clones private payload data and dispatches through the
+  registered process-local dispatcher when possible, but failed workers are
+  currently marked non-retryable by default.
+- Rate limiting is in-process per running instance, not distributed.
+- Working state is hidden, same-session, best-effort, possibly stale, and
   non-authoritative.
 - Continuity resolves bounded context or returns user choices; it is not
   open-ended retrieval authority.
 - Preference learning is intentionally narrow and does not silently mutate
   active memory.
-- Artifact execution is request-bound, not a durable background job system.
-- Rate limiting is in-memory per process/Cloud Run instance.
+- Direct `/api/synthesize` and generic artifact creation are request-bound
+  generation paths. Chat-routed blueprint artifact requests are queue-backed.
 - Firestore indexes and pagination strategy are intentionally narrow.
+- Blueprint artifacts expose list/detail/feedback routes; matching blueprint
+  archive/restore/delete routes are not registered in `main.py`.
 
-Intentionally deferred:
+## Not Implemented
 
-- Durable asynchronous/background execution.
-- Cloud Tasks or private worker execution.
-- Distributed rate limiting.
-- Broader preference inference.
-- Larger indexed-query and retention-policy hardening.
-- Cleanup of retained legacy/versioned/evaluation source files after submission
-  freeze.
-
-Not implemented:
-
-- Background artifact jobs that continue after the HTTP request ends.
+- A separate durable worker service outside the FastAPI/Cloud Run process.
+- Cloud Tasks or Pub/Sub-backed AgentJob delivery.
 - A globally distributed rate limiter.
+- Broad preference inference.
+- PostgreSQL as the active persistence backend.
 - Model Armor, Agent Registry, Agent Gateway, Agent Observability, or Memory
   Bank as separate Gemini Enterprise Agent Platform services.
 
-## Implemented User-Visible Capabilities
+## User-Visible Surfaces
 
-- Google or local-development authentication entry.
-- Workspace selection, creation, deletion, and workspace-scoped chat state.
-- Conversation UI with idempotent retry, receipts, citations, memory
-  clarification choices, continuity choices, and status/error display.
-- Progressive streaming for ordinary chat turns through `/api/chat/stream`;
-  `/api/chat` remains the canonical JSON and structured-decision path
-  described in [Repository map](repo-map.md).
-- Supporting drawer sections for Workspace, Artifacts, Notes, Memory, and
-  Chats; there is activity/receipt state and rendering support in code, but the
-  inspected HTML does not expose a separately labeled Activity drawer section
-  (`frontend/index.html`, `frontend/activity-view.mjs`).
-- Right-side Artifacts Viewer with artifact detail, content display, metadata,
-  lifecycle, versioning, feedback, and export behavior.
-- Memory inspection plus approval/rejection, correction, revocation, and
-  deletion flows where surfaced by the backend.
-- Collaborative note proposals, decisions, corrections, archive/restore/delete,
-  detail, and event display.
-- Chat session list/detail reconstruction.
+- Browser authentication entry and session projection.
+- Workspace selection, creation, deletion, and scoped application state.
+- Chat UI with idempotent retry, receipts, citations, queued action receipts,
+  memory clarification choices, continuity choices, and status/error display.
+- Workspace drawer sections for Workspace, Artifacts, Notes, Memory, Chats,
+  and Agents.
+- Agents panel showing queued/running/completed/failed AgentJobs and reports.
+- Memory drawer showing active memory, pending proposals, clarifications,
+  events, direct decisions, revoke, and delete actions.
+- Notes drawer showing active/archived notes, proposals, corrections,
+  decisions, lifecycle actions, and event detail.
+- Work/artifacts surface showing blueprint and generic artifacts, artifact
+  detail, metadata, versions, lifecycle actions, feedback, and export behavior.
+- Microphone dictation to the backend STT route and optional spoken responses
+  from completed assistant messages.
 
-## Implemented Backend Capabilities
+## Backend Capabilities
 
-- FastAPI routes for auth/session, workspaces, memory, notes, chat sessions,
-  synthesis, artifacts, feedback, chat, and ordinary chat streaming
-  as listed in [Repository map](repo-map.md).
-- Firestore-backed chat sessions, messages, turn records, user workspaces,
-  memory, note, artifact, feedback, continuity-source, working-state, and
-  preference records (`database.py`, `repo-map.md`).
+- FastAPI routes for auth, workspaces, memory, memory clarifications,
+  continuity choices, notes, chat sessions, AgentJobs, synthesis, artifacts,
+  artifact feedback, speech, ordinary JSON chat, and ordinary SSE chat.
+- Firestore-backed storage for chat sessions, messages, turns, workspaces,
+  governed memory, memory clarifications, collaborative notes, preference
+  records, working state, artifacts, feedback, AgentJobs, AgentJob events, and
+  AgentJob reports.
 - Google OIDC and local-dev auth modes with Cloud Run fail-closed checks for
-  Google auth configuration (`auth.py`).
-- Request perimeter middleware for request size, in-memory per-client/path rate
-  limiting, cache control, and security headers.
-- Durable chat idempotency with turn claim, replay, live conflict, expired-turn
-  resume, deterministic user/model message IDs, and completion validation.
+  hosted Google auth configuration.
+- Request perimeter middleware for request size, in-memory per-client/path
+  rate limiting, cache control, and security headers.
+- Durable chat idempotency with turn claim, replay, live conflict,
+  expired-turn resume, deterministic message IDs, and completion validation.
 - Partial failure responses that preserve already-completed effects where
   possible.
 
-## Implemented Frontend Capabilities
+## Frontend Capabilities
 
+- Static ES module UI served by FastAPI without a frontend build step.
 - Same-origin API helper with relative-path enforcement, auth headers,
-  idempotency headers, JSON handling, timeout/error normalization, and
-  structured error details.
-- Immutable chat request construction with generated idempotency keys and exact
-  retry body/key preservation.
-- Structured chat decision requests for memory clarification and continuity
-  selections.
-- Panel-specific rendering for chat, artifacts/work, notes, memory, chats, and
-  workspace state.
-- Safe text/markdown rendering and text-based artifact content display
-  (`frontend/render.mjs`, `frontend/markdown-renderer.mjs`,
-  `frontend/work-view.mjs`).
+  idempotency headers, JSON handling, SSE parsing, timeout/error
+  normalization, and structured error details.
+- Immutable-ish chat request construction with generated idempotency keys and
+  exact retry body/key preservation.
+- Ordinary chat streaming through `/api/chat/stream`.
+- Direct API calls for governed memory, note, continuity, artifact-feedback,
+  workspace, work, and AgentJob surfaces.
+- Panel-specific refresh behavior after authoritative receipts and completed
+  AgentJobs.
+- Safe text/Markdown rendering and text-based artifact content display.
 
 ## Specialist And Tool Capabilities
 
-Current routed specialist capabilities are bounded evidence producers. The
-responder does not directly receive model-visible expert tools.
+Specialists are bounded evidence producers. The responder does not receive
+open-ended model-visible expert tools for Research, Source, Computation, or
+Requirements Verification.
 
-- Research uses Gemini with Google Search grounding, validates provider
-  grounding metadata, and returns public citations/receipts only for completed
-  validated results.
-- Source analyzes supplied public URLs using Gemini URL Context for retrieval,
-  then performs a tool-free structured classification pass over grounded
-  statements.
-- Computation uses bounded ADK computation execution in a temporary in-memory
-  invocation session. The computational agent is configured with built-in Python
-  code execution, bounded inputs, max LLM calls, timeout handling, and session
+- Research uses Gemini with Google Search grounding, validates grounding
+  metadata, and returns public citations/receipts for completed validated
+  results.
+- Source uses Gemini URL Context for supplied public URLs and performs
+  structured classification over grounded statements.
+- Computation uses bounded ADK computation execution with built-in Python code
+  execution, input limits, max LLM-call limits, timeout handling, and session
   cleanup.
-- Requirements Verification uses direct tool-free structured Gemini generation
-  and local validation against supplied requirement and subject blocks
-  (`requirements_verification_service.py`).
-- Artifact routing supports request-bound artifact creation where route and
-  artifact constraints validate.
+- Requirements Verification uses direct structured Gemini generation plus local
+  validation against supplied requirement and subject blocks.
+- Artifact creation is constrained by route and artifact validation before
+  persistence.
 
-## Memory, Notes, Continuity, Working State, And Preferences
+## Current Runtime Configuration
 
-Governed profile memory is implemented. It supports model-proposed pending
-memory, deterministic policy validation, ambiguous-memory clarification,
-approval/rejection, correction, revocation, hard deletion, bounded inspection,
-provenance, lifecycle events, and adaptation receipts. Pending proposals are
-not active memory until approved.
+Required runtime configuration is source-backed in `auth.py`,
+`vertex_config.py`, `speech_service.py`, and `main.py`.
 
-Collaborative notes are implemented and workspace-scoped. They support pending
-proposals, user approval/rejection, correction, archive, restore, deletion,
-source provenance, active-note projection, and note events
-(`collaborative_note_service.py`, `database.py`).
+- `AGENT_COL_AUTH_MODE=local_dev` for local development or
+  `AGENT_COL_AUTH_MODE=google_oidc` for hosted Google auth.
+- `GOOGLE_OAUTH_CLIENT_ID` or fallback `GOOGLE_CLIENT_ID` for Google OIDC.
+- `GOOGLE_CLOUD_PROJECT`.
+- `GOOGLE_CLOUD_LOCATION=global`.
+- `GOOGLE_GENAI_USE_ENTERPRISE=True`.
+- `AGENT_COL_STT_LANGUAGE_CODES`, defaulting to `en-US`.
+- `AGENT_COL_STT_MODEL`, defaulting to `latest_short`.
+- Optional `AGENT_COL_SPEECH_MAX_AUDIO_BYTES`.
 
-Continuity is implemented and intentionally bounded. It reads active notes and
-prior chat sessions/messages as sources, returning either resolved context with
-receipts or ambiguity choices when the reference cannot be resolved safely
-(`continuity_service.py`).
+Server-side Google Cloud calls use Application Default Credentials locally and
+the Cloud Run runtime service account when deployed. The browser never calls
+Firestore, Vertex AI, Speech-to-Text, or Text-to-Speech directly.
 
-Working state is implemented and intentionally bounded/non-authoritative. It is
-hidden same-session context, can be unavailable or stale, and cannot authorize
-tools, memory, notes, artifacts, identity changes, or durable actions
-(`working_state.py`). In `/api/chat`, the request awaits:
+## Current Documentation Authority
 
-```text
-canonical responder completion
--> authoritative chat persistence
--> awaited hidden working-state maintenance
--> HTTP response returned
-```
+- [README](../README.md): developer entry point, setup, and deployment path.
+- [Architecture](architecture.md): concise current architecture and trust
+  boundaries.
+- [Local setup](local-setup.md): top-level clone/configure/run/deploy setup.
+- [Repository map](repo-map.md): detailed source-derived file, route, and
+  lifecycle map.
+- [Deployment runbook](deployment/google-cloud-run-deployment-instructions.md):
+  canonical MacBook/Cloud Run deployment procedure for the maintained service.
 
-Working-state update failures are logged and swallowed, but when enabled the
-maintenance call is awaited before the response returns.
+## Known Technical Debt
 
-Preference learning is implemented but intentionally narrow. It stores
-non-authoritative observations/hypotheses and currently recognizes explicit
-shorter/concise response feedback; surfaced hypotheses are confirmed through
-the governed memory clarification path (`preference_learning.py`,
-`preference_learning_service.py`, `main.py`).
-
-## Artifact Behavior
-
-Implemented artifact capabilities include synchronous blueprint synthesis,
-blueprint list/detail, generic single-file artifact create/list/detail,
-archive/restore, metadata update, child version creation, blueprint feedback
-records, feedback supersession metadata, and chat-routed supported artifact
-effects.
-
-Artifact execution is currently request-bound. Durable asynchronous/background
-execution is not part of the current runtime path.
-
-## Test And Evidence Status
-
-[Repository map](repo-map.md) records the current source-backed test inventory.
-Existing tests cover routing constraints, expert validation, memory
-normalization and proposal behavior, collaborative-note lifecycle behavior,
-artifact read/feedback behavior, frontend state/retry behavior, and safe
-markdown rendering.
-
-This document does not claim a fresh full-suite run. For this documentation
-pass, the required verification is `git diff --check` after edits.
-
-## Implemented But Intentionally Bounded
-
-- Continuity ambiguity handling is implemented as bounded resolved context or
-  explicit user choices, not open-ended retrieval authority.
-- Working state is implemented as hidden, same-session, non-authoritative
-  context, not durable memory or an action authority.
-- Preference learning is implemented narrowly for explicit concise/shorter
-  response feedback.
-- Artifact generation and feedback are implemented for current request-bound
-  paths, not background jobs.
-- Rate limiting is implemented in memory per running instance, not as a
-  distributed limiter.
-
-## Known Current Limitations
-
-- Durable asynchronous/background execution is not implemented.
-- Firestore pagination/index strategy is intentionally narrow; custom indexes
-  are limited in the checked-in index file (`firestore.indexes.json`).
-- Source and Computation fail safely but expose less detailed invalid-output
-  diagnostics than Research and Requirements Verification (`repo-map.md`).
-- Some older routing/provider/executor/context modules remain as compatibility,
-  tests-only, live-check-only, or apparently unused code (`repo-map.md`).
-- Retention/deletion policy and broader operational hardening remain limited to
-  the currently implemented service behavior and docs.
-
-## Post-Submission Technical Debt
-
+- External durable worker architecture for AgentJobs.
 - Distributed rate limiting.
-- Indexed pagination/query expansion.
+- Broader indexed-query and pagination hardening.
 - Broader preference extraction beyond explicit concise/shorter feedback.
-- Durable asynchronous/background execution.
 - Blueprint/generic artifact lifecycle parity.
-- Legacy/versioned/dead-code cleanup after the submission freeze.
-- Deeper retention, deletion, and operational hardening.
+- Workspace deletion cleanup for AgentJob/report collections.
+- Legacy/versioned/dead-code cleanup after release stabilization.
+- Retention, deletion, and operational hardening beyond the current service
+  behavior.

@@ -17,7 +17,10 @@ memory and notes.
 - User-owned workspaces with workspace-scoped chat, notes, memory, and work.
 - Persisted chat sessions with retry-safe idempotent turn records.
 - Progressive SSE chat streaming for ordinary turns at `/api/chat/stream`, with
-  `/api/chat` retained as the canonical JSON and structured-decision path.
+  `/api/chat` retained for ordinary non-streaming JSON chat.
+- Direct resource APIs for memory decisions, memory clarifications, continuity
+  choices, collaborative-note decisions, artifact feedback, and lifecycle
+  mutations that no longer depend on active chat turns.
 - Firestore-backed `AgentJob` records, reports, events, retry/cancel APIs, and
   in-process workers for queued memory, collaborative-note, artifact, and
   working-state work.
@@ -503,7 +506,7 @@ map.
 - [Current state](docs/current-state.md)
 - [Architecture](docs/architecture.md)
 - [Repository map](docs/repo-map.md)
-- [Local development setup](docs/development/local-setup.md)
+- [Local development setup](docs/local-setup.md)
 - [Testing](docs/development/testing.md)
 - [Troubleshooting](docs/development/troubleshooting.md)
 - [Submission checklist](docs/submission-checklist.md)
