@@ -335,3 +335,45 @@ Poll/logs: `job-poll-samples.jsonl`, `cross-surface-poll.jsonl`, `session-switch
 Soak helpers (evidence support only): `soak13-runner.js`, `soak13-mixed-driver.mjs`, `soak13-cdp-expr.txt`, `soak13-chunks.json`, `soak13-chunks/`, `soak13-chunks-wrapped/`
 
 **Session stopped by user request. No further testing. No source fixes.**
+
+---
+
+## Post-campaign Firestore deployment-drift resolution
+
+**Resolution date:** 2026-09-05
+**Verified target:** Firebase project `project-e1e2a890-4566-48a8-a32`, Firestore database `(default)`
+
+D1 was confirmed as an environment/deployment defect. The checked-in
+`firestore.indexes.json` was already correct, but the verified `(default)`
+Firestore database initially had zero deployed composite indexes. No runtime
+or application-source change was required.
+
+The following canonical `agent_jobs` collection-group composite indexes were
+deployed to the verified target, and both reached `READY`:
+
+- `status` ascending, `action_kind` ascending, `created_at` ascending
+  (index ID `CICAgOjXh4EK`)
+- `status` ascending, `action_kind` ascending, `lease_expires_at` ascending
+  (index ID `CICAgJiUpoMK`)
+
+The checked-in `blueprints.blueprint` field-index exemption was also applied.
+All index and field-configuration operations completed successfully.
+
+Post-deployment verification established that:
+
+- the read-only expired-running recovery query succeeded for every dispatched
+  AgentJob action kind and returned zero matching jobs;
+- the backend was restarted with
+  `AGENT_COL_AUTH_MODE=google_oidc venv/bin/uvicorn main:app --reload --host 127.0.0.1 --port 8000`;
+- startup completed without
+  `Firestore list_expired_running_jobs operation failed` or
+  `AgentJob startup drain failed`;
+- `GET /` returned `{"status":"online"}`.
+
+The positional `.where(...)` warnings in `agent_job_repository.py` remain a
+separate, non-fatal Firestore client API-style/observability issue. They were
+not required for index recovery and were not changed in this pass.
+
+This post-campaign remediation resolves D1 in the verified environment. Tests
+10 and 11 retain their original `NOT EXECUTED` campaign results and require a
+focused rerun against the remediated environment.
