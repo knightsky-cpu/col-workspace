@@ -437,6 +437,55 @@ def exact_failed_user_requested_memory_payload(job: AgentJob) -> AgentJobPayload
     )
 
 
+def raw_profile_candidate_payload(
+    job: AgentJob,
+    *,
+    decision: dict[str, object],
+    source_message_text: str,
+) -> AgentJobPayload:
+    return AgentJobPayload(
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        source_turn_id=job.source_turn_id,
+        source_message_id=job.source_message_id,
+        action_kind=job.action_kind,
+        created_at=job.created_at,
+        payload={
+            "decision": decision,
+            "clarification_selection": None,
+            "source_message_text": source_message_text,
+            "memory_decision_present": False,
+        },
+    )
+
+
+async def run_memory_worker_with_payload(
+    payload: AgentJobPayload,
+) -> tuple[AgentJob, RecordingMemoryService, RecordingAgentJobRepository]:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+
+    command = make_command()
+    job = make_job(command)
+    repository = RecordingAgentJobRepository(job=job, payload=payload)
+    service = RecordingMemoryService()
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=service,
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    completed = await worker.run_one(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="memory-worker-1",
+    )
+    assert completed is not None
+    return completed, service, repository
+
+
 def test_memory_command_restores_persisted_value_alias_payload() -> None:
     from memory_proposal_job_worker import memory_command_from_payload
 
@@ -1435,3 +1484,193 @@ async def test_memory_worker_normalizes_collaboration_preferences_candidate(
     assert recorded.decision.evidence_text == (
         "remember that I prefer assembly over C"
     )
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_normalizes_communication_style_candidate(
+) -> None:
+    command = make_command()
+    job = make_job(command)
+    payload = raw_profile_candidate_payload(
+        job,
+        decision={
+            "kind": "profile_candidate",
+            "category": "communication_style",
+            "value": "Prefers direct answers with concise tradeoffs",
+            "evidence_text": (
+                "Remember that I prefer direct answers with concise tradeoffs."
+            ),
+        },
+        source_message_text=(
+            "Remember that I prefer direct answers with concise tradeoffs."
+        ),
+    )
+
+    completed, service, repository = await run_memory_worker_with_payload(
+        payload
+    )
+
+    assert completed.status == "completed"
+    assert repository.failed == []
+    assert len(service.commands) == 1
+    recorded = service.commands[0]
+    assert recorded.decision.kind == "profile_candidate"
+    assert recorded.decision.category == "user_requested_memory"
+    assert recorded.decision.canonical_value == (
+        "Prefers direct answers with concise tradeoffs"
+    )
+    assert recorded.decision.evidence_text == (
+        "Remember that I prefer direct answers with concise tradeoffs."
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_unwraps_single_nested_profile_candidate(
+) -> None:
+    command = make_command()
+    job = make_job(command)
+    payload = raw_profile_candidate_payload(
+        job,
+        decision={
+            "kind": "profile_candidate",
+            "candidate": {
+                "kind": "profile_candidate",
+                "category": "communication_style",
+                "canonical_value": "Prefers terse code review summaries",
+                "evidence_text": (
+                    "Remember that I prefer terse code review summaries."
+                ),
+            },
+        },
+        source_message_text=(
+            "Remember that I prefer terse code review summaries."
+        ),
+    )
+
+    completed, service, repository = await run_memory_worker_with_payload(
+        payload
+    )
+
+    assert completed.status == "completed"
+    assert repository.failed == []
+    assert len(service.commands) == 1
+    recorded = service.commands[0]
+    assert recorded.decision.kind == "profile_candidate"
+    assert recorded.decision.category == "user_requested_memory"
+    assert recorded.decision.canonical_value == (
+        "Prefers terse code review summaries"
+    )
+    assert recorded.decision.evidence_text == (
+        "Remember that I prefer terse code review summaries."
+    )
+
+
+@pytest.mark.parametrize(
+    ("decision", "source_message_text"),
+    (
+        (
+            {
+                "kind": "profile_candidate",
+                "category": "response_length",
+                "candidate": {
+                    "kind": "profile_candidate",
+                    "category": "communication_style",
+                    "canonical_value": "Prefers concise answers",
+                    "evidence_text": "Remember that I prefer concise answers.",
+                },
+            },
+            "Remember that I prefer concise answers.",
+        ),
+        (
+            {
+                "kind": "profile_candidate",
+                "candidate": {
+                    "kind": "profile_candidate",
+                    "category": "communication_style",
+                    "canonical_value": "Prefers concise answers",
+                },
+            },
+            "Remember that I prefer concise answers.",
+        ),
+        (
+            {
+                "candidate": {
+                    "kind": "profile_candidate",
+                    "category": "communication_style",
+                    "canonical_value": "Prefers concise answers",
+                    "evidence_text": "Remember that I prefer concise answers.",
+                },
+            },
+            "Remember that I prefer concise answers.",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_memory_worker_rejects_invalid_nested_candidate_shapes(
+    decision: dict[str, object],
+    source_message_text: str,
+) -> None:
+    command = make_command()
+    job = make_job(command)
+    payload = raw_profile_candidate_payload(
+        job,
+        decision=decision,
+        source_message_text=source_message_text,
+    )
+
+    completed, service, repository = await run_memory_worker_with_payload(
+        payload
+    )
+
+    assert completed.status == "failed"
+    assert service.commands == []
+    assert len(repository.finalized) == 1
+    failure = repository.finalized[0]["failure"]
+    assert failure.code == "invalid_memory_candidate"
+    assert failure.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_rejects_normalized_candidate_without_exact_evidence(
+) -> None:
+    from memory_proposal_job_worker import MemoryProposalJobWorker
+    from trusted_memory_service import TrustedMemoryService
+
+    command = make_command()
+    job = make_job(command)
+    payload = raw_profile_candidate_payload(
+        job,
+        decision={
+            "kind": "profile_candidate",
+            "candidate": {
+                "kind": "profile_candidate",
+                "category": "communication_style",
+                "canonical_value": "Prefers concise answers",
+                "evidence_text": "Different source text.",
+            },
+        },
+        source_message_text="Remember that I prefer concise answers.",
+    )
+    repository = RecordingAgentJobRepository(job=job, payload=payload)
+    database = RecordingGovernedMemoryDatabase()
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=TrustedMemoryService(
+            database=database,
+            clock=lambda: NOW + timedelta(minutes=1),
+        ),
+        clock=lambda: NOW + timedelta(minutes=1),
+    )
+
+    completed = await worker.run_one(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="memory-worker-1",
+    )
+
+    assert completed is not None
+    assert completed.status == "failed"
+    assert database.calls == []
+    failure = repository.finalized[0]["failure"]
+    assert failure.code == "invalid_memory_candidate"
+    assert failure.retryable is False

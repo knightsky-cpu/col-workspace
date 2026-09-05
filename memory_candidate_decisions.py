@@ -284,7 +284,17 @@ _NATURAL_DECISION_TYPES = (
 )
 _PROVIDER_CATEGORY_ALIASES = {
     "collaboration_preferences": "user_requested_memory",
+    "communication_style": "user_requested_memory",
 }
+_PROFILE_CANDIDATE_FIELDS = frozenset(
+    {
+        "kind",
+        "category",
+        "canonical_value",
+        "value",
+        "evidence_text",
+    }
+)
 
 
 def _normalize_provider_aliases(value: object) -> object:
@@ -292,6 +302,17 @@ def _normalize_provider_aliases(value: object) -> object:
         return value
     normalized = dict(value)
     if normalized.get("kind") == "profile_candidate":
+        candidate = normalized.get("candidate")
+        if (
+            isinstance(candidate, Mapping)
+            and set(normalized) == {"kind", "candidate"}
+        ):
+            return _normalize_provider_aliases(candidate)
+        if (
+            "candidate" in normalized
+            and set(normalized) & _PROFILE_CANDIDATE_FIELDS
+        ):
+            return normalized
         if normalized.get("category") in _PROVIDER_CATEGORY_ALIASES:
             normalized["category"] = _PROVIDER_CATEGORY_ALIASES[
                 normalized["category"]
