@@ -422,7 +422,6 @@ async def test_note_service_creates_natural_pending_proposal_from_current_messag
             "expected_note_id": None,
             "expected_revision": None,
             "observed_at": NOW,
-            "turn_lease": None,
         }
     ]
 

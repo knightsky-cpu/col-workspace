@@ -9,7 +9,6 @@ from google.cloud import firestore
 
 from database import MemoryEngine, MemoryEngineError
 from memory_proposals import (
-    ProposalTurnLease,
     derive_proposal_origin_ids,
     derive_proposal_origin_ids_v2,
 )
@@ -102,37 +101,6 @@ def stored_origin_document(
     }
 
 
-def stored_turn_document(
-    *,
-    turn_id: str,
-    source_message_id: str,
-    owner_token: str = "owner-1",
-    lease_expires_at: datetime = NOW + timedelta(seconds=60),
-    status: str = "in_progress",
-    user_id: str = "user-1",
-    actions: list[dict[str, object]] | None = None,
-    memory_proposals: list[dict[str, object]] | None = None,
-) -> dict[str, object]:
-    document: dict[str, object] = {
-        "schema_version": "1.0",
-        "status": status,
-        "project_id": "project-1",
-        "user_id": user_id,
-        "memory_decision": None,
-        "user_message_id": source_message_id,
-        "model_message_id": f"turn--{turn_id}--model",
-        "lease_owner": owner_token,
-        "lease_expires_at": lease_expires_at,
-        "created_at": NOW - timedelta(seconds=10),
-        "updated_at": NOW - timedelta(seconds=10),
-    }
-    if actions is not None:
-        document["actions"] = actions
-    if memory_proposals is not None:
-        document["memory_proposals"] = memory_proposals
-    return document
-
-
 def guarded_store() -> SimpleNamespace:
     client = MagicMock()
     users = MagicMock(name="users")
@@ -204,7 +172,6 @@ def guarded_store() -> SimpleNamespace:
             )
         },
         {"observed_at": datetime(2026, 8, 21, 15, 0)},
-        {"turn_lease": object()},
     ),
 )
 async def test_guarded_proposal_validates_before_firestore_access(
@@ -224,7 +191,6 @@ async def test_guarded_proposal_validates_before_firestore_access(
         "category": "response_length",
         "proposed_value": "concise",
         "observed_at": NOW,
-        "turn_lease": None,
     }
     kwargs.update(invalid_update)
 
@@ -281,7 +247,6 @@ async def test_guarded_proposal_reads_all_state_before_atomic_writes(
         category="response_length",
         proposed_value="concise",
         observed_at=NOW,
-        turn_lease=None,
     )
 
     assert operation_order == ["origin", "proposal", "profile", "write", "write"]
@@ -359,7 +324,6 @@ async def test_guarded_proposal_rejects_already_active_value_without_write(
             category="response_length",
             proposed_value="concise",
             observed_at=NOW,
-            turn_lease=None,
         )
 
     store.transaction.set.assert_not_called()
@@ -405,7 +369,6 @@ async def test_guarded_proposal_preserves_unexpired_category_conflict(
             category="response_length",
             proposed_value="concise",
             observed_at=NOW,
-            turn_lease=None,
         )
 
     store.transaction.set.assert_not_called()
@@ -451,7 +414,6 @@ async def test_guarded_proposal_identical_origin_retry_preserves_first_expiry(
         category="response_length",
         proposed_value="concise",
         observed_at=NOW,
-        turn_lease=None,
     )
 
     assert result.created_at == first_created_at
@@ -497,7 +459,6 @@ async def test_guarded_proposal_changed_origin_retry_conflicts_without_write(
             category="response_length",
             proposed_value="concise",
             observed_at=NOW,
-            turn_lease=None,
         )
 
     store.transaction.set.assert_not_called()
@@ -548,108 +509,13 @@ async def test_guarded_proposal_stale_origin_retry_conflicts_without_write(
             category="response_length",
             proposed_value="concise",
             observed_at=NOW,
-            turn_lease=None,
         )
 
     store.transaction.set.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_guarded_proposal_records_owned_turn_effect_atomically(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    install_transaction_runner(monkeypatch)
-    store = guarded_store()
-    turn_id = "a" * 64
-    source_message_id = f"turn--{turn_id}--user"
-    operation_order: list[str] = []
-
-    async def read_origin(**kwargs):
-        operation_order.append("origin")
-        return snapshot(exists=False)
-
-    async def read_proposal(**kwargs):
-        operation_order.append("proposal")
-        return snapshot(exists=False)
-
-    async def read_profile(**kwargs):
-        operation_order.append("profile")
-        return snapshot(exists=False)
-
-    async def read_turn(**kwargs):
-        operation_order.append("turn")
-        return snapshot(
-            exists=True,
-            data=stored_turn_document(
-                turn_id=turn_id,
-                source_message_id=source_message_id,
-            ),
-        )
-
-    store.origin.get = AsyncMock(side_effect=read_origin)
-    store.proposal.get = AsyncMock(side_effect=read_proposal)
-    store.user.get = AsyncMock(side_effect=read_profile)
-    store.turn.get = AsyncMock(side_effect=read_turn)
-    store.transaction.set.side_effect = lambda *args, **kwargs: (
-        operation_order.append("write")
-    )
-    ids = derive_proposal_origin_ids(
-        "user-1",
-        "session-1",
-        source_message_id,
-        "response_length",
-    )
-
-    result = await MemoryEngine(
-        store.client
-    ).create_guarded_memory_proposal(
-        user_id="user-1",
-        session_id="session-1",
-        source_message_id=source_message_id,
-        origin_ids=ids,
-        category="response_length",
-        proposed_value="concise",
-        observed_at=NOW,
-        turn_lease=ProposalTurnLease(
-            turn_id=turn_id,
-            owner_token="owner-1",
-        ),
-    )
-
-    assert operation_order == [
-        "origin",
-        "proposal",
-        "profile",
-        "turn",
-        "write",
-        "write",
-        "write",
-    ]
-    assert store.transaction.set.call_args_list[-1] == call(
-        store.turn,
-        {
-            "actions": [
-                {
-                    "action_name": "propose_memory_signal",
-                    "status": "completed",
-                }
-            ],
-            "memory_proposals": [
-                {
-                    "proposal_id": result.proposal_id,
-                    "category": "response_length",
-                    "proposed_value": "concise",
-                    "expires_at": NOW + timedelta(hours=24),
-                }
-            ],
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        },
-        merge=True,
-    )
-
-
-@pytest.mark.asyncio
-async def test_guarded_v2_proposal_persists_provenance_and_turn_effect_atomically(
+async def test_guarded_v2_proposal_persists_provenance_atomically(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install_transaction_runner(monkeypatch)
@@ -659,15 +525,6 @@ async def test_guarded_v2_proposal_persists_provenance_and_turn_effect_atomicall
     store.origin.get = AsyncMock(return_value=snapshot(exists=False))
     store.proposal.get = AsyncMock(return_value=snapshot(exists=False))
     store.user.get = AsyncMock(return_value=snapshot(exists=False))
-    store.turn.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data=stored_turn_document(
-                turn_id=turn_id,
-                source_message_id=source_message_id,
-            ),
-        )
-    )
     ids = derive_proposal_origin_ids_v2(
         "user-1",
         "session-1",
@@ -687,10 +544,6 @@ async def test_guarded_v2_proposal_persists_provenance_and_turn_effect_atomicall
         category="development_environments",
         proposed_value=["linux", "macos"],
         observed_at=NOW,
-        turn_lease=ProposalTurnLease(
-            turn_id=turn_id,
-            owner_token="owner-1",
-        ),
     )
 
     assert result.policy_version == "2.0"
@@ -726,246 +579,7 @@ async def test_guarded_v2_proposal_persists_provenance_and_turn_effect_atomicall
                 "created_at": firestore.SERVER_TIMESTAMP,
             },
         ),
-        call(
-            store.turn,
-            {
-                "actions": [
-                    {
-                        "action_name": "propose_memory_signal",
-                        "status": "completed",
-                    }
-                ],
-                "memory_proposals": [
-                    {
-                        "proposal_id": ids.proposal_id,
-                        "category": "development_environments",
-                        "proposed_value": ["macos", "linux"],
-                        "policy_version": "2.0",
-                        "expires_at": NOW + timedelta(hours=24),
-                    }
-                ],
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            },
-            merge=True,
-        ),
     ]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "turn_updates",
-    (
-        {"owner_token": "another-owner"},
-        {"lease_expires_at": NOW},
-        {"status": "completed"},
-        {"user_id": "another-user"},
-        {"stored_source_message_id": "another-message"},
-    ),
-)
-async def test_guarded_proposal_rejects_stale_or_mismatched_turn_before_write(
-    monkeypatch: pytest.MonkeyPatch,
-    turn_updates: dict[str, object],
-) -> None:
-    from chat_turns import ChatTurnOwnershipError
-
-    install_transaction_runner(monkeypatch)
-    store = guarded_store()
-    turn_id = "a" * 64
-    source_message_id = f"turn--{turn_id}--user"
-    store.origin.get = AsyncMock(return_value=snapshot(exists=False))
-    store.proposal.get = AsyncMock(return_value=snapshot(exists=False))
-    store.user.get = AsyncMock(return_value=snapshot(exists=False))
-    stored_updates = dict(turn_updates)
-    stored_source_message_id = stored_updates.pop(
-        "stored_source_message_id",
-        source_message_id,
-    )
-    turn_data = stored_turn_document(
-        turn_id=turn_id,
-        source_message_id=stored_source_message_id,
-        **stored_updates,
-    )
-    store.turn.get = AsyncMock(
-        return_value=snapshot(exists=True, data=turn_data)
-    )
-    ids = derive_proposal_origin_ids(
-        "user-1",
-        "session-1",
-        source_message_id,
-        "response_length",
-    )
-
-    with pytest.raises(ChatTurnOwnershipError):
-        await MemoryEngine(
-            store.client
-        ).create_guarded_memory_proposal(
-            user_id="user-1",
-            session_id="session-1",
-            source_message_id=source_message_id,
-            origin_ids=ids,
-            category="response_length",
-            proposed_value="concise",
-            observed_at=NOW,
-            turn_lease=ProposalTurnLease(
-                turn_id=turn_id,
-                owner_token="owner-1",
-            ),
-        )
-
-    store.transaction.set.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("conflicting", (False, True))
-async def test_guarded_proposal_validates_precompleted_turn_effect(
-    monkeypatch: pytest.MonkeyPatch,
-    conflicting: bool,
-) -> None:
-    from chat_turns import ChatTurnStateError
-
-    install_transaction_runner(monkeypatch)
-    store = guarded_store()
-    turn_id = "a" * 64
-    source_message_id = f"turn--{turn_id}--user"
-    ids = derive_proposal_origin_ids(
-        "user-1",
-        "session-1",
-        source_message_id,
-        "response_length",
-    )
-    proposal_data = stored_proposal_document(
-        proposal_id=ids.proposal_id,
-        expected_signal_id=None,
-        message_id=source_message_id,
-    )
-    origin_data = stored_origin_document(
-        proposal_id=ids.proposal_id,
-        message_id=source_message_id,
-    )
-    receipt_value = "detailed" if conflicting else "concise"
-    store.origin.get = AsyncMock(
-        return_value=snapshot(exists=True, data=origin_data)
-    )
-    store.proposal.get = AsyncMock(
-        return_value=snapshot(exists=True, data=proposal_data)
-    )
-    store.user.get = AsyncMock(return_value=snapshot(exists=False))
-    store.turn.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data=stored_turn_document(
-                turn_id=turn_id,
-                source_message_id=source_message_id,
-                actions=[
-                    {
-                        "action_name": "propose_memory_signal",
-                        "status": "completed",
-                    }
-                ],
-                memory_proposals=[
-                    {
-                        "proposal_id": ids.proposal_id,
-                        "category": "response_length",
-                        "proposed_value": receipt_value,
-                        "expires_at": NOW + timedelta(hours=24),
-                    }
-                ],
-            ),
-        )
-    )
-
-    invocation = MemoryEngine(store.client).create_guarded_memory_proposal(
-        user_id="user-1",
-        session_id="session-1",
-        source_message_id=source_message_id,
-        origin_ids=ids,
-        category="response_length",
-        proposed_value="concise",
-        observed_at=NOW,
-        turn_lease=ProposalTurnLease(
-            turn_id=turn_id,
-            owner_token="owner-1",
-        ),
-    )
-    if conflicting:
-        with pytest.raises(ChatTurnStateError):
-            await invocation
-    else:
-        result = await invocation
-        assert result.proposal_id == ids.proposal_id
-
-    store.transaction.set.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_guarded_proposal_preserves_unrelated_turn_actions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    install_transaction_runner(monkeypatch)
-    store = guarded_store()
-    turn_id = "a" * 64
-    source_message_id = f"turn--{turn_id}--user"
-    store.origin.get = AsyncMock(return_value=snapshot(exists=False))
-    store.proposal.get = AsyncMock(return_value=snapshot(exists=False))
-    store.user.get = AsyncMock(return_value=snapshot(exists=False))
-    unrelated_action = {
-        "action_name": "google_search",
-        "status": "completed",
-    }
-    store.turn.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data=stored_turn_document(
-                turn_id=turn_id,
-                source_message_id=source_message_id,
-                actions=[unrelated_action],
-            ),
-        )
-    )
-    ids = derive_proposal_origin_ids(
-        "user-1",
-        "session-1",
-        source_message_id,
-        "response_length",
-    )
-
-    await MemoryEngine(store.client).create_guarded_memory_proposal(
-        user_id="user-1",
-        session_id="session-1",
-        source_message_id=source_message_id,
-        origin_ids=ids,
-        category="response_length",
-        proposed_value="concise",
-        observed_at=NOW,
-        turn_lease=ProposalTurnLease(
-            turn_id=turn_id,
-            owner_token="owner-1",
-        ),
-    )
-
-    turn_update = store.transaction.set.call_args_list[-1]
-    assert turn_update == call(
-        store.turn,
-        {
-            "actions": [
-                unrelated_action,
-                {
-                    "action_name": "propose_memory_signal",
-                    "status": "completed",
-                },
-            ],
-            "memory_proposals": [
-                {
-                    "proposal_id": ids.proposal_id,
-                    "category": "response_length",
-                    "proposed_value": "concise",
-                    "expires_at": NOW + timedelta(hours=24),
-                }
-            ],
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        },
-        merge=True,
-    )
 
 
 @pytest.mark.asyncio
@@ -1006,7 +620,6 @@ async def test_guarded_proposal_preserves_firestore_error_safely(
             category="response_length",
             proposed_value="concise",
             observed_at=NOW,
-            turn_lease=None,
         )
 
     assert caught.value.__cause__ is firestore_error

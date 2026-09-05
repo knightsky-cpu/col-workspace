@@ -9,11 +9,9 @@ from database import MemoryEngine
 from memory_clarifications import (
     MemoryClarificationEnvelope,
     MemoryClarificationSelection,
-    clarification_receipt,
     derive_memory_clarification_id,
 )
 from memory_proposals import (
-    ProposalTurnLease,
     derive_proposal_origin_ids_v2,
 )
 from schemas import MemoryProposalV2
@@ -113,24 +111,6 @@ def direct_envelope(**updates: object) -> MemoryClarificationEnvelope:
     return MemoryClarificationEnvelope.model_validate(payload)
 
 
-def turn_document(
-    *,
-    memory_clarifications: list[dict[str, object]] | None = None,
-) -> dict[str, object]:
-    document: dict[str, object] = {
-        "schema_version": "1.0",
-        "status": "in_progress",
-        "project_id": "workspace-1",
-        "user_id": "user-1",
-        "user_message_id": "message-1",
-        "lease_owner": "owner-1",
-        "lease_expires_at": NOW + timedelta(minutes=1),
-    }
-    if memory_clarifications is not None:
-        document["memory_clarifications"] = memory_clarifications
-    return document
-
-
 def clarification_store() -> SimpleNamespace:
     client = MagicMock(name="client")
     sessions = MagicMock(name="sessions")
@@ -216,10 +196,6 @@ def clarification_consumption_store() -> SimpleNamespace:
     )
 
 
-def lease() -> ProposalTurnLease:
-    return ProposalTurnLease(turn_id=TURN_ID, owner_token="owner-1")
-
-
 @pytest.mark.asyncio
 async def test_clarification_validates_before_firestore_access() -> None:
     store = clarification_store()
@@ -228,74 +204,27 @@ async def test_clarification_validates_before_firestore_access() -> None:
         await MemoryEngine(store.client).create_memory_clarification(
             envelope=direct_envelope(clarification_id="memory-clarification--bad"),
             observed_at=NOW,
-            turn_lease=None,
         )
 
     store.client.collection.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_clarification_creation_writes_envelope_receipt_and_pointer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    install_transaction_runner(monkeypatch)
+async def test_clarification_creation_rejects_turn_lease_argument() -> None:
     store = clarification_store()
-    store.session.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data={"user_id": "user-1", "project_id": "workspace-1"},
+
+    with pytest.raises(TypeError, match="turn_lease"):
+        await MemoryEngine(store.client).create_memory_clarification(
+            envelope=direct_envelope(),
+            observed_at=NOW,
+            turn_lease=object(),
         )
-    )
-    store.clarification.get = AsyncMock(return_value=snapshot(exists=False))
-    store.turn.get = AsyncMock(
-        return_value=snapshot(exists=True, data=turn_document())
-    )
 
-    result = await MemoryEngine(store.client).create_memory_clarification(
-        envelope=envelope(),
-        observed_at=NOW,
-        turn_lease=lease(),
-    )
-
-    expected_receipt = clarification_receipt(envelope()).model_dump(
-        mode="python"
-    )
-    assert result == envelope()
-    expected_envelope_document = envelope().model_dump(
-        mode="python",
-        exclude_none=True,
-    )
-    assert store.transaction.set.call_args_list == [
-        call(
-            store.clarification,
-            expected_envelope_document,
-        ),
-        call(
-            store.turn,
-            {
-                "memory_clarifications": [expected_receipt],
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            },
-            merge=True,
-        ),
-        call(
-            store.session,
-            {
-                "active_memory_clarification_id": (
-                    envelope().clarification_id
-                ),
-                "updated_at": firestore.SERVER_TIMESTAMP,
-            },
-            merge=True,
-        ),
-    ]
-    stored_envelope = store.transaction.set.call_args_list[0].args[1]
-    assert "choices" not in stored_envelope
-    assert "evidence_text" not in str(stored_envelope)
+    store.client.collection.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_clarification_creation_without_turn_lease_writes_envelope_and_pointer(
+async def test_clarification_creation_writes_envelope_and_pointer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install_transaction_runner(monkeypatch)
@@ -312,7 +241,6 @@ async def test_clarification_creation_without_turn_lease_writes_envelope_and_poi
     result = await MemoryEngine(store.client).create_memory_clarification(
         envelope=direct,
         observed_at=NOW,
-        turn_lease=None,
     )
 
     assert result == direct
@@ -334,47 +262,7 @@ async def test_clarification_creation_without_turn_lease_writes_envelope_and_poi
 
 
 @pytest.mark.asyncio
-async def test_clarification_exact_retry_returns_existing_without_write(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    install_transaction_runner(monkeypatch)
-    store = clarification_store()
-    receipt = clarification_receipt(envelope()).model_dump(mode="python")
-    store.session.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data={
-                "user_id": "user-1",
-                "project_id": "workspace-1",
-                "active_memory_clarification_id": envelope().clarification_id,
-            },
-        )
-    )
-    store.clarification.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data=envelope().model_dump(mode="python"),
-        )
-    )
-    store.turn.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data=turn_document(memory_clarifications=[receipt]),
-        )
-    )
-
-    result = await MemoryEngine(store.client).create_memory_clarification(
-        envelope=envelope(),
-        observed_at=NOW,
-        turn_lease=lease(),
-    )
-
-    assert result == envelope()
-    store.transaction.set.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_clarification_exact_retry_without_turn_lease_returns_existing(
+async def test_clarification_exact_retry_returns_existing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install_transaction_runner(monkeypatch)
@@ -400,7 +288,6 @@ async def test_clarification_exact_retry_without_turn_lease_returns_existing(
     result = await MemoryEngine(store.client).create_memory_clarification(
         envelope=direct,
         observed_at=NOW,
-        turn_lease=None,
     )
 
     assert result == direct
@@ -442,20 +329,6 @@ async def test_clarification_selection_atomically_consumes_and_creates_proposal(
     store.origin.get = AsyncMock(return_value=snapshot(exists=False))
     store.proposal.get = AsyncMock(return_value=snapshot(exists=False))
     store.user.get = AsyncMock(return_value=snapshot(exists=False))
-    store.turn.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data={
-                "schema_version": "1.0",
-                "status": "in_progress",
-                "project_id": "workspace-1",
-                "user_id": "user-1",
-                "user_message_id": selecting_message_id,
-                "lease_owner": "owner-2",
-                "lease_expires_at": NOW + timedelta(minutes=2),
-            },
-        )
-    )
 
     result = await MemoryEngine(
         store.client
@@ -469,10 +342,6 @@ async def test_clarification_selection_atomically_consumes_and_creates_proposal(
         ),
         expected_clarification_id=envelope().clarification_id,
         observed_at=NOW + timedelta(minutes=1),
-        turn_lease=ProposalTurnLease(
-            turn_id=selecting_turn_id,
-            owner_token="owner-2",
-        ),
     )
 
     assert result.proposal_id == ids.proposal_id
@@ -485,7 +354,7 @@ async def test_clarification_selection_atomically_consumes_and_creates_proposal(
         store.clarification,
         {
             "status": "consumed",
-            "consuming_turn_id": selecting_turn_id,
+            "consuming_turn_id": selecting_message_id,
             "consuming_message_id": selecting_message_id,
             "selected_candidate_index": 1,
         },
@@ -498,20 +367,15 @@ async def test_clarification_selection_atomically_consumes_and_creates_proposal(
             "last_consumed_memory_clarification_id": (
                 envelope().clarification_id
             ),
-            "last_consuming_memory_turn_id": selecting_turn_id,
+            "last_consuming_memory_turn_id": selecting_message_id,
             "updated_at": firestore.SERVER_TIMESTAMP,
         },
         merge=True,
     ) in writes
     assert call(store.proposal, ANY) in writes
     assert call(store.origin, ANY) in writes
-    assert any(
-        write.args[0] is store.turn
-        and write.kwargs == {"merge": True}
-        and write.args[1]["memory_proposals"][0]["proposal_id"]
-        == ids.proposal_id
-        for write in writes
-    )
+    store.turn.get.assert_not_called()
+    assert all(write.args[0] is not store.turn for write in writes)
 
 
 @pytest.mark.asyncio
@@ -556,10 +420,6 @@ async def test_clarification_selection_rejects_a_different_public_id(
                 "memory-clarification--different-clarification"
             ),
             observed_at=NOW + timedelta(minutes=1),
-            turn_lease=ProposalTurnLease(
-                turn_id=selecting_turn_id,
-                owner_token="owner-2",
-            ),
         )
 
     store.transaction.set.assert_not_called()
@@ -581,7 +441,7 @@ async def test_clarification_selection_exact_retry_reuses_proposal(
     )
     consumed = envelope(
         status="consumed",
-        consuming_turn_id=selecting_turn_id,
+        consuming_turn_id=selecting_message_id,
         consuming_message_id=selecting_message_id,
         selected_candidate_index=1,
     )
@@ -607,7 +467,7 @@ async def test_clarification_selection_exact_retry_reuses_proposal(
                 "last_consumed_memory_clarification_id": (
                     consumed.clarification_id
                 ),
-                "last_consuming_memory_turn_id": selecting_turn_id,
+                "last_consuming_memory_turn_id": selecting_message_id,
                 "last_completed_turn_id": TURN_ID,
             },
         )
@@ -640,20 +500,6 @@ async def test_clarification_selection_exact_retry_reuses_proposal(
         )
     )
     store.user.get = AsyncMock(return_value=snapshot(exists=False))
-    store.turn.get = AsyncMock(
-        return_value=snapshot(
-            exists=True,
-            data={
-                "schema_version": "1.0",
-                "status": "in_progress",
-                "project_id": "workspace-1",
-                "user_id": "user-1",
-                "user_message_id": selecting_message_id,
-                "lease_owner": "owner-2",
-                "lease_expires_at": NOW + timedelta(minutes=3),
-            },
-        )
-    )
 
     result = await MemoryEngine(
         store.client
@@ -667,10 +513,6 @@ async def test_clarification_selection_exact_retry_reuses_proposal(
         ),
         expected_clarification_id=consumed.clarification_id,
         observed_at=NOW + timedelta(minutes=2),
-        turn_lease=ProposalTurnLease(
-            turn_id=selecting_turn_id,
-            owner_token="owner-2",
-        ),
     )
 
     assert result == proposal
@@ -703,15 +545,11 @@ async def test_clarification_changed_retry_conflicts_without_write(
     store.clarification.get = AsyncMock(
         return_value=snapshot(exists=True, data=changed)
     )
-    store.turn.get = AsyncMock(
-        return_value=snapshot(exists=True, data=turn_document())
-    )
 
     with pytest.raises(MemoryClarificationConflictError):
         await MemoryEngine(store.client).create_memory_clarification(
             envelope=envelope(),
             observed_at=NOW,
-            turn_lease=lease(),
         )
 
     store.transaction.set.assert_not_called()
@@ -747,14 +585,10 @@ async def test_clarification_expires_different_prior_open_envelope(
             data=prior_envelope.model_dump(mode="python"),
         )
     )
-    store.turn.get = AsyncMock(
-        return_value=snapshot(exists=True, data=turn_document())
-    )
 
     await MemoryEngine(store.client).create_memory_clarification(
         envelope=envelope(),
         observed_at=NOW,
-        turn_lease=lease(),
     )
 
     assert store.transaction.set.call_args_list[0] == call(
@@ -802,15 +636,11 @@ async def test_clarification_rejects_pointer_document_id_mismatch(
             data=mismatched_prior.model_dump(mode="python"),
         )
     )
-    store.turn.get = AsyncMock(
-        return_value=snapshot(exists=True, data=turn_document())
-    )
 
     with pytest.raises(MemoryClarificationStateError, match="pointer"):
         await MemoryEngine(store.client).create_memory_clarification(
             envelope=envelope(),
             observed_at=NOW,
-            turn_lease=lease(),
         )
 
     store.transaction.set.assert_not_called()

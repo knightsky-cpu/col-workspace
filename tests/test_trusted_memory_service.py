@@ -124,8 +124,6 @@ async def test_preference_hypothesis_confirmation_opens_unsaved_memory_choice():
     assert first_envelope == second_envelope
     assert first_envelope.evidence_message_id == "message-3"
     assert first_envelope.clarification_turn_id != "message-3"
-    assert first_call.kwargs["turn_lease"] is None
-    assert second_call.kwargs["turn_lease"] is None
 
 
 @pytest.mark.asyncio

@@ -264,7 +264,6 @@ class TrustedMemoryService:
             category=category,
             proposed_value=proposed_value,
             observed_at=observed_at,
-            turn_lease=None,
         )
         return TrustedMemoryProposalResult(
             action=AgentActionReceipt(
@@ -337,7 +336,6 @@ class TrustedMemoryService:
                     source_message_id=command.source_message_id,
                     selection=command.clarification_selection,
                     observed_at=observed_at,
-                    turn_lease=None,
                 )
             )
             return NaturalMemoryProposalResult(
@@ -375,7 +373,6 @@ class TrustedMemoryService:
                 category=command.decision.category,
                 proposed_value=command.decision.canonical_value,
                 observed_at=observed_at,
-                turn_lease=None,
             )
             return NaturalMemoryProposalResult(
                 status="pending",
@@ -419,7 +416,6 @@ class TrustedMemoryService:
             stored = await self._database.create_memory_clarification(
                 envelope=envelope,
                 observed_at=observed_at,
-                turn_lease=None,
             )
             return NaturalMemoryClarificationResult(
                 status="clarification_required",
@@ -463,7 +459,6 @@ class TrustedMemoryService:
                 selection=selection,
                 expected_clarification_id=command.clarification_id,
                 observed_at=observed_at,
-                turn_lease=None,
             )
         )
         if stored is None:
@@ -544,7 +539,6 @@ class TrustedMemoryService:
         stored = await self._database.create_memory_clarification(
             envelope=envelope,
             observed_at=observed_at,
-            turn_lease=None,
         )
         return clarification_receipt(stored)
 

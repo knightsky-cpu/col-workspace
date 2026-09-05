@@ -411,7 +411,7 @@ async def test_memory_worker_creates_proposal_from_standalone_value_alias_payloa
         "Prefers pancakes on Saturday mornings for breakfast"
     )
     assert database.calls[0]["evidence_message_id"] == job.source_message_id
-    assert database.calls[0]["turn_lease"] is None
+    assert "turn_lease" not in database.calls[0]
     assert repository.reports[0].status == "completed"
     assert repository.reports[0].title == "Memory proposal pending review"
     assert repository.reports[0].public_resource_label == (

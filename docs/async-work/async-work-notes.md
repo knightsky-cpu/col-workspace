@@ -3004,8 +3004,8 @@ Preserved:
 - private persisted hypothesis payload restoration;
 - `confirmation_created_at`-based clarification creation and expiry;
 - preference confirmation choices, governance, and pending-proposal behavior;
-- the database call remains `create_memory_clarification(..., turn_lease=None)`
-  until database-side writer cleanup is handled separately.
+- at this checkpoint the database call still supplied `turn_lease=None`;
+  the subsequent database writer cleanup below removes that argument.
 
 Still deferred:
 
@@ -3016,3 +3016,60 @@ Still deferred:
 - synchronous artifact executor and artifact-feedback executor legacy effect
   behavior;
 - AgentJob retry/recovery/drainer work and Note shutdown hygiene.
+
+## Memory/Note Database Writer Cleanup
+
+This pass removes database-side Memory/Note chat-turn effect writer capability
+from checkpoint `7b139db27e6a17bcb7e8795b1af07a3338f525ed`. It supersedes the
+earlier sections that defer these writers. Source search before editing found
+no production caller supplying a non-None lease; after cleanup all nine
+production calls omit the argument entirely.
+
+Removed:
+
+- `turn_lease` from `create_collaborative_note_proposal`,
+  `create_memory_clarification`, `create_guarded_memory_proposal`,
+  `create_guarded_memory_proposal_v2`, and
+  `consume_memory_clarification_to_proposal_v2`;
+- their optional chat-turn reads, ownership checks, effect validation, and
+  effect writes, including clarification-consumption writer branches;
+- `_collaborative_note_proposal_turn_effect_update`,
+  `_memory_clarification_turn_effect_update`, and `_proposal_turn_effect_update`;
+- `record_chat_turn_decision_action`,
+  `record_chat_turn_collaborative_note_decision_effect`, and the now-unused
+  `ChatTurnNoteDecisionEffectResult` return type;
+- seven explicit `turn_lease=None` service call arguments, obsolete writer-only
+  tests and fixtures, and assertions that service/worker calls forward None.
+
+Preserved:
+
+- existing no-lease resource transactions, provenance, ownership/governance,
+  pending-proposal behavior, expiry, and resource idempotency;
+- clarification consumption uses `source_message_id` as its consumption identity,
+  exactly as the former no-lease branch did;
+- direct Memory/Note APIs, preference confirmation, deterministic Memory
+  preflight, natural tool queueing, and Memory/Note worker execution;
+- real chat claim/renew/release/complete/replay and transcript persistence,
+  historical structured request metadata, and `ChatTurnClaim.precompleted_*`;
+- historical effect readers and completion validation; retained chat-turn tests
+  are unchanged, including reclaim/recovery and persisted-effect replay tests;
+- negative-call spies in `test_main.py` used to assert direct APIs and retired
+  structured-input rejection never invoke the obsolete writers.
+
+Verification:
+
+- RED: `test_clarification_creation_rejects_turn_lease_argument` expected
+  `TypeError`; the old API instead raised its lease-validation `ValueError`.
+- `./venv/bin/python -m pytest tests/test_memory_clarification_database.py tests/test_memory_proposal_guard_database.py tests/test_collaborative_note_database.py -q`: 43 passed.
+- `./venv/bin/python -m pytest tests/test_chat_turn_database.py -k 'claim or replay or precompleted or complete_chat_turn or release_chat_turn' -q`: 59 passed, 28 deselected.
+- `./venv/bin/python -m pytest tests/test_trusted_memory_service.py tests/test_collaborative_note_service.py tests/test_memory_proposal_job_worker.py tests/test_collaborative_note_job_worker.py -q`: 44 passed.
+- `./venv/bin/python -m pytest tests/test_main.py -k 'preflight or select_memory_clarification or approve_memory_proposal_uses_memory_api or reject_memory_proposal_uses_memory_api or direct_collaborative_note_decision' -q`: 10 passed, 285 deselected; one dependency `BaseAgentConfig` deprecation warning.
+- `./venv/bin/python -m pytest tests/test_memory_proposal_tool.py tests/test_collaborative_note_tool.py -q`: 47 passed.
+- `./venv/bin/python -m py_compile database.py trusted_memory_service.py collaborative_note_service.py` and `git diff --check`: passed.
+
+Historical readers/assertions are compatibility requirements, not pending writer
+deletions. Artifact execution/effect writers, artifact-feedback execution/effects,
+AgentJob retry/recovery/drainer work, and Note shutdown hygiene remain deferred.
+No backend schema migration or frontend change is included. Live Firestore and
+browser acceptance have not been performed; the pass remains uncommitted and
+pending user verification.

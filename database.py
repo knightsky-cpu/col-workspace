@@ -54,7 +54,6 @@ from memory_proposals import (
     PROPOSAL_ORIGIN_SCHEMA_VERSION,
     PROPOSAL_ORIGIN_SCHEMA_VERSION_V2,
     ProposalOriginIds,
-    ProposalTurnLease,
     derive_proposal_origin_ids,
     derive_proposal_origin_ids_v2,
     parse_proposal_origin,
@@ -321,15 +320,6 @@ class ChatTurnFeedbackEffectResult:
     claim: ChatTurnClaim
     action: AgentActionReceipt
     feedback: ArtifactFeedbackReference
-
-
-@dataclass(frozen=True, slots=True)
-class ChatTurnNoteDecisionEffectResult:
-    """Return one atomically persisted chat-owned note decision effect."""
-
-    claim: ChatTurnClaim
-    action: AgentActionReceipt
-    event: CollaborativeNoteEvent
 
 
 @dataclass(frozen=True, slots=True)
@@ -828,7 +818,6 @@ class MemoryEngine:
         expected_note_id: str | None,
         expected_revision: int | None,
         observed_at: datetime,
-        turn_lease: ProposalTurnLease | None = None,
     ) -> CollaborativeNoteProposal:
         self._validate_memory_identifier(user_id, "user_id")
         self._validate_memory_identifier(workspace_id, "workspace_id")
@@ -881,22 +870,12 @@ class MemoryEngine:
                 session_ref.collection("messages").document(message_id)
                 for message_id in source_message_ids
             ]
-            turn_ref = (
-                session_ref.collection("turns").document(turn_lease.turn_id)
-                if turn_lease is not None
-                else None
-            )
             transaction = self._client.transaction()
 
             async def create_in_transaction(
                 transaction: AsyncTransaction,
             ) -> CollaborativeNoteProposal:
                 session_snapshot = await session_ref.get(transaction=transaction)
-                turn_snapshot = (
-                    await turn_ref.get(transaction=transaction)
-                    if turn_ref is not None
-                    else None
-                )
                 if not session_snapshot.exists:
                     raise ChatSessionOwnershipError("Chat session is unavailable.")
                 self._validate_chat_session_owner(
@@ -934,22 +913,6 @@ class MemoryEngine:
                         raise MemoryProposalConflictError(
                             "Note proposal conflicts with existing state."
                         )
-                    if turn_lease is not None:
-                        effect = self._collaborative_note_proposal_turn_effect_update(
-                            turn_snapshot=turn_snapshot,
-                            user_id=user_id,
-                            workspace_id=workspace_id,
-                            session_id=session_id,
-                            source_message_id=source_message_ids[0],
-                            turn_lease=turn_lease,
-                            observed_at=observed_at,
-                            proposal=stored,
-                        )
-                        if effect is not None:
-                            raise ChatTurnStateError(
-                                "Stored note proposal has no matching turn "
-                                "effect."
-                            )
                     return stored
                 pending_count = await self._count_query_results(
                     proposal_collection.where("status", "==", "pending")
@@ -960,23 +923,7 @@ class MemoryEngine:
                     raise MemoryProposalConflictError(
                         "Collaborative note proposal limit reached."
                     )
-                effect = (
-                    self._collaborative_note_proposal_turn_effect_update(
-                        turn_snapshot=turn_snapshot,
-                        user_id=user_id,
-                        workspace_id=workspace_id,
-                        session_id=session_id,
-                        source_message_id=source_message_ids[0],
-                        turn_lease=turn_lease,
-                        observed_at=observed_at,
-                        proposal=proposal,
-                    )
-                    if turn_lease is not None
-                    else None
-                )
                 transaction.set(proposal_ref, proposal.model_dump(mode="python"))
-                if turn_ref is not None and effect is not None:
-                    transaction.set(turn_ref, effect, merge=True)
                 return proposal
 
             run_transaction = firestore.async_transactional(
@@ -2232,238 +2179,6 @@ class MemoryEngine:
             return await run_transaction(transaction)
         except GoogleAPIError as exc:
             self._raise_firestore_error("renew_chat_turn_lease", exc)
-
-    async def record_chat_turn_decision_action(
-        self,
-        claim: ChatTurnClaim,
-        action: AgentActionReceipt,
-        *,
-        observed_at: datetime,
-    ) -> ChatTurnClaim:
-        """Persist one owned structured memory-decision action receipt."""
-        self._validate_chat_turn_claim(claim)
-        if not isinstance(action, AgentActionReceipt):
-            raise ValueError("action must be an AgentActionReceipt.")
-        if not self._is_aware_datetime(observed_at):
-            raise ValueError("observed_at must be a timezone-aware datetime.")
-        decision = claim.request.memory_decision
-        if decision is None:
-            raise ValueError("claim must contain a memory decision.")
-        expected_action_name = (
-            "approve_memory_signal"
-            if decision.decision == "approve"
-            else "reject_memory_signal"
-        )
-        if action.action_name != expected_action_name:
-            raise ValueError("action does not match the memory decision.")
-        turn_ref = (
-            self._client.collection("sessions")
-            .document(claim.request.session_id)
-            .collection("turns")
-            .document(claim.ids.turn_id)
-        )
-        transaction = self._client.transaction()
-
-        async def record_in_transaction(
-            transaction: AsyncTransaction,
-        ) -> ChatTurnClaim:
-            turn_snapshot = await turn_ref.get(transaction=transaction)
-            turn_data = turn_snapshot.to_dict()
-            if not turn_snapshot.exists or not isinstance(
-                turn_data,
-                Mapping,
-            ):
-                raise ChatTurnStateError("Stored chat turn is invalid.")
-            self._assert_chat_turn_claim_matches_document(claim, turn_data)
-            stored_expiry = turn_data.get("lease_expires_at")
-            if (
-                turn_data.get("status") != "in_progress"
-                or turn_data.get("lease_owner") != claim.owner_token
-                or not self._is_aware_datetime(stored_expiry)
-                or stored_expiry <= observed_at
-            ):
-                raise ChatTurnOwnershipError(
-                    "Stored chat turn cannot record a decision action."
-                )
-            (
-                stored_actions,
-                stored_proposals,
-                stored_artifacts,
-            ) = self._chat_turn_effects(turn_data)
-            decision_actions = tuple(
-                item
-                for item in stored_actions
-                if item.action_name
-                in {"approve_memory_signal", "reject_memory_signal"}
-            )
-            if decision_actions and decision_actions != (action,):
-                raise ChatTurnStateError(
-                    "Stored chat turn has a conflicting decision action."
-                )
-            actions = stored_actions
-            if not decision_actions:
-                actions = (*stored_actions, action)
-                transaction.set(
-                    turn_ref,
-                    {
-                        "actions": [
-                            item.model_dump(mode="python")
-                            for item in actions
-                        ],
-                        "updated_at": firestore.SERVER_TIMESTAMP,
-                    },
-                    merge=True,
-                )
-            return replace(
-                claim,
-                precompleted_actions=actions,
-                precompleted_memory_proposals=stored_proposals,
-                precompleted_artifacts=stored_artifacts,
-            )
-
-        run_transaction = firestore.async_transactional(record_in_transaction)
-        try:
-            return await run_transaction(transaction)
-        except GoogleAPIError as exc:
-            self._raise_firestore_error(
-                "record_chat_turn_decision_action",
-                exc,
-            )
-
-    async def record_chat_turn_collaborative_note_decision_effect(
-        self,
-        claim: ChatTurnClaim,
-        event: CollaborativeNoteEvent,
-        *,
-        observed_at: datetime,
-    ) -> ChatTurnNoteDecisionEffectResult:
-        """Persist one owned structured note-decision effect receipt."""
-        self._validate_chat_turn_claim(claim)
-        if not isinstance(event, CollaborativeNoteEvent):
-            raise ValueError("event must be a CollaborativeNoteEvent.")
-        if not self._is_aware_datetime(observed_at):
-            raise ValueError("observed_at must be a timezone-aware datetime.")
-        decision = claim.request.collaborative_note_decision
-        if decision is None:
-            raise ValueError(
-                "claim must contain one collaborative note decision."
-            )
-        expected_action_name = (
-            "approve_collaborative_note"
-            if decision.decision == "approve"
-            else "reject_collaborative_note"
-        )
-        action = AgentActionReceipt(
-            action_name=expected_action_name,
-            status="completed",
-        )
-        if (
-            event.proposal_id != decision.proposal_id
-            or event.owner_user_id != claim.request.user_id
-            or event.workspace_id != claim.request.project_id
-            or (
-                decision.decision == "approve"
-                and event.event_type not in {"approved", "corrected"}
-            )
-            or (
-                decision.decision == "reject"
-                and event.event_type != "rejected"
-            )
-        ):
-            raise ValueError("event does not match the note decision.")
-        turn_ref = (
-            self._client.collection("sessions")
-            .document(claim.request.session_id)
-            .collection("turns")
-            .document(claim.ids.turn_id)
-        )
-        transaction = self._client.transaction()
-
-        async def record_in_transaction(
-            transaction: AsyncTransaction,
-        ) -> ChatTurnNoteDecisionEffectResult:
-            turn_snapshot = await turn_ref.get(transaction=transaction)
-            turn_data = turn_snapshot.to_dict()
-            if not turn_snapshot.exists or not isinstance(
-                turn_data,
-                Mapping,
-            ):
-                raise ChatTurnStateError("Stored chat turn is invalid.")
-            self._assert_chat_turn_claim_matches_document(claim, turn_data)
-            stored_expiry = turn_data.get("lease_expires_at")
-            if (
-                turn_data.get("status") != "in_progress"
-                or turn_data.get("lease_owner") != claim.owner_token
-                or not self._is_aware_datetime(stored_expiry)
-                or stored_expiry <= observed_at
-            ):
-                raise ChatTurnOwnershipError(
-                    "Stored chat turn cannot record a note decision effect."
-                )
-            stored_actions, stored_proposals, stored_artifacts = (
-                self._chat_turn_effects(turn_data)
-            )
-            if stored_proposals or stored_artifacts:
-                raise ChatTurnStateError(
-                    "Stored note turn contains another durable effect."
-                )
-            stored_note_proposals, stored_note_events = (
-                self._chat_turn_note_effects(turn_data, stored_actions)
-            )
-            if stored_note_proposals:
-                raise ChatTurnStateError(
-                    "Stored note turn contains a proposal effect."
-                )
-            if stored_note_events:
-                if stored_note_events != (event,):
-                    raise ChatTurnStateError(
-                        "Stored note turn event is invalid."
-                    )
-                return ChatTurnNoteDecisionEffectResult(
-                    claim=replace(
-                        claim,
-                        precompleted_actions=stored_actions,
-                        precompleted_memory_proposals=stored_proposals,
-                        precompleted_artifacts=stored_artifacts,
-                        precompleted_collaborative_note_events=(
-                            stored_note_events
-                        ),
-                    ),
-                    action=action,
-                    event=event,
-                )
-            actions = (*stored_actions, action)
-            transaction.set(
-                turn_ref,
-                {
-                    "actions": [
-                        item.model_dump(mode="python") for item in actions
-                    ],
-                    "collaborative_note_events": [
-                        event.model_dump(mode="python")
-                    ],
-                    "updated_at": firestore.SERVER_TIMESTAMP,
-                },
-                merge=True,
-            )
-            return ChatTurnNoteDecisionEffectResult(
-                claim=replace(
-                    claim,
-                    precompleted_actions=actions,
-                    precompleted_collaborative_note_events=(event,),
-                ),
-                action=action,
-                event=event,
-            )
-
-        run_transaction = firestore.async_transactional(record_in_transaction)
-        try:
-            return await run_transaction(transaction)
-        except GoogleAPIError as exc:
-            self._raise_firestore_error(
-                "record_chat_turn_collaborative_note_decision_effect",
-                exc,
-            )
 
     async def release_chat_turn(
         self,
@@ -4164,104 +3879,6 @@ class MemoryEngine:
                 "Stored chat turn note effects are invalid."
             )
         return proposals, events
-
-    @staticmethod
-    def _collaborative_note_proposal_turn_effect_update(
-        *,
-        turn_snapshot: object,
-        user_id: str,
-        workspace_id: str,
-        session_id: str,
-        source_message_id: str,
-        turn_lease: ProposalTurnLease,
-        observed_at: datetime,
-        proposal: CollaborativeNoteProposal,
-    ) -> dict[str, object] | None:
-        if (
-            turn_snapshot is None
-            or not getattr(turn_snapshot, "exists", False)
-        ):
-            raise ChatTurnOwnershipError(
-                "Stored chat turn cannot own a note proposal effect."
-            )
-        turn_data = turn_snapshot.to_dict()
-        if not isinstance(turn_data, Mapping):
-            raise ChatTurnStateError("Stored chat turn is invalid.")
-        lease_expires_at = turn_data.get("lease_expires_at")
-        if (
-            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
-            or turn_data.get("status") != "in_progress"
-            or turn_data.get("user_id") != user_id
-            or turn_data.get("project_id") != workspace_id
-            or turn_data.get("user_message_id") != source_message_id
-            or turn_data.get("lease_owner") != turn_lease.owner_token
-            or not MemoryEngine._is_aware_datetime(lease_expires_at)
-            or lease_expires_at <= observed_at
-        ):
-            raise ChatTurnOwnershipError(
-                "Stored chat turn cannot own a note proposal effect."
-            )
-        existing_actions = turn_data.get("actions", [])
-        existing_note_proposals = turn_data.get(
-            "collaborative_note_proposals",
-            [],
-        )
-        if not isinstance(existing_actions, list) or not isinstance(
-            existing_note_proposals,
-            list,
-        ):
-            raise ChatTurnStateError("Stored chat turn note effects are invalid.")
-        try:
-            validated_actions = [
-                AgentActionReceipt.model_validate(item).model_dump(
-                    mode="python"
-                )
-                for item in existing_actions
-            ]
-            validated_note_proposals = [
-                CollaborativeNoteProposal.model_validate(item).model_dump(
-                    mode="python"
-                )
-                for item in existing_note_proposals
-            ]
-        except (ValidationError, TypeError, ValueError) as exc:
-            raise ChatTurnStateError(
-                "Stored chat turn note effects are invalid."
-            ) from exc
-        if (
-            turn_data.get("memory_proposals")
-            or turn_data.get("memory_clarifications")
-            or turn_data.get("artifacts")
-            or turn_data.get("artifact_feedback")
-            or turn_data.get("collaborative_note_events")
-        ):
-            raise ChatTurnStateError(
-                "Stored chat turn has another durable effect."
-            )
-        action = AgentActionReceipt(
-            action_name="propose_collaborative_note",
-            status="completed",
-        ).model_dump(mode="python")
-        receipt = proposal.model_dump(mode="python")
-        proposal_actions = [
-            item
-            for item in validated_actions
-            if item["action_name"] == "propose_collaborative_note"
-        ]
-        if proposal_actions or validated_note_proposals:
-            if (
-                proposal_actions == [action]
-                and validated_note_proposals == [receipt]
-            ):
-                return None
-            raise ChatTurnStateError(
-                "Stored chat turn has conflicting note proposal effects."
-            )
-        return {
-            "actions": [*validated_actions, action],
-            "collaborative_note_proposals": [receipt],
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        }
 
     @classmethod
     def _assert_chat_turn_response_preserves_effects(
@@ -6043,13 +5660,11 @@ class MemoryEngine:
         *,
         envelope: MemoryClarificationEnvelope,
         observed_at: datetime,
-        turn_lease: ProposalTurnLease | None,
     ) -> MemoryClarificationEnvelope:
         """Atomically persist one retry-safe memory clarification."""
         self._validate_memory_clarification_creation(
             envelope=envelope,
             observed_at=observed_at,
-            turn_lease=turn_lease,
         )
         session_ref = self._client.collection("sessions").document(
             envelope.session_id
@@ -6059,11 +5674,6 @@ class MemoryEngine:
         )
         clarification_ref = clarifications_ref.document(
             envelope.clarification_id
-        )
-        turn_ref = (
-            session_ref.collection("turns").document(turn_lease.turn_id)
-            if turn_lease is not None
-            else None
         )
         transaction = self._client.transaction()
 
@@ -6075,11 +5685,6 @@ class MemoryEngine:
             )
             clarification_snapshot = await clarification_ref.get(
                 transaction=transaction
-            )
-            turn_snapshot = (
-                await turn_ref.get(transaction=transaction)
-                if turn_ref is not None
-                else None
             )
             if not session_snapshot.exists:
                 raise ChatTurnOwnershipError(
@@ -6113,17 +5718,6 @@ class MemoryEngine:
                         "Stored clarification is not the active session "
                         "clarification."
                     )
-                if turn_lease is not None:
-                    effect = self._memory_clarification_turn_effect_update(
-                        turn_snapshot=turn_snapshot,
-                        envelope=envelope,
-                        turn_lease=turn_lease,
-                        observed_at=observed_at,
-                    )
-                    if effect is not None:
-                        raise MemoryClarificationStateError(
-                            "Stored clarification has no matching turn effect."
-                        )
                 return stored
 
             prior_ref = None
@@ -6151,16 +5745,6 @@ class MemoryEngine:
                         "Active clarification pointer is invalid."
                     )
 
-            effect = (
-                self._memory_clarification_turn_effect_update(
-                    turn_snapshot=turn_snapshot,
-                    envelope=envelope,
-                    turn_lease=turn_lease,
-                    observed_at=observed_at,
-                )
-                if turn_lease is not None
-                else None
-            )
             if prior_ref is not None and prior is not None:
                 transaction.set(
                     prior_ref,
@@ -6171,8 +5755,6 @@ class MemoryEngine:
                 clarification_ref,
                 envelope.model_dump(mode="python", exclude_none=True),
             )
-            if turn_ref is not None and effect is not None:
-                transaction.set(turn_ref, effect, merge=True)
             transaction.set(
                 session_ref,
                 {
@@ -6206,7 +5788,6 @@ class MemoryEngine:
         category: MemoryCategory,
         proposed_value: MemoryValue,
         observed_at: datetime,
-        turn_lease: ProposalTurnLease | None,
     ) -> MemoryProposal:
         """Atomically create one source-message-guarded proposal."""
         self._validate_guarded_memory_proposal_inputs(
@@ -6217,7 +5798,6 @@ class MemoryEngine:
             category=category,
             proposed_value=proposed_value,
             observed_at=observed_at,
-            turn_lease=turn_lease,
         )
         user_ref = self._client.collection("users").document(user_id)
         origin_ref = user_ref.collection(
@@ -6226,14 +5806,6 @@ class MemoryEngine:
         proposal_ref = user_ref.collection("memory_proposals").document(
             category
         )
-        turn_ref = None
-        if turn_lease is not None:
-            turn_ref = (
-                self._client.collection("sessions")
-                .document(session_id)
-                .collection("turns")
-                .document(turn_lease.turn_id)
-            )
         transaction = self._client.transaction()
 
         async def create_in_transaction(
@@ -6244,11 +5816,6 @@ class MemoryEngine:
                 transaction=transaction
             )
             profile_snapshot = await user_ref.get(transaction=transaction)
-            turn_snapshot = (
-                await turn_ref.get(transaction=transaction)
-                if turn_ref is not None
-                else None
-            )
             if origin_snapshot.exists:
                 origin_document = self._validated_proposal_origin_document(
                     origin_snapshot.to_dict()
@@ -6310,21 +5877,6 @@ class MemoryEngine:
                     raise MemoryProposalOriginConflictError(
                         "Stored proposal conflicts with this source."
                     )
-                if turn_ref is not None:
-                    turn_effect = self._proposal_turn_effect_update(
-                        turn_snapshot=turn_snapshot,
-                        user_id=user_id,
-                        source_message_id=source_message_id,
-                        turn_lease=turn_lease,
-                        observed_at=observed_at,
-                        proposal=stored_proposal,
-                    )
-                    if turn_effect is not None:
-                        transaction.set(
-                            turn_ref,
-                            turn_effect,
-                            merge=True,
-                        )
                 return stored_proposal
             profile = (
                 self._collaboration_profile_from_document(
@@ -6371,16 +5923,6 @@ class MemoryEngine:
                 created_at=observed_at,
                 expires_at=observed_at + timedelta(hours=24),
             )
-            turn_effect = None
-            if turn_ref is not None:
-                turn_effect = self._proposal_turn_effect_update(
-                    turn_snapshot=turn_snapshot,
-                    user_id=user_id,
-                    source_message_id=source_message_id,
-                    turn_lease=turn_lease,
-                    observed_at=observed_at,
-                    proposal=proposal,
-                )
             transaction.set(
                 proposal_ref,
                 self._proposal_document(proposal),
@@ -6396,12 +5938,6 @@ class MemoryEngine:
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
-            if turn_ref is not None and turn_effect is not None:
-                transaction.set(
-                    turn_ref,
-                    turn_effect,
-                    merge=True,
-                )
             return proposal
 
         run_transaction = firestore.async_transactional(
@@ -6427,7 +5963,6 @@ class MemoryEngine:
         category: MemoryCategoryV2,
         proposed_value: object,
         observed_at: datetime,
-        turn_lease: ProposalTurnLease | None,
     ) -> MemoryProposalV2:
         """Atomically create one version-2 source-grounded proposal."""
         self._validate_memory_user_id(user_id)
@@ -6460,22 +5995,11 @@ class MemoryEngine:
             raise ValueError(
                 "Clarified memory evidence must precede the source message."
             )
-        if turn_lease is not None and not isinstance(turn_lease, ProposalTurnLease):
-            raise ValueError("turn_lease is invalid.")
-
         user_ref = self._client.collection("users").document(user_id)
         origin_ref = user_ref.collection("memory_proposal_origins").document(
             origin_ids.origin_id
         )
         proposal_ref = user_ref.collection("memory_proposals").document(category)
-        turn_ref = None
-        if turn_lease is not None:
-            turn_ref = (
-                self._client.collection("sessions")
-                .document(session_id)
-                .collection("turns")
-                .document(turn_lease.turn_id)
-            )
         transaction = self._client.transaction()
 
         async def create_in_transaction(
@@ -6484,11 +6008,6 @@ class MemoryEngine:
             origin_snapshot = await origin_ref.get(transaction=transaction)
             proposal_snapshot = await proposal_ref.get(transaction=transaction)
             profile_snapshot = await user_ref.get(transaction=transaction)
-            turn_snapshot = (
-                await turn_ref.get(transaction=transaction)
-                if turn_ref is not None
-                else None
-            )
             profile = (
                 self._versioned_profile_from_document(profile_snapshot.to_dict())
                 if profile_snapshot.exists
@@ -6549,17 +6068,6 @@ class MemoryEngine:
                     raise MemoryProposalOriginConflictError(
                         "Stored proposal conflicts with this source."
                     )
-                if turn_ref is not None:
-                    effect = self._proposal_turn_effect_update(
-                        turn_snapshot=turn_snapshot,
-                        user_id=user_id,
-                        source_message_id=source_message_id,
-                        turn_lease=turn_lease,
-                        observed_at=observed_at,
-                        proposal=stored,
-                    )
-                    if effect is not None:
-                        transaction.set(turn_ref, effect, merge=True)
                 return stored
 
             if active_signal is not None and active_signal.value == normalized_value:
@@ -6590,16 +6098,6 @@ class MemoryEngine:
                 created_at=observed_at,
                 expires_at=observed_at + timedelta(hours=24),
             )
-            effect = None
-            if turn_ref is not None:
-                effect = self._proposal_turn_effect_update(
-                    turn_snapshot=turn_snapshot,
-                    user_id=user_id,
-                    source_message_id=source_message_id,
-                    turn_lease=turn_lease,
-                    observed_at=observed_at,
-                    proposal=proposal,
-                )
             proposal_document = proposal.model_dump(mode="python")
             proposal_document["created_at"] = firestore.SERVER_TIMESTAMP
             transaction.set(proposal_ref, proposal_document)
@@ -6616,8 +6114,6 @@ class MemoryEngine:
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
-            if turn_ref is not None and effect is not None:
-                transaction.set(turn_ref, effect, merge=True)
             return proposal
 
         run_transaction = firestore.async_transactional(create_in_transaction)
@@ -6635,7 +6131,6 @@ class MemoryEngine:
         source_message_id: str,
         selection: MemoryClarificationSelection,
         observed_at: datetime,
-        turn_lease: ProposalTurnLease | None,
         expected_clarification_id: str | None = None,
     ) -> MemoryProposalV2 | None:
         """Consume the first subsequent clarification turn into one proposal."""
@@ -6650,8 +6145,6 @@ class MemoryEngine:
             raise ValueError("selection must be a memory clarification selection.")
         if not self._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
-        if turn_lease is not None and not isinstance(turn_lease, ProposalTurnLease):
-            raise ValueError("turn_lease must be valid.")
         if expected_clarification_id is not None:
             self._validate_memory_identifier(
                 expected_clarification_id,
@@ -6660,9 +6153,7 @@ class MemoryEngine:
 
         session_ref = self._client.collection("sessions").document(session_id)
         clarifications_ref = session_ref.collection("memory_clarifications")
-        consuming_turn_id = (
-            turn_lease.turn_id if turn_lease is not None else source_message_id
-        )
+        consuming_turn_id = source_message_id
         user_ref = self._client.collection("users").document(user_id)
         transaction = self._client.transaction()
 
@@ -6757,14 +6248,7 @@ class MemoryEngine:
                         workspace_id=workspace_id,
                         selecting_turn_id=consuming_turn_id,
                         selecting_message_id=source_message_id,
-                        is_first_subsequent_turn=(
-                            True
-                            if turn_lease is None
-                            else (
-                                session_document.get("last_completed_turn_id")
-                                == envelope.clarification_turn_id
-                            )
-                        ),
+                        is_first_subsequent_turn=True,
                         observed_at=observed_at,
                     )
                 except ValueError as exc:
@@ -6823,16 +6307,6 @@ class MemoryEngine:
             origin_snapshot = await origin_ref.get(transaction=transaction)
             proposal_snapshot = await proposal_ref.get(transaction=transaction)
             profile_snapshot = await user_ref.get(transaction=transaction)
-            turn_snapshot = (
-                await (
-                    session_ref.collection("turns")
-                    .document(turn_lease.turn_id)
-                    .get(transaction=transaction)
-                )
-                if turn_lease is not None
-                else None
-            )
-
             profile = (
                 self._versioned_profile_from_document(profile_snapshot.to_dict())
                 if profile_snapshot.exists
@@ -6894,24 +6368,6 @@ class MemoryEngine:
                     raise MemoryProposalOriginConflictError(
                         "Stored proposal conflicts with this selection."
                     )
-                effect = (
-                    self._proposal_turn_effect_update(
-                        turn_snapshot=turn_snapshot,
-                        user_id=user_id,
-                        source_message_id=source_message_id,
-                        turn_lease=turn_lease,
-                        observed_at=observed_at,
-                        proposal=stored,
-                    )
-                    if turn_lease is not None
-                    else None
-                )
-                if effect is not None:
-                    turn_ref = (
-                        session_ref.collection("turns")
-                        .document(turn_lease.turn_id)
-                    )
-                    transaction.set(turn_ref, effect, merge=True)
                 return stored
 
             if active_signal is not None and active_signal.value == normalized_value:
@@ -6942,18 +6398,6 @@ class MemoryEngine:
                 created_at=observed_at,
                 expires_at=observed_at + timedelta(hours=24),
             )
-            effect = (
-                self._proposal_turn_effect_update(
-                    turn_snapshot=turn_snapshot,
-                    user_id=user_id,
-                    source_message_id=source_message_id,
-                    turn_lease=turn_lease,
-                    observed_at=observed_at,
-                    proposal=proposal,
-                )
-                if turn_lease is not None
-                else None
-            )
             proposal_document = proposal.model_dump(mode="python")
             proposal_document["created_at"] = firestore.SERVER_TIMESTAMP
             transaction.set(proposal_ref, proposal_document)
@@ -6970,12 +6414,6 @@ class MemoryEngine:
                     "created_at": firestore.SERVER_TIMESTAMP,
                 },
             )
-            if effect is not None:
-                turn_ref = (
-                    session_ref.collection("turns")
-                    .document(turn_lease.turn_id)
-                )
-                transaction.set(turn_ref, effect, merge=True)
             transaction.set(
                 clarification_ref,
                 {
@@ -8228,7 +7666,6 @@ class MemoryEngine:
         category: object,
         proposed_value: object,
         observed_at: object,
-        turn_lease: object,
     ) -> None:
         MemoryEngine._validate_memory_user_id(user_id)
         MemoryEngine._validate_memory_identifier(session_id, "session_id")
@@ -8253,30 +7690,17 @@ class MemoryEngine:
             raise ValueError("origin_ids do not match proposal provenance.")
         if not MemoryEngine._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
-        if turn_lease is not None and not isinstance(
-            turn_lease,
-            ProposalTurnLease,
-        ):
-            raise ValueError("turn_lease must be valid when provided.")
 
     @staticmethod
     def _validate_memory_clarification_creation(
         *,
         envelope: object,
         observed_at: object,
-        turn_lease: object,
     ) -> None:
         if not isinstance(envelope, MemoryClarificationEnvelope):
             raise ValueError("envelope must be a memory clarification.")
         if envelope.status != "open":
             raise ValueError("Only an open clarification can be created.")
-        if turn_lease is not None:
-            if not isinstance(turn_lease, ProposalTurnLease):
-                raise ValueError("turn_lease must be valid when provided.")
-            if turn_lease.turn_id != envelope.clarification_turn_id:
-                raise ValueError(
-                    "The turn lease does not own the clarification."
-                )
         if not MemoryEngine._is_aware_datetime(observed_at):
             raise ValueError("observed_at must be a timezone-aware datetime.")
         if not envelope.created_at <= observed_at < envelope.expires_at:
@@ -8317,64 +7741,6 @@ class MemoryEngine:
         return envelope
 
     @staticmethod
-    def _memory_clarification_turn_effect_update(
-        *,
-        turn_snapshot: object,
-        envelope: MemoryClarificationEnvelope,
-        turn_lease: ProposalTurnLease,
-        observed_at: datetime,
-    ) -> dict[str, object] | None:
-        if not getattr(turn_snapshot, "exists", False):
-            raise ChatTurnOwnershipError(
-                "Stored chat turn cannot own a clarification effect."
-            )
-        turn_data = turn_snapshot.to_dict()
-        if not isinstance(turn_data, Mapping):
-            raise ChatTurnStateError("Stored chat turn is invalid.")
-        lease_expires_at = turn_data.get("lease_expires_at")
-        if (
-            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
-            or turn_data.get("status") != "in_progress"
-            or turn_data.get("project_id") != envelope.workspace_id
-            or turn_data.get("user_id") != envelope.user_id
-            or turn_data.get("user_message_id")
-            != envelope.evidence_message_id
-            or turn_data.get("lease_owner") != turn_lease.owner_token
-            or not MemoryEngine._is_aware_datetime(lease_expires_at)
-            or lease_expires_at <= observed_at
-        ):
-            raise ChatTurnOwnershipError(
-                "Stored chat turn cannot own a clarification effect."
-            )
-        receipt = clarification_receipt(envelope).model_dump(mode="python")
-        existing = turn_data.get("memory_clarifications", [])
-        if not isinstance(existing, list):
-            raise ChatTurnStateError(
-                "Stored clarification turn effects are invalid."
-            )
-        try:
-            validated = [
-                MemoryClarificationReceipt.model_validate(item).model_dump(
-                    mode="python"
-                )
-                for item in existing
-            ]
-        except (ValidationError, TypeError, ValueError) as exc:
-            raise ChatTurnStateError(
-                "Stored clarification turn effects are invalid."
-            ) from exc
-        if validated:
-            if validated == [receipt]:
-                return None
-            raise ChatTurnStateError(
-                "Stored chat turn has conflicting clarification effects."
-            )
-        return {
-            "memory_clarifications": [receipt],
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        }
-
-    @staticmethod
     def _validated_proposal_origin_document(
         document: object,
     ) -> dict[str, object]:
@@ -8412,92 +7778,6 @@ class MemoryEngine:
                 field_name,
             )
         return document
-
-    @staticmethod
-    def _proposal_turn_effect_update(
-        *,
-        turn_snapshot: object,
-        user_id: str,
-        source_message_id: str,
-        turn_lease: ProposalTurnLease | None,
-        observed_at: datetime,
-        proposal: VersionedMemoryProposal,
-    ) -> dict[str, object] | None:
-        if turn_lease is None:
-            raise ValueError("turn_lease is required for a turn effect.")
-        if (
-            turn_snapshot is None
-            or not getattr(turn_snapshot, "exists", False)
-        ):
-            raise ChatTurnOwnershipError(
-                "Stored chat turn cannot own a proposal effect."
-            )
-        turn_data = turn_snapshot.to_dict()
-        if not isinstance(turn_data, Mapping):
-            raise ChatTurnStateError("Stored chat turn is invalid.")
-        lease_expires_at = turn_data.get("lease_expires_at")
-        if (
-            turn_data.get("schema_version") != CHAT_TURN_SCHEMA_VERSION
-            or turn_data.get("status") != "in_progress"
-            or turn_data.get("user_id") != user_id
-            or turn_data.get("user_message_id") != source_message_id
-            or turn_data.get("lease_owner") != turn_lease.owner_token
-            or not MemoryEngine._is_aware_datetime(lease_expires_at)
-            or lease_expires_at <= observed_at
-        ):
-            raise ChatTurnOwnershipError(
-                "Stored chat turn cannot own a proposal effect."
-            )
-        action = AgentActionReceipt(
-            action_name="propose_memory_signal",
-            status="completed",
-        ).model_dump(mode="python")
-        receipt = MemoryEngine._proposal_receipt(proposal).model_dump(
-            mode="python"
-        )
-        existing_actions = turn_data.get("actions", [])
-        existing_proposals = turn_data.get("memory_proposals", [])
-        if not isinstance(existing_actions, list) or not isinstance(
-            existing_proposals,
-            list,
-        ):
-            raise ChatTurnStateError("Stored chat turn effects are invalid.")
-        try:
-            validated_actions = [
-                AgentActionReceipt.model_validate(item).model_dump(
-                    mode="python"
-                )
-                for item in existing_actions
-            ]
-            validated_proposals = [
-                MemoryEngine._proposal_receipt_from_document(item).model_dump(
-                    mode="python"
-                )
-                for item in existing_proposals
-            ]
-        except (ValidationError, TypeError, ValueError) as exc:
-            raise ChatTurnStateError(
-                "Stored chat turn effects are invalid."
-            ) from exc
-        proposal_actions = [
-            item
-            for item in validated_actions
-            if item["action_name"] == "propose_memory_signal"
-        ]
-        if proposal_actions or validated_proposals:
-            if (
-                proposal_actions == [action]
-                and validated_proposals == [receipt]
-            ):
-                return None
-            raise ChatTurnStateError(
-                "Stored chat turn has conflicting proposal effects."
-            )
-        return {
-            "actions": [*validated_actions, action],
-            "memory_proposals": [receipt],
-            "updated_at": firestore.SERVER_TIMESTAMP,
-        }
 
     @staticmethod
     def _proposal_receipt(

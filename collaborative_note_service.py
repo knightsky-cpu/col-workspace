@@ -253,7 +253,6 @@ class CollaborativeNoteService:
             expected_note_id=None,
             expected_revision=None,
             observed_at=command.observed_at,
-            turn_lease=None,
         )
         return CollaborativeNoteProposalResult(
             proposal=proposal,
