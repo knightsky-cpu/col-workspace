@@ -1,0 +1,7 @@
+{
+  "start_epoch": 1788605079.308,
+  "start_iso": "2026-09-05T10:44:39.308Z",
+  "target_sec": 600,
+  "driver": "chrome-cdp",
+  "note": "Glass MCP unavailable to subagent; Chrome for Testing CDP against same /workspace"
+}

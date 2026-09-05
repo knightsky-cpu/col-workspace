@@ -1,0 +1,34 @@
+{
+  "durationSec": 635,
+  "targetSec": 600,
+  "cycles": 103,
+  "chats": {
+    "control": 39,
+    "memory": 13,
+    "note": 13,
+    "artifact": 13
+  },
+  "findings": [],
+  "finalSnap": {
+    "url": "http://127.0.0.1:8000/workspace",
+    "agents": "Agents 0 active · 0 queued ⌃",
+    "sendDisabled": false,
+    "hasIdentity": true,
+    "pendingNotes": 3,
+    "hasPendingMemory": false,
+    "hasQueued": true,
+    "bodyHead": "Local development mode\n\nAgent Col | Agent Col\nNew conversation\nHide\nRefresh\nWorkspace\nArtifacts\nNotes\nPending proposals\n\nPending note proposal\n\nAbuse Session Switch Note 09\n\nWorking context\n\nPending note proposal\n\nAbuse Cross Note 05\n\nTask state\n\nPending note proposal\n\nAbuse Test Note 04\n\nTask state\n\nActive notes\nActive\nArchived\n\nNo notes loaded.\n\nCreate note\nKind\nDecision\nRequirement\nConstraint\nT"
+  },
+  "finalJobs": {
+    "count": 19,
+    "by_status": {
+      "completed": 17,
+      "failed": 2
+    },
+    "nonterm": []
+  },
+  "consoleErrors": [],
+  "driver": "chrome-cdp",
+  "glassMcpNote": "Glass browser MCP could not hold a tab for this subagent; soak used Chrome for Testing CDP on same /workspace URL",
+  "end_iso": "2026-09-05T10:55:16.389Z"
+}
