@@ -601,6 +601,245 @@ async def test_turn_service_queues_explicit_memory_request_before_routing(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected_value"),
+    [
+        (
+            (
+                "One more thing to remember about me: when we're debugging, "
+                "I like the explanation first and the code change second."
+            ),
+            (
+                "when we're debugging, I like the explanation first and the "
+                "code change second"
+            ),
+        ),
+        (
+            (
+                "Also remember that when I'm working on UI stuff, I usually "
+                "prefer dark mode."
+            ),
+            "when I'm working on UI stuff, I usually prefer dark mode",
+        ),
+        (
+            (
+                "Keep in mind for future conversations that I prefer concise "
+                "tradeoffs."
+            ),
+            "I prefer concise tradeoffs",
+        ),
+        (
+            (
+                "Queue Memory only now: propose remembering I prefer dark-mode "
+                "UI during abuse testing."
+            ),
+            "I prefer dark-mode UI during abuse testing",
+        ),
+        (
+            (
+                "For code review, my default style is source-backed findings "
+                "before summaries."
+            ),
+            (
+                "For code review, my default style is source-backed findings "
+                "before summaries"
+            ),
+        ),
+        (
+            (
+                "When we review code, screenshots help me more than long "
+                "explanations."
+            ),
+            (
+                "When we review code, screenshots help me more than long "
+                "explanations"
+            ),
+        ),
+        (
+            "Source-backed plans before implementation works best for me.",
+            "Source-backed plans before implementation works best for me",
+        ),
+        (
+            "Short answers are easier for me to work with.",
+            "Short answers are easier for me to work with",
+        ),
+        (
+            "For frontend work, visual examples are usually more useful.",
+            "For frontend work, visual examples are usually more useful",
+        ),
+        (
+            "Visual explanations tend to stick better.",
+            "Visual explanations tend to stick better",
+        ),
+        (
+            "Architecture first, implementation second works best.",
+            "Architecture first, implementation second works best",
+        ),
+        (
+            "Less ceremony makes collaboration smoother.",
+            "Less ceremony makes collaboration smoother",
+        ),
+        (
+            (
+                "Screenshots help more than long descriptions when we're "
+                "debugging UI."
+            ),
+            (
+                "Screenshots help more than long descriptions when we're "
+                "debugging UI"
+            ),
+        ),
+        (
+            (
+                "Root-cause analysis before code changes usually saves time."
+            ),
+            "Root-cause analysis before code changes usually saves time",
+        ),
+        (
+            "Source-backed plans make implementation easier.",
+            "Source-backed plans make implementation easier",
+        ),
+        (
+            "CLI workflows are much easier for me than GUI-heavy ones.",
+            "CLI workflows are much easier for me than GUI-heavy ones",
+        ),
+        (
+            "Small surgical passes are easier to review.",
+            "Small surgical passes are easier to review",
+        ),
+        (
+            (
+                "I get more value from examples than abstract explanations."
+            ),
+            "I get more value from examples than abstract explanations",
+        ),
+        (
+            "Planning before implementation tends to work better.",
+            "Planning before implementation tends to work better",
+        ),
+        (
+            (
+                "I don't like changing architecture while debugging a narrow "
+                "defect."
+            ),
+            (
+                "I don't like changing architecture while debugging a narrow "
+                "defect"
+            ),
+        ),
+        (
+            "For me, fewer moving parts usually means a safer fix.",
+            "For me, fewer moving parts usually means a safer fix",
+        ),
+        (
+            (
+                "When something fails, root cause matters more than a quick "
+                "patch."
+            ),
+            (
+                "When something fails, root cause matters more than a quick "
+                "patch"
+            ),
+        ),
+        (
+            "If we're reviewing source, exact file references are useful.",
+            "If we're reviewing source, exact file references are useful",
+        ),
+        (
+            (
+                "Code review goes better when findings are separated from "
+                "fixes."
+            ),
+            (
+                "Code review goes better when findings are separated from "
+                "fixes"
+            ),
+        ),
+        (
+            (
+                "I absorb technical material better when the why comes before "
+                "the what."
+            ),
+            (
+                "I absorb technical material better when the why comes before "
+                "the what"
+            ),
+        ),
+        (
+            "When there are multiple options, tradeoffs help me decide.",
+            "When there are multiple options, tradeoffs help me decide",
+        ),
+        (
+            (
+                "Debugging goes better when we identify the cause before "
+                "changing code."
+            ),
+            (
+                "Debugging goes better when we identify the cause before "
+                "changing code"
+            ),
+        ),
+    ],
+)
+async def test_turn_service_routes_broad_prospective_memory_intent(
+    message: str,
+    expected_value: str,
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("broad-memory-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert len(memory_queue.calls) == 1
+    memory_command = memory_queue.calls[0]
+    assert memory_command.decision.kind == "profile_candidate"
+    assert memory_command.decision.category == "user_requested_memory"
+    assert memory_command.decision.canonical_value == expected_value
+    assert memory_command.decision.evidence_text in message
+    assert result.queued_actions[0].action_kind == "propose_memory_signal"
+
+
+@pytest.mark.asyncio
 async def test_turn_service_preserves_preflight_memory_queue_without_requeue(
 ) -> None:
     from agent_col_routing_v4 import (
@@ -887,6 +1126,189 @@ async def test_turn_service_does_not_queue_historical_memory_recall() -> None:
 
     assert memory_queue.calls == []
     assert result.queued_actions == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "what do you remember about me?",
+        "Do you remember my preference?",
+        "Can you remember my preference?",
+        "Do you remember my coding style?",
+        "Do you remember me telling you that I prefer dark mode?",
+        "do you remember when we picked the stack?",
+        "what did I tell you before?",
+        "what was my preference last time?",
+        "can you remember what I said about review style last week?",
+    ],
+)
+async def test_turn_service_excludes_memory_retrieval_from_new_memory_routing(
+    message: str,
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-retrieval-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert memory_queue.calls == []
+    assert result.queued_actions == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected_value"),
+    [
+        (
+            "Could you remember that I work better with visual examples?",
+            "I work better with visual examples",
+        ),
+        (
+            "Can you remember that I prefer dark mode?",
+            "I prefer dark mode",
+        ),
+        (
+            "Could you remember this about me: I like concise answers?",
+            "I like concise answers",
+        ),
+        (
+            (
+                "Help me debug this, and remember that I prefer root-cause "
+                "analysis before code changes."
+            ),
+            "I prefer root-cause analysis before code changes",
+        ),
+        (
+            (
+                "Can you help with this? Short answers are easier for me to "
+                "work with."
+            ),
+            "Short answers are easier for me to work with",
+        ),
+        (
+            (
+                "What do you remember about me? Short answers are easier for "
+                "me to work with."
+            ),
+            "Short answers are easier for me to work with",
+        ),
+        (
+            (
+                "Help me debug this. Visual explanations tend to stick "
+                "better."
+            ),
+            "Visual explanations tend to stick better",
+        ),
+        (
+            "Would concise answers work better for me?",
+            "Would concise answers work better for me",
+        ),
+        (
+            "Fix this by keeping future explanations source-backed.",
+            "Fix this by keeping future explanations source-backed",
+        ),
+        (
+            "Review this with concise findings first.",
+            "Review this with concise findings first",
+        ),
+    ],
+)
+async def test_turn_service_routes_memory_inside_questions_and_mixed_turns(
+    message: str,
+    expected_value: str,
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("mixed-memory-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert len(memory_queue.calls) == 1
+    memory_command = memory_queue.calls[0]
+    assert memory_command.decision.kind == "profile_candidate"
+    assert memory_command.decision.category == "user_requested_memory"
+    assert memory_command.decision.canonical_value == expected_value
+    assert memory_command.decision.evidence_text in message
+    assert result.queued_actions[0].action_kind == "propose_memory_signal"
 
 
 @pytest.mark.asyncio

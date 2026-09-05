@@ -192,6 +192,32 @@ def test_provider_profile_candidate_accepts_value_alias() -> None:
     )
 
 
+def test_provider_profile_candidate_normalizes_collaboration_style_alias(
+) -> None:
+    from memory_candidate_decisions import (
+        ProfileCandidateDecision,
+        validate_provider_natural_memory_decision,
+    )
+
+    decision = validate_provider_natural_memory_decision(
+        {
+            "kind": "profile_candidate",
+            "category": "collaboration_style",
+            "value": "Prefers explanation first and code changes second",
+            "evidence_text": (
+                "when we're debugging, I like the explanation first and the "
+                "code change second"
+            ),
+        }
+    )
+
+    assert isinstance(decision, ProfileCandidateDecision)
+    assert decision.category == "user_requested_memory"
+    assert decision.canonical_value == (
+        "Prefers explanation first and code changes second"
+    )
+
+
 def test_provider_profile_candidate_keeps_canonical_value_payload() -> None:
     from memory_candidate_decisions import (
         ProfileCandidateDecision,

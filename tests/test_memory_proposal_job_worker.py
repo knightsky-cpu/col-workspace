@@ -1525,6 +1525,43 @@ async def test_memory_worker_normalizes_communication_style_candidate(
 
 
 @pytest.mark.asyncio
+async def test_memory_worker_normalizes_collaboration_style_candidate(
+) -> None:
+    command = make_command()
+    job = make_job(command)
+    payload = raw_profile_candidate_payload(
+        job,
+        decision={
+            "kind": "profile_candidate",
+            "category": "collaboration_style",
+            "value": "Prefers explanation first and code changes second",
+            "evidence_text": (
+                "when we're debugging, I like the explanation first and the "
+                "code change second"
+            ),
+        },
+        source_message_text=(
+            "One more thing to remember about me: when we're debugging, I like "
+            "the explanation first and the code change second."
+        ),
+    )
+
+    completed, service, repository = await run_memory_worker_with_payload(
+        payload
+    )
+
+    assert completed.status == "completed"
+    assert repository.failed == []
+    assert len(service.commands) == 1
+    recorded = service.commands[0]
+    assert recorded.decision.kind == "profile_candidate"
+    assert recorded.decision.category == "user_requested_memory"
+    assert recorded.decision.canonical_value == (
+        "Prefers explanation first and code changes second"
+    )
+
+
+@pytest.mark.asyncio
 async def test_memory_worker_unwraps_single_nested_profile_candidate(
 ) -> None:
     command = make_command()

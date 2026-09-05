@@ -3024,6 +3024,79 @@ async def test_chat_stream_explicit_memory_request_bypasses_continuity(
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_broad_memory_request_bypasses_continuity(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    service_state.database.chat_turn_result = make_chat_turn_claim()
+
+    class Store:
+        async def list_active_collaborative_notes_for_continuity(
+            self,
+            *,
+            user_id: str,
+            workspace_id: str,
+            limit: int,
+        ) -> tuple[CollaborativeNote, ...]:
+            raise ValueError("broad memory request should not read notes")
+
+        async def list_recent_session_continuity_receipts(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+        ) -> tuple[ContinuitySourceReceipt, ...]:
+            raise ValueError(
+                "broad memory request should not read recent receipts"
+            )
+
+        async def list_chat_sessions(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            limit: int,
+        ) -> ChatSessionListResponse:
+            raise ValueError(
+                "broad memory request should not read chat sessions"
+            )
+
+        async def get_chat_session_detail(
+            self,
+            *,
+            user_id: str,
+            project_id: str,
+            session_id: str,
+            limit: int,
+            observed_at: datetime,
+        ) -> ChatSessionDetailResponse:
+            raise ValueError("broad memory request should not read chat detail")
+
+    main.app.state.continuity_service = ContinuityService(store=Store())
+
+    response = await client.post(
+        "/api/chat/stream",
+        headers={"Idempotency-Key": "broad-memory-stream-key-1"},
+        json={
+            "project_id": "project-1",
+            "session_id": "session-1",
+            "user_id": "user-1",
+            "message": (
+                "One more thing to remember about me: when we're debugging, "
+                "I like the explanation first and the code change second."
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events[-1][0] == "final"
+    assert service_state.turn_service.calls
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_waits_for_persistence_before_final(
     client: httpx.AsyncClient,
     service_state: ServiceState,

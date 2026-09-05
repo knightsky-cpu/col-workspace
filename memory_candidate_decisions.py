@@ -284,6 +284,7 @@ _NATURAL_DECISION_TYPES = (
 )
 _PROVIDER_CATEGORY_ALIASES = {
     "collaboration_preferences": "user_requested_memory",
+    "collaboration_style": "user_requested_memory",
     "communication_style": "user_requested_memory",
 }
 _PROFILE_CANDIDATE_FIELDS = frozenset(

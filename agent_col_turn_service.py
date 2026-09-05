@@ -115,12 +115,7 @@ _EXPLICIT_WORKSPACE_NOTE_BOUNDARY = re.compile(
     r")",
     re.IGNORECASE,
 )
-_EXPLICIT_MEMORY_CLAUSE = re.compile(
-    r"(?P<prefix>^(?:also|and)\s+|^|[.!?]\s+|\s+(?:also|and)\s+)"
-    r"(?P<request>(?:please\s+)?remember"
-    r"(?:\s+that\s+(?P<that_body>(?:i|me|my|we|our|us)\b.+?)|"
-    r"\s+my\s+preference\s+is\s+(?P<preference_body>.+?)|"
-    r"\s+(?P<body>(?:i|me|my|we|our|us)\b.+?)))"
+_MEMORY_CLAUSE_BOUNDARY = re.compile(
     r"(?=$|[.!?](?:\s+|$)|\s+(?:also|and|then)\s+create\s+"
     r"(?:a\s+|an\s+)?(?:blueprint\s+)?artifact\b|"
     r"\s+then\s+write\s+me\s+(?:a|an)\s+"
@@ -129,6 +124,62 @@ _EXPLICIT_MEMORY_CLAUSE = re.compile(
     r"\s+(?:also|and|then)\s+(?:propose|create|record|save)\s+"
     r"(?:a\s+)?workspace\s+note\b)",
     re.IGNORECASE | re.DOTALL,
+)
+_MEMORY_RETRIEVAL_OR_HISTORY = re.compile(
+    r"\b(?:do|did|can|could)\s+you\s+(?:remember|recall)\s+"
+    r"(?:when|what|where|who|how|if|whether)\b|"
+    r"\b(?:do|did|can|could)\s+you\s+(?:remember|recall)\s+"
+    r"(?:my|our)\b|"
+    r"\b(?:do|did|can|could)\s+you\s+(?:remember|recall)\s+"
+    r"(?:me|us)\s+(?:telling|saying|mentioning)\s+you\b|"
+    r"\bwhat\s+(?:do|did|have)\s+(?:you\s+)?"
+    r"(?:remember|recall|know|tell|told|say|said|mention|mentioned)\b|"
+    r"\bwhat\s+(?:did|have)\s+i\s+(?:tell|say|mention)\s+you\b|"
+    r"\bwhat\s+(?:was|were)\s+my\s+preferences?\b"
+    r".*\b(?:last|before|previous|previously|prior|earlier)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_MEMORY_INTENT_PREFIXES = (
+    re.compile(
+        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:(?:also|and)\s+)?(?:(?:can|could|would|will)\s+you\s+)?"
+        r"(?:one\s+more\s+thing\s+to\s+)?"
+        r"(?:please\s+)?remember\s+(?:that\s+|"
+        r"this\s+about\s+me:\s*|this\s+|about\s+me:\s*|"
+        r"my\s+preference\s+is\s+)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:(?:also|and)\s+)?(?:please\s+)?"
+        r"(?:keep\s+in\s+mind|bear\s+in\s+mind)"
+        r"(?:\s+for\s+future\s+conversations)?(?:\s+that)?\s+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:(?:also|and)\s+)?(?:please\s+)?"
+        r"(?:note|make\s+a\s+note)"
+        r"(?:\s+about\s+me)?(?:\s+that|:)\s+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:(?:also|and)\s+)?(?:please\s+)?"
+        r"(?:save|store|record)\s+"
+        r"(?:this\s+)?(?:as\s+)?(?:a\s+)?"
+        r"(?:memory|preference|profile\s+note)?(?:\s+that|:)?\s*",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:queue\s+memory\b.*?\b)?propose\s+remembering\s+",
+        re.IGNORECASE,
+    ),
+)
+_MEMORY_CANDIDATE_SPLIT = re.compile(
+    r"(?<=[.!?])\s+|\n+|\s+(?:and|also|then)\s+(?=[A-Z0-9])",
+    re.IGNORECASE,
 )
 _MAX_ACCEPTED_NOTE_TITLE_CHARS = 80
 logger = logging.getLogger(__name__)
@@ -445,22 +496,67 @@ def _source_message_id(command: AgentColTurnCommand) -> str:
 
 
 def _explicit_memory_clause_text(message: str) -> tuple[str, str] | None:
-    match = _EXPLICIT_MEMORY_CLAUSE.search(message)
-    if match is None:
-        return None
-    request = match.group("request").strip()
-    prefix = match.group("prefix").strip()
-    if prefix.lower() in {"also", "and"}:
-        request = f"{prefix} {request}"
-    body = (
-        match.group("that_body")
-        or match.group("preference_body")
-        or match.group("body")
-        or ""
-    ).strip()
+    for pattern in _MEMORY_INTENT_PREFIXES:
+        match = pattern.search(message)
+        if match is None:
+            continue
+        extracted = _finish_memory_clause_extraction(
+            message,
+            request_start=match.start(),
+            body_start=match.end(),
+        )
+        if (
+            extracted is not None
+            and not _MEMORY_RETRIEVAL_OR_HISTORY.search(extracted[0])
+        ):
+            return extracted
+    return _plausible_memory_context_text(message)
+
+
+def _finish_memory_clause_extraction(
+    message: str,
+    *,
+    request_start: int,
+    body_start: int,
+) -> tuple[str, str] | None:
+    tail = message[body_start:]
+    boundary = _MEMORY_CLAUSE_BOUNDARY.search(tail)
+    body_end = body_start + (boundary.start() if boundary else len(tail))
+    request = message[request_start:body_end].strip()
+    body = _normalize_memory_clause_body(message[body_start:body_end])
     if not request or not body:
         return None
     return request, body
+
+
+def _normalize_memory_clause_body(body: str) -> str:
+    return body.strip(" \t\r\n:;,.!?")
+
+
+def _plausible_memory_context_text(message: str) -> tuple[str, str] | None:
+    selected: tuple[str, str] | None = None
+    for start, end in _iter_memory_candidate_spans(message):
+        clause = message[start:end].strip()
+        if not clause:
+            continue
+        if _MEMORY_RETRIEVAL_OR_HISTORY.search(clause):
+            continue
+        body = _normalize_memory_clause_body(clause)
+        if body:
+            selected = clause, body
+    return selected
+
+
+def _iter_memory_candidate_spans(message: str):
+    cursor = 0
+    for match in _MEMORY_CANDIDATE_SPLIT.finditer(message):
+        start = cursor
+        end = match.start()
+        if start < end:
+            yield start, end
+        cursor = match.end()
+    if cursor < len(message):
+        yield cursor, len(message)
 
 
 def has_explicit_memory_clause(message: str) -> bool:
