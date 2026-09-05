@@ -3203,3 +3203,35 @@ Not included:
 - startup/runtime queued-job draining;
 - expired running-lease recovery;
 - shutdown hygiene or terminal report consistency cleanup.
+
+## AgentJob Retry Dispatch
+
+This pass dispatches queued retry jobs after the retry endpoint successfully
+creates or idempotently returns a retry job. It reuses the same startup-wired
+worker dispatch functions as newly queued Memory, Note, and Artifact work.
+
+Fixed:
+
+- the retry endpoint now calls a retry dispatch helper only after
+  `AgentJobRepository.retry_job(...)` succeeds;
+- the helper routes queued retry jobs by `action_kind` to the existing Memory,
+  Note, or Artifact worker dispatcher;
+- successful retry dispatches are tracked in-process by retry `job_id` so a
+  repeated idempotent retry request does not schedule duplicate concurrent work;
+- if the dispatcher raises after the retry is durably queued, the endpoint still
+  returns the queued retry job and leaves it recoverable.
+
+Preserved:
+
+- retry private-payload preservation and exact replay integrity;
+- retry lineage and idempotency;
+- original failed job immutability;
+- worker-specific private payload loading;
+- queue/worker boundaries.
+
+Not included:
+
+- general queued-job draining;
+- expired running-lease recovery;
+- retry dispatch recovery across process restart;
+- shutdown hygiene or terminal report consistency cleanup.

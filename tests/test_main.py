@@ -931,6 +931,7 @@ class FakeAgentJobRepository:
     event_calls: list[dict[str, object]] = field(default_factory=list)
     cancel_calls: list[dict[str, object]] = field(default_factory=list)
     retry_calls: list[dict[str, object]] = field(default_factory=list)
+    retry_action_kind: str = "create_artifact"
 
     async def list_jobs(
         self,
@@ -1100,6 +1101,7 @@ class FakeAgentJobRepository:
             user_id=user_id,
             workspace_id=workspace_id,
             project_id=workspace_id,
+            action_kind=self.retry_action_kind,
             status="queued",
             created_at=observed_at,
             updated_at=observed_at,
@@ -5502,6 +5504,122 @@ async def test_agent_job_retry_uses_deterministic_retry_job_id(
     assert retry_call["idempotency_key"] == "retry-idempotency-key"
     assert retry_call["retry_job_id"].startswith("agent-job-retry-")
     assert "retry-idempotency-key" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_agent_job_retry_dispatches_newly_created_retry(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    dispatched: list[AgentJob] = []
+    main.app.state.agent_job_dispatchers = {
+        "create_artifact": dispatched.append,
+    }
+    main.app.state.agent_job_retry_dispatches = set()
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/retry",
+        headers={"Idempotency-Key": "retry-idempotency-key"},
+    )
+
+    assert response.status_code == 200
+    assert len(service_state.agent_job_repository.retry_calls) == 1
+    retry_call = service_state.agent_job_repository.retry_calls[0]
+    assert [job.job_id for job in dispatched] == [
+        retry_call["retry_job_id"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_agent_job_retry_replay_does_not_duplicate_dispatch(
+    client: httpx.AsyncClient,
+) -> None:
+    dispatched: list[AgentJob] = []
+    main.app.state.agent_job_dispatchers = {
+        "create_artifact": dispatched.append,
+    }
+    main.app.state.agent_job_retry_dispatches = set()
+
+    first = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/retry",
+        headers={"Idempotency-Key": "retry-idempotency-key"},
+    )
+    second = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/retry",
+        headers={"Idempotency-Key": "retry-idempotency-key"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(dispatched) == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_job_retry_dispatch_failure_leaves_retry_queued(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+) -> None:
+    dispatch_calls: list[AgentJob] = []
+
+    def fail_dispatch(job: AgentJob) -> None:
+        dispatch_calls.append(job)
+        raise RuntimeError("background dispatcher unavailable")
+
+    main.app.state.agent_job_dispatchers = {
+        "create_artifact": fail_dispatch,
+    }
+    main.app.state.agent_job_retry_dispatches = set()
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/retry",
+        headers={"Idempotency-Key": "retry-idempotency-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["job"]["status"] == "queued"
+    assert len(dispatch_calls) == 1
+    assert len(service_state.agent_job_repository.retry_calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("action_kind", "expected_dispatcher"),
+    (
+        ("propose_memory_signal", "memory"),
+        ("propose_collaborative_note", "note"),
+        ("create_artifact", "artifact"),
+    ),
+)
+async def test_agent_job_retry_routes_to_existing_worker_dispatcher(
+    client: httpx.AsyncClient,
+    service_state: ServiceState,
+    action_kind: str,
+    expected_dispatcher: str,
+) -> None:
+    service_state.agent_job_repository.retry_action_kind = action_kind
+    dispatched: list[tuple[str, AgentJob]] = []
+    main.app.state.agent_job_dispatchers = {
+        "propose_memory_signal": (
+            lambda job: dispatched.append(("memory", job))
+        ),
+        "propose_collaborative_note": (
+            lambda job: dispatched.append(("note", job))
+        ),
+        "create_artifact": (
+            lambda job: dispatched.append(("artifact", job))
+        ),
+    }
+    main.app.state.agent_job_retry_dispatches = set()
+
+    response = await client.post(
+        "/api/users/user-1/projects/project-1/agent/jobs/agent-job-1/retry",
+        headers={"Idempotency-Key": "retry-idempotency-key"},
+    )
+
+    assert response.status_code == 200
+    assert [(name, job.action_kind) for name, job in dispatched] == [
+        (expected_dispatcher, action_kind)
+    ]
 
 
 @pytest.mark.asyncio

@@ -1115,6 +1115,34 @@ def _agent_job_retry_id(
     return f"agent-job-retry-{digest}"
 
 
+def _dispatch_retry_agent_job(app_state: object, job: AgentJob) -> None:
+    if job.status != "queued":
+        return
+    dispatched_job_ids = getattr(app_state, "agent_job_retry_dispatches", None)
+    if dispatched_job_ids is None:
+        dispatched_job_ids = set()
+        setattr(app_state, "agent_job_retry_dispatches", dispatched_job_ids)
+    if job.job_id in dispatched_job_ids:
+        return
+    dispatchers = getattr(app_state, "agent_job_dispatchers", {})
+    dispatcher = dispatchers.get(job.action_kind)
+    if dispatcher is None:
+        logger.warning(
+            "No AgentJob dispatcher registered for retry action_kind=%s.",
+            job.action_kind,
+        )
+        return
+    try:
+        dispatcher(job)
+    except Exception:
+        logger.exception(
+            "AgentJob retry dispatch failed for action_kind=%s.",
+            job.action_kind,
+        )
+        return
+    dispatched_job_ids.add(job.job_id)
+
+
 def _public_collaborative_note(
     *,
     note: CollaborativeNote,
@@ -2194,6 +2222,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.generic_artifact_generator = generate_generic_artifact
     app.state.artifact_job_worker = artifact_job_worker
     app.state.artifact_job_background_tasks = artifact_job_background_tasks
+    app.state.agent_job_dispatchers = {
+        "create_artifact": dispatch_artifact_job,
+        "propose_memory_signal": dispatch_memory_job,
+        "propose_collaborative_note": dispatch_note_job,
+    }
+    app.state.agent_job_retry_dispatches = set()
     app.state.artifact_feedback_service = artifact_feedback_service
     app.state.memory_service = memory_service
     app.state.memory_job_worker = memory_job_worker
@@ -3550,6 +3584,7 @@ async def retry_agent_job(
             idempotency_key=validated_idempotency_key,
             observed_at=datetime.now(UTC),
         )
+        _dispatch_retry_agent_job(request.app.state, job)
         return AgentJobDetailResponse(
             job=_public_agent_job(
                 job=job,
