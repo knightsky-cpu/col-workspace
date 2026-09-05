@@ -923,6 +923,152 @@ async def test_fail_job_requires_matching_live_lease(
 
 
 @pytest.mark.asyncio
+async def test_renew_job_lease_extends_matching_live_owner(
+    repository: AgentJobRepository,
+) -> None:
+    original_payload = make_payload()
+    await repository.enqueue_job_with_payload(make_job(), original_payload)
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+
+    renewed = await repository.renew_job_lease(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=4),
+        observed_at=NOW + timedelta(seconds=30),
+    )
+
+    assert renewed.status == "running"
+    assert renewed.lease_owner == "worker-1"
+    assert renewed.lease_expires_at == NOW + timedelta(minutes=4)
+    assert renewed.attempt_count == 1
+    assert renewed.retry_of_job_id is None
+    stored = await repository.get_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    )
+    assert stored == renewed
+    payload = await repository.get_job_payload(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+    )
+    assert payload == original_payload
+
+
+@pytest.mark.asyncio
+async def test_renew_job_lease_rejects_wrong_owner(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(make_job())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+
+    with pytest.raises(AgentJobLeaseError):
+        await repository.renew_job_lease(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1",
+            lease_owner="worker-2",
+            lease_expires_at=NOW + timedelta(minutes=4),
+            observed_at=NOW + timedelta(seconds=30),
+        )
+
+
+@pytest.mark.asyncio
+async def test_renew_job_lease_rejects_expired_lease(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(make_job())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(seconds=10),
+        observed_at=NOW,
+    )
+
+    with pytest.raises(AgentJobLeaseError):
+        await repository.renew_job_lease(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1",
+            lease_owner="worker-1",
+            lease_expires_at=NOW + timedelta(minutes=4),
+            observed_at=NOW + timedelta(seconds=10),
+        )
+
+
+@pytest.mark.asyncio
+async def test_renew_job_lease_rejects_non_extending_expiry(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(make_job())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+
+    with pytest.raises(AgentJobLeaseError):
+        await repository.renew_job_lease(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1",
+            lease_owner="worker-1",
+            lease_expires_at=NOW + timedelta(minutes=1),
+            observed_at=NOW + timedelta(seconds=30),
+        )
+
+
+@pytest.mark.asyncio
+async def test_renew_job_lease_rejects_terminal_job(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(make_job())
+    await repository.lease_next_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="worker-1",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW,
+    )
+    await repository.complete_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-1",
+        observed_at=NOW + timedelta(seconds=5),
+        result_refs={"artifact_id": "artifact-1"},
+    )
+
+    with pytest.raises(AgentJobLeaseError):
+        await repository.renew_job_lease(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1",
+            lease_owner="worker-1",
+            lease_expires_at=NOW + timedelta(minutes=4),
+            observed_at=NOW + timedelta(seconds=30),
+        )
+
+
+@pytest.mark.asyncio
 async def test_cancel_job_only_marks_non_terminal_jobs(
     repository: AgentJobRepository,
 ) -> None:

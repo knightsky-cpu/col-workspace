@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -28,16 +29,26 @@ NOW = datetime(2026, 8, 22, 16, 0, tzinfo=UTC)
 
 
 class RecordingMemoryService:
-    def __init__(self, *, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        error: Exception | None = None,
+        delay_seconds: float = 0,
+    ) -> None:
         self.error = error
+        self.delay_seconds = delay_seconds
         self.commands: list[NaturalMemoryCommand] = []
         self.selection_commands: list[SelectMemoryClarificationCommand] = []
         self.preference_confirmation_calls: list[dict[str, object]] = []
+        self.resource_mutations: list[str] = []
 
     async def handle_natural_memory_decision(self, command):
         self.commands.append(command)
+        if self.delay_seconds:
+            await asyncio.sleep(self.delay_seconds)
         if self.error is not None:
             raise self.error
+        self.resource_mutations.append("memory_proposal")
         return NaturalMemoryProposalResult(
             status="pending",
             action=AgentActionReceipt(
@@ -101,6 +112,8 @@ class RecordingAgentJobRepository:
         self.job = job
         self.payload = payload
         self.leased = []
+        self.renewed = []
+        self.renew_error: Exception | None = None
         self.events = []
         self.completed = []
         self.failed = []
@@ -128,6 +141,37 @@ class RecordingAgentJobRepository:
         )
         if action_kind is not None and self.job.action_kind != action_kind:
             return None
+        return self.job.model_copy(
+            update={
+                "status": "running",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+            }
+        )
+
+    async def renew_job_lease(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        lease_expires_at,
+        observed_at,
+    ):
+        self.renewed.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+                "observed_at": observed_at,
+            }
+        )
+        if self.renew_error is not None:
+            raise self.renew_error
         return self.job.model_copy(
             update={
                 "status": "running",
@@ -475,6 +519,77 @@ async def test_memory_worker_completes_queued_memory_proposal_from_private_paylo
         "A memory proposal was created and is pending your review."
     )
     assert report.public_resource_label == "concise"
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_renews_lease_while_execution_remains_active(
+) -> None:
+    from memory_proposal_job_worker import (
+        MemoryProposalJobWorker,
+        memory_job_payload,
+    )
+
+    command = make_command()
+    job = make_job(command)
+    repository = RecordingAgentJobRepository(
+        job=job,
+        payload=memory_job_payload(command, job),
+    )
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=RecordingMemoryService(delay_seconds=0.03),
+        clock=lambda: NOW + timedelta(minutes=1),
+        renewal_interval_seconds=0.001,
+    )
+
+    completed = await worker.run_one(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        lease_owner="memory-worker-1",
+    )
+    renew_count = len(repository.renewed)
+    await asyncio.sleep(0.01)
+
+    assert completed.status == "completed"
+    assert renew_count >= 1
+    assert len(repository.renewed) == renew_count
+    assert repository.renewed[0]["lease_owner"] == "memory-worker-1"
+
+
+@pytest.mark.asyncio
+async def test_memory_worker_renewal_failure_prevents_successful_completion(
+) -> None:
+    from agent_job_repository import AgentJobLeaseError
+    from memory_proposal_job_worker import (
+        MemoryProposalJobWorker,
+        memory_job_payload,
+    )
+
+    command = make_command()
+    job = make_job(command)
+    repository = RecordingAgentJobRepository(
+        job=job,
+        payload=memory_job_payload(command, job),
+    )
+    memory_service = RecordingMemoryService(delay_seconds=0.03)
+    repository.renew_error = AgentJobLeaseError("lost lease")
+    worker = MemoryProposalJobWorker(
+        agent_job_repository=repository,
+        memory_service=memory_service,
+        clock=lambda: NOW + timedelta(minutes=1),
+        renewal_interval_seconds=0.001,
+    )
+
+    with pytest.raises(AgentJobLeaseError):
+        await worker.run_one(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            lease_owner="memory-worker-1",
+        )
+
+    assert repository.renewed
+    assert repository.completed == []
+    assert memory_service.resource_mutations == []
 
 
 @pytest.mark.asyncio

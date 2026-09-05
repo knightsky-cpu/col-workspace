@@ -3279,3 +3279,39 @@ Still deferred:
 - expired running-lease recovery;
 - permanent poison-dispatch starvation/backoff hardening;
 - shutdown hygiene and terminal report/event consistency cleanup.
+
+## AgentJob Lease Renewal Heartbeat
+
+This pass makes `lease_expires_at` a trustworthy abandoned-worker signal before
+expired running-job recovery is added. It keeps the existing 120-second worker
+lease and renews active Memory, Note, and Artifact jobs every 40 seconds while
+the worker execution is still alive.
+
+Fixed:
+
+- `AgentJobRepository.renew_job_lease(...)` atomically renews only a
+  `running` job with a matching, unexpired `lease_owner`;
+- wrong owners, terminal jobs, and already-expired leases fail closed;
+- Memory, Note, and Artifact workers start a heartbeat only after acquiring
+  their normal queued-job lease;
+- heartbeat tasks are cancelled and gathered when worker execution finishes or
+  fails;
+- renewal failure cancels the owning worker coroutine, surfaces the original
+  lease/repository error, and preserves external shutdown `CancelledError`
+  semantics;
+- workers also check for heartbeat loss before writing successful or failed
+  terminal state, so a worker that lost its lease cannot claim successful
+  completion.
+
+Preserved:
+
+- initial queued-job lease acquisition remains the execution gate;
+- retry private-payload preservation, retry dispatch, and queued-job draining;
+- Memory, Note, and Artifact private payload loading and resource mutation
+  semantics.
+
+Still deferred:
+
+- expired running-job requeue/recovery;
+- worker shutdown hygiene beyond the heartbeat task lifetime;
+- permanent poison-dispatch starvation/backoff hardening.

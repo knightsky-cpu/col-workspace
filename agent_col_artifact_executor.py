@@ -20,6 +20,10 @@ from agent_col_agent_jobs import (
 )
 from agent_job_payloads import AgentJobPayload
 from agent_job_repository import AgentJobRepository
+from agent_job_worker_heartbeat import (
+    AGENT_JOB_LEASE_RENEWAL_INTERVAL_SECONDS,
+    AgentJobLeaseHeartbeat,
+)
 from agent_col_routing_v4 import AgentColRoute, AgentColRoutingDirective
 from chat_turns import ChatTurnClaim
 from generic_artifact_creation_service import GenericArtifactCreationCommand
@@ -233,6 +237,9 @@ class AgentColArtifactCreationJobWorker:
         genai_client: object | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         lease_seconds: int = _ARTIFACT_JOB_LEASE_SECONDS,
+        renewal_interval_seconds: float = (
+            AGENT_JOB_LEASE_RENEWAL_INTERVAL_SECONDS
+        ),
     ) -> None:
         self._agent_job_repository = agent_job_repository
         self._synthesis_service = synthesis_service
@@ -241,6 +248,7 @@ class AgentColArtifactCreationJobWorker:
         self._genai_client = genai_client
         self._clock = clock
         self._lease_seconds = lease_seconds
+        self._renewal_interval_seconds = renewal_interval_seconds
 
     def dispatch(
         self,
@@ -279,11 +287,13 @@ class AgentColArtifactCreationJobWorker:
         )
         if job is None:
             return None
-        return await self._execute_leased_job(
-            job,
-            lease_owner=lease_owner,
-            started_at=observed_at,
-        )
+        async with self._lease_heartbeat(job, lease_owner) as heartbeat:
+            return await self._execute_leased_job(
+                job,
+                lease_owner=lease_owner,
+                started_at=observed_at,
+                heartbeat=heartbeat,
+            )
 
     async def run_job(
         self,
@@ -301,10 +311,27 @@ class AgentColArtifactCreationJobWorker:
             + timedelta(seconds=self._lease_seconds),
             observed_at=observed_at,
         )
-        return await self._execute_leased_job(
-            leased,
+        async with self._lease_heartbeat(leased, lease_owner) as heartbeat:
+            return await self._execute_leased_job(
+                leased,
+                lease_owner=lease_owner,
+                started_at=observed_at,
+                heartbeat=heartbeat,
+            )
+
+    def _lease_heartbeat(
+        self,
+        job: AgentJob,
+        lease_owner: str,
+    ) -> AgentJobLeaseHeartbeat:
+        return AgentJobLeaseHeartbeat(
+            agent_job_repository=self._agent_job_repository,
+            job=job,
             lease_owner=lease_owner,
-            started_at=observed_at,
+            clock=self._clock,
+            lease_seconds=self._lease_seconds,
+            renewal_interval_seconds=self._renewal_interval_seconds,
+            logger=logger,
         )
 
     async def _execute_leased_job(
@@ -313,6 +340,7 @@ class AgentColArtifactCreationJobWorker:
         *,
         lease_owner: str,
         started_at: datetime,
+        heartbeat: AgentJobLeaseHeartbeat,
     ) -> AgentJob:
         await self._append_event(
             job=job,
@@ -328,10 +356,12 @@ class AgentColArtifactCreationJobWorker:
             )
             artifact_id, label = await self._execute_payload(payload)
         except Exception:
+            heartbeat.raise_if_lost()
             return await self._fail_job(
                 job=job,
                 lease_owner=lease_owner,
             )
+        heartbeat.raise_if_lost()
         return await self._complete_job(
             job=job,
             lease_owner=lease_owner,

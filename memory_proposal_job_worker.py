@@ -16,6 +16,10 @@ from agent_col_agent_jobs import (
 )
 from agent_job_payloads import AgentJobPayload
 from agent_job_repository import AgentJobRepository
+from agent_job_worker_heartbeat import (
+    AGENT_JOB_LEASE_RENEWAL_INTERVAL_SECONDS,
+    AgentJobLeaseHeartbeat,
+)
 from chat_turns import ChatTurnOwnershipError, ChatTurnStateError
 from database import (
     MemoryClarificationSelectionError,
@@ -301,6 +305,9 @@ class MemoryProposalJobWorker:
         ) = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         lease_seconds: int = _MEMORY_JOB_LEASE_SECONDS,
+        renewal_interval_seconds: float = (
+            AGENT_JOB_LEASE_RENEWAL_INTERVAL_SECONDS
+        ),
     ) -> None:
         self._agent_job_repository = agent_job_repository
         self._memory_service = memory_service
@@ -308,6 +315,7 @@ class MemoryProposalJobWorker:
         self._preference_confirmation_queue = preference_confirmation_queue
         self._clock = clock
         self._lease_seconds = lease_seconds
+        self._renewal_interval_seconds = renewal_interval_seconds
 
     def dispatch(
         self,
@@ -347,11 +355,13 @@ class MemoryProposalJobWorker:
         )
         if job is None:
             return None
-        return await self._execute_leased_job(
-            job,
-            lease_owner=lease_owner,
-            started_at=observed_at,
-        )
+        async with self._lease_heartbeat(job, lease_owner) as heartbeat:
+            return await self._execute_leased_job(
+                job,
+                lease_owner=lease_owner,
+                started_at=observed_at,
+                heartbeat=heartbeat,
+            )
 
     async def run_job(
         self,
@@ -369,10 +379,27 @@ class MemoryProposalJobWorker:
             + timedelta(seconds=self._lease_seconds),
             observed_at=observed_at,
         )
-        return await self._execute_leased_job(
-            leased,
+        async with self._lease_heartbeat(leased, lease_owner) as heartbeat:
+            return await self._execute_leased_job(
+                leased,
+                lease_owner=lease_owner,
+                started_at=observed_at,
+                heartbeat=heartbeat,
+            )
+
+    def _lease_heartbeat(
+        self,
+        job: AgentJob,
+        lease_owner: str,
+    ) -> AgentJobLeaseHeartbeat:
+        return AgentJobLeaseHeartbeat(
+            agent_job_repository=self._agent_job_repository,
+            job=job,
             lease_owner=lease_owner,
-            started_at=observed_at,
+            clock=self._clock,
+            lease_seconds=self._lease_seconds,
+            renewal_interval_seconds=self._renewal_interval_seconds,
+            logger=logger,
         )
 
     async def _execute_leased_job(
@@ -381,6 +408,7 @@ class MemoryProposalJobWorker:
         *,
         lease_owner: str,
         started_at: datetime,
+        heartbeat: AgentJobLeaseHeartbeat,
     ) -> AgentJob:
         await self._append_event(
             job=job,
@@ -438,6 +466,7 @@ class MemoryProposalJobWorker:
                         )
                     )
                 except Exception:
+                    heartbeat.raise_if_lost()
                     return await self._fail_job(
                         job=job,
                         lease_owner=lease_owner,
@@ -450,12 +479,14 @@ class MemoryProposalJobWorker:
                     observation=observation,
                     result=preference_result,
                     suppress_confirmation=suppress_confirmation,
+                    heartbeat=heartbeat,
                 )
             else:
                 result = await self._memory_service.handle_natural_memory_decision(
                     memory_command_from_payload(payload)
                 )
         except ValueError:
+            heartbeat.raise_if_lost()
             return await self._fail_job(
                 job=job,
                 lease_owner=lease_owner,
@@ -467,24 +498,28 @@ class MemoryProposalJobWorker:
             MemoryProposalConflictError,
             MemoryProposalOriginConflictError,
         ):
+            heartbeat.raise_if_lost()
             return await self._fail_job(
                 job=job,
                 lease_owner=lease_owner,
                 error_code="memory_proposal_conflict",
             )
         except MemorySignalAlreadyActiveError:
+            heartbeat.raise_if_lost()
             return await self._fail_job(
                 job=job,
                 lease_owner=lease_owner,
                 error_code="memory_signal_already_active",
             )
         except (ChatTurnOwnershipError, ChatTurnStateError):
+            heartbeat.raise_if_lost()
             return await self._fail_job(
                 job=job,
                 lease_owner=lease_owner,
                 error_code="memory_turn_conflict",
             )
         if isinstance(result, NaturalMemoryProposalResult):
+            heartbeat.raise_if_lost()
             return await self._complete_job(
                 job=job,
                 lease_owner=lease_owner,
@@ -497,6 +532,7 @@ class MemoryProposalJobWorker:
                 public_resource_label=result.proposal.proposed_value,
             )
         if isinstance(result, NaturalMemoryClarificationResult):
+            heartbeat.raise_if_lost()
             return await self._complete_job(
                 job=job,
                 lease_owner=lease_owner,
@@ -511,6 +547,7 @@ class MemoryProposalJobWorker:
                 public_resource_label=None,
             )
         if isinstance(result, NaturalMemoryNoEffectResult):
+            heartbeat.raise_if_lost()
             return await self._complete_job(
                 job=job,
                 lease_owner=lease_owner,
@@ -520,6 +557,7 @@ class MemoryProposalJobWorker:
                 report_summary="No durable memory change was needed for this request.",
                 public_resource_label=None,
             )
+        heartbeat.raise_if_lost()
         return await self._fail_job(
             job=job,
             lease_owner=lease_owner,
@@ -570,6 +608,7 @@ class MemoryProposalJobWorker:
         observation: PreferenceObservation,
         result: PreferenceLearningResult,
         suppress_confirmation: bool,
+        heartbeat: AgentJobLeaseHeartbeat,
     ) -> AgentJob:
         result_refs = {"observation_status": "captured"}
         if result.hypothesis is not None:
@@ -579,6 +618,7 @@ class MemoryProposalJobWorker:
             and not suppress_confirmation
         ):
             if self._preference_confirmation_queue is None:
+                heartbeat.raise_if_lost()
                 return await self._fail_job(
                     job=job,
                     lease_owner=lease_owner,
@@ -594,6 +634,7 @@ class MemoryProposalJobWorker:
                     hypothesis=result.surfaced_hypothesis,
                 )
             except Exception:
+                heartbeat.raise_if_lost()
                 return await self._fail_job(
                     job=job,
                     lease_owner=lease_owner,
@@ -601,6 +642,7 @@ class MemoryProposalJobWorker:
                     retryable=True,
                 )
             result_refs["confirmation_job_id"] = queued.job_id
+        heartbeat.raise_if_lost()
         return await self._complete_job(
             job=job,
             lease_owner=lease_owner,

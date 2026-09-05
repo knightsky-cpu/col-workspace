@@ -429,6 +429,72 @@ class AgentJobRepository:
         except GoogleAPIError as exc:
             self._raise_firestore_error("lease_queued_job", exc)
 
+    async def renew_job_lease(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+        lease_owner: str,
+        lease_expires_at: datetime,
+        observed_at: datetime,
+    ) -> AgentJob:
+        if lease_expires_at <= observed_at:
+            raise AgentJobLeaseError("AgentJob lease renewal must extend lease.")
+        try:
+            job_ref = self._job_ref(user_id, workspace_id, job_id)
+            transaction = self._client.transaction()
+
+            async def renew_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> AgentJob:
+                snapshot = await job_ref.get(transaction=transaction)
+                job = self._available_scoped_job(
+                    snapshot,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+                self._validate_live_lease(
+                    job,
+                    lease_owner=lease_owner,
+                    observed_at=observed_at,
+                )
+                if (
+                    job.lease_expires_at is not None
+                    and lease_expires_at <= job.lease_expires_at
+                ):
+                    raise AgentJobLeaseError(
+                        "AgentJob lease renewal must extend lease."
+                    )
+                renewed = transition_agent_job(
+                    job,
+                    status="running",
+                    updated_at=observed_at,
+                    lease_owner=lease_owner,
+                    lease_expires_at=lease_expires_at,
+                )
+                transaction.set(
+                    job_ref,
+                    self._job_document(renewed),
+                    merge=True,
+                )
+                return renewed
+
+            run_transaction = firestore.async_transactional(
+                renew_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (
+            AgentJobLeaseError,
+            AgentJobNotFoundError,
+            AgentJobStateError,
+        ):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJob state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("renew_job_lease", exc)
+
     async def complete_job(
         self,
         *,

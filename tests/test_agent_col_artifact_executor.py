@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -203,6 +204,8 @@ class FakeSynthesisService:
     adaptations: tuple[AdaptationReceipt, ...] = ()
     commands: list[object] = field(default_factory=list)
     persisted_blueprint_id: str = "blueprint-from-worker"
+    delay_seconds: float = 0
+    resource_mutations: list[str] = field(default_factory=list)
 
     async def generate_governed_blueprint(self, command: object) -> object:
         from synthesis_service import GovernedSynthesisGenerationResult
@@ -217,6 +220,9 @@ class FakeSynthesisService:
         from synthesis_service import SynthesisResult
 
         self.commands.append(command)
+        if self.delay_seconds:
+            await asyncio.sleep(self.delay_seconds)
+        self.resource_mutations.append("blueprint_artifact")
         return SynthesisResult(
             blueprint_id=self.persisted_blueprint_id,
             blueprint=self.generated,
@@ -244,6 +250,8 @@ class RecordingAgentJobRepository:
         self.enqueued_payloads = []
         self.events = []
         self.leased = []
+        self.renewed = []
+        self.renew_error: Exception | None = None
         self.completed = []
         self.failed = []
         self.reports = []
@@ -282,6 +290,38 @@ class RecordingAgentJobRepository:
         job = self.enqueued[-1]
         if action_kind is not None and job.action_kind != action_kind:
             return None
+        return job.model_copy(
+            update={
+                "status": "running",
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+            }
+        )
+
+    async def renew_job_lease(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        lease_expires_at,
+        observed_at,
+    ):
+        self.renewed.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+                "observed_at": observed_at,
+            }
+        )
+        if self.renew_error is not None:
+            raise self.renew_error
+        job = self.enqueued[-1]
         return job.model_copy(
             update={
                 "status": "running",
@@ -606,3 +646,101 @@ async def test_artifact_worker_creates_blueprint_artifact_from_private_payload(
     assert report.title == "Artifact created"
     assert report.summary == "The requested artifact was created."
     assert report.public_resource_label == "Collaborative Study Partner"
+
+
+@pytest.mark.asyncio
+async def test_artifact_worker_renews_lease_while_execution_remains_active(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactCreationJobWorker,
+        AgentColArtifactExecutionCommand,
+        _artifact_job,
+        artifact_job_payload,
+    )
+
+    claim = initial_claim()
+    repository = RecordingAgentJobRepository()
+    command = AgentColArtifactExecutionCommand(
+        claim=claim,
+        routing_directive=artifact_directive(),
+        observed_at=NOW,
+        source_text="Create a study partner blueprint.",
+    )
+    command_job = _artifact_job(command)
+    job = await repository.enqueue_job_with_payload(
+        command_job,
+        artifact_job_payload(command, command_job),
+    )
+    worker = AgentColArtifactCreationJobWorker(
+        agent_job_repository=repository,
+        synthesis_service=FakeSynthesisService(blueprint(), delay_seconds=0.03),
+        clock=lambda: NOW + timedelta(minutes=1),
+        renewal_interval_seconds=0.001,
+    )
+
+    completed = await worker.run_one(
+        user_id="user-1",
+        workspace_id="agent-col",
+        lease_owner="artifact-worker-1",
+    )
+    renew_count = len(repository.renewed)
+    await asyncio.sleep(0.01)
+
+    assert completed is not None
+    assert completed.status == "completed"
+    assert renew_count >= 1
+    assert len(repository.renewed) == renew_count
+    assert {
+        entry["job_id"] for entry in repository.renewed
+    } == {job.job_id}
+    assert {
+        entry["lease_owner"] for entry in repository.renewed
+    } == {"artifact-worker-1"}
+
+
+@pytest.mark.asyncio
+async def test_artifact_worker_renewal_failure_prevents_successful_completion(
+) -> None:
+    from agent_col_artifact_executor import (
+        AgentColArtifactCreationJobWorker,
+        AgentColArtifactExecutionCommand,
+        _artifact_job,
+        artifact_job_payload,
+    )
+    from agent_job_repository import AgentJobLeaseError
+
+    claim = initial_claim()
+    repository = RecordingAgentJobRepository()
+    repository.renew_error = AgentJobLeaseError("lease lost")
+    command = AgentColArtifactExecutionCommand(
+        claim=claim,
+        routing_directive=artifact_directive(),
+        observed_at=NOW,
+        source_text="Create a study partner blueprint.",
+    )
+    command_job = _artifact_job(command)
+    await repository.enqueue_job_with_payload(
+        command_job,
+        artifact_job_payload(command, command_job),
+    )
+    synthesis_service = FakeSynthesisService(
+        blueprint(),
+        delay_seconds=0.03,
+    )
+    worker = AgentColArtifactCreationJobWorker(
+        agent_job_repository=repository,
+        synthesis_service=synthesis_service,
+        clock=lambda: NOW + timedelta(minutes=1),
+        renewal_interval_seconds=0.001,
+    )
+
+    with pytest.raises(AgentJobLeaseError):
+        await worker.run_one(
+            user_id="user-1",
+            workspace_id="agent-col",
+            lease_owner="artifact-worker-1",
+        )
+
+    assert repository.renewed
+    assert repository.completed == []
+    assert synthesis_service.resource_mutations == []
