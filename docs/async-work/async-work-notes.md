@@ -3425,3 +3425,35 @@ Closed by audit:
 Still deferred:
 
 - permanent poison-dispatch starvation/backoff hardening.
+
+## Async-Decoupling Implementation Closure
+
+Completed feature checkpoint:
+`25a29274ef5eb73d74b96676b341f745d377d6a5`.
+
+The async-decoupling implementation and hardening path is closed at this
+checkpoint.
+
+Closed:
+
+- resource/chat ownership decoupling is complete;
+- retry private-payload preservation is complete;
+- retry dispatch is complete;
+- queued AgentJob startup/runtime draining is complete;
+- AgentJob lease heartbeat fencing is complete;
+- expired-running AgentJob recovery is complete;
+- AgentJob worker shutdown hygiene is complete;
+- atomic terminal AgentJob/event/report finalization is complete;
+- working-state durability is resolved as Firestore-backed when written, but
+  best-effort, hidden, same-session, non-authoritative responder context;
+- implementation hardening is complete for the async-decoupling path.
+
+Next phase:
+
+- canonical merge to `main`;
+- manual abuse testing against the merged path;
+- fix-only-on-observed-defect work after manual testing.
+
+Still intentionally deferred:
+
+- permanent poison-dispatch starvation/backoff hardening.
