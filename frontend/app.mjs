@@ -1780,7 +1780,7 @@ async function deleteGenericArtifact(artifactId) {
 
 async function updateGenericArtifactMetadata(artifactId, metadata) {
   if (!state.context) {
-    return;
+    return false;
   }
   clearWorkError();
   try {
@@ -1796,14 +1796,16 @@ async function updateGenericArtifactMetadata(artifactId, metadata) {
     state = completeWorkMetadataUpdate(state, response.metadata);
     ensureWorkView().render(state);
     await loadWorkList();
+    return true;
   } catch (error) {
     showWorkError(error.message);
+    return false;
   }
 }
 
 async function createGenericArtifactVersion(artifactId, versionRequest) {
   if (!state.context) {
-    return;
+    return false;
   }
   clearWorkError();
   try {
@@ -1823,8 +1825,10 @@ async function createGenericArtifactVersion(artifactId, versionRequest) {
     state = completeWorkVersionCreate(state, response);
     ensureWorkView().render(state);
     await loadWorkList();
+    return true;
   } catch (error) {
     showWorkError(error.message);
+    return false;
   }
 }
 
@@ -1965,7 +1969,7 @@ function ensureAgentsView() {
 
 async function submitArtifactFeedback(decision) {
   if (!state.context) {
-    return;
+    return false;
   }
   const artifactId = String(decision.artifact_id ?? "").trim();
   const feedbackRequest = {
@@ -2002,8 +2006,10 @@ async function submitArtifactFeedback(decision) {
     );
     await loadWorkDetail(artifactId);
     await loadWorkList();
+    return true;
   } catch (error) {
     showWorkError(error.message);
+    return false;
   }
 }
 
@@ -2119,11 +2125,12 @@ async function submitCollaborativeNoteDecision(decision) {
 
 async function createCollaborativeNoteCorrection(note, request) {
   if (!state.context) {
-    return;
+    return false;
   }
   clearNotesError();
   state = beginNoteRequest(state, `correction:${note.note_id}`);
   ensureNotesView().render(state);
+  let succeeded = false;
   try {
     const response = await createNoteCorrection(
       state.context.user_id,
@@ -2137,20 +2144,23 @@ async function createCollaborativeNoteCorrection(note, request) {
     );
     state = completeNoteRequest(storePendingNoteProposal(state, response.proposal));
     await loadNotes();
+    succeeded = true;
   } catch (error) {
     state = failNoteRequest(state, error);
     showNotesError(error.message);
   }
   renderWorkspace();
+  return succeeded;
 }
 
 async function createCollaborativeNoteProposal(request) {
   if (!state.context) {
-    return;
+    return false;
   }
   clearNotesError();
   state = beginNoteRequest(state, "proposal:create");
   ensureNotesView().render(state);
+  let succeeded = false;
   try {
     const response = await createNoteProposal(
       state.context.user_id,
@@ -2166,11 +2176,13 @@ async function createCollaborativeNoteProposal(request) {
     );
     state = completeNoteRequest(storePendingNoteProposal(state, response.proposal));
     await loadNotes();
+    succeeded = true;
   } catch (error) {
     state = failNoteRequest(state, error);
     showNotesError(error.message);
   }
   renderWorkspace();
+  return succeeded;
 }
 
 async function changeCollaborativeNoteLifecycle(action, note) {

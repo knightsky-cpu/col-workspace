@@ -394,6 +394,69 @@ test("createNotesView preserves create-note draft across rerender and clears on 
   assert.equal(namedField(form, "body").value, "");
 });
 
+test("createNotesView clears create-note draft across submit-time rerender", async () => {
+  const panel = node();
+  let view;
+  view = createNotesView({ panel }, {
+    onCreateNoteProposal: async () => {
+      view.render(notesState({
+        notes: [{
+          ...activeNote,
+          title: "Authoritative submit refresh",
+        }],
+      }));
+      return true;
+    },
+  });
+
+  view.render(notesState());
+  let form = noteProposalForm(panel);
+  const title = namedField(form, "title");
+  const body = namedField(form, "body");
+  title.value = "Draft cleared at success";
+  title.oninput?.();
+  body.value = "This draft should not redraw during submit refresh.";
+  body.oninput?.();
+
+  await form.onsubmit({ preventDefault() {} });
+
+  form = noteProposalForm(panel);
+  assert.equal(namedField(form, "title").value, "");
+  assert.equal(namedField(form, "body").value, "");
+});
+
+test("createNotesView restores create-note draft after failed submit-time rerender", async () => {
+  const panel = node();
+  let view;
+  view = createNotesView({ panel }, {
+    onCreateNoteProposal: async () => {
+      view.render(notesState({
+        notes: [{
+          ...activeNote,
+          title: "Authoritative failed-submit refresh",
+        }],
+      }));
+      return false;
+    },
+  });
+
+  view.render(notesState());
+  let form = noteProposalForm(panel);
+  const title = namedField(form, "title");
+  const body = namedField(form, "body");
+  title.value = "Draft restored after failure";
+  title.oninput?.();
+  body.value = "This draft should come back if submit fails.";
+  body.oninput?.();
+
+  await form.onsubmit({ preventDefault() {} });
+  view.render(notesState());
+
+  form = noteProposalForm(panel);
+  assert.equal(namedField(form, "title").value, "Draft restored after failure");
+  assert.equal(namedField(form, "body").value, "This draft should come back if submit fails.");
+});
+
 test("createNotesView preserves correction draft by note revision without leaking to another identity", async () => {
   const panel = node();
   const corrections = [];

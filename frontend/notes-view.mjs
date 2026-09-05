@@ -170,8 +170,20 @@ function updateDraft(drafts, key, patch) {
 }
 
 async function submitAndClearDraft(drafts, key, submit) {
-  await submit();
+  const draft = drafts.get(key);
   drafts.delete(key);
+  try {
+    const result = await submit();
+    if (result === false && draft !== undefined) {
+      drafts.set(key, draft);
+    }
+    return result;
+  } catch (error) {
+    if (draft !== undefined) {
+      drafts.set(key, draft);
+    }
+    throw error;
+  }
 }
 
 function renderNoteProposalForm(container, disabled, handlers, drafts) {

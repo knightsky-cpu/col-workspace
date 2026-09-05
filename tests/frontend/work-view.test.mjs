@@ -977,6 +977,81 @@ test("createWorkView preserves artifact metadata draft across rerender and clear
   assert.equal(fieldByName(form, "filename").value, "password_generator.py");
 });
 
+test("createWorkView clears artifact metadata draft across submit-time rerender", async () => {
+  const list = node();
+  const detailPanel = node();
+  let view;
+  view = createWorkView({ list, detail: detailPanel }, {
+    onSelectArtifact: () => {},
+    onUpdateArtifactMetadata: async () => {
+      view.render(workState({
+        ...genericDetail,
+        metadata: {
+          ...genericDetail.metadata,
+          reference: {
+            ...genericDetail.metadata.reference,
+            display_label: "Authoritative submit refresh",
+          },
+        },
+      }));
+      return true;
+    },
+  });
+
+  view.render(workState());
+  let form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  const label = fieldByName(form, "display_label");
+  const filename = fieldByName(form, "filename");
+  label.value = "Draft name to clear";
+  label.oninput?.();
+  filename.value = "draft_name_to_clear.md";
+  filename.oninput?.();
+
+  await form.onsubmit({ preventDefault() {} });
+
+  form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  assert.equal(fieldByName(form, "display_label").value, "Authoritative submit refresh");
+  assert.equal(fieldByName(form, "filename").value, "password_generator.py");
+});
+
+test("createWorkView restores artifact metadata draft after failed submit-time rerender", async () => {
+  const list = node();
+  const detailPanel = node();
+  let view;
+  view = createWorkView({ list, detail: detailPanel }, {
+    onSelectArtifact: () => {},
+    onUpdateArtifactMetadata: async () => {
+      view.render(workState({
+        ...genericDetail,
+        metadata: {
+          ...genericDetail.metadata,
+          reference: {
+            ...genericDetail.metadata.reference,
+            display_label: "Authoritative failed-submit refresh",
+          },
+        },
+      }));
+      return false;
+    },
+  });
+
+  view.render(workState());
+  let form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  const label = fieldByName(form, "display_label");
+  const filename = fieldByName(form, "filename");
+  label.value = "Draft name restored";
+  label.oninput?.();
+  filename.value = "draft_name_restored.md";
+  filename.oninput?.();
+
+  await form.onsubmit({ preventDefault() {} });
+  view.render(workState());
+
+  form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  assert.equal(fieldByName(form, "display_label").value, "Draft name restored");
+  assert.equal(fieldByName(form, "filename").value, "draft_name_restored.md");
+});
+
 test("createWorkView preserves artifact version draft without leaking to another artifact", () => {
   const list = node();
   const detailPanel = node();
