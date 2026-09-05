@@ -95,6 +95,13 @@ _QUEUED_NOTE_COMPLETION_CLAIM_PATTERN = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+_QUEUED_WORK_CAPABILITY_DENIAL_PATTERN = re.compile(
+    r"\b("
+    r"direct background job execution tools are not active|"
+    r"i cannot directly trigger background job queuing"
+    r")\b",
+    re.IGNORECASE,
+)
 
 
 def _has_queued_memory_work(
@@ -154,6 +161,74 @@ def _contains_queued_note_completion_claim(paragraph: str) -> bool:
     )
 
 
+def _contains_queued_work_capability_denial(paragraph: str) -> bool:
+    return _QUEUED_WORK_CAPABILITY_DENIAL_PATTERN.search(paragraph) is not None
+
+
+def _queued_work_replacement_texts(
+    *,
+    has_memory_work: bool,
+    has_artifact_work: bool,
+    has_note_work: bool,
+) -> tuple[str, ...]:
+    replacements: list[str] = []
+    if has_memory_work:
+        replacements.append(_QUEUED_MEMORY_REPLACEMENT_TEXT)
+    if has_artifact_work:
+        replacements.append(_QUEUED_ARTIFACT_REPLACEMENT_TEXT)
+    if has_note_work:
+        replacements.append(_QUEUED_NOTE_REPLACEMENT_TEXT)
+    return tuple(replacements)
+
+
+def _prequeued_action_context(
+    queued_actions: list[QueuedActionReceipt],
+) -> types.Content | None:
+    if not queued_actions:
+        return None
+    public_actions = [
+        {
+            "action_kind": action.action_kind,
+            "status": action.status,
+            "display_label": action.display_label,
+            "created_at": action.created_at.isoformat().replace(
+                "+00:00",
+                "Z",
+            ),
+            **(
+                {"agent_label": action.agent_label}
+                if action.agent_label is not None
+                else {}
+            ),
+        }
+        for action in queued_actions
+    ]
+    context = "\n".join(
+        (
+            "[SERVER_VALIDATED_PREQUEUED_ACTIONS]",
+            (
+                "The application confirms matching work has already been "
+                "accepted and queued for this turn. Use only this public "
+                "lifecycle projection when describing queued state. Do not "
+                "claim queued work is "
+                "unavailable, do not enqueue duplicate work, and do not present "
+                "background work as complete until an authoritative completed "
+                "receipt or report exists."
+            ),
+            json.dumps(
+                {"queued_actions": public_actions},
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            "[/SERVER_VALIDATED_PREQUEUED_ACTIONS]",
+        )
+    )
+    return types.Content(
+        role="user",
+        parts=[types.Part.from_text(text=context)],
+    )
+
+
 def _sanitize_queued_work_response_text(
     text: str,
     *,
@@ -174,7 +249,11 @@ def _sanitize_queued_work_response_text(
     removed_memory_claim = False
     removed_artifact_claim = False
     removed_note_claim = False
+    removed_capability_denial = False
     for paragraph in re.split(r"\n\s*\n", text):
+        if _contains_queued_work_capability_denial(paragraph):
+            removed_capability_denial = True
+            continue
         if (
             has_memory_work
             and not memory_proposals
@@ -210,6 +289,14 @@ def _sanitize_queued_work_response_text(
         retained_paragraphs.append(_QUEUED_ARTIFACT_REPLACEMENT_TEXT)
     if removed_note_claim and _QUEUED_NOTE_REPLACEMENT_TEXT not in text:
         retained_paragraphs.append(_QUEUED_NOTE_REPLACEMENT_TEXT)
+    if removed_capability_denial:
+        for replacement in _queued_work_replacement_texts(
+            has_memory_work=has_memory_work,
+            has_artifact_work=has_artifact_work,
+            has_note_work=has_note_work,
+        ):
+            if replacement not in text:
+                retained_paragraphs.append(replacement)
     return "\n\n".join(
         paragraph for paragraph in retained_paragraphs if paragraph.strip()
     ).strip()
@@ -534,6 +621,11 @@ class SupervisorRuntime:
                 )
                 if active_clarification_context is not None:
                     model_input_context.append(active_clarification_context)
+                prequeued_action_context = _prequeued_action_context(
+                    queued_actions
+                )
+                if prequeued_action_context is not None:
+                    model_input_context.append(prequeued_action_context)
                 config = RunConfig(
                     max_llm_calls=SUPERVISOR_MAX_LLM_CALLS,
                     model_input_context=model_input_context,

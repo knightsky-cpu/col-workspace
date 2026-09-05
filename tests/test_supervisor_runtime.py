@@ -1,6 +1,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import json
 import logging
 from types import SimpleNamespace
 
@@ -789,6 +790,136 @@ async def test_run_turn_rewrites_queued_artifact_and_note_completion_claims() ->
     assert result.actions == ()
     assert result.collaborative_note_proposals == ()
     assert len(result.queued_actions) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_turn_injects_public_prequeued_artifact_context() -> None:
+    from schemas import QueuedActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runner = FakeRunner(events=[FakeEvent("Artifact work is queued.", True)])
+    runtime = SupervisorRuntime(
+        runner=runner,
+        session_service=FakeSessionService(),
+    )
+
+    await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create an async-work artifact.",
+            prequeued_actions=(
+                QueuedActionReceipt.model_validate(
+                    queued_artifact_receipt_payload()
+                ),
+            ),
+        )
+    )
+
+    context_text = runner.calls[0]["run_config"].model_input_context[-1].parts[
+        0
+    ].text
+    assert context_text is not None
+    assert "SERVER_VALIDATED_PREQUEUED_ACTIONS" in context_text
+    assert "matching work has already been accepted and queued" in context_text
+    assert "create_artifact" in context_text
+    assert "queued" in context_text
+    assert "Artifact: Async Work Smoke Test" in context_text
+    assert "2026-08-26T16:00:00Z" in context_text
+    assert "Artifact Builder" in context_text
+    assert "artifact-job-1" not in context_text
+    assert "job_id" not in context_text
+    queued_projection = json.loads(context_text.splitlines()[2])
+    assert queued_projection == {
+        "queued_actions": [
+            {
+                "action_kind": "create_artifact",
+                "status": "queued",
+                "display_label": "Artifact: Async Work Smoke Test",
+                "created_at": "2026-08-26T16:00:00Z",
+                "agent_label": "Artifact Builder",
+            }
+        ]
+    }
+    assert set(queued_projection["queued_actions"][0]) == {
+        "action_kind",
+        "status",
+        "display_label",
+        "created_at",
+        "agent_label",
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_turn_rewrites_queued_work_capability_denials_when_receipt_exists() -> None:
+    from schemas import QueuedActionReceipt
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(
+            events=[
+                FakeEvent(
+                    (
+                        "Direct background job execution tools are not active."
+                        "\n\n"
+                        "I cannot directly trigger background job queuing."
+                    ),
+                    True,
+                ),
+            ]
+        ),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Create an async-work artifact.",
+            prequeued_actions=(
+                QueuedActionReceipt.model_validate(
+                    queued_artifact_receipt_payload()
+                ),
+            ),
+        )
+    )
+
+    assert "Direct background job execution tools are not active" not in (
+        result.response
+    )
+    assert "cannot directly trigger background job queuing" not in result.response
+    assert result.response == (
+        "Artifact work has been queued for background processing. Check the Work "
+        "UI or job reports for the final result."
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_turn_keeps_queued_work_capability_denials_without_receipt() -> None:
+    from supervisor_runtime import SupervisorRuntime, SupervisorTurnContext
+
+    response_text = (
+        "Direct background job execution tools are not active."
+        "\n\n"
+        "I cannot directly trigger background job queuing."
+    )
+    runtime = SupervisorRuntime(
+        runner=FakeRunner(events=[FakeEvent(response_text, True)]),
+        session_service=FakeSessionService(),
+    )
+
+    result = await runtime.run_turn(
+        SupervisorTurnContext(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message="Can you queue background work?",
+        )
+    )
+
+    assert result.response == response_text
 
 
 @pytest.mark.asyncio
