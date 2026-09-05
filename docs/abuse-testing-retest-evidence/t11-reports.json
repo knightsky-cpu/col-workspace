@@ -1,0 +1,89 @@
+{
+  "agent_job_report_contract_version": "1.0",
+  "reports": [
+    {
+      "report_number": "001",
+      "job_ref": "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+      "job_number": "001",
+      "action_kind": "create_artifact",
+      "agent_label": "Artifact Builder",
+      "status": "completed",
+      "title": "Artifact created",
+      "summary": "The requested artifact was created.",
+      "public_resource_label": "AgentJob Queuing and Artifact Generator",
+      "created_at": "2026-09-05T12:10:09.623085Z"
+    },
+    {
+      "report_number": "002",
+      "job_ref": "jobref_1b2ca23e8e52b3fd89d4d196d9ef5145",
+      "job_number": "002",
+      "action_kind": "propose_memory_signal",
+      "agent_label": "Memory Analyst",
+      "status": "completed",
+      "title": "Memory proposal pending review",
+      "summary": "A memory proposal was created and is pending your review.",
+      "public_resource_label": "Prefers concise bullet answers and short confirmations during abuse testing.",
+      "created_at": "2026-09-05T12:11:54.750019Z"
+    },
+    {
+      "report_number": "003",
+      "job_ref": "jobref_ed4ccd508bf458bb9f93cabe020274f6",
+      "job_number": "003",
+      "action_kind": "propose_memory_signal",
+      "agent_label": "Memory Analyst",
+      "status": "failed",
+      "title": "Memory proposal not created",
+      "summary": "Memory proposal could not be created.",
+      "public_resource_label": null,
+      "created_at": "2026-09-05T12:13:36.179992Z"
+    },
+    {
+      "report_number": "004",
+      "job_ref": "jobref_b8835dd6e9434bacf2fc55b5e7013764",
+      "job_number": "004",
+      "action_kind": "propose_memory_signal",
+      "agent_label": "Memory Analyst",
+      "status": "failed",
+      "title": "Memory proposal not created",
+      "summary": "Memory proposal could not be created.",
+      "public_resource_label": null,
+      "created_at": "2026-09-05T12:14:42.518918Z"
+    },
+    {
+      "report_number": "005",
+      "job_ref": "jobref_d08124f738049b3d66daffe94bb3c6d1",
+      "job_number": "006",
+      "action_kind": "propose_memory_signal",
+      "agent_label": "Memory Analyst",
+      "status": "failed",
+      "title": "Memory proposal not created",
+      "summary": "A pending memory proposal already exists for this category.",
+      "public_resource_label": null,
+      "created_at": "2026-09-05T12:21:45.209856Z"
+    },
+    {
+      "report_number": "006",
+      "job_ref": "jobref_b1bac512cc03edddf1f1027f0efc089c",
+      "job_number": "007",
+      "action_kind": "propose_collaborative_note",
+      "agent_label": "Note Curator",
+      "status": "completed",
+      "title": "Workspace note proposal pending review",
+      "summary": "A workspace note proposal was created and is pending your review.",
+      "public_resource_label": "Retest Harness Note 03",
+      "created_at": "2026-09-05T12:22:32.936953Z"
+    },
+    {
+      "report_number": "007",
+      "job_ref": "jobref_d281c7840b1abf74d29ffdbc6ca6a4a7",
+      "job_number": "008",
+      "action_kind": "create_artifact",
+      "agent_label": "Artifact Builder",
+      "status": "completed",
+      "title": "Artifact created",
+      "summary": "The requested artifact was created.",
+      "public_resource_label": "Retest Harness Artifact 04 markdown document with submission proof bullets.",
+      "created_at": "2026-09-05T12:23:09.263604Z"
+    }
+  ]
+}

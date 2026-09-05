@@ -1,0 +1,922 @@
+{
+  "started_at": "2026-09-05T12:25:35.404144+00:00",
+  "user_id": "abuse-retest-20260905",
+  "project_id": "agent-col",
+  "session_id": "session--a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "session_b": "session--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  "soak_session_observed": "session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+  "tests": {
+    "preflight": {
+      "ts": "2026-09-05T12:25:35.563549+00:00",
+      "result": "INFO",
+      "workspace_job_count": 8,
+      "soak_session_job_count": 8,
+      "soak_nonterm": [
+        {
+          "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+          "job_number": "005",
+          "action_kind": "create_artifact",
+          "status": "running",
+          "display_label": "Artifact: structured blueprint",
+          "agent_label": "Artifact Builder",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:20:05.852952Z",
+          "updated_at": "2026-09-05T12:24:17.460120Z"
+        }
+      ],
+      "notes": "Backend left running; soak session not used for regression chats."
+    },
+    "1": {
+      "ts": "2026-09-05T12:25:46.499588+00:00",
+      "result": "PASS",
+      "chat": {
+        "http_status": 200,
+        "elapsed_s": 9.258,
+        "raw_preview": "event: delta\ndata: {\"text\":\"Receipt of your control message is confirmed.\"}\n\nevent: final\ndata: {\"response\":\"Receipt of your control message is confirmed.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[{\"receipt_id\":\"continuity--chat--session--3f7d5db0-da58-4003-a7d4-94a41ab1c823\",\"source_kind\":\"chat_session\",\"source_id\":\"session--3f7d5db0-da58-4003-a7d4-94a41ab1c823\",\"display_label\":\"Used prior chat: An artifact creation job for **\\\"Retest Harness Artifact 04\\\"** has been queued for background processing. **Current Lifec\",\"match_reason\":\"previous_chat\",\"source_updated_at\":\"2026-09-05T12:23:06.140000Z\"}],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "Receipt of your control message is confirmed.",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [
+            {
+              "receipt_id": "continuity--chat--session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+              "source_kind": "chat_session",
+              "source_id": "session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+              "display_label": "Used prior chat: An artifact creation job for **\"Retest Harness Artifact 04\"** has been queued for background processing. **Current Lifec",
+              "match_reason": "previous_chat",
+              "source_updated_at": "2026-09-05T12:23:06.140000Z"
+            }
+          ],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "Receipt of your control message is confirmed.",
+        "queued_actions": [],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "new_jobs": [],
+      "explicit_resource_jobs": [],
+      "job_refs": [],
+      "notes": "Control chat completed; no explicit resource AgentJob from turn."
+    },
+    "2": {
+      "ts": "2026-09-05T12:26:02.570863+00:00",
+      "result": "PASS",
+      "chat": {
+        "http_status": 200,
+        "elapsed_s": 6.467,
+        "raw_preview": "event: delta\ndata: {\"text\":\"The artifact request has been queued for background processing under **Artifact: structured blueprint**. I\"}\n\nevent: delta\ndata: {\"text\":\" will wait for the completed result from the background job before presenting the final artifact here.\"}\n\nevent: final\ndata: {\"response\":\"The artifact request has been queued for background processing under **Artifact: structured blueprint**. I will wait for the completed result from the background job before presenting the final artifact here.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[{\"job_id\":\"artifact-job-5e2bec53360d01060ebf211fe092092b\",\"action_kind\":\"create_artifact\",\"status\":\"queued\",\"display_label\":\"Artifact: structured blueprint\",\"created_at\":\"2026-09-05T12:25:47.661653Z\",\"agent_label\":\"Artifact Builder\"}],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "The artifact request has been queued for background processing under **Artifact: structured blueprint**. I will wait for the completed result from the background job before presenting the final artifact here.",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [
+            {
+              "job_id": "artifact-job-5e2bec53360d01060ebf211fe092092b",
+              "action_kind": "create_artifact",
+              "status": "queued",
+              "display_label": "Artifact: structured blueprint",
+              "created_at": "2026-09-05T12:25:47.661653Z",
+              "agent_label": "Artifact Builder"
+            }
+          ],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "The artifact request has been queued for background processing under **Artifact: structured blueprint**. I will wait for the completed result from the background job before presenting the final artifact here.",
+        "queued_actions": [
+          {
+            "job_id": "artifact-job-5e2bec53360d01060ebf211fe092092b",
+            "action_kind": "create_artifact",
+            "status": "queued",
+            "display_label": "Artifact: structured blueprint",
+            "created_at": "2026-09-05T12:25:47.661653Z",
+            "agent_label": "Artifact Builder"
+          }
+        ],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "followup": {
+        "http_status": 200,
+        "elapsed_s": 3.948,
+        "raw_preview": "event: delta\ndata: {\"text\":\"CHAT-STILL-RESPONSIVE\"}\n\nevent: final\ndata: {\"response\":\"CHAT-STILL-RESPONSIVE\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "CHAT-STILL-RESPONSIVE",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "CHAT-STILL-RESPONSIVE",
+        "queued_actions": [],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "new_jobs": [
+        {
+          "job_ref": "jobref_1d39bb053068a07be5dece720ff7ff4a",
+          "job_number": "001",
+          "action_kind": "create_artifact",
+          "status": "completed",
+          "display_label": "Artifact: structured blueprint",
+          "agent_label": "Artifact Builder",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:25:47.661653Z",
+          "updated_at": "2026-09-05T12:25:57.821502Z"
+        }
+      ],
+      "job_refs": [
+        "jobref_1d39bb053068a07be5dece720ff7ff4a"
+      ],
+      "claims_inactive": false,
+      "notes": "Artifact job independent of chat; D2 inactive-claim check recorded."
+    },
+    "3": {
+      "ts": "2026-09-05T12:26:16.156157+00:00",
+      "result": "PASS",
+      "chat": {
+        "http_status": 200,
+        "elapsed_s": 8.306,
+        "raw_preview": "event: delta\ndata: {\"text\":\"Your memory request regarding your preferred communication style has been queued for\"}\n\nevent: delta\ndata: {\"text\":\" background processing. The Memory UI or job reports will show the final result.\"}\n\nevent: final\ndata: {\"response\":\"Your memory request regarding your preferred communication style has been queued for background processing. The Memory UI or job reports will show the final result.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[{\"job_id\":\"memory-job-f35e375fa8ccae6dc88e3643f9648d4c\",\"action_kind\":\"propose_memory_signal\",\"status\":\"queued\",\"display_label\":\"Memory request: user_requested_memory\",\"created_at\":\"2026-09-05T12:26:03.719153Z\",\"agent_label\":\"Memory Analyst\"}],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "Your memory request regarding your preferred communication style has been queued for background processing. The Memory UI or job reports will show the final result.",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [
+            {
+              "job_id": "memory-job-f35e375fa8ccae6dc88e3643f9648d4c",
+              "action_kind": "propose_memory_signal",
+              "status": "queued",
+              "display_label": "Memory request: user_requested_memory",
+              "created_at": "2026-09-05T12:26:03.719153Z",
+              "agent_label": "Memory Analyst"
+            }
+          ],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "Your memory request regarding your preferred communication style has been queued for background processing. The Memory UI or job reports will show the final result.",
+        "queued_actions": [
+          {
+            "job_id": "memory-job-f35e375fa8ccae6dc88e3643f9648d4c",
+            "action_kind": "propose_memory_signal",
+            "status": "queued",
+            "display_label": "Memory request: user_requested_memory",
+            "created_at": "2026-09-05T12:26:03.719153Z",
+            "agent_label": "Memory Analyst"
+          }
+        ],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "followup": {
+        "http_status": 200,
+        "elapsed_s": 5.098,
+        "raw_preview": "event: delta\ndata: {\"text\":\"OK\"}\n\nevent: final\ndata: {\"response\":\"OK\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "OK",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "OK",
+        "queued_actions": [],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "new_jobs": [
+        {
+          "job_ref": "jobref_bdc36509a31869f17d99d0405328239d",
+          "job_number": "002",
+          "action_kind": "propose_memory_signal",
+          "status": "failed",
+          "display_label": "Memory request: user_requested_memory",
+          "agent_label": "Memory Analyst",
+          "failure_summary": {
+            "code": "memory_proposal_conflict",
+            "summary": "A pending memory proposal already exists for this category.",
+            "retryable": false
+          },
+          "created_at": "2026-09-05T12:26:03.719153Z",
+          "updated_at": "2026-09-05T12:26:05.481525Z"
+        }
+      ],
+      "job_refs": [
+        "jobref_bdc36509a31869f17d99d0405328239d"
+      ],
+      "notes": "Async ownership PASS criterion; terminal Memory outcome may still be invalid_memory_candidate (known D3)."
+    },
+    "4": {
+      "ts": "2026-09-05T12:26:44.664692+00:00",
+      "result": "PASS",
+      "chat": {
+        "http_status": 200,
+        "elapsed_s": 18.097,
+        "raw_preview": "event: delta\ndata: {\"text\":\"The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Note 0\"}\n\nevent: delta\ndata: {\"text\":\"4** by the Note Curator. \\n\\nOnce processed, the pending proposal will be available in the Notes UI for your\"}\n\nevent: delta\ndata: {\"text\":\" review to approve or reject.\"}\n\nevent: final\ndata: {\"response\":\"The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Note 04** by the Note Curator. \\n\\nOnce processed, the pending proposal will be available in the Notes UI for your review to approve or reject.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[{\"job_id\":\"artifact-job-887ac0741fcf8e2bb94a513047709f92\",\"action_kind\":\"create_artifact\",\"status\":\"queued\",\"display_label\":\"Artifact: abuse_retest_note.md\",\"created_at\":\"2026-09-05T12:26:18.774067Z\",\"agent_label\":\"Artifact Builder\"},{\"job_id\":\"note-job-9f2a0f876687a149ee61c2a4d7290332\",\"action_kind\":\"propose_collaborative_note\",\"status\":\"queued\",\"display_label\":\"Workspace note: Abuse Retest Note 04\",\"created_at\":\"2026-09-05T12:26:30.612036Z\",\"agent_label\":\"Note Curator\"}],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Note 04** by the Note Curator. \n\nOnce processed, the pending proposal will be available in the Notes UI for your review to approve or reject.",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [
+            {
+              "job_id": "artifact-job-887ac0741fcf8e2bb94a513047709f92",
+              "action_kind": "create_artifact",
+              "status": "queued",
+              "display_label": "Artifact: abuse_retest_note.md",
+              "created_at": "2026-09-05T12:26:18.774067Z",
+              "agent_label": "Artifact Builder"
+            },
+            {
+              "job_id": "note-job-9f2a0f876687a149ee61c2a4d7290332",
+              "action_kind": "propose_collaborative_note",
+              "status": "queued",
+              "display_label": "Workspace note: Abuse Retest Note 04",
+              "created_at": "2026-09-05T12:26:30.612036Z",
+              "agent_label": "Note Curator"
+            }
+          ],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Note 04** by the Note Curator. \n\nOnce processed, the pending proposal will be available in the Notes UI for your review to approve or reject.",
+        "queued_actions": [
+          {
+            "job_id": "artifact-job-887ac0741fcf8e2bb94a513047709f92",
+            "action_kind": "create_artifact",
+            "status": "queued",
+            "display_label": "Artifact: abuse_retest_note.md",
+            "created_at": "2026-09-05T12:26:18.774067Z",
+            "agent_label": "Artifact Builder"
+          },
+          {
+            "job_id": "note-job-9f2a0f876687a149ee61c2a4d7290332",
+            "action_kind": "propose_collaborative_note",
+            "status": "queued",
+            "display_label": "Workspace note: Abuse Retest Note 04",
+            "created_at": "2026-09-05T12:26:30.612036Z",
+            "agent_label": "Note Curator"
+          }
+        ],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "followup": {
+        "http_status": 200,
+        "elapsed_s": 10.09,
+        "raw_preview": "event: delta\ndata: {\"text\":\"READY\"}\n\nevent: final\ndata: {\"response\":\"READY\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[{\"receipt_id\":\"continuity--chat--session--3f7d5db0-da58-4003-a7d4-94a41ab1c823\",\"source_kind\":\"chat_session\",\"source_id\":\"session--3f7d5db0-da58-4003-a7d4-94a41ab1c823\",\"display_label\":\"Used prior chat: An artifact creation job for **\\\"Retest Harness Artifact 04\\\"** has been queued for background processing. **Current Lifec\",\"match_reason\":\"previous_chat\",\"source_updated_at\":\"2026-09-05T12:23:06.140000Z\"}],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "READY",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [
+            {
+              "receipt_id": "continuity--chat--session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+              "source_kind": "chat_session",
+              "source_id": "session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+              "display_label": "Used prior chat: An artifact creation job for **\"Retest Harness Artifact 04\"** has been queued for background processing. **Current Lifec",
+              "match_reason": "previous_chat",
+              "source_updated_at": "2026-09-05T12:23:06.140000Z"
+            }
+          ],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "READY",
+        "queued_actions": [],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "new_jobs": [
+        {
+          "job_ref": "jobref_8adc981b8aa5bdd528b9655946bb064a",
+          "job_number": "003",
+          "action_kind": "create_artifact",
+          "status": "completed",
+          "display_label": "Artifact: abuse_retest_note.md",
+          "agent_label": "Artifact Builder",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:26:18.774067Z",
+          "updated_at": "2026-09-05T12:26:25.141539Z"
+        },
+        {
+          "job_ref": "jobref_aa2688211599ec58bfbd30f9556d49a4",
+          "job_number": "004",
+          "action_kind": "propose_collaborative_note",
+          "status": "completed",
+          "display_label": "Workspace note: Abuse Retest Note 04",
+          "agent_label": "Note Curator",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:26:30.612036Z",
+          "updated_at": "2026-09-05T12:26:32.478962Z"
+        }
+      ],
+      "job_refs": [
+        "jobref_aa2688211599ec58bfbd30f9556d49a4"
+      ],
+      "pending_note_titles": [
+        "Abuse Retest Note 04",
+        "Retest Harness Note 03",
+        "DRAFT-NOTE-TITLE-RETEST-KEEP"
+      ],
+      "notes_api_pending_count": 3
+    },
+    "5": {
+      "ts": "2026-09-05T12:27:30.329714+00:00",
+      "result": "PASS",
+      "chats": {
+        "note": {
+          "http_status": 200,
+          "elapsed_s": 10.302,
+          "raw_preview": "event: delta\ndata: {\"text\":\"The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Cross Note\"}\n\nevent: delta\ndata: {\"text\":\" 05** by the Note Curator.\\n\\nOnce processed, the pending proposal will be available in the Notes UI for\"}\n\nevent: delta\ndata: {\"text\":\" your review to approve or reject.\"}\n\nevent: final\ndata: {\"response\":\"The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Cross Note 05** by the Note Curator.\\n\\nOnce processed, the pending proposal will be available in the Notes UI for your review to approve or reject.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[{\"job_id\":\"note-job-a0c6f4c933cff609aacbf84c8e0d263a\",\"action_kind\":\"propose_collaborative_note\",\"status\":\"queued\",\"display_label\":\"Workspace note: Abuse Retest Cross Note 05\",\"created_at\":\"2026-09-05T12:26:51.654639Z\",\"agent_label\":\"Note Curator\"}],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+          "final": {
+            "response": "The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Cross Note 05** by the Note Curator.\n\nOnce processed, the pending proposal will be available in the Notes UI for your review to approve or reject.",
+            "actions": [],
+            "artifacts": [],
+            "artifact_feedback": [],
+            "queued_actions": [
+              {
+                "job_id": "note-job-a0c6f4c933cff609aacbf84c8e0d263a",
+                "action_kind": "propose_collaborative_note",
+                "status": "queued",
+                "display_label": "Workspace note: Abuse Retest Cross Note 05",
+                "created_at": "2026-09-05T12:26:51.654639Z",
+                "agent_label": "Note Curator"
+              }
+            ],
+            "citations": [],
+            "memory_proposals": [],
+            "memory_clarifications": [],
+            "collaborative_note_proposals": [],
+            "collaborative_note_events": [],
+            "continuity_receipts": [],
+            "continuity_choices": [],
+            "adaptations": []
+          },
+          "text": "The workspace note proposal request has been queued for background processing under **Workspace note: Abuse Retest Cross Note 05** by the Note Curator.\n\nOnce processed, the pending proposal will be available in the Notes UI for your review to approve or reject.",
+          "queued_actions": [
+            {
+              "job_id": "note-job-a0c6f4c933cff609aacbf84c8e0d263a",
+              "action_kind": "propose_collaborative_note",
+              "status": "queued",
+              "display_label": "Workspace note: Abuse Retest Cross Note 05",
+              "created_at": "2026-09-05T12:26:51.654639Z",
+              "agent_label": "Note Curator"
+            }
+          ],
+          "actions": [],
+          "memory_proposals": [],
+          "collaborative_note_proposals": [],
+          "artifacts": []
+        },
+        "artifact": {
+          "http_status": 200,
+          "elapsed_s": 6.936,
+          "raw_preview": "event: delta\ndata: {\"text\":\"The artifact creation request for `abuse_retest_cross_artifact_05.md` has been queued for background processing under\"}\n\nevent: delta\ndata: {\"text\":\" **Artifact: structured blueprint** by the Artifact Builder. I will wait for the completed result from the background job before presenting the final artifact here.\"}\n\nevent: final\ndata: {\"response\":\"The artifact creation request for `abuse_retest_cross_artifact_05.md` has been queued for background processing under **Artifact: structured blueprint** by the Artifact Builder. I will wait for the completed result from the background job before presenting the final artifact here.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[{\"job_id\":\"artifact-job-a10abbb2ce427d5d709e4c64e76a4b3e\",\"action_kind\":\"create_artifact\",\"status\":\"queued\",\"display_label\":\"Artifact: structured blueprint\",\"created_at\":\"2026-09-05T12:26:56.285100Z\",\"agent_label\":\"Artifact Builder\"}],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+          "final": {
+            "response": "The artifact creation request for `abuse_retest_cross_artifact_05.md` has been queued for background processing under **Artifact: structured blueprint** by the Artifact Builder. I will wait for the completed result from the background job before presenting the final artifact here.",
+            "actions": [],
+            "artifacts": [],
+            "artifact_feedback": [],
+            "queued_actions": [
+              {
+                "job_id": "artifact-job-a10abbb2ce427d5d709e4c64e76a4b3e",
+                "action_kind": "create_artifact",
+                "status": "queued",
+                "display_label": "Artifact: structured blueprint",
+                "created_at": "2026-09-05T12:26:56.285100Z",
+                "agent_label": "Artifact Builder"
+              }
+            ],
+            "citations": [],
+            "memory_proposals": [],
+            "memory_clarifications": [],
+            "collaborative_note_proposals": [],
+            "collaborative_note_events": [],
+            "continuity_receipts": [],
+            "continuity_choices": [],
+            "adaptations": []
+          },
+          "text": "The artifact creation request for `abuse_retest_cross_artifact_05.md` has been queued for background processing under **Artifact: structured blueprint** by the Artifact Builder. I will wait for the completed result from the background job before presenting the final artifact here.",
+          "queued_actions": [
+            {
+              "job_id": "artifact-job-a10abbb2ce427d5d709e4c64e76a4b3e",
+              "action_kind": "create_artifact",
+              "status": "queued",
+              "display_label": "Artifact: structured blueprint",
+              "created_at": "2026-09-05T12:26:56.285100Z",
+              "agent_label": "Artifact Builder"
+            }
+          ],
+          "actions": [],
+          "memory_proposals": [],
+          "collaborative_note_proposals": [],
+          "artifacts": []
+        },
+        "memory": {
+          "http_status": 200,
+          "elapsed_s": 7.897,
+          "raw_preview": "event: delta\ndata: {\"text\":\"Your memory request regarding your preference\"}\n\nevent: delta\ndata: {\"text\":\" for a dark-mode UI during abuse retesting has been queued for background processing under **Memory request: user_requested_memory** by the Memory Analyst\"}\n\nevent: delta\ndata: {\"text\":\". The Memory UI or job reports will show the final result.\"}\n\nevent: final\ndata: {\"response\":\"Your memory request regarding your preference for a dark-mode UI during abuse retesting has been queued for background processing under **Memory request: user_requested_memory** by the Memory Analyst. The Memory UI or job reports will show the final result.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[{\"job_id\":\"memory-job-7474a2bed6c6024a7abee7949175cd01\",\"action_kind\":\"propose_memory_signal\",\"status\":\"queued\",\"display_label\":\"Memory request: user_requested_memory\",\"created_at\":\"2026-09-05T12:27:19.248707Z\",\"agent_label\":\"Memory Analyst\"}],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+          "final": {
+            "response": "Your memory request regarding your preference for a dark-mode UI during abuse retesting has been queued for background processing under **Memory request: user_requested_memory** by the Memory Analyst. The Memory UI or job reports will show the final result.",
+            "actions": [],
+            "artifacts": [],
+            "artifact_feedback": [],
+            "queued_actions": [
+              {
+                "job_id": "memory-job-7474a2bed6c6024a7abee7949175cd01",
+                "action_kind": "propose_memory_signal",
+                "status": "queued",
+                "display_label": "Memory request: user_requested_memory",
+                "created_at": "2026-09-05T12:27:19.248707Z",
+                "agent_label": "Memory Analyst"
+              }
+            ],
+            "citations": [],
+            "memory_proposals": [],
+            "memory_clarifications": [],
+            "collaborative_note_proposals": [],
+            "collaborative_note_events": [],
+            "continuity_receipts": [],
+            "continuity_choices": [],
+            "adaptations": []
+          },
+          "text": "Your memory request regarding your preference for a dark-mode UI during abuse retesting has been queued for background processing under **Memory request: user_requested_memory** by the Memory Analyst. The Memory UI or job reports will show the final result.",
+          "queued_actions": [
+            {
+              "job_id": "memory-job-7474a2bed6c6024a7abee7949175cd01",
+              "action_kind": "propose_memory_signal",
+              "status": "queued",
+              "display_label": "Memory request: user_requested_memory",
+              "created_at": "2026-09-05T12:27:19.248707Z",
+              "agent_label": "Memory Analyst"
+            }
+          ],
+          "actions": [],
+          "memory_proposals": [],
+          "collaborative_note_proposals": [],
+          "artifacts": []
+        },
+        "followup": {
+          "http_status": 200,
+          "elapsed_s": 4.1,
+          "raw_preview": "event: delta\ndata: {\"text\":\"PONG\"}\n\nevent: final\ndata: {\"response\":\"PONG\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+          "final": {
+            "response": "PONG",
+            "actions": [],
+            "artifacts": [],
+            "artifact_feedback": [],
+            "queued_actions": [],
+            "citations": [],
+            "memory_proposals": [],
+            "memory_clarifications": [],
+            "collaborative_note_proposals": [],
+            "collaborative_note_events": [],
+            "continuity_receipts": [],
+            "continuity_choices": [],
+            "adaptations": []
+          },
+          "text": "PONG",
+          "queued_actions": [],
+          "actions": [],
+          "memory_proposals": [],
+          "collaborative_note_proposals": [],
+          "artifacts": []
+        }
+      },
+      "job_refs": [
+        "jobref_04baa4a27f8397622fb696854d6a725a",
+        "jobref_3cdd66db8182926176429b81035beb61",
+        "jobref_15518b15c4369bb76d8460e9db8a3b77"
+      ],
+      "families": {
+        "note": [
+          {
+            "job_ref": "jobref_04baa4a27f8397622fb696854d6a725a",
+            "job_number": "005",
+            "action_kind": "propose_collaborative_note",
+            "status": "completed",
+            "display_label": "Workspace note: Abuse Retest Cross Note 05",
+            "agent_label": "Note Curator",
+            "failure_summary": null,
+            "created_at": "2026-09-05T12:26:51.654639Z",
+            "updated_at": "2026-09-05T12:26:53.444068Z"
+          }
+        ],
+        "artifact": [
+          {
+            "job_ref": "jobref_3cdd66db8182926176429b81035beb61",
+            "job_number": "006",
+            "action_kind": "create_artifact",
+            "status": "completed",
+            "display_label": "Artifact: structured blueprint",
+            "agent_label": "Artifact Builder",
+            "failure_summary": null,
+            "created_at": "2026-09-05T12:26:56.285100Z",
+            "updated_at": "2026-09-05T12:27:17.142388Z"
+          }
+        ],
+        "memory": [
+          {
+            "job_ref": "jobref_15518b15c4369bb76d8460e9db8a3b77",
+            "job_number": "007",
+            "action_kind": "propose_memory_signal",
+            "status": "failed",
+            "display_label": "Memory request: user_requested_memory",
+            "agent_label": "Memory Analyst",
+            "failure_summary": {
+              "code": "memory_proposal_conflict",
+              "summary": "A pending memory proposal already exists for this category.",
+              "retryable": false
+            },
+            "created_at": "2026-09-05T12:27:19.248707Z",
+            "updated_at": "2026-09-05T12:27:21.138796Z"
+          }
+        ]
+      },
+      "notes": "Sequential close requests (combined multi-queue may clarify). Distinct job refs across families required."
+    },
+    "6": {
+      "ts": "2026-09-05T12:27:32.161176+00:00",
+      "result": "PASS",
+      "surfaces": {
+        "memory_unresolved": 1,
+        "notes_pending": 4,
+        "artifacts_active": 5,
+        "jobs": 15,
+        "reports": 14
+      },
+      "notes": "API authoritative re-fetch without chat turn (browser nav deferred; soak occupies Glass).",
+      "job_refs": []
+    },
+    "7": {
+      "ts": "2026-09-05T12:27:32.414215+00:00",
+      "result": "PASS",
+      "pairs": [
+        {
+          "job_ref": "jobref_1d39bb053068a07be5dece720ff7ff4a",
+          "job_status": "completed",
+          "report_status": "completed",
+          "action_kind": "create_artifact",
+          "display_label": "Artifact: structured blueprint",
+          "report_summary": "The requested artifact was created.",
+          "status_match": true
+        },
+        {
+          "job_ref": "jobref_bdc36509a31869f17d99d0405328239d",
+          "job_status": "failed",
+          "report_status": "failed",
+          "action_kind": "propose_memory_signal",
+          "display_label": "Memory request: user_requested_memory",
+          "report_summary": "A pending memory proposal already exists for this category.",
+          "status_match": true
+        },
+        {
+          "job_ref": "jobref_8adc981b8aa5bdd528b9655946bb064a",
+          "job_status": "completed",
+          "report_status": "completed",
+          "action_kind": "create_artifact",
+          "display_label": "Artifact: abuse_retest_note.md",
+          "report_summary": "The requested artifact was created.",
+          "status_match": true
+        },
+        {
+          "job_ref": "jobref_aa2688211599ec58bfbd30f9556d49a4",
+          "job_status": "completed",
+          "report_status": "completed",
+          "action_kind": "propose_collaborative_note",
+          "display_label": "Workspace note: Abuse Retest Note 04",
+          "report_summary": "A workspace note proposal was created and is pending your review.",
+          "status_match": true
+        },
+        {
+          "job_ref": "jobref_04baa4a27f8397622fb696854d6a725a",
+          "job_status": "completed",
+          "report_status": "completed",
+          "action_kind": "propose_collaborative_note",
+          "display_label": "Workspace note: Abuse Retest Cross Note 05",
+          "report_summary": "A workspace note proposal was created and is pending your review.",
+          "status_match": true
+        },
+        {
+          "job_ref": "jobref_3cdd66db8182926176429b81035beb61",
+          "job_status": "completed",
+          "report_status": "completed",
+          "action_kind": "create_artifact",
+          "display_label": "Artifact: structured blueprint",
+          "report_summary": "The requested artifact was created.",
+          "status_match": true
+        },
+        {
+          "job_ref": "jobref_15518b15c4369bb76d8460e9db8a3b77",
+          "job_status": "failed",
+          "report_status": "failed",
+          "action_kind": "propose_memory_signal",
+          "display_label": "Memory request: user_requested_memory",
+          "report_summary": "A pending memory proposal already exists for this category.",
+          "status_match": true
+        }
+      ],
+      "mismatches": [],
+      "duplicate_job_refs": 0,
+      "families_present": {
+        "artifact": true,
+        "note": true,
+        "memory": true
+      },
+      "job_refs": [
+        "jobref_1d39bb053068a07be5dece720ff7ff4a",
+        "jobref_bdc36509a31869f17d99d0405328239d",
+        "jobref_8adc981b8aa5bdd528b9655946bb064a",
+        "jobref_aa2688211599ec58bfbd30f9556d49a4",
+        "jobref_04baa4a27f8397622fb696854d6a725a",
+        "jobref_3cdd66db8182926176429b81035beb61",
+        "jobref_15518b15c4369bb76d8460e9db8a3b77"
+      ],
+      "notes": "Session-scoped job/report pairing; event raw-id limitation same as prior campaign."
+    },
+    "9": {
+      "ts": "2026-09-05T12:28:06.416604+00:00",
+      "result": "PASS",
+      "chat_origin": {
+        "http_status": 200,
+        "elapsed_s": 5.309,
+        "raw_preview": "event: delta\ndata: {\"text\":\"The artifact creation request for **Retest Session Switch Artifact 09** has been queued for\"}\n\nevent: delta\ndata: {\"text\":\" background processing under **Artifact: structured blueprint** by the Artifact Builder. \\n\\nI will wait for the completed result from the\"}\n\nevent: delta\ndata: {\"text\":\" background job before presenting the final artifact here.\"}\n\nevent: final\ndata: {\"response\":\"The artifact creation request for **Retest Session Switch Artifact 09** has been queued for background processing under **Artifact: structured blueprint** by the Artifact Builder. \\n\\nI will wait for the completed result from the background job before presenting the final artifact here.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[{\"job_id\":\"artifact-job-7b74396f61db7f8bdaa85d807598958c\",\"action_kind\":\"create_artifact\",\"status\":\"queued\",\"display_label\":\"Artifact: structured blueprint\",\"created_at\":\"2026-09-05T12:27:33.547106Z\",\"agent_label\":\"Artifact Builder\"}],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "The artifact creation request for **Retest Session Switch Artifact 09** has been queued for background processing under **Artifact: structured blueprint** by the Artifact Builder. \n\nI will wait for the completed result from the background job before presenting the final artifact here.",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [
+            {
+              "job_id": "artifact-job-7b74396f61db7f8bdaa85d807598958c",
+              "action_kind": "create_artifact",
+              "status": "queued",
+              "display_label": "Artifact: structured blueprint",
+              "created_at": "2026-09-05T12:27:33.547106Z",
+              "agent_label": "Artifact Builder"
+            }
+          ],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [],
+          "continuity_choices": [],
+          "adaptations": []
+        },
+        "text": "The artifact creation request for **Retest Session Switch Artifact 09** has been queued for background processing under **Artifact: structured blueprint** by the Artifact Builder. \n\nI will wait for the completed result from the background job before presenting the final artifact here.",
+        "queued_actions": [
+          {
+            "job_id": "artifact-job-7b74396f61db7f8bdaa85d807598958c",
+            "action_kind": "create_artifact",
+            "status": "queued",
+            "display_label": "Artifact: structured blueprint",
+            "created_at": "2026-09-05T12:27:33.547106Z",
+            "agent_label": "Artifact Builder"
+          }
+        ],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "chat_session_b": {
+        "http_status": 200,
+        "elapsed_s": 7.217,
+        "raw_preview": "event: final\ndata: {\"response\":\"I found more than one prior chat that could match. Please choose the one you mean.\",\"actions\":[],\"artifacts\":[],\"artifact_feedback\":[],\"queued_actions\":[],\"citations\":[],\"memory_proposals\":[],\"memory_clarifications\":[],\"collaborative_note_proposals\":[],\"collaborative_note_events\":[],\"continuity_receipts\":[],\"continuity_choices\":[{\"choice_id\":\"choice-1\",\"source_kind\":\"chat_session\",\"source_id\":\"session--a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\"display_label\":\"The artifact creation request for **Retest Session Switch Artifact 09** has been queued for background processing under\",\"match_reason\":\"previous_chat\"},{\"choice_id\":\"choice-2\",\"source_kind\":\"chat_session\",\"source_id\":\"session--324a5fce-c00b-41b2-ac75-deb92785bd6f\",\"display_label\":\"RETEST-CONTROL-OK\",\"match_reason\":\"previous_chat\"}],\"adaptations\":[]}\n\n",
+        "final": {
+          "response": "I found more than one prior chat that could match. Please choose the one you mean.",
+          "actions": [],
+          "artifacts": [],
+          "artifact_feedback": [],
+          "queued_actions": [],
+          "citations": [],
+          "memory_proposals": [],
+          "memory_clarifications": [],
+          "collaborative_note_proposals": [],
+          "collaborative_note_events": [],
+          "continuity_receipts": [],
+          "continuity_choices": [
+            {
+              "choice_id": "choice-1",
+              "source_kind": "chat_session",
+              "source_id": "session--a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              "display_label": "The artifact creation request for **Retest Session Switch Artifact 09** has been queued for background processing under",
+              "match_reason": "previous_chat"
+            },
+            {
+              "choice_id": "choice-2",
+              "source_kind": "chat_session",
+              "source_id": "session--324a5fce-c00b-41b2-ac75-deb92785bd6f",
+              "display_label": "RETEST-CONTROL-OK",
+              "match_reason": "previous_chat"
+            }
+          ],
+          "adaptations": []
+        },
+        "text": "I found more than one prior chat that could match. Please choose the one you mean.",
+        "queued_actions": [],
+        "actions": [],
+        "memory_proposals": [],
+        "collaborative_note_proposals": [],
+        "artifacts": []
+      },
+      "origin_job_refs": [
+        "jobref_f02ff226e7524857a5f69f2709912c9c"
+      ],
+      "session_a_count": 8,
+      "session_b_count": 0,
+      "cross_session_job_refs": [],
+      "session_a_jobs": [
+        {
+          "job_ref": "jobref_1d39bb053068a07be5dece720ff7ff4a",
+          "job_number": "001",
+          "action_kind": "create_artifact",
+          "status": "completed",
+          "display_label": "Artifact: structured blueprint",
+          "agent_label": "Artifact Builder",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:25:47.661653Z",
+          "updated_at": "2026-09-05T12:25:57.821502Z"
+        },
+        {
+          "job_ref": "jobref_bdc36509a31869f17d99d0405328239d",
+          "job_number": "002",
+          "action_kind": "propose_memory_signal",
+          "status": "failed",
+          "display_label": "Memory request: user_requested_memory",
+          "agent_label": "Memory Analyst",
+          "failure_summary": {
+            "code": "memory_proposal_conflict",
+            "summary": "A pending memory proposal already exists for this category.",
+            "retryable": false
+          },
+          "created_at": "2026-09-05T12:26:03.719153Z",
+          "updated_at": "2026-09-05T12:26:05.481525Z"
+        },
+        {
+          "job_ref": "jobref_8adc981b8aa5bdd528b9655946bb064a",
+          "job_number": "003",
+          "action_kind": "create_artifact",
+          "status": "completed",
+          "display_label": "Artifact: abuse_retest_note.md",
+          "agent_label": "Artifact Builder",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:26:18.774067Z",
+          "updated_at": "2026-09-05T12:26:25.141539Z"
+        },
+        {
+          "job_ref": "jobref_aa2688211599ec58bfbd30f9556d49a4",
+          "job_number": "004",
+          "action_kind": "propose_collaborative_note",
+          "status": "completed",
+          "display_label": "Workspace note: Abuse Retest Note 04",
+          "agent_label": "Note Curator",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:26:30.612036Z",
+          "updated_at": "2026-09-05T12:26:32.478962Z"
+        },
+        {
+          "job_ref": "jobref_04baa4a27f8397622fb696854d6a725a",
+          "job_number": "005",
+          "action_kind": "propose_collaborative_note",
+          "status": "completed",
+          "display_label": "Workspace note: Abuse Retest Cross Note 05",
+          "agent_label": "Note Curator",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:26:51.654639Z",
+          "updated_at": "2026-09-05T12:26:53.444068Z"
+        },
+        {
+          "job_ref": "jobref_3cdd66db8182926176429b81035beb61",
+          "job_number": "006",
+          "action_kind": "create_artifact",
+          "status": "completed",
+          "display_label": "Artifact: structured blueprint",
+          "agent_label": "Artifact Builder",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:26:56.285100Z",
+          "updated_at": "2026-09-05T12:27:17.142388Z"
+        },
+        {
+          "job_ref": "jobref_15518b15c4369bb76d8460e9db8a3b77",
+          "job_number": "007",
+          "action_kind": "propose_memory_signal",
+          "status": "failed",
+          "display_label": "Memory request: user_requested_memory",
+          "agent_label": "Memory Analyst",
+          "failure_summary": {
+            "code": "memory_proposal_conflict",
+            "summary": "A pending memory proposal already exists for this category.",
+            "retryable": false
+          },
+          "created_at": "2026-09-05T12:27:19.248707Z",
+          "updated_at": "2026-09-05T12:27:21.138796Z"
+        },
+        {
+          "job_ref": "jobref_f02ff226e7524857a5f69f2709912c9c",
+          "job_number": "008",
+          "action_kind": "create_artifact",
+          "status": "completed",
+          "display_label": "Artifact: structured blueprint",
+          "agent_label": "Artifact Builder",
+          "failure_summary": null,
+          "created_at": "2026-09-05T12:27:33.547106Z",
+          "updated_at": "2026-09-05T12:27:57.042379Z"
+        }
+      ],
+      "session_b_jobs": [],
+      "notes": "API session_id filter association; UI New conversation switch not driven (soak on Glass).",
+      "job_refs": [
+        "jobref_f02ff226e7524857a5f69f2709912c9c"
+      ]
+    },
+    "12": {
+      "ts": "2026-09-05T12:28:06.416626+00:00",
+      "result": "NOT EXECUTED",
+      "notes": "Backend kill/restart would interrupt concurrent \u226510min soak / active Glass client polling; deferred per campaign constraint.",
+      "job_refs": []
+    }
+  },
+  "finished_at": "2026-09-05T12:28:06.416632+00:00",
+  "matrix": {
+    "1": "PASS",
+    "2": "PASS",
+    "3": "PASS",
+    "4": "PASS",
+    "5": "PASS",
+    "6": "PASS",
+    "7": "PASS",
+    "9": "PASS",
+    "12": "NOT EXECUTED"
+  }
+}

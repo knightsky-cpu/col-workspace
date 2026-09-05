@@ -134,6 +134,11 @@ _MEMORY_RETRIEVAL_OR_HISTORY = re.compile(
     r"(?:me|us)\s+(?:telling|saying|mentioning)\s+you\b|"
     r"\bwhat\s+(?:do|did|have)\s+(?:you\s+)?"
     r"(?:remember|recall|know|tell|told|say|said|mention|mentioned)\b|"
+    r"\bwhat\s+(?:kind|type|style)\s+of\s+.+\s+do\s+i\s+"
+    r"(?:like|prefer|want|use)\b|"
+    r"\bwhat\s+.+\s+do\s+i\s+(?:like|prefer|want|use)\b|"
+    r"\bwhat\s+(?:is|are)\s+my\s+"
+    r"(?:preferred|default|usual|normal|typical)\b|"
     r"\bwhat\s+(?:did|have)\s+i\s+(?:tell|say|mention)\s+you\b|"
     r"\bwhat\s+(?:was|were)\s+my\s+preferences?\b"
     r".*\b(?:last|before|previous|previously|prior|earlier)\b",

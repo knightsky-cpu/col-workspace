@@ -1,0 +1,40 @@
+INFO:     Will watch for changes in these directories: ['/Users/wifiknight/col-workspace']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [216] using StatReload
+INFO:     Started server process [218]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+INFO:     127.0.0.1:51351 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51352 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51353 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51354 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51357 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51358 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51359 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51360 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51361 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51362 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51363 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51364 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51365 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51366 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51367 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51368 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51371 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51372 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51373 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51374 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51375 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51376 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51377 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51378 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK

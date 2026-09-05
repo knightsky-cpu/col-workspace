@@ -1,0 +1,137 @@
+{
+  "campaign": "post-fix-retest",
+  "checkpoint": "4ce7e88279edfe0dbd03c2de6555cb632cc6139c",
+  "stopped_by": "operator_request_end_campaign_cleanly",
+  "meta": {
+    "start_epoch": 1788611245.417,
+    "start_iso": "2026-09-05T12:27:25.417Z",
+    "target_sec": 600,
+    "driver": "chrome-playwright-fill",
+    "glass_mcp": "unavailable_to_subagent_tabs_evaporate",
+    "fill_method": "playwright_locator.fill_on_maxlength_10000",
+    "identity": {
+      "user": "abuse-retest-20260905",
+      "project": "agent-col"
+    },
+    "note": "Submission-proof soak; Playwright fill \u2248 browser_fill (not CDP-only .value)"
+  },
+  "soak_end": {
+    "ts": "2026-09-05T12:38:20.146Z",
+    "elapsed_s": 655,
+    "type": "soak_end",
+    "result": {
+      "duration_s": 655,
+      "target_sec": 600,
+      "verdict": "FAIL",
+      "pass": false,
+      "cycles": 20,
+      "send_ok": 0,
+      "send_fail": 0,
+      "by_kind": {
+        "ordinary_chat": 7,
+        "memory": 3,
+        "note": 2,
+        "artifact": 2,
+        "combined_clarify": 2
+      },
+      "ui": {
+        "drawer_thrash": 6,
+        "inspect_agents": 4,
+        "session_switch": 4,
+        "soft_refresh": 2,
+        "nav_roundtrip": 2
+      },
+      "findings": [
+        "cycle 1 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 2 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 3 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 4 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 5 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 7 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 8 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 10 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 11 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 12 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 13 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 14 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 16 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 17 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 19 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n",
+        "cycle 20 error: TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator('textarea[maxlength=\"10000\"]').first()\n    - locator resolved to <textarea rows=\"4\" required=\"\" name=\"message\" id=\"chat-message\" maxlength=\"10000\" data-chat-input=\"\"></textarea>\n  - attempting click action\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n    - waiting 20ms\n    2 \u00d7 waiting for element to be visible, enabled and stable\n      - element is not visible\n    - retrying click action\n      - waiting 100ms\n    56 \u00d7 waiting for element to be visible, enabled and stable\n       - element is not visible\n     - retrying click action\n       - waiting 500ms\n"
+      ],
+      "finalSnap": {
+        "url": "http://127.0.0.1:8000/workspace",
+        "agents": "Agents 0 active \u00b7 0 queued \u2303",
+        "sendDisabled": false,
+        "hasIdentityGate": true,
+        "pendingNotes": 0,
+        "hasQueued": false,
+        "bodyHead": "Local development mode\n\nAgent Col\nNew conversation\nDevelopment context\n\nThese values are local request locators only. They are not authentication. In Google mode, identity comes from the verified Google session.\n\nWorkspace identity\nProject ID\nEnter workspace"
+      },
+      "finalJobs": {
+        "count": 16,
+        "by_status": {
+          "completed": 10,
+          "failed": 5,
+          "running": 1
+        },
+        "nonterm": [
+          [
+            "0a8d6e10",
+            "running",
+            "create_artifact",
+            "Artifact: structured blueprint"
+          ]
+        ]
+      },
+      "driver": "chrome-playwright-fill",
+      "glass_mcp_note": "Glass browser MCP could not hold a tab (tabs evaporate between tool calls); soak used Chrome for Testing + Playwright fill() on maxlength=10000 textarea against same /workspace URL",
+      "end_iso": "2026-09-05T12:38:20.146Z"
+    }
+  },
+  "duration_s": 655,
+  "start_iso": "2026-09-05T12:27:25.417Z",
+  "end_iso": "2026-09-05T12:38:20.146Z",
+  "last_poll": {
+    "ts": "2026-09-05T12:38:24Z",
+    "elapsed_s": 659.6,
+    "count": 16,
+    "nonterm": [
+      [
+        "0a8d6e10",
+        "running",
+        "create_artifact",
+        "Artifact: structured blueprint"
+      ]
+    ],
+    "by_status": {
+      "completed": 10,
+      "failed": 5,
+      "running": 1
+    }
+  },
+  "log_event_counts": {
+    "soak_start": 1,
+    "reenter_identity": 55,
+    "cycle_start": 20,
+    "cycle_error": 16,
+    "cycle_end": 20,
+    "drawer_thrash": 8,
+    "inspect_agents": 4,
+    "session": 4,
+    "soft_refresh": 2,
+    "nav_away": 2,
+    "nav_back": 2,
+    "soak_end": 1
+  },
+  "summary": {
+    "verdict": "FAIL",
+    "pass": false,
+    "send_ok": 0,
+    "send_fail": 0,
+    "cycles": 20,
+    "cycle_errors": 16,
+    "issue_class": "harness/test-environment \u2014 chat composer not visible (identity gate / drawer thrash); 0 proven submissions during soak despite prior 4-msg harness PASS",
+    "product_failures_in_soak": "none attributed \u2014 no send_ok means soak did not exercise product chat/resource paths; residual nonterminal job 0a8d6e10 is prior TEST 11 product defect, not a soak-produced D2/D3 failure"
+  }
+}

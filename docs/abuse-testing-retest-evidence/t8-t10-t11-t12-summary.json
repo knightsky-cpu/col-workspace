@@ -1,0 +1,43 @@
+{
+  "ts": "2026-09-05T12:25:24.479796+00:00",
+  "target": {
+    "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+    "job_number": "005",
+    "user_id": "abuse-retest-20260905",
+    "project_id": "agent-col",
+    "action_kind": "create_artifact",
+    "status": "running",
+    "display_label": "Artifact: structured blueprint",
+    "agent_label": "Artifact Builder",
+    "created_at": "2026-09-05T12:20:05.852952Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "failure_summary": null
+  },
+  "early_lease_observations": [
+    {
+      "ts": "2026-09-05T12:20:15.287654+00:00",
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "status": "running"
+    }
+  ],
+  "later_lease_renewals": [
+    {
+      "ts": "2026-09-05T12:22:17.297780+00:00",
+      "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+      "updated_at": "2026-09-05T12:22:16.095166Z",
+      "status": "running"
+    },
+    {
+      "ts": "2026-09-05T12:24:18.395815+00:00",
+      "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+      "updated_at": "2026-09-05T12:24:17.460120Z",
+      "status": "running"
+    }
+  ],
+  "conflict_count": "count=8",
+  "job_count": 8,
+  "failed_retryable": []
+}

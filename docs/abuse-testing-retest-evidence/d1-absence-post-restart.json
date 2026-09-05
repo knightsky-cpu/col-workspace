@@ -1,0 +1,13 @@
+{
+  "ts": "2026-09-05T12:25:09.354819+00:00",
+  "counts": {
+    "list_expired_running_jobs operation failed": 0,
+    "AgentJob startup drain failed": 0,
+    "AgentJob runtime drain failed": 0,
+    "The query requires an index": 0,
+    "FAILED_PRECONDITION": 0,
+    "Application startup complete": 1,
+    "AgentJobEvent conflicts with existing event_id": 8
+  },
+  "d1_absent": true
+}

@@ -1,0 +1,12 @@
+{
+  "ts": "2026-09-05T12:30:32.482Z",
+  "port": 9334,
+  "session": "session--a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "session_b": "session--b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  "finalSnap": {
+    "url": "http://127.0.0.1:8000/workspace",
+    "agents": "Agents 0 active · 0 queued ⌃",
+    "bodyHead": "Local development mode\n\nAgent Col | Agent Col\nNew conversation\nHide\nRefresh\nWorkspace\nArtifacts\nActive\nArchived\nRetest Session Switch Artifact 09 · Accepted 0 · Rejected 0 · Edited 0\nCross-Surface Concurrency Artifact Builder · Accepted 0 · Rejected 0 · Edited 0\nCollaborative workspace note proposal titled Abuse Retest Note 04. · Markdown document\nAsync AgentJob Processing System · Accepted 0 · Rejected 0 · Edited 0\nRetest Harness Artifact 04 markdown document with submission proof bullets. · Ma",
+    "hasEnter": true
+  }
+}

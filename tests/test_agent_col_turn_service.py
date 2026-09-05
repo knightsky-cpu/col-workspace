@@ -1132,6 +1132,10 @@ async def test_turn_service_does_not_queue_historical_memory_recall() -> None:
 @pytest.mark.parametrize(
     "message",
     [
+        "what ui themes do i like",
+        "what editor do i prefer",
+        "what kind of answers do i like",
+        "what is my preferred workflow",
         "what do you remember about me?",
         "Do you remember my preference?",
         "Can you remember my preference?",

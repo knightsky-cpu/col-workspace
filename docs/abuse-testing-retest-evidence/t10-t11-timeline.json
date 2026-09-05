@@ -1,0 +1,46 @@
+[
+  {
+    "ts": "2026-09-05T12:20:04.715247+00:00",
+    "event": "baseline",
+    "count": 4,
+    "refs": [
+      "jobref_1b2ca23e8e52b3fd89d4d196d9ef5145",
+      "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+      "jobref_b8835dd6e9434bacf2fc55b5e7013764",
+      "jobref_ed4ccd508bf458bb9f93cabe020274f6"
+    ]
+  },
+  {
+    "ts": "2026-09-05T12:20:04.717930+00:00",
+    "event": "chat_started",
+    "pid": 163
+  },
+  {
+    "ts": "2026-09-05T12:20:06.407943+00:00",
+    "event": "nonterminal_seen",
+    "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+    "status": "queued",
+    "lease_expires_at": null,
+    "attempt_count": 1
+  },
+  {
+    "ts": "2026-09-05T12:20:11.533473+00:00",
+    "event": "backend_stopped",
+    "pids_after": [],
+    "health_after": false
+  },
+  {
+    "ts": "2026-09-05T12:20:15.195368+00:00",
+    "event": "backend_restarted",
+    "ready": true,
+    "wait_s": 2.61
+  },
+  {
+    "ts": "2026-09-05T12:21:45.536015+00:00",
+    "event": "result",
+    "test10": "FAIL",
+    "test11": "NOT_EXECUTED",
+    "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+    "reason": "no_terminal_after_restart"
+  }
+]

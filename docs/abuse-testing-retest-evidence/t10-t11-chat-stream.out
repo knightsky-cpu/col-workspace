@@ -1,0 +1,15 @@
+event: delta
+data: {"text":"An artifact creation job for **\"Retest Recovery Artifact T11\"** has been queued for background processing"}
+
+event: delta
+data: {"text":".\n\n**Current Lifecycle Status:**\n* **Job:** Artifact: structured blueprint\n* **Agent:** Artifact Builder\n"}
+
+event: delta
+data: {"text":"* **Status:** Queued\n\nI will wait for the authoritative completed result before presenting the finished artifact. Please let me know if you would like to"}
+
+event: delta
+data: {"text":" refine the restart recovery details or focus on another task while the background job processes!"}
+
+event: final
+data: {"response":"An artifact creation job for **\"Retest Recovery Artifact T11\"** has been queued for background processing.\n\n**Current Lifecycle Status:**\n* **Job:** Artifact: structured blueprint\n* **Agent:** Artifact Builder\n* **Status:** Queued\n\nI will wait for the authoritative completed result before presenting the finished artifact. Please let me know if you would like to refine the restart recovery details or focus on another task while the background job processes!","actions":[],"artifacts":[],"artifact_feedback":[],"queued_actions":[{"job_id":"artifact-job-541bd6129564396151e2c047df17618b","action_kind":"create_artifact","status":"queued","display_label":"Artifact: structured blueprint","created_at":"2026-09-05T12:20:05.852952Z","agent_label":"Artifact Builder"}],"citations":[],"memory_proposals":[],"memory_clarifications":[],"collaborative_note_proposals":[],"collaborative_note_events":[],"continuity_receipts":[],"continuity_choices":[],"adaptations":[]}
+

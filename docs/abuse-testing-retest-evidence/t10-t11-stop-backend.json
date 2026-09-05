@@ -1,0 +1,22 @@
+{
+  "ts": "2026-09-05T12:20:06.428549+00:00",
+  "reason": "caught_queued_jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+  "pids_before": [
+    98655,
+    98661
+  ],
+  "signals": [
+    {
+      "pid": 98655,
+      "signal": "SIGINT",
+      "ok": true
+    },
+    {
+      "pid": 98661,
+      "signal": "SIGINT",
+      "ok": true
+    }
+  ],
+  "pids_after": [],
+  "health_after": false
+}

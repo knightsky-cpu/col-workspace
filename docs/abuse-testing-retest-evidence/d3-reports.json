@@ -1,0 +1,29 @@
+{
+    "agent_job_report_contract_version": "1.0",
+    "reports": [
+        {
+            "report_number": "001",
+            "job_ref": "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+            "job_number": "001",
+            "action_kind": "create_artifact",
+            "agent_label": "Artifact Builder",
+            "status": "completed",
+            "title": "Artifact created",
+            "summary": "The requested artifact was created.",
+            "public_resource_label": "AgentJob Queuing and Artifact Generator",
+            "created_at": "2026-09-05T12:10:09.623085Z"
+        },
+        {
+            "report_number": "002",
+            "job_ref": "jobref_1b2ca23e8e52b3fd89d4d196d9ef5145",
+            "job_number": "002",
+            "action_kind": "propose_memory_signal",
+            "agent_label": "Memory Analyst",
+            "status": "completed",
+            "title": "Memory proposal pending review",
+            "summary": "A memory proposal was created and is pending your review.",
+            "public_resource_label": "Prefers concise bullet answers and short confirmations during abuse testing.",
+            "created_at": "2026-09-05T12:11:54.750019Z"
+        }
+    ]
+}

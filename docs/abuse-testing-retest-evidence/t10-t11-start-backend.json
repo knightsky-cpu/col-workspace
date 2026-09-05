@@ -1,0 +1,19 @@
+{
+  "ts": "2026-09-05T12:20:12.545136+00:00",
+  "pid": 216,
+  "log": "/Users/wifiknight/col-workspace/docs/abuse-testing-retest-evidence/t10-t11-restart-uvicorn.log",
+  "cmd": [
+    "/Users/wifiknight/col-workspace/venv/bin/uvicorn",
+    "main:app",
+    "--reload",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000"
+  ],
+  "ready": true,
+  "wait_s": 2.61,
+  "pids": [
+    216
+  ]
+}

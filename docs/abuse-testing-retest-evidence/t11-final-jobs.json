@@ -1,0 +1,65 @@
+{
+  "target": {
+    "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+    "job_number": "005",
+    "user_id": "abuse-retest-20260905",
+    "project_id": "agent-col",
+    "action_kind": "create_artifact",
+    "status": "running",
+    "display_label": "Artifact: structured blueprint",
+    "agent_label": "Artifact Builder",
+    "created_at": "2026-09-05T12:20:05.852952Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "failure_summary": null
+  },
+  "artifact_jobs": [
+    {
+      "job_ref": "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+      "job_number": "001",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "completed",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:09:53.740057Z",
+      "updated_at": "2026-09-05T12:10:09.623085Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:11:54.478242Z",
+      "failure_summary": null
+    },
+    {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:24:17.460120Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+      "failure_summary": null
+    },
+    {
+      "job_ref": "jobref_d281c7840b1abf74d29ffdbc6ca6a4a7",
+      "job_number": "008",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "completed",
+      "display_label": "Artifact: retest_harness_artifact_04.md",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:23:01.671959Z",
+      "updated_at": "2026-09-05T12:23:09.263604Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:25:02.351364Z",
+      "failure_summary": null
+    }
+  ],
+  "all_count": 8
+}

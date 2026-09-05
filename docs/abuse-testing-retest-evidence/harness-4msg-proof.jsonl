@@ -1,0 +1,4 @@
+{"n": 1, "kind": "ordinary_chat", "classification": "send_ok", "ok": true, "stream": {"id": 1, "status": 200, "completed": true}, "transcriptHit": true}
+{"n": 2, "kind": "memory", "classification": "send_ok", "ok": true, "stream": {"id": 2, "status": 200, "completed": true}, "transcriptHit": true, "queuedReceipt": "Queued action: Memory Analyst \u00b7 Memory request: communication_style \u00b7 Queued"}
+{"n": 3, "kind": "note", "classification": "send_ok", "ok": true, "stream": {"id": 3, "status": 200, "completed": true}, "transcriptHit": true, "queuedReceipt": "Queued action: Note Curator \u00b7 Workspace note: Retest Harness Note 03 \u00b7 Queued"}
+{"n": 4, "kind": "artifact", "classification": "send_ok", "ok": true, "stream": {"id": 4, "status": 200, "completed": true}, "transcriptHit": true, "queuedReceipt": "Queued action: Artifact Builder \u00b7 Artifact: retest_harness_artifact_04.md \u00b7 Queued"}

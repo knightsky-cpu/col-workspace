@@ -1,0 +1,13 @@
+{
+  "ts": "2026-09-05T12:43:24.861885Z",
+  "phase": "pre_soak_startup",
+  "counts": {
+    "list_expired_running_jobs operation failed": 0,
+    "AgentJob startup drain failed": 0,
+    "AgentJob runtime drain failed": 0,
+    "The query requires an index": 0,
+    "FAILED_PRECONDITION": 0,
+    "Application startup complete": 1
+  },
+  "d1_absent": true
+}

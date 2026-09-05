@@ -1,0 +1,11 @@
+{"test": "preflight", "result": "INFO", "notes": "Backend left running; soak session not used for regression chats."}
+{"test": "1", "result": "PASS", "job_refs": [], "notes": "Control chat completed; no explicit resource AgentJob from turn."}
+{"test": "2", "result": "PASS", "job_refs": ["jobref_1d39bb053068a07be5dece720ff7ff4a"], "notes": "Artifact job independent of chat; D2 inactive-claim check recorded."}
+{"test": "3", "result": "PASS", "job_refs": ["jobref_bdc36509a31869f17d99d0405328239d"], "notes": "Async ownership PASS criterion; terminal Memory outcome may still be invalid_memory_candidate (known D3)."}
+{"test": "4", "result": "PASS", "job_refs": ["jobref_aa2688211599ec58bfbd30f9556d49a4"]}
+{"test": "5", "result": "PASS", "job_refs": ["jobref_04baa4a27f8397622fb696854d6a725a", "jobref_3cdd66db8182926176429b81035beb61", "jobref_15518b15c4369bb76d8460e9db8a3b77"], "notes": "Sequential close requests (combined multi-queue may clarify). Distinct job refs across families required."}
+{"test": "6", "result": "PASS", "job_refs": [], "notes": "API authoritative re-fetch without chat turn (browser nav deferred; soak occupies Glass)."}
+{"test": "7", "result": "PASS", "job_refs": ["jobref_1d39bb053068a07be5dece720ff7ff4a", "jobref_bdc36509a31869f17d99d0405328239d", "jobref_8adc981b8aa5bdd528b9655946bb064a", "jobref_aa2688211599ec58bfbd30f9556d49a4", "jobref_04baa4a27f8397622fb696854d6a725a", "jobref_3cdd66db8182926176429b81035beb61", "jobref_15518b15c4369bb76d8460e9db8a3b77"], "notes": "Session-scoped job/report pairing; event raw-id limitation same as prior campaign."}
+{"test": "9", "result": "PASS", "job_refs": ["jobref_f02ff226e7524857a5f69f2709912c9c"], "notes": "API session_id filter association; UI New conversation switch not driven (soak on Glass)."}
+{"test": "12", "result": "NOT EXECUTED", "job_refs": [], "notes": "Backend kill/restart would interrupt concurrent \u226510min soak / active Glass client polling; deferred per campaign constraint."}
+MATRIX {"1": "PASS", "2": "PASS", "3": "PASS", "4": "PASS", "5": "PASS", "6": "PASS", "7": "PASS", "9": "PASS", "12": "NOT EXECUTED"}

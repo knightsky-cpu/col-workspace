@@ -1,0 +1,13 @@
+{
+  "start_epoch": 1788611245.417,
+  "start_iso": "2026-09-05T12:27:25.417Z",
+  "target_sec": 600,
+  "driver": "chrome-playwright-fill",
+  "glass_mcp": "unavailable_to_subagent_tabs_evaporate",
+  "fill_method": "playwright_locator.fill_on_maxlength_10000",
+  "identity": {
+    "user": "abuse-retest-20260905",
+    "project": "agent-col"
+  },
+  "note": "Submission-proof soak; Playwright fill ≈ browser_fill (not CDP-only .value)"
+}

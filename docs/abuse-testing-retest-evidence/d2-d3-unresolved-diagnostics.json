@@ -1,0 +1,246 @@
+{
+  "created_at": "2026-09-05T12:39:57.156905Z",
+  "checkpoint": "4ce7e88279edfe0dbd03c2de6555cb632cc6139c",
+  "identity": {
+    "user": "abuse-retest-20260905",
+    "project": "agent-col"
+  },
+  "note": "D2/D3 findings preserved as separate unresolved diagnostics; not classified as Test 13 soak failures. Soak produced 0 send_ok.",
+  "D2": {
+    "status": "RESOLVED_PASS",
+    "scenario": "Artifact queue messaging consistency vs prior contradictory inactive-tools claim",
+    "prompt_as_recorded": "create Artifact \"Retest D2 Artifact\" with two bullets; queue immediately.",
+    "assistant_observed": "An artifact creation job \u2026 has already been queued for background processing; receipt Queued action: Artifact Builder \u00b7 Artifact: structured blueprint \u00b7 Queued; claimsInactive=false",
+    "job_ref": "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+    "payload": {
+      "job": {
+        "job_ref": "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+        "job_number": "001",
+        "user_id": "abuse-retest-20260905",
+        "project_id": "agent-col",
+        "action_kind": "create_artifact",
+        "status": "completed",
+        "display_label": "Artifact: structured blueprint",
+        "agent_label": "Artifact Builder",
+        "created_at": "2026-09-05T12:09:53.740057Z",
+        "updated_at": "2026-09-05T12:10:09.623085Z",
+        "attempt_count": 1,
+        "lease_expires_at": "2026-09-05T12:11:54.478242Z",
+        "failure_summary": null
+      },
+      "report": {
+        "report_number": "001",
+        "job_ref": "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+        "job_number": "001",
+        "action_kind": "create_artifact",
+        "agent_label": "Artifact Builder",
+        "status": "completed",
+        "title": "Artifact created",
+        "summary": "The requested artifact was created.",
+        "public_resource_label": "AgentJob Queuing and Artifact Generator",
+        "created_at": "2026-09-05T12:10:09.623085Z"
+      }
+    },
+    "screenshot": "d2-artifact-consistent-messaging.png"
+  },
+  "D3": {
+    "status": "PARTIAL_UNRESOLVED",
+    "scenarios": [
+      {
+        "id": "D3a_communication_style",
+        "result": "PASS",
+        "prompt_source": "exact prior campaign communication_style prompt (original Test 3 wording)",
+        "prompt": "Please create an explicit Memory proposal now: propose remembering that I prefer concise bullet answers and short confirmations during abuse testing. Queue the Memory job; do not wait for me to confirm in chat.",
+        "queued_receipt_observed": "Memory Analyst / Memory request: communication_style / Queued (per retest report)",
+        "job_ref": "jobref_1b2ca23e8e52b3fd89d4d196d9ef5145",
+        "payload": {
+          "job": {
+            "job_ref": "jobref_1b2ca23e8e52b3fd89d4d196d9ef5145",
+            "job_number": "002",
+            "user_id": "abuse-retest-20260905",
+            "project_id": "agent-col",
+            "action_kind": "propose_memory_signal",
+            "status": "completed",
+            "display_label": "Memory request: communication_style",
+            "agent_label": "Memory Analyst",
+            "created_at": "2026-09-05T12:11:52.898924Z",
+            "updated_at": "2026-09-05T12:11:54.750019Z",
+            "attempt_count": 1,
+            "lease_expires_at": "2026-09-05T12:13:53.634681Z",
+            "failure_summary": null
+          },
+          "report": {
+            "report_number": "002",
+            "job_ref": "jobref_1b2ca23e8e52b3fd89d4d196d9ef5145",
+            "job_number": "002",
+            "action_kind": "propose_memory_signal",
+            "agent_label": "Memory Analyst",
+            "status": "completed",
+            "title": "Memory proposal pending review",
+            "summary": "A memory proposal was created and is pending your review.",
+            "public_resource_label": "Prefers concise bullet answers and short confirmations during abuse testing.",
+            "created_at": "2026-09-05T12:11:54.750019Z"
+          }
+        },
+        "memory_pending_match": {
+          "proposal_id": "user_requested_memory--3d8ea1932d11799284812064eea65729",
+          "category": "user_requested_memory",
+          "proposed_value": "Prefers concise bullet answers and short confirmations during abuse testing.",
+          "expected_signal_id": null,
+          "policy_version": "2.0",
+          "status": "pending",
+          "source_session_id": "session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+          "source_message_id": "turn--0eb557dac9ce99a784fd5a177c07567e809c27934cdca6cd9b332f64154bbd45--user",
+          "evidence_message_id": "turn--0eb557dac9ce99a784fd5a177c07567e809c27934cdca6cd9b332f64154bbd45--user",
+          "clarification_id": null,
+          "created_at": "2026-09-05T12:11:54.798000Z",
+          "expires_at": "2026-09-06T12:11:54.343417Z"
+        },
+        "screenshot": "d3-communication-style-memory-completed.png"
+      },
+      {
+        "id": "D3b_dark_mode_user_requested_memory",
+        "result": "FAIL_PRODUCT",
+        "prompt_source": "prior dark-mode / user_requested_memory scenario (retest report + prior campaign wording)",
+        "prompt": "Queue Memory only now: propose remembering I prefer dark-mode UI during abuse testing.",
+        "alternate_prior_wording": "propose remembering I prefer dark-mode UI for abuse testing",
+        "queued_receipt_observed": "Memory request: user_requested_memory (job created then failed)",
+        "job_ref": "jobref_ed4ccd508bf458bb9f93cabe020274f6",
+        "failure_code": "invalid_memory_candidate",
+        "payload": {
+          "job": {
+            "job_ref": "jobref_ed4ccd508bf458bb9f93cabe020274f6",
+            "job_number": "003",
+            "user_id": "abuse-retest-20260905",
+            "project_id": "agent-col",
+            "action_kind": "propose_memory_signal",
+            "status": "failed",
+            "display_label": "Memory request: user_requested_memory",
+            "agent_label": "Memory Analyst",
+            "created_at": "2026-09-05T12:13:34.761250Z",
+            "updated_at": "2026-09-05T12:13:36.179992Z",
+            "attempt_count": 1,
+            "lease_expires_at": "2026-09-05T12:15:35.465165Z",
+            "failure_summary": {
+              "code": "invalid_memory_candidate",
+              "summary": "Memory proposal could not be created.",
+              "retryable": false
+            }
+          },
+          "report": {
+            "report_number": "003",
+            "job_ref": "jobref_ed4ccd508bf458bb9f93cabe020274f6",
+            "job_number": "003",
+            "action_kind": "propose_memory_signal",
+            "agent_label": "Memory Analyst",
+            "status": "failed",
+            "title": "Memory proposal not created",
+            "summary": "Memory proposal could not be created.",
+            "public_resource_label": null,
+            "created_at": "2026-09-05T12:13:36.179992Z"
+          }
+        },
+        "screenshot": "d3-dark-mode-memory-failed.png",
+        "issue_class": "product \u2014 not a soak failure"
+      },
+      {
+        "id": "D3c_nested_multi_preference_clarification",
+        "result": "FAIL_PRODUCT",
+        "prompt_source": "retest report: nested multi-preference (pancakes + concise); exact transcript fill string not separately archived",
+        "prompt_summary": "Nested multi-preference prompt requesting both pancakes preference and concise communication; chat queued Memory clarification; worker rejected",
+        "observed_display_label": "Memory clarification",
+        "queued_receipt_observed": "Memory clarification then failed",
+        "job_ref": "jobref_b8835dd6e9434bacf2fc55b5e7013764",
+        "failure_code": "invalid_memory_candidate",
+        "payload": {
+          "job": {
+            "job_ref": "jobref_b8835dd6e9434bacf2fc55b5e7013764",
+            "job_number": "004",
+            "user_id": "abuse-retest-20260905",
+            "project_id": "agent-col",
+            "action_kind": "propose_memory_signal",
+            "status": "failed",
+            "display_label": "Memory clarification",
+            "agent_label": "Memory Analyst",
+            "created_at": "2026-09-05T12:14:41.153515Z",
+            "updated_at": "2026-09-05T12:14:42.518918Z",
+            "attempt_count": 1,
+            "lease_expires_at": "2026-09-05T12:16:41.818103Z",
+            "failure_summary": {
+              "code": "invalid_memory_candidate",
+              "summary": "Memory proposal could not be created.",
+              "retryable": false
+            }
+          },
+          "report": {
+            "report_number": "004",
+            "job_ref": "jobref_b8835dd6e9434bacf2fc55b5e7013764",
+            "job_number": "004",
+            "action_kind": "propose_memory_signal",
+            "agent_label": "Memory Analyst",
+            "status": "failed",
+            "title": "Memory proposal not created",
+            "summary": "Memory proposal could not be created.",
+            "public_resource_label": null,
+            "created_at": "2026-09-05T12:14:42.518918Z"
+          }
+        },
+        "screenshot": "d3-nested-memory-clarification-failed.png",
+        "supporting_files": [
+          "d3-jobs-after-nested.json",
+          "d3-jobs.json",
+          "d3-reports.json"
+        ],
+        "issue_class": "product \u2014 not a soak failure"
+      }
+    ],
+    "later_conflict_residue_not_D3_validation": {
+      "note": "Subsequent Memory jobs failed memory_proposal_conflict because pending proposal from D3a remained unresolved; ownership still PASS in Tests 3/5",
+      "example_job_refs": [
+        "jobref_bdc36509a31869f17d99d0405328239d",
+        "jobref_15518b15c4369bb76d8460e9db8a3b77"
+      ]
+    }
+  },
+  "T11_residual_running_job_visible_during_soak_poll": {
+    "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+    "note": "Prior TEST 11 product defect (event_id conflict loop); observed as nonterminal during soak poll \u2014 not produced by soak submissions",
+    "payload": {
+      "job": {
+        "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+        "job_number": "005",
+        "user_id": "abuse-retest-20260905",
+        "project_id": "agent-col",
+        "action_kind": "create_artifact",
+        "status": "running",
+        "display_label": "Artifact: structured blueprint",
+        "agent_label": "Artifact Builder",
+        "created_at": "2026-09-05T12:20:05.852952Z",
+        "updated_at": "2026-09-05T12:38:27.241812Z",
+        "attempt_count": 1,
+        "lease_expires_at": "2026-09-05T12:40:27.241812Z",
+        "failure_summary": null
+      },
+      "report": null
+    }
+  },
+  "memory_snapshot_excerpt": {
+    "unresolved_proposals": [
+      {
+        "proposal_id": "user_requested_memory--3d8ea1932d11799284812064eea65729",
+        "category": "user_requested_memory",
+        "proposed_value": "Prefers concise bullet answers and short confirmations during abuse testing.",
+        "expected_signal_id": null,
+        "policy_version": "2.0",
+        "status": "pending",
+        "source_session_id": "session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+        "source_message_id": "turn--0eb557dac9ce99a784fd5a177c07567e809c27934cdca6cd9b332f64154bbd45--user",
+        "evidence_message_id": "turn--0eb557dac9ce99a784fd5a177c07567e809c27934cdca6cd9b332f64154bbd45--user",
+        "clarification_id": null,
+        "created_at": "2026-09-05T12:11:54.798000Z",
+        "expires_at": "2026-09-06T12:11:54.343417Z"
+      }
+    ],
+    "active_preferences": {}
+  }
+}

@@ -1,0 +1,1343 @@
+INFO:     Will watch for changes in these directories: ['/Users/wifiknight/col-workspace']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [5633] using StatReload
+INFO:     Started server process [5637]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+INFO:     127.0.0.1:52878 - "GET / HTTP/1.1" 200 OK
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:52885 - "GET /workspace HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52887 - "GET /static/agent-col/styles.css HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52888 - "GET /static/agent-col/app.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52888 - "GET /static/agent-col/api.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52887 - "GET /static/agent-col/auth-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52889 - "GET /static/agent-col/agents-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52892 - "GET /static/agent-col/chat-request-recovery.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52890 - "GET /static/agent-col/chats-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52891 - "GET /static/agent-col/chat-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52888 - "GET /static/agent-col/memory-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52891 - "GET /static/agent-col/work-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52889 - "GET /static/agent-col/notes-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52892 - "GET /static/agent-col/requests.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52887 - "GET /static/agent-col/workspace-view.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52890 - "GET /static/agent-col/workspace-indicator.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52889 - "GET /static/agent-col/state.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52888 - "GET /static/agent-col/workspace-layout.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52890 - "GET /static/agent-col/markdown-renderer.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52891 - "GET /static/agent-col/render.mjs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52891 - "GET /api/auth/config HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52896 - "GET /favicon.ico HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52896 - "GET /api/users/abuse-retest-20260905/workspaces?limit=20 HTTP/1.1" 200 OK
+/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/base_collection.py:317: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  return query.where(field_path, op_string, value)
+/Users/wifiknight/col-workspace/database.py:425: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("project_id", "==", project_id)
+INFO:     127.0.0.1:52899 - "GET /api/projects/agent-col/artifacts?limit=20&lifecycle_status=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52902 - "GET /api/users/abuse-retest-20260905/projects/agent-col/chat-sessions?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52896 - "GET /api/projects/agent-col/blueprints?limit=20 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52903 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50&session_id=session--5a3129bb-9933-4ecf-9f57-ea172ec02419 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52900 - "GET /api/users/abuse-retest-20260905/projects/agent-col/notes?limit=20&status_filter=active HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52901 - "GET /api/users/abuse-retest-20260905/memory HTTP/1.1" 200 OK
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+Artifact creation background job failed.
+Traceback (most recent call last):
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 566, in _log_background_failure
+    task.result()
+    ~~~~~~~~~~~^^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 314, in run_job
+    return await self._execute_leased_job(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+    )
+    ^
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 344, in _execute_leased_job
+    await self._append_event(
+    ...<4 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_col_artifact_executor.py", line 550, in _append_event
+    await self._agent_job_repository.append_event(
+    ...<8 lines>...
+    )
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 959, in append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+WARNING:  StatReload detected changes in 'tests/test_agent_job_repository.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [5637]
+INFO:     Started server process [6792]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_job_repository.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6792]
+INFO:     Started server process [6843]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_job_repository.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6843]
+INFO:     Started server process [6895]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+I0905 09:06:54.409085 4916760 fork_posix.cc:71] Other threads are currently calling into gRPC, skipping fork() handlers
+I0905 09:06:54.412989 4916777 ev_poll_posix.cc:593] FD from fork parent still in poll list: fd(17, generation: 1)
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+Direct use of automatic function calling (AFC) in AsyncModels.generate_content is not recommended. Instead, we recommend to use AFC in AsyncChat.send_message. Similarly, direct use of AFC in AsyncModels.generate_content_stream is not recommended. Instead, we recommend to use AFC in AsyncChat.send_message_stream.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6895]
+INFO:     Started server process [7312]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_memory_candidate_decisions.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7312]
+INFO:     Started server process [7370]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'memory_candidate_decisions.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7370]
+INFO:     Started server process [7438]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7438]
+INFO:     Started server process [7476]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7476]
+INFO:     Started server process [7595]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7595]
+INFO:     Started server process [7629]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7629]
+INFO:     Started server process [7662]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7662]
+INFO:     Started server process [7695]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7695]
+INFO:     Started server process [7765]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7765]
+INFO:     Started server process [7957]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7957]
+INFO:     Started server process [7992]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [7992]
+INFO:     Started server process [8036]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8036]
+INFO:     Started server process [8070]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8070]
+INFO:     Started server process [8103]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8103]
+INFO:     Started server process [8223]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8223]
+INFO:     Started server process [8269]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8269]
+INFO:     Started server process [8342]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8342]
+INFO:     Started server process [8376]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8376]
+INFO:     Started server process [8435]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8435]
+INFO:     Started server process [8666]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8666]
+INFO:     Started server process [8713]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8713]
+INFO:     Started server process [8852]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8852]
+INFO:     Started server process [8907]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8907]
+INFO:     Started server process [8943]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'tests/test_agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [8943]
+INFO:     Started server process [9259]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'agent_col_turn_service.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [9259]
+INFO:     Started server process [9311]
+INFO:     Waiting for application startup.
+/Users/wifiknight/col-workspace/agent_job_repository.py:330: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "running")
+/Users/wifiknight/col-workspace/agent_job_repository.py:331: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+/Users/wifiknight/col-workspace/agent_job_repository.py:332: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("lease_expires_at", "<=", observed_at)
+/Users/wifiknight/col-workspace/agent_job_repository.py:296: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("status", "==", "queued")
+/Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
+  .where("action_kind", "==", action_kind)
+INFO:     Application startup complete.

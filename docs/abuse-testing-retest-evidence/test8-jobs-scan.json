@@ -1,0 +1,24 @@
+{
+  "ts": "2026-09-05T12:25:09.826647+00:00",
+  "failed": [
+    {
+      "job_ref": "jobref_ed4ccd508bf458bb9f93cabe020274f6",
+      "label": "Memory request: user_requested_memory",
+      "code": "invalid_memory_candidate",
+      "retryable": false
+    },
+    {
+      "job_ref": "jobref_b8835dd6e9434bacf2fc55b5e7013764",
+      "label": "Memory clarification",
+      "code": "invalid_memory_candidate",
+      "retryable": false
+    },
+    {
+      "job_ref": "jobref_d08124f738049b3d66daffe94bb3c6d1",
+      "label": "Memory request: communication_style",
+      "code": "memory_proposal_conflict",
+      "retryable": false
+    }
+  ],
+  "any_retryable": false
+}

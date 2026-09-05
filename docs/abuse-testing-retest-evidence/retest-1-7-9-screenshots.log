@@ -1,0 +1,28 @@
+wrote retest-01-control-chat.png 307353
+wrote retest-02-artifact-while-chatting.png 307353
+wrote retest-07-terminal-job-report-consistency.png 307353
+wrote retest-03-memory-while-chatting.png 323379
+wrote retest-04-note-while-chatting.png 322393
+wrote retest-05-cross-surface-concurrency.png 322393
+wrote retest-06-resource-surfaces-after-refresh.png 354769
+wrote retest-09-session-switch-active-jobs.png 354769
+done {
+  url: 'http://127.0.0.1:8000/workspace',
+  agents: 'Agents 0 active · 0 queued ⌃',
+  bodyHead: 'Local development mode\n' +
+    '\n' +
+    'Agent Col | Agent Col\n' +
+    'New conversation\n' +
+    'Hide\n' +
+    'Refresh\n' +
+    'Workspace\n' +
+    'Artifacts\n' +
+    'Active\n' +
+    'Archived\n' +
+    'Retest Session Switch Artifact 09 · Accepted 0 · Rejected 0 · Edited 0\n' +
+    'Cross-Surface Concurrency Artifact Builder · Accepted 0 · Rejected 0 · Edited 0\n' +
+    'Collaborative workspace note proposal titled Abuse Retest Note 04. · Markdown document\n' +
+    'Async AgentJob Processing System · Accepted 0 · Rejected 0 · Edited 0\n' +
+    'Retest Harness Artifact 04 markdown document with submission proof bullets. · Ma',
+  hasEnter: true
+}

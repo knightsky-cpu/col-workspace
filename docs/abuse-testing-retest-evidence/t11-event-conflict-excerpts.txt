@@ -1,0 +1,139 @@
+count=8
+
+ append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51483 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?lim
+
+===== OCCURRENCE =====
+
+^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51483 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51380 - "GET /api/users/abuse-retest-20260905/projects/a
+
+===== OCCURRENCE =====
+
+ append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51519 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?lim
+
+===== OCCURRENCE =====
+
+^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51519 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50&session_id=session--3f7d5db0-da58-4003-a7d4-94a41ab1c823 HTTP/1.1" 200 OK
+INFO:     127.0.0.1
+
+===== OCCURRENCE =====
+
+ append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51608 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?lim
+
+===== OCCURRENCE =====
+
+^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51608 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50&session_id=session--3f7d5db0-da58-4003-a7d4-94a41ab1c823 HTTP/1.1" 200 OK
+INFO:     127.0.0.1
+
+===== OCCURRENCE =====
+
+ append_event
+    return await run_transaction(transaction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51670 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?lim
+
+===== OCCURRENCE =====
+
+^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 336, in __call__
+    result: T = await self._pre_commit(transaction, *args, **kwargs)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/venv/lib/python3.14/site-packages/google/cloud/firestore_v1/async_transaction.py", line 305, in _pre_commit
+    return await self.to_wrap(transaction, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/wifiknight/col-workspace/agent_job_repository.py", line 949, in append_in_transaction
+    raise AgentJobConflictError(
+        "AgentJobEvent conflicts with existing event_id."
+    )
+agent_job_repository.AgentJobConflictError: AgentJobEvent conflicts with existing event_id.
+INFO:     127.0.0.1:51670 - "GET /api/users/abuse-retest-20260905/projects/agent-col/agent/jobs?limit=50&session_id=session--3f7d5db0-da58-4003-a7d4-94a41ab1c823 HTTP/1.1" 200 OK
+INFO:     127.0.0.1

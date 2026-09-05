@@ -1,0 +1,47 @@
+{
+  "ts": "2026-09-05T12:28:06.417178+00:00",
+  "matrix": {
+    "1": "PASS",
+    "2": "PASS",
+    "3": "PASS",
+    "4": "PASS",
+    "5": "PASS",
+    "6": "PASS",
+    "7": "PASS",
+    "9": "PASS",
+    "12": "NOT EXECUTED"
+  },
+  "key_job_refs": {
+    "1": null,
+    "2": [
+      "jobref_1d39bb053068a07be5dece720ff7ff4a"
+    ],
+    "3": [
+      "jobref_bdc36509a31869f17d99d0405328239d"
+    ],
+    "4": [
+      "jobref_aa2688211599ec58bfbd30f9556d49a4"
+    ],
+    "5": [
+      "jobref_04baa4a27f8397622fb696854d6a725a",
+      "jobref_3cdd66db8182926176429b81035beb61",
+      "jobref_15518b15c4369bb76d8460e9db8a3b77"
+    ],
+    "6": null,
+    "7": [
+      "jobref_1d39bb053068a07be5dece720ff7ff4a",
+      "jobref_bdc36509a31869f17d99d0405328239d",
+      "jobref_8adc981b8aa5bdd528b9655946bb064a",
+      "jobref_aa2688211599ec58bfbd30f9556d49a4",
+      "jobref_04baa4a27f8397622fb696854d6a725a",
+      "jobref_3cdd66db8182926176429b81035beb61",
+      "jobref_15518b15c4369bb76d8460e9db8a3b77"
+    ],
+    "9": [
+      "jobref_f02ff226e7524857a5f69f2709912c9c"
+    ],
+    "12": null
+  },
+  "session_id": "session--a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "session_b": "session--b2c3d4e5-f6a7-8901-bcde-f12345678901"
+}

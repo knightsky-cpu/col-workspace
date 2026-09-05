@@ -1,0 +1,158 @@
+{
+  "artifact_contract_version": "1.0",
+  "artifacts": [
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "FbfESDeNnTCAsFCbVOvo",
+        "schema_version": "2.0",
+        "display_label": "AgentJob Queuing and Artifact Generator"
+      },
+      "created_at": "2026-09-05T12:10:09.670000Z",
+      "originating_session_id": "session--3f7d5db0-da58-4003-a7d4-94a41ab1c823",
+      "originating_turn_id": null,
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 0,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    },
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "CGCpIOlwwQ5XHQ4vgbTu",
+        "schema_version": "2.0",
+        "display_label": "AgentJobs Session Association Architecture"
+      },
+      "created_at": "2026-09-05T10:05:37.457000Z",
+      "originating_session_id": "session--cede757d-3991-4b3a-8c5c-e918036b0544",
+      "originating_turn_id": null,
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 0,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    },
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "RovWAgnoc2wksHvTHBJD",
+        "schema_version": "2.0",
+        "display_label": "Asynchronous Agent Jobs Framework"
+      },
+      "created_at": "2026-09-05T09:27:18.617000Z",
+      "originating_session_id": "session--f0c41a04-8f51-46f7-9e8f-7fd5eef7a809",
+      "originating_turn_id": null,
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 0,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    },
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "blueprint--4d35e4a01c1be6a45404ee9638eda09f62e546ab007d88d0171a85d788098247",
+        "schema_version": "2.0",
+        "display_label": "FocusPulse Pomodoro Timer"
+      },
+      "created_at": "2026-08-24T10:59:23.191000Z",
+      "originating_session_id": "session--420993b5-0772-40d9-8eb2-247ac5aa40fd",
+      "originating_turn_id": "4d35e4a01c1be6a45404ee9638eda09f62e546ab007d88d0171a85d788098247",
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 0,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    },
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "blueprint--b28d78b555a02709a71dcd09668fe93cc7b805424d4162bdaf6150b0a1fa651b",
+        "schema_version": "2.0",
+        "display_label": "Adaptive Study Workflow Engine"
+      },
+      "created_at": "2026-08-24T08:43:29.943000Z",
+      "originating_session_id": "session--40e25bf0-ae4a-4284-a353-248b173ffe1d",
+      "originating_turn_id": "b28d78b555a02709a71dcd09668fe93cc7b805424d4162bdaf6150b0a1fa651b",
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 0,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    },
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "blueprint--4677de7718acf97030d5e4da1dfb45a2267dc2dc12dda386f17623216c445506",
+        "schema_version": "2.0",
+        "display_label": "Adaptive Study Workflow Engine"
+      },
+      "created_at": "2026-08-24T01:17:32.199000Z",
+      "originating_session_id": "session--d0297ca7-e090-44e4-a48b-38afd181490f",
+      "originating_turn_id": "4677de7718acf97030d5e4da1dfb45a2267dc2dc12dda386f17623216c445506",
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 0,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    },
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "blueprint--a3e264654eaef23e4802523df13b05e815233e38a8b52520930aa5f3e1589d4c",
+        "schema_version": "2.0",
+        "display_label": "Cross-Session Collaborative Study Workflow"
+      },
+      "created_at": "2026-08-23T16:46:20.734000Z",
+      "originating_session_id": "m8-col-4c-manual-20260823-01",
+      "originating_turn_id": "a3e264654eaef23e4802523df13b05e815233e38a8b52520930aa5f3e1589d4c",
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 1,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    },
+    {
+      "reference": {
+        "artifact_type": "synthesis_blueprint",
+        "project_id": "agent-col",
+        "artifact_id": "qFVHsfuzmOQuOkwlWXy8",
+        "schema_version": "2.0",
+        "display_label": "Trustworthy Collaborative Learning Engine"
+      },
+      "created_at": "2026-08-23T14:30:39.554000Z",
+      "originating_session_id": "m8-col-2-manual-20260823-01",
+      "originating_turn_id": null,
+      "parent_artifact_id": null,
+      "feedback_counts": {
+        "accepted": 0,
+        "rejected": 0,
+        "edited": 0
+      },
+      "adaptation_categories": []
+    }
+  ],
+  "next_before": null
+}

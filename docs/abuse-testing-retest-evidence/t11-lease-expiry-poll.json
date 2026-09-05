@@ -1,0 +1,722 @@
+[
+  {
+    "ts": "2026-09-05T12:22:17.297780+00:00",
+    "elapsed": 0.1,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:19.377447+00:00",
+    "elapsed": 2.2,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:21.467902+00:00",
+    "elapsed": 4.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:23.551945+00:00",
+    "elapsed": 6.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:25.631134+00:00",
+    "elapsed": 8.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:27.723669+00:00",
+    "elapsed": 10.5,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:29.804009+00:00",
+    "elapsed": 12.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:31.889362+00:00",
+    "elapsed": 14.7,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:33.971414+00:00",
+    "elapsed": 16.8,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:36.050747+00:00",
+    "elapsed": 18.8,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:38.139864+00:00",
+    "elapsed": 20.9,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:40.222131+00:00",
+    "elapsed": 23.0,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:42.318695+00:00",
+    "elapsed": 25.1,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:44.410253+00:00",
+    "elapsed": 27.2,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:46.483900+00:00",
+    "elapsed": 29.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:48.590906+00:00",
+    "elapsed": 31.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:50.684427+00:00",
+    "elapsed": 33.5,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:52.771095+00:00",
+    "elapsed": 35.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:54.853890+00:00",
+    "elapsed": 37.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:56.939770+00:00",
+    "elapsed": 39.7,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:22:59.042213+00:00",
+    "elapsed": 41.8,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:01.125252+00:00",
+    "elapsed": 43.9,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:03.206260+00:00",
+    "elapsed": 46.0,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:05.287746+00:00",
+    "elapsed": 48.1,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:07.393785+00:00",
+    "elapsed": 50.2,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:09.500711+00:00",
+    "elapsed": 52.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:11.578198+00:00",
+    "elapsed": 54.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:13.658637+00:00",
+    "elapsed": 56.5,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:15.763343+00:00",
+    "elapsed": 58.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:17.848293+00:00",
+    "elapsed": 60.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:19.927951+00:00",
+    "elapsed": 62.7,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:22.005335+00:00",
+    "elapsed": 64.8,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:24.100101+00:00",
+    "elapsed": 66.9,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:26.195558+00:00",
+    "elapsed": 69.0,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:28.286239+00:00",
+    "elapsed": 71.1,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:30.365505+00:00",
+    "elapsed": 73.2,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:32.461224+00:00",
+    "elapsed": 75.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:34.558183+00:00",
+    "elapsed": 77.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:36.640813+00:00",
+    "elapsed": 79.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:38.736680+00:00",
+    "elapsed": 81.5,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:40.820897+00:00",
+    "elapsed": 83.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:42.900361+00:00",
+    "elapsed": 85.7,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:44.987705+00:00",
+    "elapsed": 87.8,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:47.066612+00:00",
+    "elapsed": 89.9,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:49.160240+00:00",
+    "elapsed": 92.0,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:51.243163+00:00",
+    "elapsed": 94.0,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:53.322722+00:00",
+    "elapsed": 96.1,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:55.404206+00:00",
+    "elapsed": 98.2,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:57.500615+00:00",
+    "elapsed": 100.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:23:59.581135+00:00",
+    "elapsed": 102.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:01.670391+00:00",
+    "elapsed": 104.5,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:03.761360+00:00",
+    "elapsed": 106.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:05.850208+00:00",
+    "elapsed": 108.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:07.947330+00:00",
+    "elapsed": 110.7,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:10.030557+00:00",
+    "elapsed": 112.8,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:12.114879+00:00",
+    "elapsed": 114.9,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:14.203639+00:00",
+    "elapsed": 117.0,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:16.301397+00:00",
+    "elapsed": 119.1,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:24:16.095166Z",
+    "updated_at": "2026-09-05T12:22:16.095166Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:18.395815+00:00",
+    "elapsed": 121.2,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:20.480498+00:00",
+    "elapsed": 123.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:22.567105+00:00",
+    "elapsed": 125.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:24.645344+00:00",
+    "elapsed": 127.4,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:26.724946+00:00",
+    "elapsed": 129.5,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:28.806409+00:00",
+    "elapsed": 131.6,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:30.888725+00:00",
+    "elapsed": 133.7,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:32.973078+00:00",
+    "elapsed": 135.8,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:35.065975+00:00",
+    "elapsed": 137.9,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:37.140079+00:00",
+    "elapsed": 139.9,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:39.223631+00:00",
+    "elapsed": 142.0,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:41.310982+00:00",
+    "elapsed": 144.1,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:43.388661+00:00",
+    "elapsed": 146.2,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  },
+  {
+    "ts": "2026-09-05T12:24:45.477824+00:00",
+    "elapsed": 148.3,
+    "status": "running",
+    "attempt_count": 1,
+    "lease_expires_at": "2026-09-05T12:26:17.460120Z",
+    "updated_at": "2026-09-05T12:24:17.460120Z",
+    "failure_summary": null,
+    "display_label": "Artifact: structured blueprint"
+  }
+]

@@ -1,0 +1,2928 @@
+[
+  {
+    "ts": "2026-09-05T12:20:15.287654+00:00",
+    "elapsed": 0.09,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:15.888584+00:00",
+    "elapsed": 0.69,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:16.487937+00:00",
+    "elapsed": 1.29,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:17.079741+00:00",
+    "elapsed": 1.88,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:17.686918+00:00",
+    "elapsed": 2.49,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:18.290026+00:00",
+    "elapsed": 3.09,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:18.878845+00:00",
+    "elapsed": 3.68,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:19.471688+00:00",
+    "elapsed": 4.28,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:20.085205+00:00",
+    "elapsed": 4.89,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:20.682088+00:00",
+    "elapsed": 5.49,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:21.287781+00:00",
+    "elapsed": 6.09,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:21.890837+00:00",
+    "elapsed": 6.7,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:22.477806+00:00",
+    "elapsed": 7.28,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:23.145180+00:00",
+    "elapsed": 7.95,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:23.735713+00:00",
+    "elapsed": 8.54,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:24.321979+00:00",
+    "elapsed": 9.13,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:24.930421+00:00",
+    "elapsed": 9.74,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:25.522991+00:00",
+    "elapsed": 10.33,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:26.111428+00:00",
+    "elapsed": 10.92,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:26.706310+00:00",
+    "elapsed": 11.51,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:27.291912+00:00",
+    "elapsed": 12.1,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:27.882947+00:00",
+    "elapsed": 12.69,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:28.467472+00:00",
+    "elapsed": 13.27,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:29.073377+00:00",
+    "elapsed": 13.88,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:29.670040+00:00",
+    "elapsed": 14.47,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:30.275216+00:00",
+    "elapsed": 15.08,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:30.862132+00:00",
+    "elapsed": 15.67,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:31.441283+00:00",
+    "elapsed": 16.25,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:32.020414+00:00",
+    "elapsed": 16.83,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:32.601365+00:00",
+    "elapsed": 17.41,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:33.183005+00:00",
+    "elapsed": 17.99,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:33.767701+00:00",
+    "elapsed": 18.57,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:34.344377+00:00",
+    "elapsed": 19.15,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:34.925387+00:00",
+    "elapsed": 19.73,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:35.505075+00:00",
+    "elapsed": 20.31,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:36.086680+00:00",
+    "elapsed": 20.89,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:36.683715+00:00",
+    "elapsed": 21.49,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:37.266855+00:00",
+    "elapsed": 22.07,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:37.861598+00:00",
+    "elapsed": 22.67,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:38.441873+00:00",
+    "elapsed": 23.25,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:39.026926+00:00",
+    "elapsed": 23.83,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:39.615451+00:00",
+    "elapsed": 24.42,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:40.192975+00:00",
+    "elapsed": 25.0,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:40.771474+00:00",
+    "elapsed": 25.58,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:41.353067+00:00",
+    "elapsed": 26.16,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:41.936334+00:00",
+    "elapsed": 26.74,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:42.523104+00:00",
+    "elapsed": 27.33,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:43.100099+00:00",
+    "elapsed": 27.9,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:43.684256+00:00",
+    "elapsed": 28.49,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:44.266788+00:00",
+    "elapsed": 29.07,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:44.844230+00:00",
+    "elapsed": 29.65,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:45.424199+00:00",
+    "elapsed": 30.23,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:46.004449+00:00",
+    "elapsed": 30.81,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:46.580822+00:00",
+    "elapsed": 31.39,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:47.160938+00:00",
+    "elapsed": 31.97,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:47.766687+00:00",
+    "elapsed": 32.57,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:48.342562+00:00",
+    "elapsed": 33.15,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:48.928530+00:00",
+    "elapsed": 33.73,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:49.517684+00:00",
+    "elapsed": 34.32,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:50.106416+00:00",
+    "elapsed": 34.91,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:50.700218+00:00",
+    "elapsed": 35.5,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:51.279475+00:00",
+    "elapsed": 36.08,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:51.864203+00:00",
+    "elapsed": 36.67,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:52.444726+00:00",
+    "elapsed": 37.25,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:53.032041+00:00",
+    "elapsed": 37.84,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:53.616356+00:00",
+    "elapsed": 38.42,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:54.194815+00:00",
+    "elapsed": 39.0,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:54.774963+00:00",
+    "elapsed": 39.58,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:55.355726+00:00",
+    "elapsed": 40.16,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:55.939510+00:00",
+    "elapsed": 40.74,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:56.523105+00:00",
+    "elapsed": 41.33,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:57.110315+00:00",
+    "elapsed": 41.91,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:57.697179+00:00",
+    "elapsed": 42.5,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:58.288249+00:00",
+    "elapsed": 43.09,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:58.868560+00:00",
+    "elapsed": 43.67,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:20:59.451536+00:00",
+    "elapsed": 44.26,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:00.027455+00:00",
+    "elapsed": 44.83,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:00.607858+00:00",
+    "elapsed": 45.41,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:01.189406+00:00",
+    "elapsed": 45.99,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:01.789271+00:00",
+    "elapsed": 46.59,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:02.369948+00:00",
+    "elapsed": 47.17,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:02.951151+00:00",
+    "elapsed": 47.76,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:03.532893+00:00",
+    "elapsed": 48.34,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:04.122494+00:00",
+    "elapsed": 48.93,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:04.702021+00:00",
+    "elapsed": 49.51,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:05.276853+00:00",
+    "elapsed": 50.08,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:05.856443+00:00",
+    "elapsed": 50.66,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:06.434543+00:00",
+    "elapsed": 51.24,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:07.031175+00:00",
+    "elapsed": 51.84,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:07.646670+00:00",
+    "elapsed": 52.45,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:08.230529+00:00",
+    "elapsed": 53.04,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:08.812115+00:00",
+    "elapsed": 53.62,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:09.402366+00:00",
+    "elapsed": 54.21,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:09.985115+00:00",
+    "elapsed": 54.79,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:10.559438+00:00",
+    "elapsed": 55.36,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:11.139405+00:00",
+    "elapsed": 55.94,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:11.717808+00:00",
+    "elapsed": 56.52,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:12.300933+00:00",
+    "elapsed": 57.11,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:12.886269+00:00",
+    "elapsed": 57.69,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:13.489986+00:00",
+    "elapsed": 58.29,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:14.077349+00:00",
+    "elapsed": 58.88,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:14.660632+00:00",
+    "elapsed": 59.47,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:15.242094+00:00",
+    "elapsed": 60.05,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:15.831197+00:00",
+    "elapsed": 60.64,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:16.416281+00:00",
+    "elapsed": 61.22,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:16.994757+00:00",
+    "elapsed": 61.8,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:17.578179+00:00",
+    "elapsed": 62.38,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:18.158833+00:00",
+    "elapsed": 62.96,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:18.737301+00:00",
+    "elapsed": 63.54,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:19.315634+00:00",
+    "elapsed": 64.12,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:19.898028+00:00",
+    "elapsed": 64.7,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:20.493515+00:00",
+    "elapsed": 65.3,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:21.075152+00:00",
+    "elapsed": 65.88,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:21.661667+00:00",
+    "elapsed": 66.47,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:22.247208+00:00",
+    "elapsed": 67.05,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:22.826399+00:00",
+    "elapsed": 67.63,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:23.403486+00:00",
+    "elapsed": 68.21,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:23.984131+00:00",
+    "elapsed": 68.79,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:24.574238+00:00",
+    "elapsed": 69.38,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:25.155233+00:00",
+    "elapsed": 69.96,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:25.735841+00:00",
+    "elapsed": 70.54,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:26.322192+00:00",
+    "elapsed": 71.13,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:26.905918+00:00",
+    "elapsed": 71.71,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:27.486549+00:00",
+    "elapsed": 72.29,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:28.068187+00:00",
+    "elapsed": 72.87,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:28.647224+00:00",
+    "elapsed": 73.45,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:29.227689+00:00",
+    "elapsed": 74.03,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:29.805206+00:00",
+    "elapsed": 74.61,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:30.387622+00:00",
+    "elapsed": 75.19,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:30.986590+00:00",
+    "elapsed": 75.79,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:31.572815+00:00",
+    "elapsed": 76.38,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:32.148842+00:00",
+    "elapsed": 76.95,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:32.730037+00:00",
+    "elapsed": 77.53,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:33.311775+00:00",
+    "elapsed": 78.12,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:33.889574+00:00",
+    "elapsed": 78.69,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:34.470239+00:00",
+    "elapsed": 79.27,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:35.056313+00:00",
+    "elapsed": 79.86,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:35.640051+00:00",
+    "elapsed": 80.44,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:36.219889+00:00",
+    "elapsed": 81.02,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:36.808822+00:00",
+    "elapsed": 81.61,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:37.394562+00:00",
+    "elapsed": 82.2,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:37.990003+00:00",
+    "elapsed": 82.79,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:38.576306+00:00",
+    "elapsed": 83.38,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:39.154277+00:00",
+    "elapsed": 83.96,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:39.733929+00:00",
+    "elapsed": 84.54,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:40.312477+00:00",
+    "elapsed": 85.12,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:40.901019+00:00",
+    "elapsed": 85.71,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:41.497711+00:00",
+    "elapsed": 86.3,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:42.084600+00:00",
+    "elapsed": 86.89,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:42.673402+00:00",
+    "elapsed": 87.48,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:43.257171+00:00",
+    "elapsed": 88.06,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:43.845656+00:00",
+    "elapsed": 88.65,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:44.451807+00:00",
+    "elapsed": 89.26,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  },
+  {
+    "ts": "2026-09-05T12:21:45.029976+00:00",
+    "elapsed": 89.83,
+    "job": {
+      "job_ref": "jobref_d20bcc1ad72cf7fc4f30eee80a8d6e10",
+      "job_number": "005",
+      "user_id": "abuse-retest-20260905",
+      "project_id": "agent-col",
+      "action_kind": "create_artifact",
+      "status": "running",
+      "display_label": "Artifact: structured blueprint",
+      "agent_label": "Artifact Builder",
+      "created_at": "2026-09-05T12:20:05.852952Z",
+      "updated_at": "2026-09-05T12:20:06.598218Z",
+      "attempt_count": 1,
+      "lease_expires_at": "2026-09-05T12:22:06.598218Z",
+      "failure_summary": null
+    }
+  }
+]

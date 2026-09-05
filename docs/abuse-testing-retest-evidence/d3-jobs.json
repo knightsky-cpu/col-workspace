@@ -1,0 +1,35 @@
+{
+    "agent_job_contract_version": "1.0",
+    "jobs": [
+        {
+            "job_ref": "jobref_b2ecd2626f1295af2da3a35cc4ec5130",
+            "job_number": "001",
+            "user_id": "abuse-retest-20260905",
+            "project_id": "agent-col",
+            "action_kind": "create_artifact",
+            "status": "completed",
+            "display_label": "Artifact: structured blueprint",
+            "agent_label": "Artifact Builder",
+            "created_at": "2026-09-05T12:09:53.740057Z",
+            "updated_at": "2026-09-05T12:10:09.623085Z",
+            "attempt_count": 1,
+            "lease_expires_at": "2026-09-05T12:11:54.478242Z",
+            "failure_summary": null
+        },
+        {
+            "job_ref": "jobref_1b2ca23e8e52b3fd89d4d196d9ef5145",
+            "job_number": "002",
+            "user_id": "abuse-retest-20260905",
+            "project_id": "agent-col",
+            "action_kind": "propose_memory_signal",
+            "status": "completed",
+            "display_label": "Memory request: communication_style",
+            "agent_label": "Memory Analyst",
+            "created_at": "2026-09-05T12:11:52.898924Z",
+            "updated_at": "2026-09-05T12:11:54.750019Z",
+            "attempt_count": 1,
+            "lease_expires_at": "2026-09-05T12:13:53.634681Z",
+            "failure_summary": null
+        }
+    ]
+}
