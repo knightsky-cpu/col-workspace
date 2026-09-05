@@ -3354,3 +3354,37 @@ Still deferred:
 - permanent poison-dispatch starvation/backoff hardening;
 - broader worker shutdown hygiene;
 - terminal report/event consistency cleanup.
+
+## AgentJob Worker Shutdown Hygiene
+
+This pass closes the verified AgentJob worker task ownership gap in FastAPI
+lifespan shutdown without changing retry, recovery, lease, heartbeat, or
+terminal job/report behavior.
+
+Fixed:
+
+- `note_job_background_tasks` is now stored on `app.state` like Memory and
+  Artifact worker task sets;
+- shutdown cancels and gathers the queued-job runtime drainer before
+  snapshotting worker task sets, preventing the drainer from creating a worker
+  task after the snapshots are taken;
+- shutdown snapshots Memory, Note, and Artifact worker task sets only after the
+  drainer is fully stopped;
+- shutdown cancels and gathers Memory, Note, and Artifact worker tasks
+  consistently;
+- the worker done-callback behavior is unchanged, and worker cancellation still
+  unwinds `AgentJobLeaseHeartbeat` through each worker's existing `async with`
+  boundary.
+
+Preserved:
+
+- retry dispatch and payload semantics;
+- queued and expired-running recovery behavior;
+- AgentJob lease renewal and heartbeat fencing;
+- terminal job/event/report behavior.
+
+Still deferred:
+
+- terminal job/event/report consistency cleanup;
+- working-state durability boundary decision;
+- permanent poison-dispatch starvation/backoff hardening.

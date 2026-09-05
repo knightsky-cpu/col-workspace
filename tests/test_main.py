@@ -2006,6 +2006,8 @@ class ServiceState:
     note_job_dispatches: list[AgentJob]
     artifact_job_dispatches: list[AgentJob]
     agent_job_dispatch_errors: dict[str, Exception]
+    agent_job_worker_hold_actions: set[str]
+    agent_job_worker_task_events: list[tuple[str, str]]
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
     research_vertex_settings: list[VertexAISettings]
@@ -2263,6 +2265,8 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     note_job_dispatches: list[AgentJob] = []
     artifact_job_dispatches: list[AgentJob] = []
     agent_job_dispatch_errors: dict[str, Exception] = {}
+    agent_job_worker_hold_actions: set[str] = set()
+    agent_job_worker_task_events: list[tuple[str, str]] = []
     genai_client_kwargs: list[dict[str, object]] = []
     responder_vertex_settings: list[VertexAISettings] = []
     research_vertex_settings: list[VertexAISettings] = []
@@ -2315,6 +2319,8 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         note_job_dispatches=note_job_dispatches,
         artifact_job_dispatches=artifact_job_dispatches,
         agent_job_dispatch_errors=agent_job_dispatch_errors,
+        agent_job_worker_hold_actions=agent_job_worker_hold_actions,
+        agent_job_worker_task_events=agent_job_worker_task_events,
         genai_client_kwargs=genai_client_kwargs,
         responder_vertex_settings=responder_vertex_settings,
         research_vertex_settings=research_vertex_settings,
@@ -2638,6 +2644,45 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         raising=False,
     )
 
+    def dispatch_fake_worker_task(
+        *,
+        action_kind: str,
+        task_set: set[asyncio.Task[AgentJob | None]] | None,
+    ) -> None:
+        if action_kind not in state.agent_job_worker_hold_actions:
+            return
+
+        state.agent_job_worker_task_events.append((action_kind, "created"))
+
+        async def run_until_cancelled() -> AgentJob | None:
+            state.agent_job_worker_task_events.append(
+                (action_kind, "started")
+            )
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                state.agent_job_worker_task_events.append(
+                    (action_kind, "cancelled")
+                )
+                raise
+            finally:
+                state.agent_job_worker_task_events.append(
+                    (action_kind, "finished")
+                )
+
+        task = asyncio.create_task(run_until_cancelled())
+        task.add_done_callback(
+            lambda completed: state.agent_job_worker_task_events.append(
+                (
+                    action_kind,
+                    "done_cancelled" if completed.cancelled() else "done",
+                )
+            )
+        )
+        if task_set is not None:
+            task_set.add(task)
+            task.add_done_callback(task_set.discard)
+
     class FakeArtifactJobWorker:
         def __init__(self, **kwargs: object) -> None:
             pass
@@ -2652,6 +2697,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             if error is not None:
                 raise error
             state.artifact_job_dispatches.append(job)
+            dispatch_fake_worker_task(
+                action_kind="create_artifact",
+                task_set=task_set,
+            )
 
     class FakeMemoryJobWorker:
         def __init__(self, **kwargs: object) -> None:
@@ -2669,6 +2718,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             if error is not None:
                 raise error
             state.memory_job_dispatches.append(job)
+            dispatch_fake_worker_task(
+                action_kind="propose_memory_signal",
+                task_set=task_set,
+            )
 
     class FakeNoteJobWorker:
         def __init__(self, **kwargs: object) -> None:
@@ -2686,6 +2739,10 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             if error is not None:
                 raise error
             state.note_job_dispatches.append(job)
+            dispatch_fake_worker_task(
+                action_kind="propose_collaborative_note",
+                task_set=task_set,
+            )
 
     monkeypatch.setattr(
         main,
@@ -6708,6 +6765,116 @@ async def test_lifespan_owns_queued_job_runtime_drain_task(
         assert not task.done()
 
     assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_cancels_and_gathers_note_worker_tasks(
+    service_state: ServiceState,
+) -> None:
+    note_job = make_agent_job(
+        job_id="note-job-1",
+        action_kind="propose_collaborative_note",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [note_job]
+    service_state.agent_job_worker_hold_actions.add(
+        "propose_collaborative_note"
+    )
+
+    async with main.lifespan(main.app):
+        await asyncio.sleep(0)
+
+    assert (
+        "propose_collaborative_note",
+        "done_cancelled",
+    ) in service_state.agent_job_worker_task_events
+    assert main.app.state.note_job_background_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_still_cleans_memory_and_artifact_worker_tasks(
+    service_state: ServiceState,
+) -> None:
+    memory_job = make_agent_job(
+        job_id="memory-job-1",
+        action_kind="propose_memory_signal",
+        status="queued",
+    )
+    artifact_job = make_agent_job(
+        job_id="artifact-job-1",
+        action_kind="create_artifact",
+        status="queued",
+    )
+    service_state.agent_job_repository.queued_jobs = [memory_job, artifact_job]
+    service_state.agent_job_worker_hold_actions.update(
+        {"propose_memory_signal", "create_artifact"}
+    )
+
+    async with main.lifespan(main.app):
+        await asyncio.sleep(0)
+
+    assert (
+        "propose_memory_signal",
+        "done_cancelled",
+    ) in service_state.agent_job_worker_task_events
+    assert (
+        "create_artifact",
+        "done_cancelled",
+    ) in service_state.agent_job_worker_task_events
+    assert main.app.state.memory_job_background_tasks == set()
+    assert main.app.state.artifact_job_background_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_lifespan_stops_drainer_before_worker_task_snapshots(
+    monkeypatch: pytest.MonkeyPatch,
+    service_state: ServiceState,
+) -> None:
+    service_state.agent_job_worker_hold_actions.add("propose_memory_signal")
+
+    async def dispatch_during_drainer_cancellation(
+        *,
+        repository: object,
+        app_state: object,
+        interval_seconds: float = main.AGENT_JOB_RUNTIME_DRAIN_INTERVAL_SECONDS,
+        limit: int = main.AGENT_JOB_STARTUP_DRAIN_LIMIT,
+    ) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            main._dispatch_queued_agent_job(
+                app_state,
+                make_agent_job(
+                    job_id="memory-job-drainer-cancel",
+                    action_kind="propose_memory_signal",
+                    status="queued",
+                ),
+                log_context="shutdown test",
+            )
+            raise
+
+    monkeypatch.setattr(
+        main,
+        "_run_queued_agent_job_drain_loop",
+        dispatch_during_drainer_cancellation,
+    )
+
+    async with main.lifespan(main.app):
+        await asyncio.sleep(0)
+
+    events_after_shutdown = list(service_state.agent_job_worker_task_events)
+    remaining_tasks = tuple(main.app.state.memory_job_background_tasks)
+    try:
+        assert (
+            "propose_memory_signal",
+            "done_cancelled",
+        ) in events_after_shutdown
+        assert remaining_tasks == ()
+    finally:
+        for task in remaining_tasks:
+            task.cancel()
+        if remaining_tasks:
+            await asyncio.gather(*remaining_tasks, return_exceptions=True)
 
 
 @pytest.mark.asyncio

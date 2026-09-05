@@ -2317,6 +2317,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.memory_job_background_tasks = memory_job_background_tasks
     app.state.memory_queue = memory_queue
     app.state.collaborative_note_service = collaborative_note_service
+    app.state.note_job_background_tasks = note_job_background_tasks
     app.state.continuity_service = continuity_service
     app.state.working_state_service = working_state_service
     app.state.preference_learning_service = preference_learning_service
@@ -2352,41 +2353,50 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "queued_agent_job_drain_task",
             None,
         )
-        working_state_background_tasks = tuple(
-            getattr(app.state, "working_state_background_tasks", set())
-        )
-        artifact_job_background_tasks = tuple(
-            getattr(app.state, "artifact_job_background_tasks", set())
-        )
-        memory_job_background_tasks = tuple(
-            getattr(app.state, "memory_job_background_tasks", set())
-        )
-        for task in working_state_background_tasks:
-            task.cancel()
-        for task in artifact_job_background_tasks:
-            task.cancel()
-        for task in memory_job_background_tasks:
-            task.cancel()
         if queued_agent_job_drain_task is not None:
             queued_agent_job_drain_task.cancel()
-        if working_state_background_tasks:
-            await asyncio.gather(
-                *working_state_background_tasks,
-                return_exceptions=True,
-            )
-        if artifact_job_background_tasks:
-            await asyncio.gather(
-                *artifact_job_background_tasks,
-                return_exceptions=True,
-            )
-        if memory_job_background_tasks:
-            await asyncio.gather(
-                *memory_job_background_tasks,
-                return_exceptions=True,
-            )
-        if queued_agent_job_drain_task is not None:
             await asyncio.gather(
                 queued_agent_job_drain_task,
+                return_exceptions=True,
+            )
+        working_state_background_task_snapshot = tuple(
+            getattr(app.state, "working_state_background_tasks", set())
+        )
+        artifact_job_background_task_snapshot = tuple(
+            getattr(app.state, "artifact_job_background_tasks", set())
+        )
+        memory_job_background_task_snapshot = tuple(
+            getattr(app.state, "memory_job_background_tasks", set())
+        )
+        note_job_background_task_snapshot = tuple(
+            getattr(app.state, "note_job_background_tasks", set())
+        )
+        for task in working_state_background_task_snapshot:
+            task.cancel()
+        for task in artifact_job_background_task_snapshot:
+            task.cancel()
+        for task in memory_job_background_task_snapshot:
+            task.cancel()
+        for task in note_job_background_task_snapshot:
+            task.cancel()
+        if working_state_background_task_snapshot:
+            await asyncio.gather(
+                *working_state_background_task_snapshot,
+                return_exceptions=True,
+            )
+        if artifact_job_background_task_snapshot:
+            await asyncio.gather(
+                *artifact_job_background_task_snapshot,
+                return_exceptions=True,
+            )
+        if memory_job_background_task_snapshot:
+            await asyncio.gather(
+                *memory_job_background_task_snapshot,
+                return_exceptions=True,
+            )
+        if note_job_background_task_snapshot:
+            await asyncio.gather(
+                *note_job_background_task_snapshot,
                 return_exceptions=True,
             )
         try:
