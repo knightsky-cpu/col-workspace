@@ -199,19 +199,7 @@ def test_versioned_proposal_origin_reader_fails_closed(
         parse_proposal_origin(document)
 
 
-@pytest.mark.parametrize(
-    ("turn_id", "owner_token"),
-    (
-        ("not-a-digest", "owner-1"),
-        ("a" * 64, ""),
-        ("a" * 64, "owner token"),
-    ),
-)
-def test_proposal_turn_lease_rejects_invalid_metadata(
-    turn_id: str,
-    owner_token: str,
-) -> None:
-    from memory_proposals import ProposalTurnLease
+def test_memory_proposals_no_longer_exports_proposal_turn_lease() -> None:
+    import memory_proposals
 
-    with pytest.raises(ValueError):
-        ProposalTurnLease(turn_id=turn_id, owner_token=owner_token)
+    assert not hasattr(memory_proposals, "ProposalTurnLease")

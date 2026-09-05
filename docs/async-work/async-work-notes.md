@@ -3129,3 +3129,36 @@ Historical artifact readers/assertions are compatibility requirements, not
 pending writer deletions. AgentJob retry/recovery/drainer work, Note shutdown
 hygiene, frontend behavior, and Memory/Note behavior remain intentionally out of
 scope.
+
+## ProposalTurnLease Symbol Hygiene And Decoupling Closure
+
+This tiny cleanup removes the final unused `ProposalTurnLease` production symbol
+after live orchestration, Memory/Note command plumbing, Memory/Note database
+effect writers, preference-confirmation lease handling, artifact synchronous
+execution, and artifact-feedback chat-owned execution were retired.
+
+Removed:
+
+- the unused `ProposalTurnLease` dataclass from `memory_proposals.py`;
+- the private turn-id regex used only by that dead dataclass;
+- the dedicated test that only validated `ProposalTurnLease` metadata.
+
+Preserved:
+
+- `ChatTurnClaim.owner_token`;
+- chat claim/renew/release/complete/replay behavior;
+- historical `ChatTurnRequest` structured metadata and `precompleted_*` fields;
+- historical effect readers, validators, replay, reclaim, and completion
+  preservation;
+- active direct resource APIs and active AgentJob queue/worker paths;
+- frontend compatibility checks for retired structured chat resource inputs.
+
+Source audit now finds no production `ProposalTurnLease` usage, no
+resource-side `turn_lease` capability, no resource-owned `record_chat_turn_*`
+writers, no live structured `/api/chat` resource execution path, and no
+synchronous chat-owned artifact or feedback executor path. The resource/chat
+ownership decoupling cleanup boundary is closed. Remaining async work is
+recovery/reliability work: AgentJob payload-preserving retry, retry dispatch,
+startup/runtime draining, expired running-lease recovery, shutdown hygiene,
+terminal event/report consistency, hidden working-state durability, stale
+frontend compatibility cleanup, and stale documentation cleanup.

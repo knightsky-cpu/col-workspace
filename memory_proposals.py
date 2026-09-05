@@ -17,7 +17,6 @@ from memory_policy import (
 PROPOSAL_ORIGIN_SCHEMA_VERSION = "1.0"
 PROPOSAL_ORIGIN_SCHEMA_VERSION_V2 = "2.0"
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
-_TURN_ID_PATTERN = re.compile(r"^[a-f0-9]{64}$")
 _ORIGIN_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 
 
@@ -91,17 +90,6 @@ PROPOSAL_ORIGIN_SCHEMA_REGISTRY = MappingProxyType(
         PROPOSAL_ORIGIN_SCHEMA_VERSION_V2: ProposalOriginV2,
     }
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ProposalTurnLease:
-    turn_id: str
-    owner_token: str
-
-    def __post_init__(self) -> None:
-        if _TURN_ID_PATTERN.fullmatch(self.turn_id) is None:
-            raise ValueError("turn_id must be a lowercase SHA-256 digest.")
-        _validate_identifier(self.owner_token, "owner_token")
 
 
 def derive_proposal_origin_ids(
