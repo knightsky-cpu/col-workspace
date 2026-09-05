@@ -1341,3 +1341,6 @@ INFO:     Waiting for application startup.
 /Users/wifiknight/col-workspace/agent_job_repository.py:297: UserWarning: Detected filter using positional arguments. Prefer using the 'filter' keyword argument instead.
   .where("action_kind", "==", action_kind)
 INFO:     Application startup complete.
+INFO:     Shutting down
+INFO:     Finished server process [9311]
+INFO:     Stopping reloader process [5633]
