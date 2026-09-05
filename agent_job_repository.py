@@ -945,7 +945,10 @@ class AgentJobRepository:
                 event_snapshot = await event_ref.get(transaction=transaction)
                 if event_snapshot.exists:
                     stored = self._event_from_snapshot(event_snapshot)
-                    if stored != event:
+                    if stored != event and not self._is_started_event_replay(
+                        stored,
+                        event,
+                    ):
                         raise AgentJobConflictError(
                             "AgentJobEvent conflicts with existing event_id."
                         )
@@ -1281,6 +1284,18 @@ class AgentJobRepository:
     @staticmethod
     def _event_document(event: AgentJobEvent) -> dict[str, object]:
         return event.model_dump(mode="python")
+
+    @staticmethod
+    def _is_started_event_replay(
+        stored: AgentJobEvent,
+        event: AgentJobEvent,
+    ) -> bool:
+        if stored.event_type != "started" or event.event_type != "started":
+            return False
+        return stored.model_dump(
+            mode="python",
+            exclude={"created_at"},
+        ) == event.model_dump(mode="python", exclude={"created_at"})
 
     @staticmethod
     def _report_document(report: AgentJobReport) -> dict[str, object]:

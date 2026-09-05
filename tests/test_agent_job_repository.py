@@ -2269,3 +2269,164 @@ async def test_events_are_idempotent_and_list_only_public_events(
     )
 
     assert [event.event_id for event in events] == ["event-1"]
+
+
+@pytest.mark.asyncio
+async def test_started_event_replay_accepts_timestamp_only_difference(
+    repository: AgentJobRepository,
+) -> None:
+    await repository.enqueue_job(make_job())
+    original = make_event(
+        event_id="job-1-started",
+        event_type="started",
+        message="Artifact creation started.",
+        created_at=NOW,
+        status="running",
+    )
+    recovered = original.model_copy(
+        update={"created_at": NOW + timedelta(minutes=3)}
+    )
+
+    assert await repository.append_event(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        event=original,
+    ) == original
+
+    assert await repository.append_event(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        event=recovered,
+    ) == original
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("event_type", "queued"),
+        ("message", "Memory proposal started."),
+        ("status", "queued"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_started_event_replay_rejects_different_semantic_meaning(
+    repository: AgentJobRepository,
+    field: str,
+    value: str,
+) -> None:
+    await repository.enqueue_job(make_job())
+    original = make_event(
+        event_id="job-1-started",
+        event_type="started",
+        message="Artifact creation started.",
+        created_at=NOW,
+        status="running",
+    )
+    conflicting = original.model_copy(
+        update={
+            field: value,
+            "created_at": NOW + timedelta(minutes=3),
+        }
+    )
+
+    await repository.append_event(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        event=original,
+    )
+
+    with pytest.raises(
+        AgentJobConflictError,
+        match="AgentJobEvent conflicts with existing event_id.",
+    ):
+        await repository.append_event(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            event=conflicting,
+        )
+
+
+@pytest.mark.asyncio
+async def test_recovered_same_row_job_replays_started_event_then_terminalizes(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_job(
+        status="running",
+        created_at=NOW - timedelta(minutes=3),
+        lease_owner="worker-1",
+        lease_expires_at=NOW - timedelta(seconds=1),
+        updated_at=NOW - timedelta(minutes=2),
+    )
+    store_job(repository, running)
+    await repository.append_event(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        event=make_event(
+            event_id="job-1-started",
+            event_type="started",
+            message="Artifact creation started.",
+            created_at=NOW - timedelta(minutes=2),
+            status="running",
+        ),
+    )
+
+    recovered = await repository.recover_expired_running_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        observed_at=NOW,
+    )
+    assert recovered is not None
+    leased = await repository.lease_queued_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-2",
+        lease_expires_at=NOW + timedelta(minutes=2),
+        observed_at=NOW + timedelta(seconds=1),
+    )
+
+    replayed = await repository.append_event(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        event=make_event(
+            event_id="job-1-started",
+            event_type="started",
+            message="Artifact creation started.",
+            created_at=NOW + timedelta(seconds=1),
+            status="running",
+        ),
+    )
+    completed = await repository.finalize_terminal_job(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        job_id="job-1",
+        lease_owner="worker-2",
+        observed_at=NOW + timedelta(seconds=2),
+        status="completed",
+        result_refs={"artifact_id": "artifact-1"},
+        failure=None,
+        event=terminal_event_for(
+            leased,
+            observed_at=NOW + timedelta(seconds=2),
+        ),
+        report=terminal_report_for(
+            leased,
+            observed_at=NOW + timedelta(seconds=2),
+        ),
+    )
+
+    assert replayed.created_at == NOW - timedelta(minutes=2)
+    assert completed.status == "completed"
+    assert completed.job_id == running.job_id
+    events = await collect(
+        repository.list_events(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            job_id="job-1",
+        )
+    )
+    assert [event.event_id for event in events] == [
+        "job-1-started",
+        "job-1-completed",
+    ]
