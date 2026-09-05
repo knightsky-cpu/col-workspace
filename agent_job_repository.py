@@ -677,6 +677,120 @@ class AgentJobRepository:
         except GoogleAPIError as exc:
             self._raise_firestore_error("cancel_job", exc)
 
+    async def finalize_terminal_job(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        job_id: str,
+        lease_owner: str,
+        observed_at: datetime,
+        status: AgentJobStatus,
+        result_refs: dict[str, str] | None,
+        failure: AgentJobFailure | None,
+        event: AgentJobEvent,
+        report: AgentJobReport,
+    ) -> AgentJob:
+        if status not in {"completed", "failed"}:
+            raise AgentJobStateError("AgentJob terminal status is unsupported.")
+        if status == "completed":
+            if result_refs is None or failure is not None:
+                raise AgentJobStateError("Completed AgentJob terminal state is invalid.")
+        if status == "failed":
+            if result_refs is not None or failure is None:
+                raise AgentJobStateError("Failed AgentJob terminal state is invalid.")
+        try:
+            job_ref = self._job_ref(user_id, workspace_id, job_id)
+            event_ref = job_ref.collection("events").document(event.event_id)
+            report_ref = self._reports_collection(
+                user_id,
+                workspace_id,
+            ).document(report.report_id)
+            transaction = self._client.transaction()
+
+            async def finalize_in_transaction(
+                transaction: AsyncTransaction,
+            ) -> AgentJob:
+                job_snapshot = await job_ref.get(transaction=transaction)
+                job = self._available_scoped_job(
+                    job_snapshot,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+                self._validate_terminal_sidecars(
+                    job=job,
+                    status=status,
+                    event=event,
+                    report=report,
+                )
+                if job.status in TERMINAL_AGENT_JOB_STATUSES:
+                    self._validate_terminal_replay(
+                        job=job,
+                        lease_owner=lease_owner,
+                        observed_at=observed_at,
+                        status=status,
+                        result_refs=result_refs,
+                        failure=failure,
+                    )
+                    finished = job
+                else:
+                    self._validate_live_lease(
+                        job,
+                        lease_owner=lease_owner,
+                        observed_at=observed_at,
+                    )
+                    finished = transition_agent_job(
+                        job,
+                        status=status,
+                        updated_at=observed_at,
+                        result_refs=result_refs,
+                        failure=failure,
+                    )
+                event_snapshot = await event_ref.get(transaction=transaction)
+                if event_snapshot.exists:
+                    stored_event = self._event_from_snapshot(event_snapshot)
+                    if stored_event != event:
+                        raise AgentJobConflictError(
+                            "AgentJobEvent conflicts with existing event_id."
+                        )
+                report_snapshot = await report_ref.get(transaction=transaction)
+                if report_snapshot.exists:
+                    stored_report = self._report_from_snapshot(report_snapshot)
+                    if stored_report != report:
+                        raise AgentJobConflictError(
+                            "AgentJobReport conflicts with existing report_id."
+                        )
+                if job.status in TERMINAL_AGENT_JOB_STATUSES:
+                    if not event_snapshot.exists or not report_snapshot.exists:
+                        raise AgentJobConflictError(
+                            "Terminal AgentJob is missing terminal sidecars."
+                        )
+                    return finished
+                transaction.set(
+                    job_ref,
+                    self._job_document(finished),
+                    merge=True,
+                )
+                transaction.set(event_ref, self._event_document(event))
+                transaction.set(report_ref, self._report_document(report))
+                return finished
+
+            run_transaction = firestore.async_transactional(
+                finalize_in_transaction
+            )
+            return await run_transaction(transaction)
+        except (
+            AgentJobConflictError,
+            AgentJobLeaseError,
+            AgentJobNotFoundError,
+            AgentJobStateError,
+        ):
+            raise
+        except ValidationError as exc:
+            raise AgentJobStateError("Stored AgentJob terminal state is invalid.") from exc
+        except GoogleAPIError as exc:
+            self._raise_firestore_error("finalize_terminal_job", exc)
+
     async def retry_job(
         self,
         *,
@@ -1107,6 +1221,54 @@ class AgentJobRepository:
     ) -> None:
         if report.user_id != user_id or report.workspace_id != workspace_id:
             raise AgentJobStateError("Stored AgentJobReport owner scope is invalid.")
+
+    @staticmethod
+    def _validate_terminal_sidecars(
+        *,
+        job: AgentJob,
+        status: AgentJobStatus,
+        event: AgentJobEvent,
+        report: AgentJobReport,
+    ) -> None:
+        if (
+            event.job_id != job.job_id
+            or event.event_type != status
+            or event.status != status
+        ):
+            raise AgentJobStateError("AgentJob terminal event is invalid.")
+        if (
+            report.job_id != job.job_id
+            or report.user_id != job.user_id
+            or report.project_id != job.project_id
+            or report.workspace_id != job.workspace_id
+            or report.session_id != job.session_id
+            or report.action_kind != job.action_kind
+            or report.agent_label != job.agent_label
+            or report.status != status
+        ):
+            raise AgentJobStateError("AgentJob terminal report is invalid.")
+
+    @staticmethod
+    def _validate_terminal_replay(
+        *,
+        job: AgentJob,
+        lease_owner: str,
+        observed_at: datetime,
+        status: AgentJobStatus,
+        result_refs: dict[str, str] | None,
+        failure: AgentJobFailure | None,
+    ) -> None:
+        expected_refs = result_refs if result_refs is not None else {}
+        if (
+            job.status != status
+            or job.lease_owner != lease_owner
+            or job.updated_at != observed_at
+            or job.result_refs != expected_refs
+            or job.failure_summary != failure
+        ):
+            raise AgentJobConflictError(
+                "AgentJob terminal state conflicts with existing state."
+            )
 
     @staticmethod
     def _job_document(job: AgentJob) -> dict[str, object]:

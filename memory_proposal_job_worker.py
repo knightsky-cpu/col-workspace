@@ -12,7 +12,6 @@ from agent_col_agent_jobs import (
     AgentJobEvent,
     AgentJobFailure,
     AgentJobReport,
-    AgentJobReportStatus,
 )
 from agent_job_payloads import AgentJobPayload
 from agent_job_repository import AgentJobRepository
@@ -576,29 +575,38 @@ class MemoryProposalJobWorker:
         public_resource_label: str | None,
     ) -> AgentJob:
         observed_at = self._clock()
-        completed = await self._agent_job_repository.complete_job(
+        terminal_job = job.model_copy(update={"status": "completed"})
+        return await self._agent_job_repository.finalize_terminal_job(
             user_id=job.user_id,
             workspace_id=job.workspace_id,
             job_id=job.job_id,
             lease_owner=lease_owner,
             observed_at=observed_at,
-            result_refs=result_refs,
-        )
-        await self._append_event(
-            job=completed,
-            event_type="completed",
-            message=message,
-            observed_at=observed_at,
-        )
-        await self._create_report(
-            job=completed,
             status="completed",
-            title=report_title,
-            summary=report_summary,
-            public_resource_label=public_resource_label,
-            observed_at=observed_at,
+            result_refs=result_refs,
+            failure=None,
+            event=_memory_job_event(
+                job=terminal_job,
+                event_type="completed",
+                message=message,
+                observed_at=observed_at,
+            ),
+            report=AgentJobReport(
+                report_id=_memory_report_id(job),
+                job_id=job.job_id,
+                user_id=job.user_id,
+                project_id=job.project_id,
+                workspace_id=job.workspace_id,
+                session_id=job.session_id,
+                action_kind=job.action_kind,
+                agent_label=job.agent_label,
+                status="completed",
+                title=report_title,
+                summary=report_summary,
+                public_resource_label=public_resource_label,
+                created_at=observed_at,
+            ),
         )
-        return completed
 
     async def _complete_preference_capture(
         self,
@@ -665,60 +673,43 @@ class MemoryProposalJobWorker:
     ) -> AgentJob:
         observed_at = self._clock()
         failure_title, failure_summary = _memory_failure_report(error_code)
-        failed = await self._agent_job_repository.fail_job(
+        failure = AgentJobFailure(
+            code=error_code,
+            summary=failure_summary,
+            retryable=retryable,
+        )
+        terminal_job = job.model_copy(update={"status": "failed"})
+        return await self._agent_job_repository.finalize_terminal_job(
             user_id=job.user_id,
             workspace_id=job.workspace_id,
             job_id=job.job_id,
             lease_owner=lease_owner,
             observed_at=observed_at,
-            failure=AgentJobFailure(
-                code=error_code,
+            status="failed",
+            result_refs=None,
+            failure=failure,
+            event=_memory_job_event(
+                job=terminal_job,
+                event_type="failed",
+                message="Memory proposal failed.",
+                observed_at=observed_at,
+            ),
+            report=AgentJobReport(
+                report_id=_memory_report_id(job),
+                job_id=job.job_id,
+                user_id=job.user_id,
+                project_id=job.project_id,
+                workspace_id=job.workspace_id,
+                session_id=job.session_id,
+                action_kind=job.action_kind,
+                agent_label=job.agent_label,
+                status="failed",
+                title=failure_title,
                 summary=failure_summary,
-                retryable=retryable,
+                public_resource_label=None,
+                created_at=observed_at,
             ),
         )
-        await self._append_event(
-            job=failed,
-            event_type="failed",
-            message="Memory proposal failed.",
-            observed_at=observed_at,
-        )
-        await self._create_report(
-            job=failed,
-            status="failed",
-            title=failure_title,
-            summary=failure_summary,
-            public_resource_label=None,
-            observed_at=observed_at,
-        )
-        return failed
-
-    async def _create_report(
-        self,
-        *,
-        job: AgentJob,
-        status: AgentJobReportStatus,
-        title: str,
-        summary: str,
-        public_resource_label: str | None,
-        observed_at: datetime,
-    ) -> AgentJobReport:
-        report = AgentJobReport(
-            report_id=_memory_report_id(job),
-            job_id=job.job_id,
-            user_id=job.user_id,
-            project_id=job.project_id,
-            workspace_id=job.workspace_id,
-            session_id=job.session_id,
-            action_kind=job.action_kind,
-            agent_label=job.agent_label,
-            status=status,
-            title=title,
-            summary=summary,
-            public_resource_label=public_resource_label,
-            created_at=observed_at,
-        )
-        return await self._agent_job_repository.create_report(report)
 
     async def _append_event(
         self,

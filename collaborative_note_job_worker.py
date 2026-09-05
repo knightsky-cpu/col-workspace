@@ -11,7 +11,6 @@ from agent_col_agent_jobs import (
     AgentJobEvent,
     AgentJobFailure,
     AgentJobReport,
-    AgentJobReportStatus,
 )
 from agent_job_payloads import AgentJobPayload
 from agent_job_repository import AgentJobRepository
@@ -260,31 +259,40 @@ class CollaborativeNoteProposalJobWorker:
         public_resource_label: str,
     ) -> AgentJob:
         observed_at = self._clock()
-        completed = await self._agent_job_repository.complete_job(
+        terminal_job = job.model_copy(update={"status": "completed"})
+        return await self._agent_job_repository.finalize_terminal_job(
             user_id=job.user_id,
             workspace_id=job.workspace_id,
             job_id=job.job_id,
             lease_owner=lease_owner,
             observed_at=observed_at,
-            result_refs={"proposal_id": proposal_id},
-        )
-        await self._append_event(
-            job=completed,
-            event_type="completed",
-            message="Workspace note proposal created.",
-            observed_at=observed_at,
-        )
-        await self._create_report(
-            job=completed,
             status="completed",
-            title="Workspace note proposal pending review",
-            summary=(
-                "A workspace note proposal was created and is pending your review."
+            result_refs={"proposal_id": proposal_id},
+            failure=None,
+            event=_note_job_event(
+                job=terminal_job,
+                event_type="completed",
+                message="Workspace note proposal created.",
+                observed_at=observed_at,
             ),
-            public_resource_label=public_resource_label,
-            observed_at=observed_at,
+            report=AgentJobReport(
+                report_id=_note_report_id(job),
+                job_id=job.job_id,
+                user_id=job.user_id,
+                project_id=job.project_id,
+                workspace_id=job.workspace_id,
+                session_id=job.session_id,
+                action_kind=job.action_kind,
+                agent_label=job.agent_label,
+                status="completed",
+                title="Workspace note proposal pending review",
+                summary=(
+                    "A workspace note proposal was created and is pending your review."
+                ),
+                public_resource_label=public_resource_label,
+                created_at=observed_at,
+            ),
         )
-        return completed
 
     async def _fail_job(
         self,
@@ -293,33 +301,43 @@ class CollaborativeNoteProposalJobWorker:
         lease_owner: str,
     ) -> AgentJob:
         observed_at = self._clock()
-        failed = await self._agent_job_repository.fail_job(
+        failure = AgentJobFailure(
+            code="collaborative_note_proposal_conflict",
+            summary="Workspace note proposal could not be created.",
+            retryable=False,
+        )
+        terminal_job = job.model_copy(update={"status": "failed"})
+        return await self._agent_job_repository.finalize_terminal_job(
             user_id=job.user_id,
             workspace_id=job.workspace_id,
             job_id=job.job_id,
             lease_owner=lease_owner,
             observed_at=observed_at,
-            failure=AgentJobFailure(
-                code="collaborative_note_proposal_conflict",
+            status="failed",
+            result_refs=None,
+            failure=failure,
+            event=_note_job_event(
+                job=terminal_job,
+                event_type="failed",
+                message="Workspace note proposal failed.",
+                observed_at=observed_at,
+            ),
+            report=AgentJobReport(
+                report_id=_note_report_id(job),
+                job_id=job.job_id,
+                user_id=job.user_id,
+                project_id=job.project_id,
+                workspace_id=job.workspace_id,
+                session_id=job.session_id,
+                action_kind=job.action_kind,
+                agent_label=job.agent_label,
+                status="failed",
+                title="Workspace note proposal not created",
                 summary="Workspace note proposal could not be created.",
-                retryable=False,
+                public_resource_label=None,
+                created_at=observed_at,
             ),
         )
-        await self._append_event(
-            job=failed,
-            event_type="failed",
-            message="Workspace note proposal failed.",
-            observed_at=observed_at,
-        )
-        await self._create_report(
-            job=failed,
-            status="failed",
-            title="Workspace note proposal not created",
-            summary="Workspace note proposal could not be created.",
-            public_resource_label=None,
-            observed_at=observed_at,
-        )
-        return failed
 
     async def _append_event(
         self,
@@ -339,33 +357,6 @@ class CollaborativeNoteProposalJobWorker:
                 observed_at=observed_at,
             ),
         )
-
-    async def _create_report(
-        self,
-        *,
-        job: AgentJob,
-        status: AgentJobReportStatus,
-        title: str,
-        summary: str,
-        public_resource_label: str | None,
-        observed_at: datetime,
-    ) -> AgentJobReport:
-        report = AgentJobReport(
-            report_id=_note_report_id(job),
-            job_id=job.job_id,
-            user_id=job.user_id,
-            project_id=job.project_id,
-            workspace_id=job.workspace_id,
-            session_id=job.session_id,
-            action_kind=job.action_kind,
-            agent_label=job.agent_label,
-            status=status,
-            title=title,
-            summary=summary,
-            public_resource_label=public_resource_label,
-            created_at=observed_at,
-        )
-        return await self._agent_job_repository.create_report(report)
 
     @staticmethod
     def _log_background_failure(task: asyncio.Task[AgentJob | None]) -> None:

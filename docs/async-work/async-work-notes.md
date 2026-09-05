@@ -3388,3 +3388,33 @@ Still deferred:
 - terminal job/event/report consistency cleanup;
 - working-state durability boundary decision;
 - permanent poison-dispatch starvation/backoff hardening.
+
+## Atomic AgentJob Terminal Finalization
+
+This pass closes the crash window between terminal AgentJob state, the public
+terminal AgentJob event, and the public AgentJob report.
+
+Fixed:
+
+- `AgentJobRepository.finalize_terminal_job(...)` now validates the matching
+  live worker lease and writes the terminal AgentJob state, terminal event, and
+  AgentJob report in one Firestore transaction;
+- exact replay of the same terminal job/event/report state is idempotent;
+- conflicting pre-existing terminal job, event, or report state fails closed;
+- wrong owners and expired leases cannot terminalize jobs;
+- Memory, Note, and Artifact workers now use the repository-owned atomic
+  terminalization boundary for completed and failed outcomes;
+- non-terminal `started` events remain unchanged.
+
+Preserved:
+
+- result refs, failure summaries, public resource labels, report titles,
+  report summaries, and worker timestamps;
+- retry dispatch and payload semantics;
+- queued and expired-running recovery behavior;
+- AgentJob lease renewal, heartbeat fencing, and shutdown ownership.
+
+Still deferred:
+
+- working-state durability boundary decision;
+- permanent poison-dispatch starvation/backoff hardening.

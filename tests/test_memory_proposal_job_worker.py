@@ -117,6 +117,7 @@ class RecordingAgentJobRepository:
         self.events = []
         self.completed = []
         self.failed = []
+        self.finalized = []
         self.reports = []
 
     async def lease_next_queued_job(
@@ -250,6 +251,52 @@ class RecordingAgentJobRepository:
                 "status": "failed",
                 "updated_at": observed_at,
                 "lease_owner": lease_owner,
+                "failure_summary": failure,
+            }
+        )
+
+    async def finalize_terminal_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        observed_at,
+        status,
+        result_refs,
+        failure,
+        event,
+        report,
+    ):
+        self.finalized.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "observed_at": observed_at,
+                "status": status,
+                "result_refs": result_refs,
+                "failure": failure,
+                "event": event,
+                "report": report,
+            }
+        )
+        self.events.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "event": event,
+            }
+        )
+        self.reports.append(report)
+        return self.job.model_copy(
+            update={
+                "status": status,
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "result_refs": result_refs or {},
                 "failure_summary": failure,
             }
         )
@@ -448,7 +495,7 @@ async def test_memory_worker_creates_proposal_from_standalone_value_alias_payloa
 
     assert completed.status == "completed"
     assert repository.failed == []
-    assert len(repository.completed) == 1
+    assert len(repository.finalized) == 1
     assert len(database.calls) == 1
     assert database.calls[0]["category"] == "user_requested_memory"
     assert database.calls[0]["proposed_value"] == (
@@ -502,13 +549,16 @@ async def test_memory_worker_completes_queued_memory_proposal_from_private_paylo
     assert recorded.decision == command.decision
     assert recorded.clarification_selection == command.clarification_selection
     assert repository.leased[0]["action_kind"] == "propose_memory_signal"
+    assert len(repository.finalized) == 1
+    assert repository.finalized[0]["status"] == "completed"
+    assert repository.finalized[0]["result_refs"] == {
+        "proposal_id": "response_length--e82366f7699ee2e39bff6a68154e09b7"
+    }
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
         "completed",
     ]
-    assert repository.completed[0]["result_refs"] == {
-        "proposal_id": "response_length--e82366f7699ee2e39bff6a68154e09b7"
-    }
+    assert repository.completed == []
     assert repository.failed == []
     assert len(repository.reports) == 1
     report = repository.reports[0]
@@ -686,7 +736,7 @@ async def test_memory_worker_creates_queued_clarification_without_turn_lease(
     assert len(service.commands) == 1
     assert service.commands[0].decision == command.decision
     assert service.commands[0].source_message_id == command.source_message_id
-    assert repository.completed[0]["result_refs"] == {
+    assert repository.finalized[0]["result_refs"] == {
         "clarification_id": clarification.clarification_id
     }
     assert repository.failed == []
@@ -763,7 +813,7 @@ async def test_memory_worker_creates_preference_confirmation_without_turn_lease(
             "confirmation_created_at": NOW,
         }
     ]
-    assert repository.completed[0]["result_refs"] == {
+    assert repository.finalized[0]["result_refs"] == {
         "clarification_id": "memory-clarification--preference-1"
     }
     assert repository.failed == []
@@ -913,7 +963,7 @@ async def test_memory_worker_captures_preference_and_conditionally_queues_confir
         expected_refs["confirmation_job_id"] = (
             "memory-preference-confirmation-job-1"
         )
-    assert repository.completed[0]["result_refs"] == expected_refs
+    assert repository.finalized[0]["result_refs"] == expected_refs
 
 
 @pytest.mark.asyncio
@@ -992,8 +1042,8 @@ async def test_memory_worker_fails_preference_capture_safely() -> None:
 
     assert failed.status == "failed"
     assert repository.completed == []
-    assert repository.failed[0]["failure"].code == "preference_capture_failed"
-    assert repository.failed[0]["failure"].retryable is True
+    assert repository.finalized[0]["failure"].code == "preference_capture_failed"
+    assert repository.finalized[0]["failure"].retryable is True
     assert "private persistence failure" not in repository.reports[0].summary
 
     class RecoveredPreferenceService:
@@ -1158,10 +1208,10 @@ async def test_memory_worker_reports_confirmation_enqueue_failure_after_capture(
     )
 
     assert failed.status == "failed"
-    assert first_repository.failed[0]["failure"].code == (
+    assert first_repository.finalized[0]["failure"].code == (
         "preference_confirmation_enqueue_failed"
     )
-    assert first_repository.failed[0]["failure"].retryable is True
+    assert first_repository.finalized[0]["failure"].retryable is True
     assert "evidence was captured" in first_repository.reports[0].summary.lower()
     assert "private confirmation queue failure" not in (
         first_repository.reports[0].summary
@@ -1189,7 +1239,7 @@ async def test_memory_worker_reports_confirmation_enqueue_failure_after_capture(
     assert confirmation_job_ids == {
         "memory-preference-confirmation-job-retry"
     }
-    assert retry_repository.completed[0]["result_refs"][
+    assert retry_repository.finalized[0]["result_refs"][
         "confirmation_job_id"
     ] == "memory-preference-confirmation-job-retry"
 
@@ -1229,7 +1279,7 @@ async def test_memory_worker_completes_queued_clarification_selection_without_tu
             selected_candidate_index=0,
         )
     ]
-    assert repository.completed[0]["result_refs"] == {
+    assert repository.finalized[0]["result_refs"] == {
         "proposal_id": "response_length--clarified-proposal-1"
     }
     assert repository.failed == []
@@ -1264,8 +1314,8 @@ async def test_memory_worker_records_clarification_selection_conflict_failure(
 
     assert failed.status == "failed"
     assert repository.completed == []
-    assert repository.failed[0]["failure"].code == "memory_proposal_conflict"
-    assert "private stale selection" not in repository.failed[0][
+    assert repository.finalized[0]["failure"].code == "memory_proposal_conflict"
+    assert "private stale selection" not in repository.finalized[0][
         "failure"
     ].summary
     assert repository.reports[0].status == "failed"
@@ -1312,7 +1362,7 @@ async def test_memory_worker_records_conflict_failure_without_private_details(
         "started",
         "failed",
     ]
-    failure = repository.failed[0]["failure"]
+    failure = repository.finalized[0]["failure"]
     assert failure.code == "memory_proposal_conflict"
     assert failure.summary == (
         "A pending memory proposal already exists for this category."

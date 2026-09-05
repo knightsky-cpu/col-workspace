@@ -254,6 +254,7 @@ class RecordingAgentJobRepository:
         self.renew_error: Exception | None = None
         self.completed = []
         self.failed = []
+        self.finalized = []
         self.reports = []
 
     async def enqueue_job(self, job):
@@ -437,6 +438,53 @@ class RecordingAgentJobRepository:
             }
         )
 
+    async def finalize_terminal_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        observed_at,
+        status,
+        result_refs,
+        failure,
+        event,
+        report,
+    ):
+        self.finalized.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "observed_at": observed_at,
+                "status": status,
+                "result_refs": result_refs,
+                "failure": failure,
+                "event": event,
+                "report": report,
+            }
+        )
+        self.events.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "event": event,
+            }
+        )
+        self.reports.append(report)
+        job = self.enqueued[-1]
+        return job.model_copy(
+            update={
+                "status": status,
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "result_refs": result_refs or {},
+                "failure_summary": failure,
+            }
+        )
+
     async def create_report(self, report):
         self.reports.append(report)
         return report
@@ -567,9 +615,12 @@ async def test_artifact_worker_creates_single_file_artifact_from_private_payload
     assert creation_command.user_id == "user-1"
     assert creation_command.originating_turn_id == claim.ids.turn_id
     assert creation_command.artifact == generated.model_dump(mode="json")
-    assert repository.completed[0]["result_refs"] == {
+    assert len(repository.finalized) == 1
+    assert repository.finalized[0]["status"] == "completed"
+    assert repository.finalized[0]["result_refs"] == {
         "artifact_id": artifact.artifact_id
     }
+    assert repository.completed == []
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
         "completed",
@@ -632,9 +683,12 @@ async def test_artifact_worker_creates_blueprint_artifact_from_private_payload(
             source_text="Create a study partner blueprint.",
         )
     ]
-    assert repository.completed[0]["result_refs"] == {
+    assert len(repository.finalized) == 1
+    assert repository.finalized[0]["status"] == "completed"
+    assert repository.finalized[0]["result_refs"] == {
         "artifact_id": "blueprint-from-worker"
     }
+    assert repository.completed == []
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
         "completed",

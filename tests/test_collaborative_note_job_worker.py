@@ -68,6 +68,7 @@ class RecordingAgentJobRepository:
         self.events = []
         self.completed = []
         self.failed = []
+        self.finalized = []
         self.reports = []
 
     async def lease_next_queued_job(
@@ -227,6 +228,52 @@ class RecordingAgentJobRepository:
             }
         )
 
+    async def finalize_terminal_job(
+        self,
+        *,
+        user_id,
+        workspace_id,
+        job_id,
+        lease_owner,
+        observed_at,
+        status,
+        result_refs,
+        failure,
+        event,
+        report,
+    ):
+        self.finalized.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "job_id": job_id,
+                "lease_owner": lease_owner,
+                "observed_at": observed_at,
+                "status": status,
+                "result_refs": result_refs,
+                "failure": failure,
+                "event": event,
+                "report": report,
+            }
+        )
+        self.events.append(
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "event": event,
+            }
+        )
+        self.reports.append(report)
+        return self.job.model_copy(
+            update={
+                "status": status,
+                "updated_at": observed_at,
+                "lease_owner": lease_owner,
+                "result_refs": result_refs or {},
+                "failure_summary": failure,
+            }
+        )
+
     async def create_report(self, report):
         self.reports.append(report)
         return report
@@ -310,13 +357,16 @@ async def test_note_worker_completes_queued_note_proposal_from_private_payload(
     assert recorded.source_message_text == command.source_message_text
     assert recorded.decision == command.decision
     assert repository.leased[0]["action_kind"] == "propose_collaborative_note"
+    assert len(repository.finalized) == 1
+    assert repository.finalized[0]["status"] == "completed"
+    assert repository.finalized[0]["result_refs"] == {
+        "proposal_id": "note-proposal-1"
+    }
     assert [entry["event"].event_type for entry in repository.events] == [
         "started",
         "completed",
     ]
-    assert repository.completed[0]["result_refs"] == {
-        "proposal_id": "note-proposal-1"
-    }
+    assert repository.completed == []
     assert repository.failed == []
     assert len(repository.reports) == 1
     report = repository.reports[0]
@@ -435,7 +485,7 @@ async def test_note_worker_records_conflict_failure_without_private_details(
         "started",
         "failed",
     ]
-    failure = repository.failed[0]["failure"]
+    failure = repository.finalized[0]["failure"]
     assert failure.code == "collaborative_note_proposal_conflict"
     assert failure.summary == "Workspace note proposal could not be created."
     assert failure.retryable is False

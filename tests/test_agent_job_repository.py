@@ -29,7 +29,14 @@ NOW = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 def install_transaction_runner(monkeypatch: pytest.MonkeyPatch) -> None:
     def run_without_sdk_retry(callback):
         async def run(transaction, *args, **kwargs):
-            return await callback(transaction, *args, **kwargs)
+            transaction.begin()
+            try:
+                result = await callback(transaction, *args, **kwargs)
+            except Exception:
+                transaction.rollback()
+                raise
+            transaction.commit()
+            return result
 
         return run
 
@@ -59,6 +66,18 @@ class FakeSnapshot:
 class FakeTransaction:
     def __init__(self, store: FakeFirestoreClient) -> None:
         self._store = store
+        self._pending: dict[tuple[str, ...], dict[str, object]] = {}
+        self.fail_after_sets: int | None = None
+
+    def begin(self) -> None:
+        self._pending = {}
+
+    def commit(self) -> None:
+        self._store.documents.update(self._pending)
+        self._pending = {}
+
+    def rollback(self) -> None:
+        self._pending = {}
 
     def set(
         self,
@@ -67,8 +86,15 @@ class FakeTransaction:
         *,
         merge: bool = False,
     ) -> None:
-        current = self._store.documents.get(document.path, {})
-        self._store.documents[document.path] = (
+        if self.fail_after_sets == 0:
+            raise RuntimeError("simulated transaction failure")
+        if self.fail_after_sets is not None:
+            self.fail_after_sets -= 1
+        current = self._pending.get(
+            document.path,
+            self._store.documents.get(document.path, {}),
+        )
+        self._pending[document.path] = (
             {**current, **data} if merge else dict(data)
         )
 
@@ -389,6 +415,60 @@ def make_report(**overrides: object) -> AgentJobReport:
     }
     values.update(overrides)
     return AgentJobReport(**values)
+
+
+def make_running_job(**overrides: object) -> AgentJob:
+    values: dict[str, object] = {
+        "status": "running",
+        "updated_at": NOW,
+        "lease_owner": "worker-1",
+        "lease_expires_at": NOW + timedelta(minutes=2),
+    }
+    values.update(overrides)
+    return make_job(**values)
+
+
+def terminal_event_for(
+    job: AgentJob,
+    *,
+    event_type: str = "completed",
+    message: str = "Artifact created.",
+    observed_at: datetime = NOW + timedelta(seconds=5),
+) -> AgentJobEvent:
+    return make_event(
+        event_id=f"{job.job_id}-{event_type}",
+        job_id=job.job_id,
+        event_type=event_type,
+        message=message,
+        created_at=observed_at,
+        status=event_type,
+    )
+
+
+def terminal_report_for(
+    job: AgentJob,
+    *,
+    status: str = "completed",
+    title: str = "Artifact created",
+    summary: str = "The requested artifact was created.",
+    public_resource_label: str | None = "repo_helper.sh",
+    observed_at: datetime = NOW + timedelta(seconds=5),
+) -> AgentJobReport:
+    return make_report(
+        report_id=f"{job.job_id}-report",
+        job_id=job.job_id,
+        user_id=job.user_id,
+        project_id=job.project_id,
+        workspace_id=job.workspace_id,
+        session_id=job.session_id,
+        action_kind=job.action_kind,
+        agent_label=job.agent_label,
+        status=status,
+        title=title,
+        summary=summary,
+        public_resource_label=public_resource_label,
+        created_at=observed_at,
+    )
 
 
 async def collect(async_iterable: Any) -> list[Any]:
@@ -1009,6 +1089,354 @@ async def test_fail_job_requires_matching_live_lease(
     assert failed.status == "failed"
     assert failed.failure_summary is not None
     assert failed.failure_summary.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_writes_completed_job_event_and_report_atomically(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_running_job()
+    observed_at = NOW + timedelta(seconds=5)
+    event = terminal_event_for(running, observed_at=observed_at)
+    report = terminal_report_for(running, observed_at=observed_at)
+    store_job(repository, running)
+
+    completed = await repository.finalize_terminal_job(
+        user_id=running.user_id,
+        workspace_id=running.workspace_id,
+        job_id=running.job_id,
+        lease_owner="worker-1",
+        observed_at=observed_at,
+        status="completed",
+        result_refs={"artifact_id": "artifact-1"},
+        failure=None,
+        event=event,
+        report=report,
+    )
+
+    assert completed.status == "completed"
+    assert completed.result_refs == {"artifact_id": "artifact-1"}
+    assert await repository.get_job(
+        user_id=running.user_id,
+        workspace_id=running.workspace_id,
+        job_id=running.job_id,
+    ) == completed
+    assert await collect(
+        repository.list_events(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+        )
+    ) == [event]
+    assert await collect(
+        repository.list_reports(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+        )
+    ) == [report]
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_writes_failed_job_event_and_report_atomically(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_running_job()
+    observed_at = NOW + timedelta(seconds=5)
+    failure = AgentJobFailure(
+        code="artifact_creation_failed",
+        summary="Artifact could not be created.",
+        retryable=False,
+    )
+    event = terminal_event_for(
+        running,
+        event_type="failed",
+        message="Artifact creation failed.",
+        observed_at=observed_at,
+    )
+    report = terminal_report_for(
+        running,
+        status="failed",
+        title="Artifact not created",
+        summary="Artifact could not be created.",
+        public_resource_label=None,
+        observed_at=observed_at,
+    )
+    store_job(repository, running)
+
+    failed = await repository.finalize_terminal_job(
+        user_id=running.user_id,
+        workspace_id=running.workspace_id,
+        job_id=running.job_id,
+        lease_owner="worker-1",
+        observed_at=observed_at,
+        status="failed",
+        result_refs=None,
+        failure=failure,
+        event=event,
+        report=report,
+    )
+
+    assert failed.status == "failed"
+    assert failed.failure_summary == failure
+    assert await collect(
+        repository.list_events(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+        )
+    ) == [event]
+    assert await collect(
+        repository.list_reports(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+        )
+    ) == [report]
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_replays_exact_terminal_state(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_running_job()
+    observed_at = NOW + timedelta(seconds=5)
+    event = terminal_event_for(running, observed_at=observed_at)
+    report = terminal_report_for(running, observed_at=observed_at)
+    store_job(repository, running)
+
+    first = await repository.finalize_terminal_job(
+        user_id=running.user_id,
+        workspace_id=running.workspace_id,
+        job_id=running.job_id,
+        lease_owner="worker-1",
+        observed_at=observed_at,
+        status="completed",
+        result_refs={"artifact_id": "artifact-1"},
+        failure=None,
+        event=event,
+        report=report,
+    )
+    replayed = await repository.finalize_terminal_job(
+        user_id=running.user_id,
+        workspace_id=running.workspace_id,
+        job_id=running.job_id,
+        lease_owner="worker-1",
+        observed_at=observed_at,
+        status="completed",
+        result_refs={"artifact_id": "artifact-1"},
+        failure=None,
+        event=event,
+        report=report,
+    )
+
+    assert replayed == first
+    assert len(
+        await collect(
+            repository.list_events(
+                user_id=running.user_id,
+                workspace_id=running.workspace_id,
+                job_id=running.job_id,
+            )
+        )
+    ) == 1
+    assert len(
+        await collect(
+            repository.list_reports(
+                user_id=running.user_id,
+                workspace_id=running.workspace_id,
+            )
+        )
+    ) == 1
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_rejects_conflicting_terminal_job(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_running_job()
+    observed_at = NOW + timedelta(seconds=5)
+    completed = running.model_copy(
+        update={
+            "status": "completed",
+            "updated_at": observed_at,
+            "result_refs": {"artifact_id": "different-artifact"},
+        }
+    )
+    event = terminal_event_for(running, observed_at=observed_at)
+    report = terminal_report_for(running, observed_at=observed_at)
+    store_job(repository, completed)
+
+    with pytest.raises(AgentJobConflictError):
+        await repository.finalize_terminal_job(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+            lease_owner="worker-1",
+            observed_at=observed_at,
+            status="completed",
+            result_refs={"artifact_id": "artifact-1"},
+            failure=None,
+            event=event,
+            report=report,
+        )
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_rejects_conflicting_terminal_event(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_running_job()
+    observed_at = NOW + timedelta(seconds=5)
+    event = terminal_event_for(running, observed_at=observed_at)
+    report = terminal_report_for(running, observed_at=observed_at)
+    store_job(repository, running)
+    event_ref = repository._job_ref(
+        running.user_id,
+        running.workspace_id,
+        running.job_id,
+    ).collection("events").document(event.event_id)
+    repository._client.documents[event_ref.path] = event.model_copy(
+        update={"message": "Conflicting event."}
+    ).model_dump(mode="python")
+
+    with pytest.raises(AgentJobConflictError):
+        await repository.finalize_terminal_job(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+            lease_owner="worker-1",
+            observed_at=observed_at,
+            status="completed",
+            result_refs={"artifact_id": "artifact-1"},
+            failure=None,
+            event=event,
+            report=report,
+        )
+
+    assert (
+        await repository.get_job(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+        )
+    ).status == "running"
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_rejects_conflicting_terminal_report(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_running_job()
+    observed_at = NOW + timedelta(seconds=5)
+    event = terminal_event_for(running, observed_at=observed_at)
+    report = terminal_report_for(running, observed_at=observed_at)
+    store_job(repository, running)
+    report_ref = repository._reports_collection(
+        running.user_id,
+        running.workspace_id,
+    ).document(report.report_id)
+    repository._client.documents[report_ref.path] = report.model_copy(
+        update={"summary": "Conflicting report."}
+    ).model_dump(mode="python")
+
+    with pytest.raises(AgentJobConflictError):
+        await repository.finalize_terminal_job(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+            lease_owner="worker-1",
+            observed_at=observed_at,
+            status="completed",
+            result_refs={"artifact_id": "artifact-1"},
+            failure=None,
+            event=event,
+            report=report,
+        )
+
+    assert (
+        await repository.get_job(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+        )
+    ).status == "running"
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_requires_matching_live_lease(
+    repository: AgentJobRepository,
+) -> None:
+    observed_at = NOW + timedelta(seconds=5)
+    for running, lease_owner in (
+        (make_running_job(job_id="wrong-owner"), "worker-2"),
+        (
+            make_running_job(
+                job_id="expired",
+                lease_expires_at=NOW + timedelta(seconds=1),
+            ),
+            "worker-1",
+        ),
+    ):
+        store_job(repository, running)
+        with pytest.raises(AgentJobLeaseError):
+            await repository.finalize_terminal_job(
+                user_id=running.user_id,
+                workspace_id=running.workspace_id,
+                job_id=running.job_id,
+                lease_owner=lease_owner,
+                observed_at=observed_at,
+                status="completed",
+                result_refs={"artifact_id": "artifact-1"},
+                failure=None,
+                event=terminal_event_for(running, observed_at=observed_at),
+                report=terminal_report_for(running, observed_at=observed_at),
+            )
+
+
+@pytest.mark.asyncio
+async def test_finalize_terminal_job_transaction_failure_leaves_no_partial_terminal_state(
+    repository: AgentJobRepository,
+) -> None:
+    running = make_running_job()
+    observed_at = NOW + timedelta(seconds=5)
+    event = terminal_event_for(running, observed_at=observed_at)
+    report = terminal_report_for(running, observed_at=observed_at)
+    store_job(repository, running)
+    repository._client.transaction_obj.fail_after_sets = 1
+
+    with pytest.raises(RuntimeError, match="simulated transaction failure"):
+        await repository.finalize_terminal_job(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+            lease_owner="worker-1",
+            observed_at=observed_at,
+            status="completed",
+            result_refs={"artifact_id": "artifact-1"},
+            failure=None,
+            event=event,
+            report=report,
+        )
+
+    assert (
+        await repository.get_job(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+        )
+    ) == running
+    assert await collect(
+        repository.list_events(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+            job_id=running.job_id,
+        )
+    ) == []
+    assert await collect(
+        repository.list_reports(
+            user_id=running.user_id,
+            workspace_id=running.workspace_id,
+        )
+    ) == []
 
 
 @pytest.mark.asyncio
