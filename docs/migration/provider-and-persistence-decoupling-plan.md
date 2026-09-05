@@ -1,6 +1,6 @@
 # Agent Col: Migration Sequencing & Coexistence Architecture Plan
 
-This document establishes the authoritative, source-grounded migration sequencing, provider decoupling, and coexistence architecture for **Agent Col**. It defines the step-by-step procedure to transition Agent Col from **Firestore + Google (Gemini / Vertex AI / Google ADK / Google Speech)** to **PostgreSQL + OpenAI (Responses API / GPT-5.6 / Whisper / OpenAI Speech)** while preserving application invariants, changing only one authoritative subsystem at a time, and maintaining clear rollback and recovery capability.
+This document proposes source-grounded migration sequencing, provider decoupling, and coexistence architecture for **Agent Col**. It defines a target procedure for moving inference and durable persistence from **Firestore + Google (Gemini / Vertex AI / Google ADK / Google Speech)** to **PostgreSQL + OpenAI**, while preserving application invariants and changing only one authoritative subsystem at a time. User authentication is a separate product/security decision and is not implicitly replaced by inference-provider migration.
 
 Primary migration contracts:
 - [`docs/postgresql-migration/postgresql-migration-mapping.md`](../postgresql-migration/postgresql-migration-mapping.md)
@@ -45,7 +45,8 @@ The recommended strategy is **Strategy C: Provider & Persistence Interfaces Firs
                                                                         ▼ Phase 5: Google Retirement
                                                      ┌──────────────────────────────────────┐
                                                      │ Independent Agent Col Architecture   │
-                                                     │ (Google SDKs Purged)                 │
+                                                     │ (Retire migrated Google SDKs;        │
+                                                     │  retain chosen identity provider)    │
                                                      └──────────────────────────────────────┘
 
   Optional Test-Only Configuration (Non-Production Branch):
@@ -57,14 +58,14 @@ The recommended strategy is **Strategy C: Provider & Persistence Interfaces Firs
 ### Strategy Comparison & Selection Rationale
 
 - **Strategy A (PostgreSQL First without Interfaces):** Replaces Firestore directly while application code is heavily coupled to `MemoryEngine` methods and Google GenAI types. High risk of persistence regressions affecting live model calls.
-- **Strategy B (OpenAI First without Interfaces):** Replaces Gemini/Vertex/ADK while persistence is tied to Firestore transaction objects. High risk of inference failures corrupting Firestore turn claims.
-- **Strategy C (Interfaces First - RECOMMENDED):** Wraps existing persistence (`MemoryEngine`) and inference (`genai.Client`, ADK `Runner`) behind explicit application interfaces (`AbstractMemoryEngine`, `InferenceProvider`, `StructuredOutputProvider`, `SpeechProvider`). Enables switching **one subsystem at a time** via feature flags with zero dual-write persistence hazards and clean recovery boundaries.
+- **Strategy B (OpenAI First without Interfaces):** Replaces Gemini/Vertex/ADK while orchestration still constructs provider-specific types and persistence still uses Firestore transaction objects. This creates a broad regression surface around turn completion and model-output validation.
+- **Strategy C (Interfaces First - RECOMMENDED):** Wraps existing persistence (`MemoryEngine`) and inference (`genai.Client`, ADK `Runner`) behind explicit application interfaces (`AbstractMemoryEngine`, `InferenceProvider`, `StructuredOutputProvider`, `SpeechProvider`). This enables switching one subsystem at a time without intentionally dual-writing authoritative state. Correct adapters and cutover fencing are still required; interfaces alone do not guarantee consistency.
 
 ---
 
 ## B. Current Coupling Map
 
-The table below catalogs every intersection where Firestore, Gemini/Vertex, Google ADK, Google Search, Google Speech, Google Auth, and `AgentJob` orchestration collide in current application code:
+The diagram below is a high-level coupling map, not an exhaustive source inventory. The detailed migration inventory must be generated from current production imports before each retirement pass. In particular, current source also contains Google/ADK dependencies in memory/note/source tool declarations, responder-context builders, `agent_job_repository.py`, `workspace_cleanup.py`, compatibility modules, and specialist runtimes.
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -99,6 +100,13 @@ The table below catalogs every intersection where Firestore, Gemini/Vertex, Goog
                                           3. OpenAIResponderAdapter / OpenAIRunnerAdapter (ADK Removal)
 ```
 
+Verified source qualifications:
+
+- `vertex_config.py` validates settings and returns client keyword arguments; `main.py:1983-1988` instantiates the shared `genai.Client`.
+- `agent_col_artifact_feedback_executor.py` is a deterministic chat-owned feedback boundary. It imports GenAI content types for responder projection but is not an AgentJob background model worker.
+- `memory_proposal_tool.py`, `collaborative_note_tool.py`, and `source_expert_tool.py` declare Google ADK tools and must be included in any ADK-removal pass.
+- `auth.py` uses Google OIDC independently of model inference and persistence.
+
 ---
 
 ## C. Required Compatibility Interfaces
@@ -110,8 +118,8 @@ To decouple application logic from vendor drivers, the following thin interfaces
 | `AbstractMemoryEngine` | `MemoryEngine` | `database.py` | `main.py`, `AgentColTurnService`, `TrustedMemoryService`, `CollaborativeNoteService`, `ContinuityService`, `WorkingStateService` | `MemoryEngine` (Firestore SDK) | `PostgresMemoryEngine` (asyncpg / SQLAlchemy) | No (Direct class) |
 | `AbstractAgentJobRepository` | `AgentJobRepository` | `agent_job_repository.py` | `main.py`, `AgentColTurnService`, Background Queue Workers | `AgentJobRepository` (Firestore) | `PostgresAgentJobRepository` (PostgreSQL) | No (Direct class) |
 | `InferenceProvider` | Direct `genai.Client` calls | `vertex_config.py`, `agent_col_turn_service.py` | Specialist services, `AgentColTurnService` | `GoogleGenAIProvider` | `OpenAIProviderAdapter` (Responses API) | No (Direct SDK) |
-| `StructuredOutputProvider` | `agent_col_routing_provider_v4.py` | `agent_col_routing_provider_v4.py` | `AgentColTurnService`, `synthesis_service.py`, `generic_artifact_generation.py` | `GenAIStructuredOutputProvider` | `OpenAIStructuredOutputProvider` (`text.format`) | Partial (v4 provider class) |
-| `WebSearchProvider` | Direct `types.GoogleSearch` | `research_expert_service.py` | `ResearchExpertService` | `GoogleSearchGroundingProvider` | `OpenAIWebSearchProvider` (`web_search_preview`) | No (Direct SDK tool) |
+| `StructuredOutputProvider` | Separate direct GenAI callers | `agent_col_routing_provider_v4.py`, `synthesis_service.py`, `generic_artifact_generation.py`, analyst/specialist services | Routing, synthesis, artifacts, analysts, specialists | New adapter over existing direct SDK calls | `OpenAIStructuredOutputProvider` (`text.format`) | No shared interface today; routing V4 is only a neighboring pattern |
+| `WebSearchProvider` | Direct `types.GoogleSearch` | `research_expert_service.py` | `ResearchExpertService` | `GoogleSearchGroundingProvider` | `OpenAIWebSearchProvider` (`web_search`, with preview compatibility only if required by the pinned SDK/API) | No (Direct SDK tool) |
 | `SpeechProvider` | Direct Google STT/TTS | `speech_service.py` | `main.py` speech API routes | `GoogleSpeechProvider` | `OpenAISpeechProvider` (`gpt-transcribe`, `gpt-4o-mini-tts`) | Partial (Service wrapper) |
 
 ---
@@ -151,9 +159,10 @@ Phase 4: Collapse Configurations to OpenAI
   └── Set INFERENCE_PROVIDER_DEFAULT=openai; collapse temporary PROVIDER_* flags.
         │
         ▼
-Phase 5: Google Runtime Dependency Retirement
-  ├── 5.1 Remove Google SDK dependencies from requirements.txt.
-  └── 5.2 Delete legacy Firestore and Vertex AI configuration files.
+Phase 5: Migrated Google Runtime Dependency Retirement
+  ├── 5.1 Remove Firestore, GenAI/ADK, and speech dependencies after source-import audit.
+  ├── 5.2 Delete or archive replaced persistence/provider configuration modules.
+  └── 5.3 Retain Google auth libraries if Google OIDC remains the selected identity provider.
 ```
 
 ---
@@ -168,7 +177,7 @@ Phase 5: Google Runtime Dependency Retirement
   2. Define `AbstractAgentJobRepository` protocol in `agent_job_repository_interface.py`.
   3. Define `InferenceProvider` and `StructuredOutputProvider` protocols in `inference_interface.py`.
   4. Wire `PERSISTENCE_BACKEND` (`"firestore"` | `"postgresql"`) and granular `PROVIDER_*` flags in `main.py` lifespan setup.
-- **Verification:** Run `pytest`; all tests pass using existing Firestore + Google implementations under interface wrappers.
+- **Verification:** Run focused interface/contract tests and directly affected subsystem tests first. Because the completed phase changes shared dependency construction across the application, run the full suite as the phase-completion gate after focused failures are resolved.
 
 ### Phase 2: PostgreSQL Persistence Migration
 - **Goal:** Transition all durable state from Firestore to PostgreSQL while maintaining Google GenAI/ADK for inference.
@@ -192,15 +201,20 @@ Phase 5: Google Runtime Dependency Retirement
   2. `PROVIDER_ANALYSTS=openai` (working state, continuity, preferences via `gpt-5.6-luna`).
   3. `PROVIDER_SPECIALISTS=openai` (source, computational, requirements via `gpt-5.6-sol`/`terra`).
   4. `PROVIDER_ARTIFACTS=openai` (blueprint synthesis, single-file artifacts via `gpt-5.6-sol`).
-  5. `PROVIDER_SEARCH=openai` (research web search grounding via `gpt-5.6-terra` + `web_search_preview`).
+  5. `PROVIDER_SEARCH=openai` (research web search grounding through the current supported `web_search` tool contract; retain preview compatibility only if required by the pinned SDK/API).
   6. `PROVIDER_RESPONDER=openai` (Primary Responder & ADK removal via `OpenAIResponderAdapter`).
   7. `PROVIDER_SPEECH=openai` (speech adapters via `gpt-transcribe` & `gpt-4o-mini-tts`).
 - **Verification:** Run test gates after each sub-phase.
 
-### Phase 4: Collapse Configurations & Final Google Retirement
-- **Goal:** Collapse temporary `PROVIDER_*` flags to `INFERENCE_PROVIDER_DEFAULT=openai` and purge Google SDK dependencies.
+### Phase 4: Collapse Provider Configurations
+- **Goal:** Collapse temporary inference/speech `PROVIDER_*` flags to `INFERENCE_PROVIDER_DEFAULT=openai` after all staged provider paths are verified.
 - **Entry Condition:** All sub-phases of Phase 3 verified stable in production.
-- **Actions:** Remove `google-genai`, `google-adk`, `google-cloud-firestore` from `requirements.txt`. Delete `vertex_config.py`.
+- **Actions:** Remove temporary provider-routing combinations while retaining an explicit rollback release. Do not remove SDKs until the source-import audit in Phase 5 is clean.
+
+### Phase 5: Retire Migrated Google Runtime Dependencies
+- **Goal:** Remove replaced Firestore, GenAI/ADK, and speech dependencies without implicitly changing user authentication.
+- **Entry Condition:** PostgreSQL and OpenAI paths are authoritative, rollback policy is satisfied, and production imports no longer use the migrated SDKs.
+- **Actions:** Remove only dependencies proven unused by a production-source import scan. Retain `google-auth`/OIDC code unless a separately approved identity-provider migration replaces it.
 
 ---
 
@@ -237,25 +251,25 @@ Because PostgreSQL normalizes array fields (e.g. `source_message_ids` -> junctio
 | **Workspaces** | `users/{id}/workspaces/{id}` | `workspaces` | Exact 1:1 | Verify `workspace_id`, `user_id` FK, `display_name`, `is_default`. |
 | **Projects** | `projects/{id}` | `projects` | Exact 1:1 | Verify `project_id REFERENCES workspaces(workspace_id)`. |
 | **Sessions** | `sessions/{id}` | `sessions` | Exact 1:1 | Verify `session_id`, `user_id` FK, `project_id` FK, `last_completed_turn_id`. |
-| **Messages** | `sessions/{id}/messages/{id}` | `messages` | Exact 1:1 | Verify `message_id`, `session_id` FK, `role`, text length checksum. |
-| **Note Proposals** | `workspaces/{id}/note_proposals/{id}` | `note_proposals` + `note_proposal_source_messages` | 1:1 Parent, 1:N Junction | Verify `proposal_id`; verify junction table rows equal `len(source_message_ids)`. |
-| **Notes** | `workspaces/{id}/collaborative_notes/{id}` | `collaborative_notes` + `note_source_messages` | 1:1 Parent, 1:N Junction | Verify `note_id`, `revision`; verify junction table rows equal `len(source_message_ids)`. |
+| **Messages** | `sessions/{id}/messages/{id}` | `messages` | Exact 1:1 | Verify composite `(session_id, message_id)`, role, and text length checksum. |
+| **Note Proposals** | `users/{user_id}/workspaces/{id}/note_proposals/{id}` | `note_proposals` + `note_proposal_source_messages` | 1:1 Parent, 1:N Junction | Verify `proposal_id`; verify junction rows and session-scoped message identities equal `source_message_ids`. |
+| **Notes** | `users/{user_id}/workspaces/{id}/collaborative_notes/{id}` | `collaborative_notes` + `note_source_messages` | 1:1 Parent, 1:N Junction | Verify `note_id`, `revision`; verify junction rows and session-scoped message identities. |
 | **Note Events** | `collaborative_notes/{id}/events/{id}` | `note_events` + `note_event_source_messages` | 1:1 Parent, 1:N Junction | Verify `event_id`, `note_id` FK; verify junction table rows match `len(source_message_ids)`. |
-| **Memory Proposals (Category Slots)** | `users/{user_id}/memory_proposals/{category}` | `memory_proposals` | Category-Slot Mapping (At most 1 active/pending proposal per category slot per user) | Verify category-slot document keying (`category`), `user_id` FK, inner `proposal_id`, status, and `proposed_value` JSON checksum. |
+| **Memory Proposals (Category Slots)** | `users/{user_id}/memory_proposals/{category}` | `memory_proposals` | One mutable category-slot row per user across all statuses | Verify category-slot document keying (`category`), `user_id` FK, inner `proposal_id`, status, and `proposed_value` JSON checksum. |
 | **Memory Proposal Origins** | `users/{user_id}/memory_proposal_origins/{origin_id}` | `memory_proposal_origins` | Independent Source Domain (1 per origin derived) | Verify exact `origin_id` PK, `user_id` FK, `category`, stored inner `proposal_id` (provenance metadata, unconstrained by category slot proposals), source session/message provenance (`source_session_id`, `source_message_id`), evidence message ID / clarification ID where applicable. |
-| **Memory Events** | `users/{id}/memory_events/{id}` | `memory_events` | Exact 1:1 | Verify `event_id`, `user_id` FK, `category`, `memory_value` JSON checksum. |
-| **Chat Turns** | `sessions/{id}/turns/{id}` | `chat_turns` | Exact 1:1 | Verify `turn_id`, `session_id` FK, `status`, `idempotency_key`. |
+| **Memory Events** | `users/{id}/memory_events/{id}` | `memory_events` | Exact 1:1 | Verify `event_id`, `user_id` FK, `category`, `value` JSON checksum. |
+| **Chat Turns** | `sessions/{id}/turns/{id}` | `chat_turns` | Exact 1:1 | Verify composite `(session_id, turn_id)`, status, and session-scoped idempotency. |
 | **Working State** | `sessions/{id}/working_state/current` | `session_working_state` | Exact 1:1 per session | Verify `session_id` PK, `current_goal`, `intent_hypothesis`. |
 | **Blueprints** | `projects/{id}/blueprints/{id}` | `blueprints` | Exact 1:1 | Verify `blueprint_id`, `project_id` FK, `blueprint` JSON payload checksum. |
 | **Artifacts** | `projects/{id}/artifacts/{id}` | `artifacts` | Exact 1:1 | Verify `artifact_id`, `project_id` FK, `filename`, content byte size. |
-| **AgentJobs** | `workspaces/{id}/agent_jobs/{id}` | `agent_jobs` + `agent_job_private_payloads` | 1:1 Job, 1:1 Payload | Verify `job_id`, `job_ref` uniqueness, `workspace_id` FK, status. |
+| **AgentJobs** | `users/{user_id}/workspaces/{id}/agent_jobs/{id}` | `agent_jobs` + `agent_job_private_payloads` | 1:1 Job, 1:1 Payload | Verify `job_id`, workspace-scoped idempotency, owner/scope fields, status, and full private payload envelope. |
 
 ---
 
 ## H. AgentJob Migration Metadata & Operational Rules
 
 1. **Job Audit & Provenance Metadata:** Payloads may include `accepted_provider` (`"google"` | `"openai"`) and `accepted_persistence` (`"firestore"` | `"postgresql"`) for audit and logging purposes. However, these fields are **non-authoritative for routing**; repository selection and model dispatch remain governed strictly by application-level configuration flags (`PERSISTENCE_BACKEND` and `PROVIDER_*`).
-2. **Worker Restarts Across Cutover:** During the Phase 2 freeze window, active `AgentJob` queue workers will be drained or fenced before switching `PERSISTENCE_BACKEND=postgresql`. Active `lease_expires_at` locks guarantee no job is executed twice across the persistence boundary.
+2. **Worker Restarts Across Cutover:** A lease in Firestore cannot fence a worker reading PostgreSQL, or vice versa. The freeze must disable new enqueue and claim operations, verify zero running jobs, reconcile queued jobs and private payloads, establish an authority epoch/fence, and only then switch the repository backend. Lease state remains useful inside one authority boundary but does not itself prevent cross-store execution.
 3. **Retry Behavior Verification:** Retrying a failed job queued prior to cutover will execute against the currently configured provider/repository backend. Retry payload reconstruction behavior will be verified during implementation against canonical `AgentJob` source logic.
 
 ---
@@ -290,7 +304,7 @@ The matrix below specifies supported, temporary, and prohibited/unsafe runtime s
                                                                                 before restoring Firestore.
 ```
 
-1. **Pre-Write Cutover Rollback Window:** Before PostgreSQL accepts authoritative post-cutover writes, toggling `PERSISTENCE_BACKEND=firestore` is completely safe and lossless because Firestore remains fully up to date.
+1. **Pre-Write Cutover Rollback Window:** Before PostgreSQL accepts authoritative post-cutover writes, switching back to Firestore is expected to be lossless only if the write freeze remained effective, all workers were fenced, and the final manifest proves Firestore is still authoritative. Treat this as a verified cutover condition, not an unconditional guarantee.
 2. **Post-Write Cutover Recovery Window:** Once PostgreSQL accepts authoritative writes, Firestore becomes stale/read-only diagnostic history. Toggling `PERSISTENCE_BACKEND=firestore` after this point will result in data loss. Recovery must occur via:
    - **Fix Forward (Recommended):** Apply patch directly to PostgreSQL while it remains authoritative.
    - **Reconciliation Recovery:** Freeze writes, execute a reverse PostgreSQL → Firestore reconciliation script, and then restore Firestore authority.
@@ -328,7 +342,7 @@ After Phase 3 completes and Google dependencies are retired, these temporary ove
 | :--- | :--- | :--- | :--- |
 | **Phase 1** | `pytest tests/test_agent_col_turn_service.py` | All interface wrappers pass unit tests with existing Firestore/Google logic. | Initial dev soak window before staging |
 | **Phase 2** | `pytest tests/test_database.py` + Manifest Validator | Migration Manifest zero-missing parity, FK integrity check passes. | Recommended 48-72h staging soak; PostgreSQL pool max 20 connections |
-| **Phase 3a** | `pytest tests/test_agent_col_routing_v4.py` | v4 intent routing returns 100% valid `AgentColRoutingDecisionV4` structures via `gpt-5.6-luna`. | Latency target < 350ms |
+| **Phase 3a** | `pytest tests/test_agent_col_routing_v4.py` | Successful structured routing responses validate as `AgentColRoutingDecisionV4`; refusal, incomplete, and provider-failure paths are also covered. | Candidate latency target < 350ms, subject to benchmark |
 | **Phase 3b** | `pytest tests/test_working_state_service.py` | Working state snapshots extract valid `WorkingStateSnapshot` objects. | Snapshot extraction < 700ms |
 | **Phase 3c-d**| `pytest tests/test_synthesis.py` | Blueprint synthesis and single-file artifact generation match Pydantic schemas. | Synthesis model timeout recommendation < 15s |
 | **Phase 3e** | `pytest tests/test_research_expert.py` | Web search annotations map cleanly into `CitationReceipt` objects. | Optional snippet handling verified |
@@ -351,16 +365,17 @@ After Phase 3 completes and Google dependencies are retired, these temporary ove
 
 ---
 
-## M. Final Google Dependency Removal Checklist
+## M. Migrated Google Dependency Removal Checklist
 
 - [ ] `database.py` Firestore `AsyncClient` references replaced by `PostgresMemoryEngine` (or moved to legacy module).
 - [ ] `agent_job_repository.py` Firestore queries replaced by `PostgresAgentJobRepository`.
 - [ ] `agent_col_responder.py` and `supervisor_runtime.py` Google ADK imports removed.
-- [ ] `vertex_config.py` removed; replaced by `openai_config.py`.
+- [ ] `vertex_config.py` removed or archived only after all GenAI callers use the provider interface; `main.py` client construction is migrated separately.
 - [ ] `research_expert_service.py` `types.GoogleSearch` grounding removed; replaced by OpenAI Web Search tool.
 - [ ] `speech_service.py` Google Speech SDKs removed; replaced by OpenAI Speech APIs.
-- [ ] `requirements.txt` cleaned of `google-genai`, `google-adk`, `google-cloud-firestore`, `google-cloud-speech`, `google-cloud-texttospeech`.
-- [ ] Repository grep check for `google.genai` and `google.adk` returns **0 occurrences** in production application code.
+- [ ] `requirements.txt` cleaned of `google-genai`, `google-adk`, `google-cloud-firestore`, `google-cloud-speech`, and `google-cloud-texttospeech` only after production imports reach zero.
+- [ ] Repository grep check for `google.genai` and `google.adk` returns **0 occurrences** in production application code, including tool and responder-context modules.
+- [ ] Google OIDC is explicitly retained or replaced through a separate approved identity-provider decision; provider migration does not silently remove it.
 
 ---
 
@@ -369,3 +384,5 @@ After Phase 3 completes and Google dependencies are retired, these temporary ove
 1. **Reasoning Effort Latency Impact:** `gpt-5.6-sol` with high reasoning effort under complex code synthesis workloads must be benchmarked to establish production timeout thresholds.
 2. **PostgreSQL Connection Pool Tuning:** Async connection pool parameters (`asyncpg` pool max connections) must be benchmarked under high-concurrency background `AgentJob` worker execution.
 3. **Migration Manifest Catch-Up Performance:** The delta migration script duration during the Phase 2 freeze window must be benchmarked on representative dataset sizes to minimize maintenance mode downtime.
+4. **Identity Provider Decision:** Decide whether Google OIDC remains supported. This is independent of OpenAI inference and PostgreSQL persistence.
+5. **Worker Concurrency Policy:** Set measured global and per-action concurrency limits so long artifact jobs cannot starve memory or note work while respecting provider and database capacity.
