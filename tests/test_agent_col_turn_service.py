@@ -840,6 +840,171 @@ async def test_turn_service_routes_broad_prospective_memory_intent(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "good afternoon agent Col how's it going",
+        "hey agent col hows it going this afternoon?",
+        "hey agent col how's it going this afternoon?",
+        "hey agent col how is it going this afternoon?",
+        "hey agent col how are you this afternoon?",
+        "hey",
+        "hello Agent Col",
+        "good morning",
+        "how's your day going?",
+        "hows your day going?",
+        "how is your day going?",
+        "how are you doing this morning?",
+        "hope you're doing well",
+        "hope you are doing well today",
+        "thanks",
+        "thank you!",
+        "appreciate it.",
+        "that's hilarious",
+        "that's funny",
+        "okay",
+        "ok",
+        "got it",
+        "sounds good",
+        "fair enough",
+        "alright",
+        "no worries",
+        "that makes sense",
+        "lol",
+        "nice",
+        "cool",
+        "good to hear",
+        "Can you review this code?",
+        "Fix the failing tests.",
+        "Explain this function.",
+        "For this response only, answer in bullet points.",
+    ],
+)
+async def test_turn_service_does_not_queue_filler_or_ephemeral_tasks_as_memory(
+    message: str,
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-filler-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert memory_queue.calls == []
+    assert result.queued_actions == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "expected_value"),
+    [
+        (
+            "Thanks. I work better with diagrams.",
+            "I work better with diagrams",
+        ),
+        (
+            "Good morning. I use Linux for development.",
+            "I use Linux for development",
+        ),
+        (
+            "Lol, remember that I prefer concise reviews.",
+            "I prefer concise reviews",
+        ),
+    ],
+)
+async def test_turn_service_routes_memory_when_mixed_with_social_text(
+    message: str,
+    expected_value: str,
+) -> None:
+    from agent_col_routing_v4 import (
+        AgentColRoutingDirective as AgentColRoutingDirectiveV4,
+    )
+    from agent_col_turn_service import AgentColTurnCommand, AgentColTurnService
+    from chat_turns import ChatTurnClaim, ChatTurnRequest, derive_chat_turn_ids
+
+    claim = ChatTurnClaim(
+        request=ChatTurnRequest(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+        ),
+        ids=derive_chat_turn_ids("memory-mixed-social-key"),
+        owner_token="owner-token",
+        lease_expires_at=datetime(2026, 8, 24, tzinfo=UTC),
+        resumed=False,
+    )
+    memory_queue = RecordingMemoryQueue()
+    service = AgentColTurnService(
+        routing_client=object(),
+        expert_executor=RecordingExecutor(),
+        responder_runtime=RecordingResponder(),
+        routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirective(route="direct")
+        ),
+        artifact_executor=RecordingArtifactExecutor(),
+        artifact_routing_request=RecordingRoutingRequest(
+            AgentColRoutingDirectiveV4.model_validate(
+                {"schema_version": "4.0", "route": "direct"}
+            )
+        ),
+        memory_queue=memory_queue,
+    )
+
+    result = await service.run_turn(
+        AgentColTurnCommand(
+            project_id="project-1",
+            session_id="session-1",
+            user_id="user-1",
+            message=message,
+            chat_turn_claim=claim,
+        )
+    )
+
+    assert len(memory_queue.calls) == 1
+    assert memory_queue.calls[0].decision.canonical_value == expected_value
+    assert result.queued_actions[0].action_kind == "propose_memory_signal"
+
+
+@pytest.mark.asyncio
 async def test_turn_service_preserves_preflight_memory_queue_without_requeue(
 ) -> None:
     from agent_col_routing_v4 import (

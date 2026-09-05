@@ -146,7 +146,7 @@ _MEMORY_RETRIEVAL_OR_HISTORY = re.compile(
 )
 _MEMORY_INTENT_PREFIXES = (
     re.compile(
-        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:^|[.!?,;]\s+|\s+(?:also|and)\s+)"
         r"(?:(?:also|and)\s+)?(?:(?:can|could|would|will)\s+you\s+)?"
         r"(?:one\s+more\s+thing\s+to\s+)?"
         r"(?:please\s+)?remember\s+(?:that\s+|"
@@ -155,21 +155,21 @@ _MEMORY_INTENT_PREFIXES = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:^|[.!?,;]\s+|\s+(?:also|and)\s+)"
         r"(?:(?:also|and)\s+)?(?:please\s+)?"
         r"(?:keep\s+in\s+mind|bear\s+in\s+mind)"
         r"(?:\s+for\s+future\s+conversations)?(?:\s+that)?\s+",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:^|[.!?,;]\s+|\s+(?:also|and)\s+)"
         r"(?:(?:also|and)\s+)?(?:please\s+)?"
         r"(?:note|make\s+a\s+note)"
         r"(?:\s+about\s+me)?(?:\s+that|:)\s+",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:^|[.!?,;]\s+|\s+(?:also|and)\s+)"
         r"(?:(?:also|and)\s+)?(?:please\s+)?"
         r"(?:save|store|record)\s+"
         r"(?:this\s+)?(?:as\s+)?(?:a\s+)?"
@@ -177,7 +177,7 @@ _MEMORY_INTENT_PREFIXES = (
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:^|[.!?]\s+|\s+(?:also|and)\s+)"
+        r"(?:^|[.!?,;]\s+|\s+(?:also|and)\s+)"
         r"(?:queue\s+memory\b.*?\b)?propose\s+remembering\s+",
         re.IGNORECASE,
     ),
@@ -185,6 +185,39 @@ _MEMORY_INTENT_PREFIXES = (
 _MEMORY_CANDIDATE_SPLIT = re.compile(
     r"(?<=[.!?])\s+|\n+|\s+(?:and|also|then)\s+(?=[A-Z0-9])",
     re.IGNORECASE,
+)
+_MEMORY_FALLBACK_SOCIAL_GREETING = re.compile(
+    r"(?:hi|hello|hey|good morning|good afternoon|good evening)"
+    r"(?: agent col)?"
+    r"(?: (?:(?:hows|how is) (?:it|your day) going|how are you(?: doing)?))?"
+    r"(?: today| this morning| this afternoon| this evening)?"
+    r"|(?:hows|how is) (?:it|your day) going"
+    r"(?: today| this morning| this afternoon| this evening)?"
+    r"|how are you(?: doing)?"
+    r"(?: today| this morning| this afternoon| this evening)?"
+    r"|hope you are doing well"
+    r"(?: today| this morning| this afternoon| this evening)?",
+)
+_MEMORY_FALLBACK_SOCIAL_GRATITUDE = re.compile(
+    r"thanks?|thank you|appreciate it",
+)
+_MEMORY_FALLBACK_SOCIAL_ACKNOWLEDGEMENT = re.compile(
+    r"ok(?:ay)?|got it|sounds good|fair enough|alright|all right|"
+    r"no worries|that makes sense",
+)
+_MEMORY_FALLBACK_SOCIAL_REACTION = re.compile(
+    r"lol|nice|cool|thats (?:hilarious|funny)|good to hear",
+)
+_MEMORY_FALLBACK_CURRENT_TURN_ONLY = re.compile(
+    r"^\s*(?:"
+    r"for\s+this\s+(?:response|turn|message|answer|chat)\s+only\b.*|"
+    r"(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"
+    r"review\s+(?:this\s+)?code|"
+    r"(?:please\s+)?fix\s+the\s+failing\s+tests|"
+    r"(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?"
+    r"explain\s+this\s+function"
+    r")\s*[.!?]*\s*$",
+    re.IGNORECASE | re.DOTALL,
 )
 _MAX_ACCEPTED_NOTE_TITLE_CHARS = 80
 logger = logging.getLogger(__name__)
@@ -527,7 +560,7 @@ def _finish_memory_clause_extraction(
     tail = message[body_start:]
     boundary = _MEMORY_CLAUSE_BOUNDARY.search(tail)
     body_end = body_start + (boundary.start() if boundary else len(tail))
-    request = message[request_start:body_end].strip()
+    request = message[request_start:body_end].lstrip(" \t\r\n.!?,;").strip()
     body = _normalize_memory_clause_body(message[body_start:body_end])
     if not request or not body:
         return None
@@ -546,10 +579,43 @@ def _plausible_memory_context_text(message: str) -> tuple[str, str] | None:
             continue
         if _MEMORY_RETRIEVAL_OR_HISTORY.search(clause):
             continue
+        if _memory_fallback_excludes_clause(clause):
+            continue
         body = _normalize_memory_clause_body(clause)
         if body:
             selected = clause, body
     return selected
+
+
+def _memory_fallback_excludes_clause(clause: str) -> bool:
+    return (
+        _is_memory_fallback_social_only_clause(clause)
+        or _MEMORY_FALLBACK_CURRENT_TURN_ONLY.match(clause) is not None
+    )
+
+
+def _is_memory_fallback_social_only_clause(clause: str) -> bool:
+    normalized = _normalize_memory_fallback_social_clause(clause)
+    if not normalized:
+        return False
+    return any(
+        pattern.fullmatch(normalized) is not None
+        for pattern in (
+            _MEMORY_FALLBACK_SOCIAL_GREETING,
+            _MEMORY_FALLBACK_SOCIAL_GRATITUDE,
+            _MEMORY_FALLBACK_SOCIAL_ACKNOWLEDGEMENT,
+            _MEMORY_FALLBACK_SOCIAL_REACTION,
+        )
+    )
+
+
+def _normalize_memory_fallback_social_clause(clause: str) -> str:
+    normalized = clause.lower().replace("’", "'")
+    normalized = re.sub(r"\bhow[' ]?s\b", "hows", normalized)
+    normalized = re.sub(r"\byou[' ]?re\b", "you are", normalized)
+    normalized = re.sub(r"\bthat[' ]?s\b", "thats", normalized)
+    normalized = re.sub(r"[^a-z0-9']+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _iter_memory_candidate_spans(message: str):
