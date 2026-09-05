@@ -1,6 +1,6 @@
 # Agent Col: PostgreSQL-Backed AgentJob Durability & Worker-Runtime Research
 
-This document presents the authoritative, source-grounded research and architectural design for executing **PostgreSQL-backed `AgentJobs`** in **Agent Col**. It defines a recoverable, local-first background worker runtime that survives process crashes, restarts, expired leases, network blips, retries, and worker concurrency without coupling background execution to the interactive chat request lifecycle.
+This document presents source-grounded research and a **TARGET DESIGN** for executing PostgreSQL-backed `AgentJobs` in **Agent Col**. Current-source behavior is identified separately from proposed worker semantics. The target is a recoverable, local-first background runtime that survives process crashes, restarts, expired leases, network failures, retries, and worker concurrency without coupling execution to the interactive chat request lifecycle.
 
 Primary codebase contracts:
 - [`agent_job_repository.py`](../../agent_job_repository.py)
@@ -60,7 +60,7 @@ The recommended architecture is a **Decoupled Local Worker System** backed by Po
 ```
 
 ### Core Design Rules
-1. **Interactive Chat Integrity:** Chat request handlers must only enqueue `AgentJobs` in PostgreSQL and return immediately. Request handlers must **never** spawn background worker `asyncio.create_task` tasks.
+1. **Interactive Chat Integrity:** Durable-action acceptance in chat and dedicated action endpoints may synchronously persist an `AgentJob` and receipt, but must not execute the job or spawn process-local worker tasks. Chat streaming may continue independently after acceptance; a chat request is not required to terminate merely because it accepted background work.
 2. **Durable Authority & Domain Side-Effect Fencing:** PostgreSQL is the single source of truth for job queueing, state transitions, lease locks, private payloads, domain side effects (artifacts, note proposals, memory proposals), events, and reports. Stale workers whose leases expired are fenced from persisting **both** domain side effects and job status updates.
 3. **Stale-Worker Fencing:** Every lease claim increments a `lease_generation` counter. Completion writes must match `status='running'`, `lease_owner`, and `lease_generation`. If the fence check fails, the transaction rolls back, preventing stale domain side-effect commits.
 4. **Crash Recovery:** Worker restarts automatically discover orphaned `queued` jobs and expired `running` jobs, reclaiming them safely without manual operator intervention.
@@ -73,16 +73,16 @@ The recommended architecture is a **Decoupled Local Worker System** backed by Po
 
 | Subsystem / Operation | Source File Location | Source Function / Line Evidence | Current Behavior & Persistence Scope |
 | :--- | :--- | :--- | :--- |
-| **Job Enqueue** | `agent_job_repository.py` | `enqueue_job()` (l. 54) | Writes `AgentJob` document (`status="queued"`, `attempt_count=0`) to Firestore. |
-| **Private Payload** | `agent_job_repository.py` | `save_private_payload()` (l. 150) | Writes `AgentJobPayload` to subcollection `.../agent_jobs/{job_id}/private_payloads/payload`. |
+| **Job Enqueue** | `agent_job_repository.py` | `enqueue_job()` (l. 54), `enqueue_job_with_payload()` (l. 101) | Writes a queued `AgentJob` to Firestore. The current strict model defaults `attempt_count=1`; `enqueue_job_with_payload()` atomically stores job and private payload. |
+| **Private Payload** | `agent_job_payloads.py`<br>`agent_job_repository.py` | `AgentJobPayload` (l. 13)<br>`enqueue_job_with_payload()` (l. 101) | Stores the full strict payload envelope at `.../agent_jobs/{job_id}/private_payloads/payload`; there is no separate `payload_id` field or `save_private_payload()` method. |
 | **Worker Dispatch** | `memory_proposal_job_worker.py`<br>`agent_col_artifact_executor.py`<br>`collaborative_note_job_worker.py` | `dispatch()` (l. 164)<br>`dispatch()` (l. 510)<br>`dispatch()` (l. 120) | Spawns process-local `asyncio.create_task(self.run_job(...))` inside FastAPI HTTP handler loops. |
-| **Lease Acquisition** | `agent_job_repository.py` | `claim_job_lease()` (l. 200) | Sets `status="running"`, `lease_owner`, `lease_expires_at`, increments `attempt_count`. |
-| **Lease Renewal** | `agent_job_repository.py` | `renew_job_lease()` (l. 260) | Updates `lease_expires_at` if `lease_owner` matches. |
-| **Job Completion** | `agent_job_repository.py` | `complete_job()` (l. 310) | Sets `status="completed"`, clears lease fields, writes `result_refs`. |
-| **Job Failure** | `agent_job_repository.py` | `fail_job()` (l. 370) | Sets `status="failed"`, clears lease fields, writes `failure_summary`. |
-| **Job Cancellation** | `agent_job_repository.py` | `cancel_job()` (l. 430) | Sets `status="cancelled"`, clears lease fields. |
-| **Event Logging** | `agent_job_repository.py` | `record_event()` (l. 480) | Writes `AgentJobEvent` to subcollection `.../agent_jobs/{job_id}/events/{event_id}`. |
-| **Report Generation**| `agent_job_repository.py` | `save_report()` (l. 520) | Writes `AgentJobReport` to subcollection `.../agent_job_reports/{report_id}`. |
+| **Lease Acquisition** | `agent_job_repository.py` | `lease_next_queued_job()` (l. 273), `lease_queued_job()` (l. 340) | Transitions only queued jobs to running and records owner/expiry. Current source neither reclaims expired running jobs nor increments attempts on claim. |
+| **Lease Renewal** | None | No current repository method | Current source has no heartbeat/renewal operation. This is a target requirement, not existing behavior. |
+| **Job Completion** | `agent_job_repository.py` | `complete_job()` (l. 390) | Validates the matching live lease, sets `status="completed"`, clears lease fields, and writes `result_refs`. |
+| **Job Failure** | `agent_job_repository.py` | `fail_job()` (l. 411) | Validates the matching live lease and writes structured `AgentJobFailure` data. |
+| **Job Cancellation** | `agent_job_repository.py` | `cancel_job()` (l. 432) | Sets `status="cancelled"` under current repository state checks. |
+| **Event Logging** | `agent_job_repository.py` | `append_event()` (l. 569) | Writes `AgentJobEvent` to `.../agent_jobs/{job_id}/events/{event_id}`. |
+| **Report Generation**| `agent_job_repository.py` | `create_report()` (l. 657) | Writes a report whose `report_id` is worker-derived and distinct from `job_id`. |
 
 ---
 
@@ -107,7 +107,7 @@ The recommended architecture is a **Decoupled Local Worker System** backed by Po
 1. **Orphaned Queued Jobs:** If the FastAPI process crashes after `enqueue_job()` but before `asyncio.create_task()` executes, the job remains in `status="queued"` indefinitely because no background polling loop exists to discover un-dispatched jobs.
 2. **Orphaned Running Jobs:** If the process crashes while a job is `status="running"`, the task dies immediately. The job remains in `status="running"` with `lease_expires_at` set in the past. Current source contains no startup or background drainer to reclaim expired jobs.
 3. **Unbounded HTTP Request Lifetime:** In-process dispatch forces long-running background work to share CPU and memory with the Uvicorn HTTP event loop.
-4. **Ungraceful Shutdown:** On FastAPI application shutdown (`main.py` lifespan shutdown), in-flight `asyncio.create_task` instances are abruptly cancelled without releasing lease locks or logging terminal failure events.
+4. **Incomplete Shutdown Ownership:** FastAPI explicitly cancels and gathers working-state, artifact, and memory task sets. The note worker task set is created but not stored on `app.state` or included in shutdown cleanup (`main.py:2071-2077`, `2162-2214`). Cancellation still does not release leases or log terminal worker events.
 
 ---
 
@@ -133,11 +133,12 @@ The recommended architecture is a **Decoupled Local Worker System** backed by Po
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                      STANDALONE WORKER PROCESS (agent-col-worker)               │
 │                                                                                 │
-│  Loop:                                                                          │
+│  Coordinator + bounded concurrent execution pool:                              │
 │    ├── 1. Atomic Queue Claim & Reclaim Event CTE                                │
-│    ├── 2. Spawn Lease Heartbeat Task                                            │
-│    ├── 3. Execute External Provider / Model Inference                           │
-│    ├── 4. Fenced Domain Side-Effect & Completion Transaction:                   │
+│    ├── 2. Validate/dispatch allowlisted action_kind to its worker backend       │
+│    ├── 3. Spawn Lease Heartbeat Task                                            │
+│    ├── 4. Execute External Provider / Model Inference                           │
+│    ├── 5. Fenced Domain Side-Effect & Completion Transaction:                   │
 │    │     BEGIN TRANSACTION;                                                     │
 │    │       UPDATE agent_jobs SET status='completed', result_refs=...            │
 │    │         WHERE job_id=$1 AND lease_owner=$2 AND lease_generation=$3         │
@@ -147,9 +148,13 @@ The recommended architecture is a **Decoupled Local Worker System** backed by Po
 │    │       INSERT INTO agent_job_reports (...);                                 │
 │    │       INSERT INTO agent_job_events (...);                                  │
 │    │     COMMIT TRANSACTION;                                                    │
-│    └── 5. Cancel Heartbeat Task                                                 │
+│    └── 6. Cancel heartbeat and release one pool capacity slot                   │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+The worker runtime must not reduce the queue to one globally serial execution lane. It should use bounded concurrency with explicit per-action limits or fair scheduling so a long artifact build does not prevent an independent note or memory job from starting. PostgreSQL remains the shared queue authority; this does not create separate queue systems. The coordinator should poll with bounded backoff or use PostgreSQL notification only as a wake-up hint, because notifications are not durable queue state.
+
+The fenced commit requires transaction-aware domain repositories, or one shared unit of work. Replacing only `AgentJobRepository` is insufficient: artifact, note, or memory persistence must participate in the same PostgreSQL transaction as terminal job, event, and report writes.
 
 ---
 
@@ -157,9 +162,9 @@ The recommended architecture is a **Decoupled Local Worker System** backed by Po
 
 ### **RECOMMENDATION** Atomic CTE Claim & Event Logging
 
-Using `FOR UPDATE SKIP LOCKED` avoids worker threads blocking on already-locked claim candidates (note: `SKIP LOCKED` prevents worker lock waiting on queue claim candidates; it does not eliminate all PostgreSQL lock contention elsewhere).
+Using `FOR UPDATE SKIP LOCKED` avoids worker threads blocking on already-locked claim candidates (note: `SKIP LOCKED` prevents worker lock waiting on queue claim candidates; it does not eliminate all PostgreSQL lock contention elsewhere). A production claim should accept an allowlisted action-kind filter or immediately dispatch the claimed kind through a validated registry.
 
-To make reclaim event creation atomic with successful claims, the claim query evaluates whether the claimed candidate was previously `queued` or `running` (expired), recording an attempt/generation-specific event (`started` or `reclaimed`) in the **same atomic SQL transaction**. Candidate selection explicitly enforces `attempt_count < max_attempts`:
+To make claim event creation atomic with successful claims, the query evaluates whether the candidate was previously queued or was an expired running lease. Both cases use the existing `started` event type; reclaim is represented by the event message and metadata so the current public event vocabulary remains unchanged. Candidate selection explicitly enforces `attempt_count < max_attempts`:
 
 ```sql
 WITH candidate AS (
@@ -181,20 +186,21 @@ claimed AS (
         updated_at = CURRENT_TIMESTAMP
     FROM candidate c
     WHERE j.job_id = c.job_id
-    RETURNING j.job_id, j.job_ref, j.user_id, j.workspace_id, j.project_id,
+    RETURNING j.job_id, j.user_id, j.workspace_id, j.project_id,
               j.session_id, j.source_turn_id, j.source_message_id, j.action_kind,
               j.idempotency_key, j.attempt_count, j.lease_owner, j.lease_expires_at,
               j.lease_generation, j.retry_of_job_id, c.previous_status
 ),
 event_insert AS (
-    INSERT INTO agent_job_events (event_id, job_id, event_type, message, status, public_visibility, created_at)
+    INSERT INTO agent_job_events (event_id, job_id, event_type, message, status, public_visibility, metadata, created_at)
     SELECT 
-        c.job_id || '-' || CASE WHEN c.previous_status = 'running' THEN 'reclaimed' ELSE 'started' END || '-' || c.attempt_count,
+        c.job_id || '-started-' || c.attempt_count,
         c.job_id,
-        CASE WHEN c.previous_status = 'running' THEN 'reclaimed' ELSE 'started' END,
+        'started',
         CASE WHEN c.previous_status = 'running' THEN 'Job execution reclaimed by worker after lease expiry' ELSE 'Job execution started by worker' END,
         'running',
         TRUE,
+        jsonb_build_object('reclaimed', c.previous_status = 'running', 'lease_generation', c.lease_generation),
         CURRENT_TIMESTAMP
     FROM claimed c
 )
@@ -208,7 +214,11 @@ UPDATE agent_jobs
 SET status = 'failed',
     lease_owner = NULL,
     lease_expires_at = NULL,
-    failure_summary = 'Job attempt limit exceeded after worker crash or lease expiry',
+    failure_summary = jsonb_build_object(
+        'code', 'agent_job_attempt_limit_exceeded',
+        'summary', 'Job attempt limit exceeded after worker crash or lease expiry',
+        'retryable', false
+    ),
     updated_at = CURRENT_TIMESTAMP
 WHERE status = 'running'
   AND lease_expires_at < CURRENT_TIMESTAMP
@@ -321,7 +331,7 @@ When `agent-col-worker` starts up, it immediately executes the unified claim que
 │  2. Initialize DB Connection Pool                                               │
 │  3. Execute Atomic Queue Claim (Section E CTE)                                  │
 │     • Claims queued jobs or reclaims expired running jobs                       │
-│     • Emits 'reclaimed' event atomically inside claim transaction if expired     │
+│     • Emits 'started' with reclaimed metadata if the prior lease expired         │
 │  4. Enter Main Worker Execution Loop                                            │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -345,6 +355,8 @@ Jobs exceeding `max_attempts` during reclaim transition to `status='failed'` wit
 
 ### **DEFINITIVE INVARIANT**
 > `attempt_count` = *the number of execution leases successfully acquired for this specific `AgentJob` record.*
+
+This is a **TARGET DESIGN** invariant. Current Firestore `AgentJob` records default to `attempt_count=1` before any lease and current lease methods do not increment it. Migration must translate existing records deliberately rather than treating the target definition as current parity.
 
 ### Attempt Count Lifecycle
 
@@ -390,7 +402,7 @@ Jobs exceeding `max_attempts` during reclaim transition to `status='failed'` wit
 Cancelling a Python `asyncio.Task` is a **best-effort local interruption**. It does **not** guarantee that an HTTP or RPC request already sent to a remote model provider endpoint stops executing on the remote provider server.
 
 The authoritative safety guarantees are:
-1. **Queue Prevention:** Setting `status='cancelled'` in PostgreSQL prevents any worker from ever claiming or executing the job.
+1. **Queue Prevention:** Setting a queued job to `status='cancelled'` prevents any new claim. A provider request already sent by a running worker may continue remotely until it completes or times out.
 2. **Side-Effect Fencing:** If an external provider call completes for a cancelled job, the worker's fenced transaction (Section G) checks `status = 'running'`. Because status is `'cancelled'`, the fenced transaction fails (0 rows updated), rolling back and discarding all model output without persisting domain side effects.
 
 ---
@@ -423,18 +435,18 @@ The table below audits canonical repository source logic for each action kind:
 
 | Action Kind | Canonical Deterministic Identity / Provenance Key | Source Function Evidence | Duplicate Model Execution Possible? | Duplicate Database Side Effect Possible? | Exact Uniqueness & Idempotency Guard |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `create_artifact` | `blueprint_id = "blueprint--" + turn_id`<br>`artifact_id = "artifact--" + turn_id` | `database.py:2860`<br>`database.py:4440` | Yes (At-least-once model calls) | **No (Fenced & Unique PK)** | Primary Key `blueprint_id` / `artifact_id` uniqueness + Fenced side-effect transaction. |
-| `propose_collaborative_note` | `proposal_id = "note_proposal--" + digest` | `collaborative_notes.py:42`<br>`database.py:2400` | Yes | **No (Fenced & Unique PK)** | Primary Key `proposal_id` uniqueness in `note_proposals` table + Fenced transaction. |
-| `propose_memory_signal` | `origin_id = ProposalOriginIds` (SHA256 digest of user_id, session_id, source_message_id, category) | `memory_proposals.py:80`<br>`database.py:6257` | Yes | **No (Fenced & Unique PK)** | Primary Key `origin_id` in `memory_proposal_origins` + Fenced transaction. |
+| `create_artifact` | **Current:** Firestore auto document ID for background blueprint/single-file persistence.<br>**Target:** job-derived effect key or unique job-origin record. | `database.py:4352`<br>`database.py:4420` | Yes (At-least-once model calls) | **Yes today if a crash occurs after artifact persistence but before job completion.** | Target fenced transaction must insert with a unique `origin_job_id`/effect key or return the already-created resource. Turn-derived IDs elsewhere do not protect these background paths. |
+| `propose_collaborative_note` | `proposal_id = "note_proposal--" + digest` | `collaborative_notes.py`<br>`collaborative_note_job_worker.py:196-255` | Yes | Current proposal construction is deterministic, but side effect and terminal job writes are separate. | Preserve proposal identity and add `origin_job_id` fencing in the shared completion transaction. |
+| `propose_memory_signal` | `origin_id = ProposalOriginIds` (SHA256 digest of user/session/source/category) | `memory_proposals.py`<br>`memory_proposal_job_worker.py:243-354` | Yes | Governed origin deduplication exists, but side effect and terminal job writes are separate. | Preserve origin policy and execute proposal/origin plus terminal job writes in one fenced unit of work. |
 | `retrieve_chat_context` | N/A (Read-only context lookup) | `agent_job_repository.py` | Yes | **No (Read-only)** | Read-only operation; zero domain side-effect persistence. |
 
 ---
 
 ## N. Event & Report Transaction Semantics
 
-Worker execution uses **three discrete transactional phases**:
+The target worker execution uses **three discrete phases**:
 
-1. **Phase 1: Claim Transaction (Short DB Lock):** Executes Section E CTE query. Claims job, increments `lease_generation` and `attempt_count`, and logs a deterministic attempt-specific event (`{job_id}-started-{attempt_count}` or `{job_id}-reclaimed-{attempt_count}`) atomically.
+1. **Phase 1: Claim Transaction (Short DB Lock):** Executes Section E CTE query. Claims the job, increments `lease_generation` and `attempt_count`, and atomically logs `{job_id}-started-{attempt_count}` with reclaim metadata when applicable.
 2. **Phase 2: External Provider Execution (Outside DB Lock):** Runs model inference, structured output generation, or code execution outside SQL transactions.
 3. **Phase 3: Fenced Side-Effect & Completion Transaction (Short DB Lock):** Executes Section G query. Persists domain side effect, job status, report, and event atomically inside 1 short SQL transaction.
 
@@ -489,6 +501,8 @@ When `agent-col-worker` receives `SIGTERM` or `SIGINT`:
 ---
 
 ## Q. FastAPI / Worker Separation Boundary
+
+The route below is illustrative target pseudocode, not a current endpoint. Existing chat SSE may accept durable actions and continue streaming; only a dedicated action endpoint would necessarily return HTTP 202 directly.
 
 ```python
 @app.post("/api/workspaces/{workspace_id}/agent_jobs", status_code=202)
@@ -546,11 +560,13 @@ Phase 3: Worker Runtime Primitive Implementation
 Phase 4: Standalone Worker CLI Entrypoint
   └── Implement python -m agent_col_worker CLI daemon.
 
-Phase 5: FastAPI Handler Decoupling
-  └── Remove asyncio.create_task() calls from main.py and tool handlers; return HTTP 202.
+Phase 5: FastAPI and Chat Acceptance Decoupling
+  └── Remove asyncio.create_task() dispatch from request/tool paths. Dedicated action
+      endpoints return HTTP 202; chat persists queued receipts and continues its own SSE flow.
 
 Phase 6: Multi-Worker & Crash Verification
-  └── Execute end-to-end integration tests verifying worker restarts and multi-process concurrency.
+  └── Execute end-to-end integration tests verifying worker restarts, multi-process claims,
+      bounded parallel execution across action kinds, and starvation-free scheduling.
 ```
 
 ---
