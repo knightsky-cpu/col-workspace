@@ -1887,7 +1887,6 @@ class ServiceState:
     generic_artifact_service: FakeGenericArtifactReadService
     artifact_executor: object
     artifact_feedback_service: FakeArtifactFeedbackService
-    artifact_feedback_executor: object
     agent_job_repository: FakeAgentJobRepository
     genai_client_kwargs: list[dict[str, object]]
     responder_vertex_settings: list[VertexAISettings]
@@ -1899,10 +1898,9 @@ class ServiceState:
         tuple[object, object, object | None, object | None]
     ]
     artifact_executor_dependencies: list[
-        tuple[object, object, object, object, object, object, object | None, object]
+        tuple[object, object, object, object | None, object]
     ]
     artifact_feedback_service_dependencies: list[tuple[object, object]]
-    artifact_feedback_executor_dependencies: list[tuple[object, object]]
     responder_note_services: list[object]
     responder_agent_job_repositories: list[object]
     responder_note_job_dispatchers: list[object]
@@ -1910,7 +1908,7 @@ class ServiceState:
     working_state_service_dependencies: list[object]
     preference_learning_service_dependencies: list[object]
     turn_service_dependencies: list[
-        tuple[object, object, object, object, object, object, object]
+        tuple[object, object, object, object, object, object]
     ]
 
 
@@ -2143,7 +2141,6 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
             next_before=None,
         )
     )
-    artifact_feedback_executor = object()
     genai_client_kwargs: list[dict[str, object]] = []
     responder_vertex_settings: list[VertexAISettings] = []
     research_vertex_settings: list[VertexAISettings] = []
@@ -2154,10 +2151,9 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         tuple[object, object, object | None, object | None]
     ] = []
     artifact_executor_dependencies: list[
-        tuple[object, object, object, object, object, object, object | None, object]
+        tuple[object, object, object, object | None, object]
     ] = []
     artifact_feedback_service_dependencies: list[tuple[object, object]] = []
-    artifact_feedback_executor_dependencies: list[tuple[object, object]] = []
     responder_note_services: list[object] = []
     responder_agent_job_repositories: list[object] = []
     responder_note_job_dispatchers: list[object] = []
@@ -2192,7 +2188,6 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         generic_artifact_service=generic_artifact_service,
         artifact_executor=artifact_executor,
         artifact_feedback_service=artifact_feedback_service,
-        artifact_feedback_executor=artifact_feedback_executor,
         agent_job_repository=agent_job_repository,
         genai_client_kwargs=genai_client_kwargs,
         responder_vertex_settings=responder_vertex_settings,
@@ -2206,9 +2201,6 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         artifact_executor_dependencies=artifact_executor_dependencies,
         artifact_feedback_service_dependencies=(
             artifact_feedback_service_dependencies
-        ),
-        artifact_feedback_executor_dependencies=(
-            artifact_feedback_executor_dependencies
         ),
         responder_note_services=responder_note_services,
         responder_agent_job_repositories=responder_agent_job_repositories,
@@ -2365,7 +2357,6 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         expert_executor: object,
         responder_runtime: object,
         artifact_executor: object,
-        artifact_feedback_executor: object,
         note_queue: object,
         memory_queue: object,
     ) -> object:
@@ -2375,7 +2366,6 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
                 expert_executor,
                 responder_runtime,
                 artifact_executor,
-                artifact_feedback_executor,
                 note_queue,
                 memory_queue,
             )
@@ -2499,10 +2489,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
     def create_artifact_executor(
         *,
         synthesis_service: object,
-        artifact_ledger: object,
-        artifact_reader: object,
         generic_artifact_generator: object,
-        generic_artifact_reader: object,
         genai_client: object,
         agent_job_repository: object | None = None,
         artifact_job_dispatcher: object | None = None,
@@ -2510,10 +2497,7 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         artifact_executor_dependencies.append(
             (
                 synthesis_service,
-                artifact_ledger,
-                artifact_reader,
                 generic_artifact_generator,
-                generic_artifact_reader,
                 genai_client,
                 agent_job_repository,
                 artifact_job_dispatcher,
@@ -2545,22 +2529,6 @@ def service_state(monkeypatch: pytest.MonkeyPatch) -> ServiceState:
         raising=False,
     )
 
-    def create_artifact_feedback_executor(
-        *,
-        feedback_resolver: object,
-        feedback_ledger: object,
-    ) -> object:
-        artifact_feedback_executor_dependencies.append(
-            (feedback_resolver, feedback_ledger)
-        )
-        return artifact_feedback_executor
-
-    monkeypatch.setattr(
-        main,
-        "AgentColArtifactFeedbackExecutor",
-        create_artifact_feedback_executor,
-        raising=False,
-    )
     return state
 
 
@@ -6114,10 +6082,7 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
         )
         assert artifact_executor_dependencies[:-1] == (
             service_state.synthesis_service,
-            service_state.database,
-            service_state.artifact_service,
             main.generate_generic_artifact,
-            service_state.generic_artifact_service,
             service_state.genai_client,
             service_state.agent_job_repository,
         )
@@ -6128,19 +6093,12 @@ async def test_lifespan_composes_deterministic_experts_and_turn_service(
                 service_state.database,
             )
         ]
-        assert service_state.artifact_feedback_executor_dependencies == [
-            (
-                service_state.artifact_feedback_service,
-                service_state.database,
-            )
-        ]
         assert service_state.turn_service_dependencies == [
             (
                 service_state.genai_client,
                 service_state.expert_executor,
                 service_state.supervisor,
                 service_state.artifact_executor,
-                service_state.artifact_feedback_executor,
                 service_state.turn_service_dependencies[0][-2],
                 service_state.turn_service_dependencies[0][-1],
             )

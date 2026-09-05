@@ -40,9 +40,6 @@ from agent_col_artifact_executor import (
     AgentColArtifactCreationJobWorker,
     AgentColArtifactExecutor,
 )
-from agent_col_artifact_feedback_executor import (
-    AgentColArtifactFeedbackExecutor,
-)
 from agent_col_expert_executor_v3 import AgentColExpertExecutorV3
 from agent_col_responder import create_responder_app
 from agent_col_turn_service import (
@@ -1991,10 +1988,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         artifact_executor = AgentColArtifactExecutor(
             synthesis_service=synthesis_service,
-            artifact_ledger=database,
-            artifact_reader=artifact_service,
             generic_artifact_generator=generate_generic_artifact,
-            generic_artifact_reader=generic_artifact_service,
             genai_client=client,
             agent_job_repository=agent_job_repository,
             artifact_job_dispatcher=dispatch_artifact_job,
@@ -2002,10 +1996,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         artifact_feedback_service = ArtifactFeedbackService(
             artifact_reader=artifact_service,
             feedback_repository=database,
-        )
-        artifact_feedback_executor = AgentColArtifactFeedbackExecutor(
-            feedback_resolver=artifact_feedback_service,
-            feedback_ledger=database,
         )
         memory_service = TrustedMemoryService(database=database)
         preference_learning_service = PreferenceLearningService(
@@ -2179,7 +2169,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             expert_executor=expert_executor,
             responder_runtime=responder,
             artifact_executor=artifact_executor,
-            artifact_feedback_executor=artifact_feedback_executor,
             note_queue=CollaborativeNoteQueue(),
             memory_queue=memory_queue,
         )

@@ -17,21 +17,9 @@ from agent_col_expert_executor_v3 import (
 )
 from agent_col_artifact_executor import (
     AgentColArtifactExecutionCommand,
-    AgentColArtifactExecutionResult,
     AgentColArtifactExecutorConfigurationError,
     AgentColArtifactQueueResult,
     build_artifact_source_text,
-)
-from agent_col_artifact_feedback_executor import (
-    AgentColArtifactFeedbackExecutionCommand,
-    AgentColArtifactFeedbackExecutionResult,
-    AgentColArtifactFeedbackExecutorConfigurationError,
-    build_agent_col_artifact_feedback_model_context,
-)
-from artifact_feedback_service import (
-    ArtifactFeedbackSchemaConflictError,
-    ArtifactFeedbackStateError,
-    ArtifactFeedbackTargetNotFoundError,
 )
 from agent_col_numeric_projection import project_routing_numeric_candidates
 from agent_col_responder_context_v3 import (
@@ -67,8 +55,6 @@ from collaborative_note_candidates import NoteCandidateDecision
 from collaborative_note_service import NaturalCollaborativeNoteCommand
 from database import (
     BlueprintArtifactNotFoundError,
-    BlueprintFeedbackConflictError,
-    BlueprintFeedbackStateError,
     MemoryEngineError,
 )
 from computational_expert import ComputationResponderResult
@@ -174,18 +160,6 @@ class ArtifactExecutor(Protocol):
         self,
         command: AgentColArtifactExecutionCommand,
     ) -> AgentColArtifactQueueResult: ...
-
-    async def execute(
-        self,
-        command: AgentColArtifactExecutionCommand,
-    ) -> AgentColArtifactExecutionResult: ...
-
-
-class ArtifactFeedbackExecutor(Protocol):
-    async def execute(
-        self,
-        command: AgentColArtifactFeedbackExecutionCommand,
-    ) -> AgentColArtifactFeedbackExecutionResult: ...
 
 
 class NoteQueue(Protocol):
@@ -592,7 +566,6 @@ class AgentColTurnService:
             request_agent_col_routing_v3_directive
         ),
         artifact_executor: ArtifactExecutor | None = None,
-        artifact_feedback_executor: ArtifactFeedbackExecutor | None = None,
         note_queue: NoteQueue | None = None,
         memory_queue: MemoryQueue | None = None,
         artifact_routing_request: ArtifactRoutingRequest = (
@@ -620,7 +593,6 @@ class AgentColTurnService:
         self._responder_runtime = responder_runtime
         self._routing_request = routing_request
         self._artifact_executor = artifact_executor
-        self._artifact_feedback_executor = artifact_feedback_executor
         self._note_queue = note_queue
         self._memory_queue = memory_queue
         self._artifact_routing_request = artifact_routing_request
@@ -683,11 +655,6 @@ class AgentColTurnService:
         deadline = self._clock() + self._turn_timeout_seconds
         try:
             async with asyncio.timeout(self._turn_timeout_seconds):
-                if command.artifact_feedback_decision_present:
-                    return await self._run_artifact_feedback_with_deadline(
-                        command,
-                        deadline,
-                    )
                 if (
                     self._artifact_executor is not None
                     and command.chat_turn_claim is not None
@@ -738,193 +705,6 @@ class AgentColTurnService:
                 continuity_choices=command.continuity_choices,
                 chat_turn_claim=command.chat_turn_claim,
             ) from exc
-
-    async def _run_artifact_feedback_with_deadline(
-        self,
-        command: AgentColTurnCommand,
-        deadline: float,
-    ) -> AgentColTurnResult:
-        claim = command.chat_turn_claim
-        executor = self._artifact_feedback_executor
-        if claim is None or executor is None:
-            raise AgentColTurnServiceError(
-                "Agent_Col artifact feedback authority is unavailable."
-            )
-        self._validate_artifact_feedback_claim(command, claim)
-        try:
-            execution = await executor.execute(
-                AgentColArtifactFeedbackExecutionCommand(
-                    claim=claim,
-                    observed_at=self._wall_clock(),
-                )
-            )
-        except (
-            AgentColArtifactFeedbackExecutorConfigurationError,
-            ArtifactFeedbackSchemaConflictError,
-            ArtifactFeedbackStateError,
-            ArtifactFeedbackTargetNotFoundError,
-            BlueprintArtifactNotFoundError,
-            BlueprintFeedbackConflictError,
-            BlueprintFeedbackStateError,
-            MemoryEngineError,
-        ) as exc:
-            raise AgentColTurnServiceError(
-                "Agent_Col artifact feedback execution failed.",
-                actions=claim.precompleted_actions,
-                artifact_feedback=claim.precompleted_artifact_feedback,
-                memory_proposals=claim.precompleted_memory_proposals,
-                memory_clarifications=(
-                    claim.precompleted_memory_clarifications
-                ),
-                continuity_receipts=command.continuity_receipts,
-                continuity_choices=command.continuity_choices,
-                chat_turn_claim=claim,
-            ) from exc
-        model_input_context = (
-            *self._model_input_with_working_state(command),
-            build_agent_col_artifact_feedback_model_context(
-                execution.projection
-            ),
-        )
-        authoritative_actions = _stable_merge(
-            command.precompleted_actions,
-            execution.actions,
-        )
-        try:
-            async with asyncio.timeout(self._remaining_seconds(deadline)):
-                result = await self._responder_runtime.run_turn(
-                    SupervisorTurnContext(
-                        project_id=command.project_id,
-                        session_id=command.session_id,
-                        user_id=command.user_id,
-                        message=command.message,
-                        model_input_context=model_input_context,
-                        source_message_id=command.source_message_id,
-                        memory_decision_present=False,
-                        artifact_feedback_decision_present=True,
-                        precompleted_actions=authoritative_actions,
-                        precompleted_memory_proposals=(
-                            command.precompleted_memory_proposals
-                        ),
-                        precompleted_memory_clarifications=(
-                            command.precompleted_memory_clarifications
-                        ),
-                        active_memory_clarification=(
-                            command.active_memory_clarification
-                        ),
-                        precompleted_collaborative_note_proposals=(
-                            command.precompleted_collaborative_note_proposals
-                        ),
-                        precompleted_collaborative_note_events=(
-                            command.precompleted_collaborative_note_events
-                        ),
-                    )
-                )
-        except SupervisorTimeoutError as exc:
-            raise AgentColTurnTimeoutError(
-                "Agent_Col turn timed out.",
-                actions=_stable_merge(authoritative_actions, exc.actions),
-                artifact_feedback=execution.artifact_feedback,
-                memory_proposals=_stable_merge(
-                    command.precompleted_memory_proposals,
-                    exc.memory_proposals,
-                ),
-                memory_clarifications=_stable_merge(
-                    command.precompleted_memory_clarifications,
-                    exc.memory_clarifications,
-                ),
-                collaborative_note_proposals=_stable_merge(
-                    command.precompleted_collaborative_note_proposals,
-                    exc.collaborative_note_proposals,
-                ),
-                collaborative_note_events=_stable_merge(
-                    command.precompleted_collaborative_note_events,
-                    exc.collaborative_note_events,
-                ),
-                queued_actions=exc.queued_actions,
-                continuity_receipts=command.continuity_receipts,
-                continuity_choices=command.continuity_choices,
-                chat_turn_claim=execution.claim,
-            ) from exc
-        except SupervisorRuntimeError as exc:
-            raise AgentColTurnResponderError(
-                "Agent_Col responder failed.",
-                actions=_stable_merge(authoritative_actions, exc.actions),
-                artifact_feedback=execution.artifact_feedback,
-                memory_proposals=_stable_merge(
-                    command.precompleted_memory_proposals,
-                    exc.memory_proposals,
-                ),
-                memory_clarifications=_stable_merge(
-                    command.precompleted_memory_clarifications,
-                    exc.memory_clarifications,
-                ),
-                collaborative_note_proposals=_stable_merge(
-                    command.precompleted_collaborative_note_proposals,
-                    exc.collaborative_note_proposals,
-                ),
-                collaborative_note_events=_stable_merge(
-                    command.precompleted_collaborative_note_events,
-                    exc.collaborative_note_events,
-                ),
-                queued_actions=exc.queued_actions,
-                continuity_receipts=command.continuity_receipts,
-                continuity_choices=command.continuity_choices,
-                chat_turn_claim=execution.claim,
-            ) from exc
-        return AgentColTurnResult(
-            response=result.response,
-            actions=_stable_merge(authoritative_actions, result.actions),
-            artifact_feedback=execution.artifact_feedback,
-            citations=result.citations,
-            memory_proposals=_stable_merge(
-                command.precompleted_memory_proposals,
-                result.memory_proposals,
-            ),
-            memory_clarifications=_stable_merge(
-                command.precompleted_memory_clarifications,
-                result.memory_clarifications,
-            ),
-            collaborative_note_proposals=_stable_merge(
-                command.precompleted_collaborative_note_proposals,
-                result.collaborative_note_proposals,
-            ),
-            collaborative_note_events=_stable_merge(
-                command.precompleted_collaborative_note_events,
-                result.collaborative_note_events,
-            ),
-            queued_actions=result.queued_actions,
-            continuity_receipts=command.continuity_receipts,
-            continuity_choices=command.continuity_choices,
-            chat_turn_claim=execution.claim,
-        )
-
-    @staticmethod
-    def _validate_artifact_feedback_claim(
-        command: AgentColTurnCommand,
-        claim: ChatTurnClaim,
-    ) -> None:
-        request = claim.request
-        if (
-            request.project_id != command.project_id
-            or request.session_id != command.session_id
-            or request.user_id != command.user_id
-            or request.message != command.message
-            or request.artifact_feedback_decision is None
-            or request.memory_decision is not None
-            or not command.artifact_feedback_decision_present
-            or command.memory_decision_present
-            or claim.precompleted_actions != command.precompleted_actions
-            or claim.precompleted_memory_proposals
-            != command.precompleted_memory_proposals
-            or claim.precompleted_memory_clarifications
-            != command.precompleted_memory_clarifications
-            or claim.precompleted_artifact_feedback
-            != command.precompleted_artifact_feedback
-        ):
-            raise AgentColTurnServiceError(
-                "Agent_Col artifact feedback claim is inconsistent."
-            )
 
     async def _queue_explicit_durable_actions(
         self,

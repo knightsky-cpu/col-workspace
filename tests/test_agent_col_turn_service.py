@@ -328,6 +328,19 @@ def command_with_precompleted_effects() -> object:
     )
 
 
+def test_turn_service_constructor_no_longer_accepts_chat_owned_feedback_executor(
+) -> None:
+    from agent_col_turn_service import AgentColTurnService
+
+    with pytest.raises(TypeError):
+        AgentColTurnService(
+            routing_client=object(),
+            expert_executor=RecordingExecutor(),
+            responder_runtime=RecordingResponder(),
+            artifact_feedback_executor=object(),
+        )
+
+
 @pytest.mark.asyncio
 async def test_turn_service_streams_only_the_responder_after_existing_routing(
 ) -> None:

@@ -3071,5 +3071,61 @@ Historical readers/assertions are compatibility requirements, not pending writer
 deletions. Artifact execution/effect writers, artifact-feedback execution/effects,
 AgentJob retry/recovery/drainer work, and Note shutdown hygiene remain deferred.
 No backend schema migration or frontend change is included. Live Firestore and
-browser acceptance have not been performed; the pass remains uncommitted and
-pending user verification.
+browser acceptance were not performed for that pass. The reviewed Memory/Note
+database writer cleanup was checkpointed as
+`105dcc2bf74866f78fe247689b2635f971731657`.
+
+## Artifact Chat-Turn Writer Cleanup
+
+This pass removes the remaining artifact-side chat-turn writer capability from
+checkpoint `105dcc2bf74866f78fe247689b2635f971731657`. It supersedes the earlier
+sections that defer synchronous artifact executor cleanup and artifact-feedback
+chat-owned effects.
+
+Removed:
+
+- `AgentColArtifactExecutor.execute()` and the synchronous blueprint/single-file
+  generation helpers that wrote chat-turn artifact effects;
+- the synchronous artifact responder projection/model-context helper used only by
+  chat-owned execution;
+- the chat-owned `AgentColArtifactFeedbackExecutor` module, its turn-service
+  protocol/wiring/deadline path, and lifespan injection;
+- database writers `record_chat_turn_blueprint_effect`,
+  `record_chat_turn_single_file_artifact_effect`, and
+  `record_chat_turn_artifact_feedback_effect`, plus their private writer result
+  dataclasses;
+- writer-only tests and the live smoke script that created new chat-turn artifact
+  effects.
+
+Preserved:
+
+- `AgentColArtifactExecutor.queue()`, `AgentColArtifactCreationJobWorker`,
+  `artifact_job_payload()`, `build_artifact_source_text()`, and queued artifact
+  responder context;
+- direct artifact creation/version APIs and direct artifact feedback
+  API/service/database behavior;
+- `ChatTurnRequest.artifact_feedback_decision` historical metadata,
+  `ChatTurnClaim.precompleted_artifacts`, and
+  `ChatTurnClaim.precompleted_artifact_feedback`;
+- historical artifact/feedback replay, reclaim, release, validation, and
+  completion-preservation readers/tests.
+
+Verification:
+
+- RED: `test_artifact_executor_exposes_queue_without_chat_owned_execute`
+  expected `AgentColArtifactExecutor.execute` to be absent; it failed because the
+  method still existed.
+- RED: `test_turn_service_constructor_no_longer_accepts_chat_owned_feedback_executor`
+  expected the turn service to reject the stale executor injection; it failed
+  because the constructor still accepted it.
+- RED: `test_memory_engine_no_longer_exposes_chat_owned_artifact_writers`
+  expected the three DB writer methods to be absent; it failed because they still
+  existed.
+- Focused artifact executor/turn-service/database/direct-feedback checks passed
+  after cleanup; final `py_compile` and `git diff --check` were run for the
+  review report.
+
+Historical artifact readers/assertions are compatibility requirements, not
+pending writer deletions. AgentJob retry/recovery/drainer work, Note shutdown
+hygiene, frontend behavior, and Memory/Note behavior remain intentionally out of
+scope.

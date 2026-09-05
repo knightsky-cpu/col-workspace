@@ -1,14 +1,10 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import logging
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from agent_col_artifact_executor import (
-    AgentColArtifactExecutionResult,
-    AgentColArtifactResponderProjection,
-)
 from agent_col_responder_context_v3 import AgentColResponderContextV3
 from agent_col_routing_v4 import AgentColRoutingDirective
 from agent_col_routing_provider_v4 import AgentColRoutingV4ProviderTimeoutError
@@ -132,8 +128,13 @@ class RecordingExpertExecutor:
         return AgentColResponderContextV3(routing_directive=directive)
 
 
+@dataclass(frozen=True)
+class LegacyArtifactExecutionResult:
+    claim: ChatTurnClaim
+
+
 class RecordingArtifactExecutor:
-    def __init__(self, result: AgentColArtifactExecutionResult) -> None:
+    def __init__(self, result: LegacyArtifactExecutionResult) -> None:
         self.result = result
         self.commands: list[object] = []
         self.execute_commands: list[object] = []
@@ -253,24 +254,9 @@ class RecordingResponder:
 
 def artifact_execution_result(
     claim: ChatTurnClaim,
-) -> AgentColArtifactExecutionResult:
-    effect_claim, action, artifact, adaptation = artifact_receipts(claim)
-    projection = AgentColArtifactResponderProjection(
-        artifact=artifact,
-        project_name="Collaborative Study Workflow",
-        core_value_proposition=(
-            "Creates approved learning plans with verifiable milestones."
-        ),
-        socratic_questions=("Which learning goal comes first?",),
-        adaptations=(adaptation,),
-    )
-    return AgentColArtifactExecutionResult(
-        claim=effect_claim,
-        actions=(action,),
-        artifacts=(artifact,),
-        adaptations=(adaptation,),
-        projection=projection,
-    )
+) -> LegacyArtifactExecutionResult:
+    effect_claim, _, _, _ = artifact_receipts(claim)
+    return LegacyArtifactExecutionResult(claim=effect_claim)
 
 
 @pytest.mark.asyncio
