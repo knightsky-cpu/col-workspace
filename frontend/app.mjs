@@ -1683,7 +1683,7 @@ function ensureWorkView() {
         loadWorkDetail(artifactId);
       },
       onSubmitFeedback(decision) {
-        submitArtifactFeedback(decision);
+        return submitArtifactFeedback(decision);
       },
       onPrintWork() {
         window.print();
@@ -1702,10 +1702,10 @@ function ensureWorkView() {
         ensureWorkView().render(state);
       },
       onUpdateArtifactMetadata(artifactId, metadata) {
-        updateGenericArtifactMetadata(artifactId, metadata);
+        return updateGenericArtifactMetadata(artifactId, metadata);
       },
       onCreateArtifactVersion(artifactId, request) {
-        createGenericArtifactVersion(artifactId, request);
+        return createGenericArtifactVersion(artifactId, request);
       },
       onSetArtifactLifecycleStatus(lifecycleStatus) {
         setArtifactLifecycleStatus(lifecycleStatus);
@@ -1893,10 +1893,10 @@ function ensureNotesView() {
         await loadNotes(statusFilter);
       },
       onCreateCorrection(note, request) {
-        createCollaborativeNoteCorrection(note, request);
+        return createCollaborativeNoteCorrection(note, request);
       },
       onCreateNoteProposal(request) {
-        createCollaborativeNoteProposal(request);
+        return createCollaborativeNoteProposal(request);
       },
       onToggleProposalDisclosure(proposalId) {
         state = toggleNoteProposalDisclosure(state, proposalId);

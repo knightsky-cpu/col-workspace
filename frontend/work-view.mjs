@@ -615,10 +615,24 @@ function renderSingleFileArtifactLifecycle(parent, detail, handlers) {
   parent.append(button);
 }
 
-function renderSingleFileArtifactMetadataForm(parent, detail, handlers) {
+function updateDraft(drafts, key, patch) {
+  drafts.set(key, {
+    ...(drafts.get(key) ?? {}),
+    ...patch,
+  });
+}
+
+async function submitAndClearDraft(drafts, key, submit) {
+  await submit();
+  drafts.delete(key);
+}
+
+function renderSingleFileArtifactMetadataForm(parent, detail, handlers, drafts) {
   const artifact = detail.artifact ?? {};
   const metadata = detail.metadata ?? {};
   const reference = artifactReference(detail);
+  const draftKey = `artifact-metadata:${reference.artifact_id}`;
+  const draft = drafts?.get(draftKey) ?? {};
   const form = document.createElement("form");
   form.classList.add("feedback-form");
   form.setAttribute("data-artifact-metadata-form", "");
@@ -628,35 +642,47 @@ function renderSingleFileArtifactMetadataForm(parent, detail, handlers) {
   const labelInput = document.createElement("input");
   labelInput.name = "display_label";
   labelInput.placeholder = "Display name";
-  labelInput.value = reference.display_label
+  labelInput.value = draft.display_label
+    ?? reference.display_label
     ?? artifact.display_label
     ?? "";
+  labelInput.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { display_label: labelInput.value });
+  });
 
   const filenameInput = document.createElement("input");
   filenameInput.name = "filename";
   filenameInput.placeholder = "Filename";
-  filenameInput.value = metadata.filename
+  filenameInput.value = draft.filename
+    ?? metadata.filename
     ?? artifact.filename
     ?? "";
+  filenameInput.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { filename: filenameInput.value });
+  });
 
   const submit = document.createElement("button");
   submit.type = "submit";
   setText(submit, "Rename");
 
   form.append(labelInput, filenameInput, submit);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    handlers.onUpdateArtifactMetadata?.(reference.artifact_id, {
-      display_label: labelInput.value,
-      filename: filenameInput.value,
-    });
+    await submitAndClearDraft(drafts, draftKey, () => (
+      handlers.onUpdateArtifactMetadata?.(reference.artifact_id, {
+        display_label: labelInput.value,
+        filename: filenameInput.value,
+      })
+    ));
   });
   parent.append(form);
 }
 
-function renderSingleFileArtifactVersionForm(parent, detail, handlers) {
+function renderSingleFileArtifactVersionForm(parent, detail, handlers, drafts) {
   const artifact = detail.artifact ?? {};
   const reference = artifactReference(detail);
+  const draftKey = `artifact-version:${reference.artifact_id}`;
+  const draft = drafts?.get(draftKey) ?? {};
   const form = document.createElement("form");
   form.classList.add("feedback-form");
   form.setAttribute("data-artifact-version-form", "");
@@ -666,44 +692,61 @@ function renderSingleFileArtifactVersionForm(parent, detail, handlers) {
   const content = document.createElement("textarea");
   content.name = "content";
   content.placeholder = "Updated artifact content";
-  content.value = artifact.content ?? "";
+  content.value = draft.content ?? artifact.content ?? "";
   content.required = true;
+  content.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { content: content.value });
+  });
 
   const filename = document.createElement("input");
   filename.name = "filename";
   filename.placeholder = "Filename";
-  filename.value = artifact.filename ?? "";
+  filename.value = draft.filename ?? artifact.filename ?? "";
+  filename.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { filename: filename.value });
+  });
 
   const displayLabel = document.createElement("input");
   displayLabel.name = "display_label";
   displayLabel.placeholder = "Display name";
-  displayLabel.value = reference.display_label ?? "";
+  displayLabel.value = draft.display_label ?? reference.display_label ?? "";
+  displayLabel.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { display_label: displayLabel.value });
+  });
 
   const summary = document.createElement("input");
   summary.name = "summary";
   summary.placeholder = "Summary";
-  summary.value = artifact.summary ?? "";
+  summary.value = draft.summary ?? artifact.summary ?? "";
+  summary.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { summary: summary.value });
+  });
 
   const submit = document.createElement("button");
   submit.type = "submit";
   setText(submit, "Save new version");
 
   form.append(content, filename, displayLabel, summary, submit);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    handlers.onCreateArtifactVersion?.(reference.artifact_id, {
-      content: content.value,
-      filename: filename.value,
-      display_label: displayLabel.value,
-      summary: summary.value,
-    });
+    await submitAndClearDraft(drafts, draftKey, () => (
+      handlers.onCreateArtifactVersion?.(reference.artifact_id, {
+        content: content.value,
+        filename: filename.value,
+        display_label: displayLabel.value,
+        summary: summary.value,
+      })
+    ));
   });
   parent.append(form);
 }
 
-function renderFeedbackTargets(parent, detail, handlers) {
+function renderFeedbackTargets(parent, detail, handlers, drafts) {
+  const artifactId = detail.metadata?.reference?.artifact_id;
   appendTextElement(parent, "h4", "", "Feedback targets");
   for (const target of detail.feedback_targets ?? []) {
+    const draftKey = `artifact-feedback:${artifactId}:${target.target_id}`;
+    const draft = drafts?.get(draftKey) ?? {};
     const form = document.createElement("form");
     form.classList.add("feedback-form");
     form.setAttribute("data-feedback-target", target.target_id);
@@ -721,19 +764,28 @@ function renderFeedbackTargets(parent, detail, handlers) {
       setText(option, value);
       select.append(option);
     }
+    select.value = draft.decision ?? "accepted";
+    select.addEventListener("change", () => {
+      correction.required = select.value === "edited";
+      updateDraft(drafts, draftKey, { decision: select.value });
+    });
 
     const feedback = document.createElement("textarea");
     feedback.name = "feedback_text";
     feedback.required = true;
     feedback.placeholder = "Feedback text";
+    feedback.value = draft.feedback_text ?? "";
+    feedback.addEventListener("input", () => {
+      updateDraft(drafts, draftKey, { feedback_text: feedback.value });
+    });
 
     const correction = document.createElement("textarea");
     correction.name = "correction_text";
     correction.placeholder = "Correction text for edited feedback";
-    correction.required = false;
-
-    select.addEventListener("change", () => {
-      correction.required = select.value === "edited";
+    correction.value = draft.correction_text ?? "";
+    correction.required = select.value === "edited";
+    correction.addEventListener("input", () => {
+      updateDraft(drafts, draftKey, { correction_text: correction.value });
     });
 
     const submit = document.createElement("button");
@@ -741,16 +793,18 @@ function renderFeedbackTargets(parent, detail, handlers) {
     setText(submit, "Record feedback");
 
     form.append(select, feedback, correction, submit);
-    form.addEventListener("submit", (event) => {
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      handlers.onSubmitFeedback({
-        artifact_id: detail.metadata.reference.artifact_id,
-        target_id: target.target_id,
-        decision: select.value,
-        feedback_text: feedback.value,
-        correction_text: correction.value,
-        expected_schema_version: detail.metadata.reference.schema_version,
-      });
+      await submitAndClearDraft(drafts, draftKey, () => (
+        handlers.onSubmitFeedback({
+          artifact_id: detail.metadata.reference.artifact_id,
+          target_id: target.target_id,
+          decision: select.value,
+          feedback_text: feedback.value,
+          correction_text: correction.value,
+          expected_schema_version: detail.metadata.reference.schema_version,
+        })
+      ));
     });
     parent.append(form);
   }
@@ -786,7 +840,7 @@ export function renderFeedbackHistory(container, work) {
   }
 }
 
-export function renderWorkDetail(container, work, handlers) {
+export function renderWorkDetail(container, work, handlers, drafts = new Map()) {
   container.replaceChildren();
   if (work.detail.status === "idle") {
     appendTextElement(
@@ -812,8 +866,8 @@ export function renderWorkDetail(container, work, handlers) {
   if (isSingleFileArtifactDetail(detail)) {
     renderSingleFileArtifact(container, detail);
     renderSingleFileArtifactLineage(container, detail, handlers);
-    renderSingleFileArtifactMetadataForm(container, detail, handlers);
-    renderSingleFileArtifactVersionForm(container, detail, handlers);
+    renderSingleFileArtifactMetadataForm(container, detail, handlers, drafts);
+    renderSingleFileArtifactVersionForm(container, detail, handlers, drafts);
     renderSingleFileArtifactLifecycle(container, detail, handlers);
     return;
   }
@@ -824,7 +878,7 @@ export function renderWorkDetail(container, work, handlers) {
     humanLabel(item.category),
     humanLabel(item.status),
   ])));
-  renderFeedbackTargets(container, detail, handlers);
+  renderFeedbackTargets(container, detail, handlers, drafts);
 
   const feedbackContainer = document.createElement("section");
   feedbackContainer.setAttribute("data-feedback-history", "");
@@ -833,6 +887,7 @@ export function renderWorkDetail(container, work, handlers) {
 }
 
 export function createWorkView(elements, handlers) {
+  const drafts = new Map();
   return {
     render(state) {
       renderWorkList(
@@ -841,7 +896,7 @@ export function createWorkView(elements, handlers) {
         handlers,
         state.disclosure?.work,
       );
-      renderWorkDetail(elements.detail, state.work, handlers);
+      renderWorkDetail(elements.detail, state.work, handlers, drafts);
     },
   };
 }

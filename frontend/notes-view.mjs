@@ -104,7 +104,7 @@ function renderPendingProposals(container, proposals, disabled, handlers, disclo
   }
 }
 
-function renderNoteList(container, notes, state, disabled, handlers, disclosure) {
+function renderNoteList(container, notes, state, disabled, handlers, disclosure, drafts) {
   appendTextElement(
     container,
     "h3",
@@ -135,7 +135,15 @@ function renderNoteList(container, notes, state, disabled, handlers, disclosure)
       && state.detail?.status === "ready"
       && state.detail?.note?.note_id === note.note_id
     ) {
-      renderSelectedNoteDetail(container, state.detail.note, state.detail, disabled, handlers, disclosure);
+      renderSelectedNoteDetail(
+        container,
+        state.detail.note,
+        state.detail,
+        disabled,
+        handlers,
+        disclosure,
+        drafts,
+      );
       continue;
     }
     const button = element("button", "notes-card contain-text", noteSummary(note));
@@ -154,7 +162,21 @@ function renderNoteList(container, notes, state, disabled, handlers, disclosure)
   }
 }
 
-function renderNoteProposalForm(container, disabled, handlers) {
+function updateDraft(drafts, key, patch) {
+  drafts.set(key, {
+    ...(drafts.get(key) ?? {}),
+    ...patch,
+  });
+}
+
+async function submitAndClearDraft(drafts, key, submit) {
+  await submit();
+  drafts.delete(key);
+}
+
+function renderNoteProposalForm(container, disabled, handlers, drafts) {
+  const draftKey = "note-proposal:create";
+  const draft = drafts?.get(draftKey) ?? {};
   const form = element("form", "notes-proposal-form contain-text");
   form.setAttribute("data-note-proposal-form", "true");
   appendTextElement(form, "h3", "work-heading contain-text", "Create note");
@@ -172,59 +194,82 @@ function renderNoteProposalForm(container, disabled, handlers) {
     option.value = value;
     kind.append(option);
   }
+  kind.value = draft.note_kind ?? "decision";
+  kind.addEventListener("change", () => {
+    updateDraft(drafts, draftKey, { note_kind: kind.value });
+  });
   kindLabel.append(kind);
   const titleLabel = element("label", "", "Title");
   const title = element("input");
   title.setAttribute("name", "title");
   title.setAttribute("maxlength", "120");
   title.required = true;
+  title.value = draft.title ?? "";
+  title.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { title: title.value });
+  });
   titleLabel.append(title);
   const bodyLabel = element("label", "", "Body");
   const body = element("textarea");
   body.setAttribute("name", "body");
   body.setAttribute("maxlength", "2000");
   body.required = true;
+  body.value = draft.body ?? "";
+  body.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { body: body.value });
+  });
   bodyLabel.append(body);
   const submit = element("button", "", "Create note proposal");
   submit.setAttribute("type", "submit");
   submit.disabled = disabled;
   form.append(kindLabel, titleLabel, bodyLabel, submit);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const nextTitle = String(title.value ?? "").trim();
     const nextBody = String(body.value ?? "").trim();
     if (!nextTitle || !nextBody || nextTitle.length > 120 || nextBody.length > 2000) {
       return;
     }
-    handlers.onCreateNoteProposal?.({
-      note_kind: kind.value,
-      title: nextTitle,
-      body: nextBody,
-    });
+    await submitAndClearDraft(drafts, draftKey, () => (
+      handlers.onCreateNoteProposal?.({
+        note_kind: kind.value,
+        title: nextTitle,
+        body: nextBody,
+      })
+    ));
   });
   container.append(form);
 }
 
-function renderCorrectionForm(container, note, disabled, handlers) {
+function renderCorrectionForm(container, note, disabled, handlers, drafts) {
+  const draftKey = `note-correction:${note.note_id}:${note.revision}`;
+  const draft = drafts?.get(draftKey) ?? {};
   const form = element("form", "notes-correction-form contain-text");
+  form.setAttribute("data-note-correction-form", "true");
   appendTextElement(form, "h3", "work-heading contain-text", "Propose correction");
   const titleLabel = element("label", "", "Title");
   const title = element("input");
   title.setAttribute("name", "title");
   title.setAttribute("maxlength", "160");
-  title.value = note.title ?? "";
+  title.value = draft.title ?? note.title ?? "";
+  title.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { title: title.value });
+  });
   titleLabel.append(title);
   const bodyLabel = element("label", "", "Body");
   const body = element("textarea");
   body.setAttribute("name", "body");
   body.setAttribute("maxlength", "2000");
-  body.value = note.body ?? "";
+  body.value = draft.body ?? note.body ?? "";
+  body.addEventListener("input", () => {
+    updateDraft(drafts, draftKey, { body: body.value });
+  });
   bodyLabel.append(body);
   const submit = element("button", "", "Create correction proposal");
   submit.setAttribute("type", "submit");
   submit.disabled = disabled;
   form.append(titleLabel, bodyLabel, submit);
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const nextTitle = String(title.value ?? "").trim();
     const nextBody = String(body.value ?? "").trim();
@@ -236,19 +281,21 @@ function renderCorrectionForm(container, note, disabled, handlers) {
     ) {
       return;
     }
-    handlers.onCreateCorrection?.(note, {
-      expected_revision: note.revision,
-      note_kind: note.note_kind,
-      title: nextTitle,
-      body: nextBody,
-      source_session_id: note.source_session_id,
-      source_message_ids: note.source_message_ids ?? [],
-    });
+    await submitAndClearDraft(drafts, draftKey, () => (
+      handlers.onCreateCorrection?.(note, {
+        expected_revision: note.revision,
+        note_kind: note.note_kind,
+        title: nextTitle,
+        body: nextBody,
+        source_session_id: note.source_session_id,
+        source_message_ids: note.source_message_ids ?? [],
+      })
+    ));
   });
   container.append(form);
 }
 
-function renderSelectedNoteDetail(container, note, detail, disabled, handlers, disclosure) {
+function renderSelectedNoteDetail(container, note, detail, disabled, handlers, disclosure, drafts) {
   const card = element("div", "notes-card contain-text");
   card.setAttribute("data-note-id", note.note_id);
   card.setAttribute("data-note-detail", note.note_id);
@@ -320,7 +367,7 @@ function renderSelectedNoteDetail(container, note, detail, disabled, handlers, d
   actions.append(deleteButton);
   details.append(actions);
   if (note.status !== "archived") {
-    renderCorrectionForm(details, note, disabled, handlers);
+    renderCorrectionForm(details, note, disabled, handlers, drafts);
   }
   if (Array.isArray(detail.events) && detail.events.length > 0) {
     appendTextElement(details, "h3", "work-heading contain-text", "Recent note events");
@@ -349,7 +396,7 @@ function renderNoteDetailStatus(container, state) {
   }
 }
 
-export function renderNotesPanel(container, notesState, handlers = {}, disclosure = {}) {
+export function renderNotesPanel(container, notesState, handlers = {}, disclosure = {}, drafts = new Map()) {
   container.replaceChildren();
   const state = notesState ?? {};
   if (state.status === "loading") {
@@ -378,15 +425,23 @@ export function renderNotesPanel(container, notesState, handlers = {}, disclosur
     disabled,
     handlers,
     disclosure,
+    drafts,
   );
   renderNoteDetailStatus(container, state);
-  renderNoteProposalForm(container, disabled, handlers);
+  renderNoteProposalForm(container, disabled, handlers, drafts);
 }
 
 export function createNotesView(elements, handlers = {}) {
+  const drafts = new Map();
   return {
     render(state) {
-      renderNotesPanel(elements.panel, state.notes, handlers, state.disclosure?.notes);
+      renderNotesPanel(
+        elements.panel,
+        state.notes,
+        handlers,
+        state.disclosure?.notes,
+        drafts,
+      );
     },
   };
 }

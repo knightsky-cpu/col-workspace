@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderNotesPanel } from "../../frontend/notes-view.mjs";
+import { createNotesView, renderNotesPanel } from "../../frontend/notes-view.mjs";
 
 function node(tagName = "div") {
   return {
@@ -82,6 +82,44 @@ const activeNote = {
   source_event_id: "note-1--approved",
   updated_at: "2026-08-26T18:30:00Z",
 };
+
+function notesState(overrides = {}) {
+  return {
+    notes: {
+      status: "ready",
+      statusFilter: "active",
+      pendingProposals: [],
+      notes: [activeNote],
+      selectedNoteId: null,
+      detail: { status: "idle", note: null, events: [], error: null },
+      pendingRequest: null,
+      error: null,
+      ...overrides,
+    },
+    disclosure: {
+      notes: {
+        proposalIds: [],
+        detailNoteIds: [],
+      },
+    },
+  };
+}
+
+function noteProposalForm(container) {
+  return findTree(container, (child) => (
+    child.attributes["data-note-proposal-form"] === "true"
+  ));
+}
+
+function noteCorrectionForm(container) {
+  return findTree(container, (child) => (
+    child.classList?.values?.includes("notes-correction-form")
+  ));
+}
+
+function namedField(form, name) {
+  return findTree(form, (child) => child.attributes.name === name);
+}
 
 test("renderNotesPanel shows pending proposals with approve and reject controls", () => {
   const container = node();
@@ -304,4 +342,141 @@ test("renderNotesPanel places direct note proposal form after saved notes", () =
     title: "API version",
     body: "Use API version 2.",
   }]);
+});
+
+test("createNotesView preserves create-note draft across rerender and clears on submit success", async () => {
+  const panel = node();
+  const submissions = [];
+  const view = createNotesView({ panel }, {
+    onCreateNoteProposal: async (request) => {
+      submissions.push(request);
+    },
+  });
+
+  view.render(notesState());
+  let form = noteProposalForm(panel);
+  let kind = namedField(form, "note_kind");
+  let title = namedField(form, "title");
+  let body = namedField(form, "body");
+  kind.value = "working_context";
+  kind.onchange?.();
+  title.value = "Frontend draft";
+  title.oninput?.();
+  body.value = "Keep this local draft while chat completes.";
+  body.oninput?.();
+
+  view.render(notesState({
+    notes: [{
+      ...activeNote,
+      title: "API version refreshed",
+    }],
+  }));
+
+  form = noteProposalForm(panel);
+  kind = namedField(form, "note_kind");
+  title = namedField(form, "title");
+  body = namedField(form, "body");
+  assert.equal(kind.value, "working_context");
+  assert.equal(title.value, "Frontend draft");
+  assert.equal(body.value, "Keep this local draft while chat completes.");
+
+  await form.onsubmit({ preventDefault() {} });
+  assert.deepEqual(submissions, [{
+    note_kind: "working_context",
+    title: "Frontend draft",
+    body: "Keep this local draft while chat completes.",
+  }]);
+
+  view.render(notesState());
+  form = noteProposalForm(panel);
+  assert.equal(namedField(form, "note_kind").value, "decision");
+  assert.equal(namedField(form, "title").value, "");
+  assert.equal(namedField(form, "body").value, "");
+});
+
+test("createNotesView preserves correction draft by note revision without leaking to another identity", async () => {
+  const panel = node();
+  const corrections = [];
+  const view = createNotesView({ panel }, {
+    onCreateCorrection: async (note, request) => {
+      corrections.push([note.note_id, request]);
+    },
+  });
+  const expanded = {
+    notes: {
+      proposalIds: [],
+      detailNoteIds: ["note-1"],
+    },
+  };
+
+  view.render({
+    ...notesState({
+      selectedNoteId: "note-1",
+      detail: { status: "ready", note: activeNote, events: [], error: null },
+    }),
+    disclosure: expanded,
+  });
+  let form = noteCorrectionForm(panel);
+  let title = namedField(form, "title");
+  let body = namedField(form, "body");
+  title.value = "Draft correction";
+  title.oninput?.();
+  body.value = "Keep correction text through refresh.";
+  body.oninput?.();
+
+  view.render({
+    ...notesState({
+      selectedNoteId: "note-1",
+      detail: { status: "ready", note: activeNote, events: [], error: null },
+    }),
+    disclosure: expanded,
+  });
+  form = noteCorrectionForm(panel);
+  assert.equal(namedField(form, "title").value, "Draft correction");
+  assert.equal(namedField(form, "body").value, "Keep correction text through refresh.");
+
+  view.render({
+    ...notesState({
+      notes: [{ ...activeNote, revision: 3 }],
+      selectedNoteId: "note-1",
+      detail: {
+        status: "ready",
+        note: { ...activeNote, revision: 3 },
+        events: [],
+        error: null,
+      },
+    }),
+    disclosure: expanded,
+  });
+  form = noteCorrectionForm(panel);
+  assert.equal(namedField(form, "title").value, "API version");
+  assert.equal(namedField(form, "body").value, "Use API version 2.");
+
+  title = namedField(form, "title");
+  body = namedField(form, "body");
+  title.value = "Submitted correction";
+  title.oninput?.();
+  body.value = "Submit this correction.";
+  body.oninput?.();
+  await form.onsubmit({ preventDefault() {} });
+
+  assert.equal(corrections.length, 1);
+  assert.equal(corrections[0][0], "note-1");
+  assert.equal(corrections[0][1].title, "Submitted correction");
+  view.render({
+    ...notesState({
+      notes: [{ ...activeNote, revision: 3 }],
+      selectedNoteId: "note-1",
+      detail: {
+        status: "ready",
+        note: { ...activeNote, revision: 3 },
+        events: [],
+        error: null,
+      },
+    }),
+    disclosure: expanded,
+  });
+  form = noteCorrectionForm(panel);
+  assert.equal(namedField(form, "title").value, "API version");
+  assert.equal(namedField(form, "body").value, "Use API version 2.");
 });

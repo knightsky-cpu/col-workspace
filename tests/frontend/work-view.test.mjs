@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   buildBlueprintExports,
   buildBlueprintDownload,
+  createWorkView,
   renderFeedbackHistory,
   renderWorkDetail,
   renderWorkList,
@@ -193,6 +194,48 @@ const textArtifactDetail = {
     summary: "A plain text note.",
   },
 };
+
+function workState(item = genericDetail) {
+  return {
+    work: {
+      list: {
+        status: "ready",
+        lifecycleStatus: "active",
+        items: [{
+          reference: item.metadata.reference,
+          filename: item.metadata.filename,
+        }],
+        next_before: null,
+        error: null,
+      },
+      selectedArtifactId: item.metadata.reference.artifact_id,
+      detail: { status: "ready", item, error: null },
+      feedback: { status: "ready", events: [], error: null },
+    },
+    disclosure: { work: { artifactIds: [] } },
+  };
+}
+
+function artifactDetailWithId(artifactId) {
+  return {
+    ...genericDetail,
+    metadata: {
+      ...genericDetail.metadata,
+      reference: {
+        ...genericDetail.metadata.reference,
+        artifact_id: artifactId,
+      },
+    },
+  };
+}
+
+function formWithAttribute(container, name, value) {
+  return findTree(container, (child) => child.attributes[name] === value);
+}
+
+function fieldByName(form, name) {
+  return findTree(form, (child) => child.name === name);
+}
 
 test("renderWorkList renders blueprint metadata and selection controls", () => {
   const selected = [];
@@ -873,6 +916,159 @@ test("renderWorkDetail submits single-file artifact content replacement", () => 
       summary: "Generates a secure password.",
     },
   ]]);
+});
+
+test("createWorkView preserves artifact metadata draft across rerender and clears on submit success", async () => {
+  const list = node();
+  const detailPanel = node();
+  const updates = [];
+  const view = createWorkView({ list, detail: detailPanel }, {
+    onSelectArtifact: () => {},
+    onUpdateArtifactMetadata: async (artifactId, request) => {
+      updates.push([artifactId, request]);
+    },
+  });
+
+  view.render(workState());
+  let form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  let label = fieldByName(form, "display_label");
+  let filename = fieldByName(form, "filename");
+  label.value = "Draft Artifact Name";
+  label.oninput?.();
+  filename.value = "draft_artifact.py";
+  filename.oninput?.();
+
+  view.render(workState({
+    ...genericDetail,
+    metadata: {
+      ...genericDetail.metadata,
+      reference: {
+        ...genericDetail.metadata.reference,
+        display_label: "Authoritative Refreshed Name",
+      },
+    },
+  }));
+  form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  assert.equal(fieldByName(form, "display_label").value, "Draft Artifact Name");
+  assert.equal(fieldByName(form, "filename").value, "draft_artifact.py");
+
+  view.render(workState(artifactDetailWithId("artifact--other")));
+  form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  assert.equal(fieldByName(form, "display_label").value, "Password Generator");
+  assert.equal(fieldByName(form, "filename").value, "password_generator.py");
+
+  view.render(workState());
+  form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  assert.equal(fieldByName(form, "display_label").value, "Draft Artifact Name");
+  assert.equal(fieldByName(form, "filename").value, "draft_artifact.py");
+
+  await form.onsubmit({ preventDefault() {} });
+  assert.deepEqual(updates, [[
+    "artifact--script",
+    {
+      display_label: "Draft Artifact Name",
+      filename: "draft_artifact.py",
+    },
+  ]]);
+
+  view.render(workState());
+  form = formWithAttribute(detailPanel, "data-artifact-metadata-form", "");
+  assert.equal(fieldByName(form, "display_label").value, "Password Generator");
+  assert.equal(fieldByName(form, "filename").value, "password_generator.py");
+});
+
+test("createWorkView preserves artifact version draft without leaking to another artifact", () => {
+  const list = node();
+  const detailPanel = node();
+  const view = createWorkView({ list, detail: detailPanel }, {
+    onSelectArtifact: () => {},
+    onCreateArtifactVersion: () => {},
+  });
+
+  view.render(workState());
+  let form = formWithAttribute(detailPanel, "data-artifact-version-form", "");
+  fieldByName(form, "content").value = "print('draft')\n";
+  fieldByName(form, "content").oninput?.();
+  fieldByName(form, "filename").value = "draft.py";
+  fieldByName(form, "filename").oninput?.();
+
+  view.render(workState());
+  form = formWithAttribute(detailPanel, "data-artifact-version-form", "");
+  assert.equal(fieldByName(form, "content").value, "print('draft')\n");
+  assert.equal(fieldByName(form, "filename").value, "draft.py");
+
+  view.render(workState(artifactDetailWithId("artifact--other")));
+  form = formWithAttribute(detailPanel, "data-artifact-version-form", "");
+  assert.equal(fieldByName(form, "content").value, "print('secure')\n");
+  assert.equal(fieldByName(form, "filename").value, "password_generator.py");
+});
+
+test("createWorkView preserves artifact feedback draft by target and clears on submit success", async () => {
+  const list = node();
+  const detailPanel = node();
+  const submitted = [];
+  const view = createWorkView({ list, detail: detailPanel }, {
+    onSelectArtifact: () => {},
+    onSubmitFeedback: async (decision) => {
+      submitted.push(decision);
+    },
+  });
+
+  view.render(workState(detail));
+  let form = formWithAttribute(detailPanel, "data-feedback-target", "target--whole");
+  let select = fieldByName(form, "decision");
+  let feedback = fieldByName(form, "feedback_text");
+  let correction = fieldByName(form, "correction_text");
+  select.value = "edited";
+  select.onchange?.();
+  feedback.value = "Needs a better milestone.";
+  feedback.oninput?.();
+  correction.value = "Rename the milestone.";
+  correction.oninput?.();
+
+  view.render(workState({
+    ...detail,
+    metadata: {
+      ...detail.metadata,
+      feedback_counts: { accepted: 2, rejected: 0, edited: 0 },
+    },
+  }));
+  form = formWithAttribute(detailPanel, "data-feedback-target", "target--whole");
+  select = fieldByName(form, "decision");
+  feedback = fieldByName(form, "feedback_text");
+  correction = fieldByName(form, "correction_text");
+  assert.equal(select.value, "edited");
+  assert.equal(feedback.value, "Needs a better milestone.");
+  assert.equal(correction.value, "Rename the milestone.");
+
+  view.render(workState({
+    ...detail,
+    feedback_targets: [{
+      target_id: "target--other",
+      target_kind: "whole_blueprint",
+      display_label: "Other target",
+    }],
+  }));
+  form = formWithAttribute(detailPanel, "data-feedback-target", "target--other");
+  assert.equal(fieldByName(form, "decision").value, "accepted");
+  assert.equal(fieldByName(form, "feedback_text").value, "");
+  assert.equal(fieldByName(form, "correction_text").value, "");
+
+  view.render(workState(detail));
+  form = formWithAttribute(detailPanel, "data-feedback-target", "target--whole");
+  assert.equal(fieldByName(form, "decision").value, "edited");
+  assert.equal(fieldByName(form, "feedback_text").value, "Needs a better milestone.");
+  assert.equal(fieldByName(form, "correction_text").value, "Rename the milestone.");
+
+  await form.onsubmit({ preventDefault() {} });
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0].feedback_text, "Needs a better milestone.");
+
+  view.render(workState(detail));
+  form = formWithAttribute(detailPanel, "data-feedback-target", "target--whole");
+  assert.equal(fieldByName(form, "decision").value, "accepted");
+  assert.equal(fieldByName(form, "feedback_text").value, "");
+  assert.equal(fieldByName(form, "correction_text").value, "");
 });
 
 test("renderWorkDetail uses artifact terminology for idle and loading states", () => {
