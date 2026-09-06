@@ -1,7 +1,8 @@
 # Agent Col Documentation
 
-This directory contains current project documentation, historical records, and
-working notes.
+This directory contains the public project documentation that remains tracked in
+the repository. Private local research and development documentation is kept in
+local subdirectories under `docs/` and is intentionally excluded from Git.
 
 ## Current Authoritative Docs
 
@@ -12,15 +13,3 @@ working notes.
   limitations.
 - [Submission checklist](submission-checklist.md): remaining hackathon
   submission work.
-- [Development docs](development/): local setup, testing, and troubleshooting.
-
-## Supporting Docs
-
-- [Design](design/): product identity, reproducibility, and integration
-  contract references.
-- [Deployment](deployment/): Cloud Run deployment instructions, handoffs, and
-  accepted deployment pass history.
-- [Notes](notes/): informal work notes, investigation notes, and evidence
-  notes.
-- [Legacy](legacy/): preserved planning and implementation history.
-- [Forward](forward/): future plans that are not current implementation truth.

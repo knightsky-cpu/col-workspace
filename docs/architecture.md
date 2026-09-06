@@ -3,9 +3,9 @@
 Last reconciled: September 5, 2026.
 
 This document describes the current implemented architecture. Source code and
-[Repository map](repo-map.md) are the authority. Historical docs under
-`docs/legacy/`, forward plans under `docs/forward/`, and migration research are
-not current implementation truth unless current source still matches them.
+[Repository map](repo-map.md) are the authority. Private local research,
+historical notes, forward plans, and migration research are not current
+implementation truth unless current source still matches them.
 
 ## System Overview
 
@@ -318,10 +318,10 @@ Dockerfile
 -> Firestore, Vertex AI, STT, and TTS through service identity
 ```
 
-The root [README](../README.md), [Local setup](local-setup.md), and deployment
-runbook under `docs/deployment/` document the command path. This architecture
-doc intentionally avoids transient project IDs, revision IDs, URLs, image
-digests, account identifiers, and secrets.
+The root [README](../README.md), [Local setup](local-setup.md), and private
+local deployment runbook document the command path. This architecture doc
+intentionally avoids transient project IDs, revision IDs, URLs, image digests,
+account identifiers, and secrets.
 
 ## Trust And Security Boundaries
 

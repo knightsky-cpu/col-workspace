@@ -4,8 +4,7 @@ Last reconciled: September 5, 2026.
 
 This document describes what Agent Col implements in the current checkout.
 Source code and [Repository map](repo-map.md) are the authority for these
-claims. Historical files under `docs/legacy/`, future plans under
-`docs/forward/`, and migration research under migration-specific directories
+claims. Private local historical files, future plans, and migration research
 are provenance or planning records unless current source still matches them.
 
 ## Current Product State

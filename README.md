@@ -437,9 +437,8 @@ Use the browser UI at `$SERVICE_URL/workspace` for authenticated chat, memory,
 notes, continuity, artifact, microphone transcription, and spoken-response
 verification.
 
-More deployment detail and pass evidence live in
-[Deployment notes](docs/deployment/deployment-notes.md) and the Cloud Run
-deployment runbook under `docs/deployment/`.
+Deployment should follow the maintained project runbook kept with the private
+local project documentation.
 
 ## Testing
 
@@ -468,8 +467,9 @@ Cloud access:
 python3 live-tests/smoke_test_chat_idempotency.py
 ```
 
-See [Testing](docs/development/testing.md) for focused command groups and what
-each layer does not prove.
+Use focused backend, frontend, packaging, and live smoke checks for the surface
+being changed. The private local project documentation keeps the expanded test
+matrix and layer-specific limits.
 
 ## Repository Navigation
 
@@ -495,8 +495,8 @@ each layer does not prove.
 - `frontend/`: static browser UI modules.
 - `tests/` and `tests/frontend/`: offline backend and frontend tests.
 - `live-tests/`: configured local smoke runners.
-- `docs/`: current docs, deployment notes, design docs, historical docs, and
-  informal notes.
+- `docs/`: public project overview documents. Private local documentation
+  subdirectories are intentionally excluded from the public repository.
 
 See [Repository map](docs/repo-map.md) for the detailed source and documentation
 map.
@@ -507,14 +507,7 @@ map.
 - [Architecture](docs/architecture.md)
 - [Repository map](docs/repo-map.md)
 - [Local development setup](docs/local-setup.md)
-- [Testing](docs/development/testing.md)
-- [Troubleshooting](docs/development/troubleshooting.md)
 - [Submission checklist](docs/submission-checklist.md)
-- [Design and product directives](docs/design/)
-- [Deployment notes](docs/deployment/)
-- [Working notes](docs/notes/)
-- [Historical implementation records](docs/legacy/)
-- [Forward plans](docs/forward/)
 
 ## Security Notes
 

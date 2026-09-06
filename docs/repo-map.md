@@ -1,8 +1,8 @@
 # Repository Map
 
 This map was re-derived from the repository source and tests on 2026-09-05.
-Treat historical plans under `docs/legacy/` as implementation history, not as
-authority for current behavior.
+Treat private local historical plans as implementation history, not as authority
+for current behavior.
 
 ## Current Authority
 
@@ -738,7 +738,7 @@ focused checks rather than encouraging a full-suite habit.
   - Artifact Registry and Cloud Run for the documented container deployment
     path.
 
-Deployment docs live in `docs/deployment/`.
+Deployment details live in private local project documentation.
 
 Runtime/deployment integration details:
 
@@ -832,19 +832,17 @@ Compatibility/test-retained code:
   background-owned after queue acceptance, but there is no public AgentJob
   creation route.
 
-## Documentation Directories
+## Documentation
 
 - `docs/README.md`: documentation index.
-- `docs/development/`: local setup, testing, and troubleshooting docs.
-- `docs/deployment/`: Cloud Run deployment, hardening, and handoff docs.
-- `docs/design/`: current design and contract documents that are not direct
-  implementation history.
-- `docs/forward/`: forward-looking implementation plans.
-- `docs/legacy/`: preserved implementation history, prior plans, evaluation
-  records, architecture notes, research, and finalization documents.
-- `docs/notes/`: informal notes, scratch findings, investigation notes, and
-  working observations from the documentation cleanup.
+- `docs/architecture.md`: current production architecture and trust boundaries.
+- `docs/current-state.md`: current feature status and known limitations.
+- `docs/local-setup.md`: public local setup guide.
+- `docs/repo-map.md`: this source-derived navigation map.
+- `docs/submission-checklist.md`: hackathon submission coverage checklist.
+- Private local research and development documentation subdirectories under
+  `docs/` are intentionally excluded from the public repository.
 
-When current docs disagree with source, source and tests win. When historical
-docs disagree with current docs, keep the history intact and update the
-authoritative current-state docs instead.
+When current docs disagree with source, source and tests win. When private local
+historical docs disagree with current docs, keep the history intact and update
+the authoritative current-state docs instead.

@@ -8,3 +8,6 @@ __pycache__/
 
 # OS-specific files
 .DS_Store
+
+# Private local research and development documentation
+docs/*/

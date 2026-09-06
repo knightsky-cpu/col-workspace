@@ -45,11 +45,11 @@ Status key:
 | Implemented feature list and limitations | Satisfied | `README.md`, `docs/current-state.md` |
 | Source-derived architecture and trust boundaries | Satisfied | `docs/architecture.md`, `docs/repo-map.md` |
 | Google technologies list | Satisfied | `README.md`, `docs/architecture.md` |
-| Local setup and run instructions | Satisfied | `README.md`, `docs/development/local-setup.md` |
-| Cloud Run deployment instructions | Satisfied | `README.md`, `docs/deployment/google-cloud-run-deployment-instructions.md` |
-| Testing commands | Satisfied | `README.md`, `docs/development/testing.md` |
+| Local setup and run instructions | Satisfied | `README.md`, `docs/local-setup.md` |
+| Cloud Run deployment instructions | Private local documentation | `README.md` plus private local runbook |
+| Testing commands | Satisfied | `README.md` |
 | License and attribution | Satisfied | `LICENSE`, `NOTICE`, `README.md` |
-| Historical docs separated from current authority | Satisfied | `docs/legacy/`, `docs/notes/`, `docs/README.md` |
+| Historical and working documentation excluded from public repo | Satisfied | `.gitignore`, `docs/README.md` |
 
 ## Hosted And Demo Verification
 
