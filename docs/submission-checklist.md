@@ -47,9 +47,10 @@ Status key:
 | Google technologies list | Satisfied | `README.md`, `docs/architecture.md` |
 | Local setup and run instructions | Satisfied | `README.md`, `docs/local-setup.md` |
 | Cloud Run deployment instructions | Private local documentation | `README.md` plus private local runbook |
-| Testing commands | Satisfied | `README.md` |
+| Testing commands | Private local verification | Private local test and smoke suites |
 | License and attribution | Satisfied | `LICENSE`, `NOTICE`, `README.md` |
 | Historical and working documentation excluded from public repo | Satisfied | `.gitignore`, `docs/README.md` |
+| Unit tests and live smoke checks excluded from public repo | Satisfied | `.gitignore` |
 
 ## Hosted And Demo Verification
 

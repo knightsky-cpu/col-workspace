@@ -40,7 +40,7 @@ for current behavior.
 - `requirements.txt`: runtime dependencies: FastAPI, Google ADK, Google Cloud
   Firestore, Google Cloud Speech-to-Text, Google Cloud Text-to-Speech, Google
   GenAI SDK, Pydantic, python-dotenv, and Uvicorn.
-- `requirements-dev.txt`: test/runtime development dependencies layered on
+- `requirements-dev.txt`: private test/runtime development dependencies layered on
   `requirements.txt`.
 - `firestore.indexes.json`: Firestore index configuration; currently disables
   indexing for the blueprint payload field.
@@ -646,43 +646,27 @@ Frontend trust and rendering:
 - Artifact content is rendered as text in code/pre surfaces rather than being
   executed as HTML.
 
-## Tests and Checks
+## Verification
 
-- `tests/`: pytest suite for backend models, services, FastAPI behavior,
+- Private local test suites cover backend models, services, FastAPI behavior,
   Firestore persistence boundaries, routing/evaluation utilities, deployment
-  packaging, and smoke-test wrappers. Current source inspection found 143 Python
-  test files under `tests/`.
-- `tests/frontend/`: Node test files for browser ES modules. Current source
-  inspection found 18 `.mjs` test files.
-- `tests/fixtures/`: JSON routing, memory, research, source, tool-belt, and
-  synthesis-quality fixtures.
-- `live-tests/`: manually run smoke checks and provider-backed checks. Current
-  source inspection found 24 Python files. These may require live Google
-  credentials or deployed/local services depending on the script.
+  packaging, browser ES modules, and test fixtures.
+- Private local live smoke checks and provider-backed checks may require live
+  Google credentials or deployed/local services depending on the script.
 - Root `*_check.py` and `*_evaluation.py` files: evaluation and live-check
-  utilities used by tests or manual verification; they are not imported by
-  `main.py` as production routes.
-
-Useful focused commands:
-
-```bash
-python -m pytest tests/test_main.py
-python -m pytest tests/test_agent_col_turn_service.py tests/test_supervisor_runtime.py
-node --test tests/frontend/*.test.mjs
-python -m pytest tests/test_deployment_packaging.py tests/test_firestore_indexes.py
-```
+  utilities used by private tests or manual verification; they are not imported
+  by `main.py` as production routes.
 
 Run live tests only when the required Google credentials, Vertex AI settings,
 and service state are intentionally available.
 
-### Tests and Protected Invariants
+### Protected Invariants
 
-The test suite is broad enough that this map should point future work to
-focused checks rather than encouraging a full-suite habit.
+The private local test suite is broad enough that this map should point future
+work to focused checks rather than encouraging a full-suite habit.
 
-- `tests/test_main.py` and related FastAPI tests protect route behavior,
-  auth/idempotency failure modes, partial-failure branches, and response
-  projections.
+- FastAPI tests protect route behavior, auth/idempotency failure modes,
+  partial-failure branches, and response projections.
 - Turn-service tests protect routing orchestration, responder handoff,
   specialist execution receipts, artifact routing, feedback handling, and
   idempotent effect preservation.
@@ -698,7 +682,7 @@ focused checks rather than encouraging a full-suite habit.
 - Artifact tests protect blueprint read models, generic artifact validation,
   creation/lifecycle/versioning, feedback receipt behavior, and schema
   conflicts.
-- Frontend Node tests protect request construction, endpoint selection,
+- Frontend tests protect request construction, endpoint selection,
   streaming/error parsing, state transitions, transcript reconstruction, safe
   Markdown rendering, and panel refresh behavior.
 - Deployment/configuration tests protect Docker packaging expectations,
@@ -789,7 +773,7 @@ Compatibility/test-retained code:
 - `agent_col_routing_v2.py` remains referenced by current v3/v4 model code for
   shared model pieces.
 - v1/v2 provider, executor, and responder-context modules are retained for
-  tests/live checks or migration history unless a future cleanup proves they
+  private verification or migration history unless a future cleanup proves they
   are removable.
 - `*_routing_check.py`, `*_routing_evaluation.py`, and spike modules are
   evaluation or live-check utilities, not FastAPI route handlers.

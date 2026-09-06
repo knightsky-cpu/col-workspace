@@ -192,34 +192,11 @@ If local STT/TTS fails, verify `speech.googleapis.com` and
 `texttospeech.googleapis.com` are enabled, ADC is configured, and the quota
 project is set.
 
-## Local Verification Commands
+## Local Verification
 
-Offline backend suite:
-
-```bash
-venv/bin/python -m pytest -q
-```
-
-Frontend ES module tests:
-
-```bash
-node --test tests/frontend/*.test.mjs
-```
-
-Focused deployment packaging check:
-
-```bash
-venv/bin/python -m pytest -q tests/test_deployment_packaging.py
-```
-
-Live local chat idempotency smoke, with Uvicorn already running:
-
-```bash
-python3 live-tests/smoke_test_chat_idempotency.py
-```
-
-Live smoke tests require configured Google credentials and may create real
-Firestore records.
+Use the private local unit-test suite and live smoke checks for verification
+before changing behavior or preparing a release. Live smoke checks require
+configured Google credentials and may create real Firestore records.
 
 ## Deploy Your Own Cloud Run Instance
 

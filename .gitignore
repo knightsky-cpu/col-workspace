@@ -11,3 +11,7 @@ __pycache__/
 
 # Private local research and development documentation
 docs/*/
+
+# Private local test suites and live smoke checks
+tests/
+live-tests/

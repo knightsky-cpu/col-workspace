@@ -103,7 +103,7 @@ Run service with `AGENT_COL_AUTH_MODE=local_dev`.
 
 - macOS or Linux.
 - Python 3.14. The production image uses `python:3.14-slim`.
-- Node.js 20+ or a current LTS for the frontend `node --test` checks.
+- Node.js 20+ or a current LTS for frontend development checks.
 - Google Cloud CLI.
 - Docker. On Apple Silicon macOS, the documented repository deployment path
   uses Colima and builds a `linux/amd64` image.
@@ -440,36 +440,14 @@ verification.
 Deployment should follow the maintained project runbook kept with the private
 local project documentation.
 
-## Testing
+## Verification
 
-Offline backend suite:
+Use the private local test suites and live smoke checks for verification before
+changing behavior or preparing a release.
 
-```bash
-venv/bin/python -m pytest -q
-```
-
-Frontend ES module tests:
-
-```bash
-node --test tests/frontend/*.test.mjs
-```
-
-Focused packaging check:
-
-```bash
-venv/bin/python -m pytest -q tests/test_deployment_packaging.py
-```
-
-Live local smoke checks require a running configured server and real Google
-Cloud access:
-
-```bash
-python3 live-tests/smoke_test_chat_idempotency.py
-```
-
-Use focused backend, frontend, packaging, and live smoke checks for the surface
-being changed. The private local project documentation keeps the expanded test
-matrix and layer-specific limits.
+The public repository intentionally excludes the local unit-test and live-smoke
+directories. The private local project documentation keeps the expanded test
+matrix, commands, and layer-specific limits.
 
 ## Repository Navigation
 
@@ -493,8 +471,8 @@ matrix and layer-specific limits.
 - `speech_service.py`: Speech-to-Text transcription and Text-to-Speech
   synthesis provider boundary.
 - `frontend/`: static browser UI modules.
-- `tests/` and `tests/frontend/`: offline backend and frontend tests.
-- `live-tests/`: configured local smoke runners.
+- Private local test suites and live smoke checks are intentionally excluded
+  from the public repository.
 - `docs/`: public project overview documents. Private local documentation
   subdirectories are intentionally excluded from the public repository.
 
