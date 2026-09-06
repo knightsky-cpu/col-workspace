@@ -15,3 +15,9 @@ docs/*/
 # Private local test suites and live smoke checks
 tests/
 live-tests/
+
+# Private local screenshot and manual-verification evidence
+scrnshot-evidence/
+scrnsht-success/
+screenshots/
+evidence/
